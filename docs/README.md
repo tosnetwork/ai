@@ -135,6 +135,9 @@ used to claim completion of the root Agentic Internet architecture.
 ## 10. Cross-repository provider product requirements
 
 - [TOS AI Service Provider — Product Requirements & Architecture V1](AI_SERVICE_PROVIDER_REQUIREMENTS_V1.md)
+- [TOS AI Service Provider — Implementation Status](AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md)
+- [TOS AI Service Provider — Getting Started](AI_SERVICE_PROVIDER_GETTING_STARTED.md)
+  (buyer and provider walkthrough using only implemented commands)
 
 This proposed product document covers provider onboarding and the existing
 software-work commercial path, with general model inference as gated incubation

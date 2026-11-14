@@ -8,6 +8,9 @@ require.
 
 **Date:** 2026-11-14
 
+To try the delivered commands as a buyer or provider, see
+[Getting Started](AI_SERVICE_PROVIDER_GETTING_STARTED.md).
+
 Each row names the pull request, the exact head that was reviewed, and its merge
 commit on `main`. "Reviewed" means a non-author review with each finding
 re-checked against code and a follow-up review of the fixes; a merge is not a
