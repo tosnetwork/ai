@@ -488,8 +488,11 @@ tosctl agent service send --operation update-policy --address <ACTOR> --from <OW
   --metadata-hash <METADATA_HASH> --proof-scheme-hash <PROOF_SCHEME_HASH> --yes
 ```
 
-Pass every policy field, as the local run does, so nothing changes by
-accident.
+`tosctl` requires every policy field shown above (price, storage fee, bounty,
+SLA, refund window, active flag, rate limit, metadata hash and proof scheme
+hash) and refuses the command if one is missing. Also pass the access setting,
+`--open-access` or `--authorized-caller <ADDRESS>`: it is the one optional part,
+and leaving it out changes who may call the actor.
 `openfox earning service metadata` prints `metadata_hash` only. The
 software-work proof scheme hash is a fixed constant
 (`ServiceActorSoftwareWorkProofScheme` in `tos-service-protocol`
