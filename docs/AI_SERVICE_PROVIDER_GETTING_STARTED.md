@@ -81,8 +81,12 @@ The pinned release artifacts live in the `tos` repository:
 
 | Value | Source |
 |---|---|
-| Native Registry code BOC | `crypto/smartcont/tos-service-native-registry-v1.boc.base64` |
-| Service Actor release code hash | `code_hash` in `crypto/smartcont/tos-service-actor-v1.release.json` |
+| Native Registry code BOC (`--registry-code-boc`, `registry_code_boc_file`) | `crypto/smartcont/tos-service-native-registry-v1.boc.base64` |
+| Native Registry code hash (`--registry-code-hash`, `registry_code_hash`) | `code_hash` in `crypto/smartcont/tos-service-native-registry-v1.release.json` |
+| Service Actor release code hash (`--actor-code-hash`, `actor_code_hash`) | `code_hash` in `crypto/smartcont/tos-service-actor-v1.release.json` |
+
+Copy each `code_hash` (a `tvm-cell-sha256:<hex>` value) from the file;
+do not retype it.
 
 ### Set up tosctl custody
 
@@ -96,15 +100,18 @@ export VAULT_URL="file://<TOSCTL_HOME>/vault.json?master_key=<MASTER_KEY>"
 export CONFIG_PATH=<TOSCTL_HOME>/config.json   # tosctl's -c/--config default
 tosctl config generate -o "$CONFIG_PATH"
 # edit chain_rpc.urls in that file to list your JSON-RPC endpoints
-tosctl wallet create -n <WALLET> -v V3R2 -w 0
+tosctl wallet create -n <WALLET> -v V5R1 -w 0
 tosctl wallet ls --format json   # shows the address to fund
 # fund the address, then:
 tosctl wallet activate -n <WALLET>
 ```
 
-The local end-to-end run used `V3R2` wallets; `wallet create` also accepts
-`V4R2` and `V5R1`, which this path has not exercised. Never put the master
-key on a command line or in a shared file.
+`wallet create` has no default version. Its help says
+"V3R2 only for bootstrap and operating keys, V4R2, V5R1", so use `V5R1` (the
+version tosctl's `agent wallet create` defaults to) or `V4R2` for a wallet that
+holds funds. **The validated local run used `V3R2` wallets**; `V4R2` and
+`V5R1` have not yet been exercised on this path. Never put the master key on
+a command line or in a shared file.
 
 The commands below assume `CONFIG_PATH` and `VAULT_URL` are exported. Tools
 that take `--tosctl-config` need the same configuration path.
@@ -134,7 +141,9 @@ THERMAL_GUARD=<GUARD_PROGRAM> \
 - Optional: `E2E_LIFECYCLE=1` adds the expire, refund, withdrawal and sweep
   paths (about two hours of real deadlines); `E2E_EXECUTE=1` adds paid
   execution in the private containerd sandbox and needs `E2E_EXECUTOR`
-  (run under `sudo -n`) and `E2E_TOS_AI_COMMIT`.
+  (run under `sudo -n`) and `E2E_TOS_AI_COMMIT`. It stages the provider's
+  root-owned state under `E2E_ROOT_BASE` (default `/tos/m1-e2e-root`), in a
+  subdirectory named after the work directory, which must not exist yet.
 - The run fails unless the protocol checkout is clean, and it ends with one
   `ALL PASS` or `FAIL` line and `<E2E_WORKDIR>/evidence.json`.
 
@@ -228,7 +237,9 @@ COMMON="--network-domain <NETWORK_DOMAIN_JSON> \
   untrusted and used only if they match the finalized digest. Get them from
   the provider or from a Gateway catalog
   (`tos-service-discovery get --gateway <URL> --caller-id <ID> --manifest-digest sha256:<HEX>`
-  prints them base64-encoded in `canonical_cbor`).
+  prints them base64-encoded in `canonical_cbor`). `tos-service-discovery`
+  reads its bearer token only from the `TOS_SERVICE_TOKEN` environment
+  variable, for example `export TOS_SERVICE_TOKEN="$(cat <TOKEN_FILE>)"`.
 - Budgets: `--max-per-call-nanotos` (default 1 TOS),
   `--max-window-nanotos` (default 10 TOS), `--max-calls` (default 100) and
   `--budget-window` (default 24h). Outstanding calls count against the window
@@ -316,10 +327,23 @@ their own fees; unused funding is returned.
 The buyer journal (`<state-dir>/journal`) records every call before custody
 starts. A call interrupted between recording and a confirmed submission is
 marked `ambiguous` and is **never sent again**. Run `status` with the same
-`--request-hash`: it settles the call from finalized history as `admitted`
-(the call landed; continue as above) or not found. Do not prepare a new call
-for the same work until `status` has resolved the old one. Back up the state
-directory; it holds the only record of your outstanding calls.
+`--request-hash`. It reads finalized history at one checkpoint and reports one
+of these:
+
+- **admitted** (`phase` `admitted`, `found` true): the call landed and created
+  a request; continue as above.
+- **refused** (`phase` `refused`, `found` true, with `exit_code`): the call
+  landed and the actor aborted it; its budget reservation is released.
+- **not found yet** (`found` false): no matching call is in finalized history
+  *at that checkpoint*.
+
+> **"Not found" is not final.** The call may still finalize later. Keep
+> running `status`, and **never prepare a new call for the same purchase**
+> while the old one is unresolved, or you may pay twice. The old call keeps
+> its budget reservation until it resolves.
+
+Back up the state directory; it holds the only record of your outstanding
+calls.
 
 ## 4. Provider guide
 
@@ -398,16 +422,30 @@ tosctl wallet send --from <OWNER_WALLET> --to <DESTINATION> --amount 2 \
   --body-boc <BODY_BOC> --yes
 ```
 
+`--manifest` takes the 64-character hex digest **without** the `sha256:`
+prefix that `openfox earning service manifest` prints; strip it.
+
 Read `final_target` from the action output, then
 `tosctl agent native-registry show ... --address <FINAL_TARGET>` until it is
 registered; the Capability id is `cap_<object_id>`. To list the manifest in a
 Gateway catalog:
-`tos-service-discovery publish --gateway <URL> --caller-id <ID> --capability-id cap_<HEX> --manifest-cbor <MANIFEST_CBOR> --idempotency-key <KEY>`.
+
+```sh
+export TOS_SERVICE_TOKEN="$(cat <TOKEN_FILE>)"   # the only way it takes the token
+tos-service-discovery publish --gateway <URL> --caller-id <ID> \
+  --capability-id cap_<HEX> --manifest-cbor <ABSOLUTE_PATH_TO_MANIFEST_CBOR> \
+  --idempotency-key <KEY>
+```
+
+`--manifest-cbor` must be an absolute, clean path.
 
 **Journaled through a Gateway** with `tos-service-provider-publish`
 (restartable at every phase). It takes the manifest as reviewed software-work
-manifest JSON (see [Software Work Manifest V1](SOFTWARE_WORK_MANIFEST_V1.md)),
-and needs a Gateway and its relay token:
+manifest JSON (see [Software Work Manifest V1](SOFTWARE_WORK_MANIFEST_V1.md))
+and needs a Gateway and its relay token. `openfox earning service manifest`
+writes only canonical CBOR; **converting it to JSON is not yet implemented**,
+so write the JSON by hand from the same fields and compare the digest that
+`prepare` reports with the one OpenFox printed.
 
 ```sh
 PUB="--state-dir <ABSOLUTE_OWNER_ONLY_DIR> --gateway <GATEWAY_URL> \
@@ -450,7 +488,8 @@ tosctl agent service send --operation update-policy --address <ACTOR> --from <OW
   --metadata-hash <METADATA_HASH> --proof-scheme-hash <PROOF_SCHEME_HASH> --yes
 ```
 
-`update-policy` replaces the whole policy, so pass every field.
+Pass every policy field, as the local run does, so nothing changes by
+accident.
 `openfox earning service metadata` prints `metadata_hash` only. The
 software-work proof scheme hash is a fixed constant
 (`ServiceActorSoftwareWorkProofScheme` in `tos-service-protocol`
@@ -458,14 +497,18 @@ software-work proof scheme hash is a fixed constant
 compute it:
 
 ```sh
-printf %s 'tos.service.service-actor.receipt.software-work-v1' | sha256sum
+printf %s 'tos.service.service-actor.receipt.software-work-v1' | sha256sum | cut -d' ' -f1
 ```
+
+Pass only the 64-character hex, not the trailing `-` that `sha256sum` prints.
 
 Buyers who use a Gateway get Quotes from the Gateway's provider Quote profile
 (`TOS_SERVICE_PROVIDER_QUOTE_PROFILE_FILE`, example in
-`tos-service-gateway/docs/provider-quote-profile.example.json`). For OpenFox,
-set its transport to `security_mode` `2`, `base_url`
-`agent-packet:<PROVIDER_AGENT_ID>` and `max_request_bytes` `1048576`.
+`tos-service-gateway/docs/provider-quote-profile.example.json`). For buyers
+who use OpenFox, set that profile's `transport` block (in the Gateway's
+profile file, not in the OpenFox rail configuration) to `security_mode` `2`,
+`base_url` `agent-packet:<PROVIDER_AGENT_ID>` and `max_request_bytes`
+`1048576`.
 
 ### 4.5 Install the private containerd
 
@@ -585,6 +628,8 @@ tosctl agent service send --operation withdraw-revenue --address <ACTOR> \
   --from <OWNER_WALLET> --withdraw-amount <TOS> --yes
 ```
 
+Like `claim-refund` and `sweep-expired-request`, `withdraw-revenue` attaches
+0.2 TOS by default to pay its own fees; the unused part comes back as change.
 Then check the wallet balance yourself. **Not yet implemented:** OpenFox does
 not track withdrawals or wallet credit (`wallet_receipt` is `not_tracked`).
 
