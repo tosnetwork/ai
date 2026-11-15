@@ -7,7 +7,7 @@ executes work bound by an Accepted Quote and produces off-chain outputs and
 evidence for a TOS-committed Receipt.
 
 The normative product direction lives in
-[`tosnetwork/tos-service-spec`](https://github.com/tosnetwork/tos-service-spec).
+[`spec/`](../spec/).
 
 ## Current scope
 
