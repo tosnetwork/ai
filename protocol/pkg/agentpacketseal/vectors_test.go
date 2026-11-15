@@ -311,6 +311,8 @@ func buildVectors(t *testing.T) vectorDocument {
 		{"relay-with-trailing-slash", relayBody("https://relay-a.example/")},
 		{"relay-uppercase-host", relayBody("https://Relay-a.example")},
 		{"relay-with-user-information", relayBody("https://u@relay-a.example")},
+		{"relay-with-escaped-space", relayBody("https://relay-a.example/a%20b")},
+		{"relay-with-escaped-slash", relayBody("https://relay-a.example/a%2Fb")},
 		{"relay-length-overruns-body", edit(func(b []byte) []byte {
 			binary.BigEndian.PutUint16(b[countOffset+1:], 0xffff)
 			return b
