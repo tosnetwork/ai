@@ -85,14 +85,16 @@ cd <TOS_CHECKOUT>/tosctl/src && cargo build --release -p tosctl
 # openfox: the entry point for selling and buying on the rail
 cd <OPENFOX_CHECKOUT> && GOWORK=off go build -tags goolm,stdjson -o <BIN_DIR>/ ./cmd/openfox
 
-# tos-ai: the provider's sandboxed executor, the root-run executor service in
-# front of it, and the collection command its timer runs
-cd <TOS_AI_CHECKOUT> && GOWORK=off go build -o <BIN_DIR>/ ./cmd/software-work-execute ./cmd/software-work-executord
+# ai (repository tosnetwork/ai), execution/: the provider's sandboxed
+# executor, the root-run executor service in front of it, and the collection
+# command its timer runs
+cd <AI_CHECKOUT> && GOWORK=off go build -o <BIN_DIR>/ \
+  ./execution/cmd/software-work-execute ./execution/cmd/software-work-executord
 
-# tos-service-protocol: only for the manual paths of section 6
-cd <PROTOCOL_CHECKOUT>
-GOWORK=off go build -o <BIN_DIR>/ ./cmd/tos-service-buyer ./cmd/tos-service-provider-publish \
-  ./cmd/tos-service-wallet ./cmd/tos-service-discovery
+# ai, protocol/: only for the manual paths of section 6
+cd <AI_CHECKOUT>
+GOWORK=off go build -o <BIN_DIR>/ ./protocol/cmd/tos-service-buyer ./protocol/cmd/tos-service-provider-publish \
+  ./protocol/cmd/tos-service-wallet ./protocol/cmd/tos-service-discovery
 ```
 
 Record the SHA-256 of `tosctl` (`sha256sum <FILE>`): every tool that drives
@@ -175,8 +177,8 @@ home path. Without `E2E_EXECUTOR_SOCKET` the script runs the legacy
 single-user mode with `E2E_EXECUTOR=<SOFTWARE_WORK_EXECUTE>`, both nodes as
 root under `sudo -n` (section 3.8).
 
-**The manual path** (`tos-service-protocol`
-`scripts/service-actor-buyer-e2e.sh`): the real `tosctl` and
+**The manual path** (`protocol/scripts/service-actor-buyer-e2e.sh` in the ai
+repository): the real `tosctl` and
 `tos-service-buyer` commands:
 
 ```sh
@@ -187,7 +189,7 @@ E2E_WORKDIR=<OWNER_ONLY_WORK_DIR> \
 REGISTRY_CODE_BOC=<TOS_CHECKOUT>/crypto/smartcont/tos-service-native-registry-v1.boc.base64 \
 ACTOR_CODE_HASH=<SERVICE_ACTOR_CODE_HASH> \
 THERMAL_GUARD=<GUARD_PROGRAM> \
-  <PROTOCOL_CHECKOUT>/scripts/service-actor-buyer-e2e.sh
+  <AI_CHECKOUT>/protocol/scripts/service-actor-buyer-e2e.sh
 ```
 
 For both scripts:
@@ -207,7 +209,8 @@ For the manual-path script only:
   (run under `sudo -n`) and `E2E_TOS_AI_COMMIT`. It stages the provider's
   root-owned state under `E2E_ROOT_BASE` (default `/tos/m1-e2e-root`), in a
   subdirectory named after the work directory, which must not exist yet.
-- The run fails unless the protocol checkout is clean.
+- The run fails unless the ai checkout is clean (the whole repository, not
+  only `protocol/`).
 - It uses `service-actor-e2e-fixture` for the manifest, metadata hash, Quote
   package and the attestor's Receipt check. That tool is a **local stand-in**
   with no authority; it is not a production tool.
@@ -369,7 +372,7 @@ A job runs in a private container runtime, and raw access to that runtime's
 socket is equivalent to root, so only root may reach it. Nothing else a
 provider node does needs root: not `tosctl`, not the vault, not the packet
 listener. The operator therefore installs, as root and once, the runtime and
-the **executor service** (`tos-ai` `software-work-executord`) in front of it
+the **executor service** (`execution/` `software-work-executord`) in front of it
 (section 4.1). The service is the only process that opens the runtime socket.
 It listens on `/run/tos-service-executor/executor.sock` and serves exactly one
 uid, the provider node's user. That user runs every provider command; the rail
@@ -1090,8 +1093,8 @@ hash) and refuses the command if one is missing. Also pass the access setting,
 and leaving it out changes who may call the actor.
 `openfox earning service metadata` prints `metadata_hash` only. The
 software-work proof scheme hash is a fixed constant
-(`ServiceActorSoftwareWorkProofScheme` in `tos-service-protocol`
-`pkg/nativecore`), the SHA-256 of a fixed string; no command prints it, so
+(`ServiceActorSoftwareWorkProofScheme` in
+`protocol/pkg/nativecore`), the SHA-256 of a fixed string; no command prints it, so
 compute it:
 
 ```sh
@@ -1102,7 +1105,7 @@ Pass only the 64-character hex, not the trailing `-` that `sha256sum` prints.
 
 Buyers who use a Gateway get Quotes from the Gateway's provider Quote profile
 (`TOS_SERVICE_PROVIDER_QUOTE_PROFILE_FILE`, example in
-`tos-service-gateway/docs/provider-quote-profile.example.json`). For buyers
+`gateway/docs/provider-quote-profile.example.json`). For buyers
 who use OpenFox, set that profile's `transport` block (in the Gateway's
 profile file, not in the OpenFox rail configuration) to `security_mode` `2`,
 `base_url` `agent-packet:<PROVIDER_AGENT_ID>` and `max_request_bytes`
@@ -1118,9 +1121,9 @@ instead of `executor_socket`), then continue at section 4.5.
 
 ### 6.3 Provider: execute and respond without OpenFox
 
-**Standalone paid command** (tos-ai), run as root against the private daemon.
+**Standalone paid command** (`execution/`), run as root against the private daemon.
 Do not run it beside OpenFox `serve` for the same actor. Its rail config is
-described in the tos-ai README:
+described in the `execution/` README:
 
 ```sh
 software-work-execute paid --rail-config <EXECUTOR_RAIL_JSON> \
@@ -1235,6 +1238,8 @@ Runtime, `tosctl` and the manual tools:
   - [AI Service Provider Requirements V1](AI_SERVICE_PROVIDER_REQUIREMENTS_V1.md)
   - [Implementation Status](AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md)
   - Local evidence:
+    [OpenFox front door from the ai module](../deployments/local-openfox-front-door-ai-20261115.json),
+    [paid execution from the ai module](../deployments/local-service-actor-paid-execution-ai-20261115.json),
     [OpenFox provider as an ordinary user](../deployments/local-openfox-unprivileged-provider-20261115.json),
     [OpenFox front door (legacy mode)](../deployments/local-openfox-front-door-20261115.json),
     [M1](../deployments/local-service-actor-provider-m1-20261114.json),
@@ -1245,6 +1250,6 @@ Runtime, `tosctl` and the manual tools:
     [Software Work Execution V1](SOFTWARE_WORK_EXECUTION_V1.md)
   - [Gate E Buyer Onboarding](GATE_E_BUYER_ONBOARDING.md),
     [Gate E Provider Onboarding](GATE_E_PROVIDER_ONBOARDING.md)
-  - `tos-service-protocol/docs/provider-sdk.md`,
+  - [`protocol/docs/provider-sdk.md`](../../protocol/docs/provider-sdk.md),
     `openfox/docs/guides/service-actor-rail.md`,
-    `tos-ai/deploy/provider/README.md`
+    [`execution/deploy/provider/README.md`](../../execution/deploy/provider/README.md)

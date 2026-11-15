@@ -248,13 +248,17 @@ metadata and is never sufficient asset identity.
 
 ## Repository ownership
 
-| Repository | Responsibility |
+| Component | Responsibility |
 |---|---|
-| `tos-service-spec` | Normative schema, rules, and frozen vectors |
-| `tos` | TVM contract and consensus execution |
-| `tos-service-protocol` | Canonical encoding, relaying, resolution, and verification |
-| `tos-service-gateway` | Reference Native gateway and transport authentication |
-| `tos-ai` | Execution workers and result production |
+| `spec/` (this directory, formerly `tos-service-spec`) | Normative schema, rules, and frozen vectors |
+| `tos` repository | TVM contract and consensus execution |
+| `protocol/` (formerly `tos-service-protocol`) | Canonical encoding, relaying, resolution, and verification |
+| `gateway/` (formerly `tos-service-gateway`) | Reference Native gateway and transport authentication |
+| `execution/` (formerly `tos-ai`) | Execution workers and result production |
+
+`spec/`, `protocol/`, `gateway/` and `execution/` are directories of the `ai`
+repository; see `deployments/README.md` for the former repositories and their
+import points.
 
 ## Repository layout
 
