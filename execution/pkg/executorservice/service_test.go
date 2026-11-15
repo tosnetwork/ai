@@ -416,12 +416,14 @@ func TestBusyAtTheInFlightByteBound(t *testing.T) {
 	if _, err := service.client.Execute(background(t), request); err != nil || backend.runs() != 1 {
 		t.Fatalf("after the budget is free: err=%v runs=%d", err, backend.runs())
 	}
-	service.server.mutex.Lock()
-	free = service.server.budgetFree
-	service.server.mutex.Unlock()
-	if free != DefaultInFlightBytes {
-		t.Fatalf("budget leaked: %d", free)
-	}
+	// The server returns the delivery's bytes to the budget after it has
+	// written the response, so the client can read the response first; the
+	// budget must come back in full, not necessarily before Execute returns.
+	eventually(t, "the delivery's bytes to return to the budget", func() bool {
+		service.server.mutex.Lock()
+		defer service.server.mutex.Unlock()
+		return service.server.budgetFree == DefaultInFlightBytes
+	})
 }
 
 func TestSlowClientsMeetDeadlines(t *testing.T) {
