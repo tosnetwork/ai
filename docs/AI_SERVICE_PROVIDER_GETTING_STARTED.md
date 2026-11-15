@@ -234,10 +234,12 @@ nothing, and exits non-zero** with
 `"confirmed": false` in its report. Read the preview, then run the same
 command again with `--yes`.
 
-`buy` is different: it always shows the costs, and pays without asking when
-the purchase is inside the spending policy that `init` recorded. Set
-`--confirm-above <TOS>` in `init` to require `buy --yes` for a purchase that
-commits more than that amount.
+**`buy` has no preview step. By default it pays immediately**: it prints the
+costs and sends the `call` in the same run. To be asked first, give `init`
+`--confirm-above <TOS>`: a purchase committing more than that (price +
+storage fee + 0.2 TOS allowance + refund reserve) then needs `buy --yes` or
+`y` at the prompt. Restate `--confirm-above` every time you re-run `init`
+with `--allow-provider`, or the threshold is dropped.
 
 OpenFox never signs. Every signature and send is made by the pinned `tosctl`,
 run from a sealed in-memory copy with only the vault URL in its environment.
@@ -653,9 +655,15 @@ openfox earning service init \
   --registry-code-boc <REGISTRY_CODE_BOC> \
   --actor-code-hash tvm-cell-sha256:<HEX> \
   --allow-provider agent_<PROVIDER_AGENT_HEX> \
-  --direct-peer agent_<PROVIDER_AGENT_HEX>=<PROVIDER_RECEIVER_SOCKET>
+  --direct-peer agent_<PROVIDER_AGENT_HEX>=<PROVIDER_RECEIVER_SOCKET> \
+  --confirm-above 0
 # read the preview, then repeat the command with --yes
 ```
+
+**Set `--confirm-above`.** Without it `buy` pays as soon as it is run.
+`--confirm-above 0` asks before every purchase; a higher value asks only for
+purchases that commit more than it. The spending-policy caps below are the
+hard bound either way: a purchase over them is refused, confirmed or not.
 
 Use `--messenger-socket <SOCKET>` instead of `--direct-peer` when a Messenger
 daemon carries the packets (section 3.6). `init` registers your node's Agent
@@ -666,15 +674,22 @@ the report) and your receiver socket path (default
 Spending policy, in TOS: `--max-per-purchase` (default 2), `--max-in-window`
 (default 10), `--window-seconds` (default 86400), `--max-open-purchases`
 (default 4), `--refund-reserve` (default 0.3, kept for the refund
-transactions) and `--confirm-above` (no default: without it purchases inside
-the bounds are not routed to you for confirmation). `--allow-provider` is
-repeatable. Running `init` again with these flags replaces the buyer section.
+transactions) and `--confirm-above` (no default: unset, nothing asks before
+paying). `--allow-provider` is repeatable. Running `init` again with
+`--allow-provider` rebuilds the whole buyer section from the flags of that
+run: a policy flag you leave out returns to its default, and an omitted
+`--confirm-above` removes the threshold without a warning.
 
 A Gateway is optional: `--gateway-url`, `--gateway-token-file`,
 `--gateway-ca-file` and `--caller-id` are needed only to buy without an offer
 file.
 
 ### 5.3 Serve and buy
+
+**`buy` has no preview step and by default pays immediately.** It asks first
+only for a purchase that commits more than the `--confirm-above` you gave
+`init` (section 3.2); then pass `--yes`, or answer `y` at the
+`Confirm this purchase [y/N]:` prompt (anything else declines).
 
 ```sh
 openfox earning service serve --rail-config <RAIL_CONFIG>      # keep running
@@ -688,13 +703,12 @@ package obtained out of band) or, with neither, the configured Gateway.
 **With `--offer` no Gateway is needed:** the Quote Proposal package is built
 locally from the offer file and finalized state. `--capability-id` and
 `--version` may be given only if they agree with the file. The source archive
-is at most 1 MiB.
+is at most 1 MiB. `--source` and `--offer` must be absolute paths.
 
 `buy` verifies the offer at a finalized checkpoint, refuses oversize input
 before anything is reserved or paid, shows the costs, applies your policy and
 sends one `call` with the quoted terms hash; terms the provider changed
-afterwards are refused on chain. Add `--yes` when the policy routes the
-purchase to you (section 3.2).
+afterwards are refused on chain.
 
 `serve` is a separate process and must be running for delivery. It delivers
 the task once the call is admitted, accepts a result only if its Receipt
@@ -706,10 +720,15 @@ and `claim_refund` itself.
 `purchases` shows each purchase's `phase` (for example `called`, then
 `completed`), `status`, deadlines and costs.
 
-**Do not repeat `buy` after an error without looking first.** If `buy` fails
-on an unavailable chain read, run `purchases` first: a second `buy` is a
-second purchase and a second payment. Repeat it only if no new purchase is
-listed.
+**A failed `buy` may already have paid.** Every `buy` is a new purchase;
+nothing deduplicates a repeat. After any non-zero exit run `purchases`:
+
+- No new entry, or a new entry with `phase: not-called`: nothing was sent.
+  Repeat the `buy`.
+- A new entry with `phase: called` (it carries `failure`): the call may be on
+  its way. Do **not** repeat. Keep `serve` running until the entry shows a
+  `status` or the phase `refused`. Until then it holds its budget and one
+  open-purchase slot.
 
 ### 5.4 Where the result lands
 
@@ -1101,7 +1120,9 @@ OpenFox front door:
 | `init` reports `transport: missing`; `serve`, `buy` or `preflight` refuse with `the rail node has no packet transport` | the node was established without a transport | run `init` again with `--direct-peer` or `--messenger-socket`; it sends nothing |
 | `the outcome of a sent message is not yet established` | an earlier run sent a message that is not in finalized state yet | wait and run the same command again; never switch to a new state directory to "retry" |
 | `another init, offer or withdraw run is in progress` | a second setup or withdraw run in the same state directory | wait for the first; the lock is released when its process ends |
-| `finalized state is unavailable`, `quorum not reached`, `no finalized checkpoint` | too few endpoints answered in time | run `init`, `offer`, `withdraw`, `preflight` or `status` again. For `buy`, check `purchases` first (section 5.3). A running `serve` logs it and retries on its next round |
+| `finalized state is unavailable`, `quorum not reached`, `no finalized checkpoint` | too few endpoints answered in time | run `init`, `offer`, `withdraw`, `preflight` or `status` again. A running `serve` logs it and retries on its next round |
+| `buy` exits non-zero, for any reason | it may have failed before or after the `call` was sent | never repeat it blindly: run `purchases` and follow the rule in section 5.3 (repeat only with no new entry or `phase: not-called`; with `phase: called` keep `serve` running and wait) |
+| `buy` prints `Confirm this purchase [y/N]:`, or ends with `the owner declined the purchase` in a script | the purchase commits more than `--confirm-above` and standard input gave no `y` | pass `--yes` once you have checked the costs |
 | `the owner wallet's type is not supported` | the wallet is not V3R2, V4R2 or V5R1, or `tosctl` did not report its type | use a wallet of an accepted type (section 3.4); nothing was sent |
 | `init` or `offer` stops naming a wallet address and an amount | the wallet is missing, not active or short | fund and activate it with `tosctl` (section 2), then run the command again |
 | `the tosctl configuration is under a directory another user can modify` | `tosctl` run as root refuses such a configuration | put the node's files under directories whose every ancestor is owned by the user running OpenFox or by root |
@@ -1137,6 +1158,13 @@ Runtime, `tosctl` and the manual tools:
   as root, over the direct transport. Not covered by that run: the Messenger
   transport, nodes on different hosts, a refund, and `withdraw --acknowledge`.
 - The Gateway publication route was not part of any local run.
+- `buy` has no preview step, unlike `init`, `offer` and `withdraw`; it pays
+  at once unless `--confirm-above` is set, and the live run always passed
+  `--yes`.
+- Re-running `init` with `--allow-provider` drops a previously set
+  `--confirm-above` unless it is restated.
+- No command closes a purchase whose call never landed: it stays `called`
+  and holds its budget and its open-purchase slot indefinitely.
 - Read next:
   - [AI Service Provider Requirements V1](AI_SERVICE_PROVIDER_REQUIREMENTS_V1.md)
   - [Implementation Status](AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md)
