@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-workspace=${TOS_WORKSPACE:-$(cd "$(dirname "$0")/../.." && pwd)}
+# Run from this checkout: protocol/, gateway/, execution/ and spec/ are
+# directories of it. tos-messenger is an external sibling checkout
+# under TOS_WORKSPACE (default: the parent directory of this checkout).
+repo=$(cd "$(dirname "$0")/../.." && pwd)
+workspace=${TOS_WORKSPACE:-$(cd "$repo/.." && pwd)}
 artifacts=${ACCEPTANCE_ARTIFACT_DIR:-$(mktemp -d /tmp/tos-carrier-source-loss.XXXXXX)}
 mkdir -p "$artifacts/bin" "$artifacts/logs"
 chmod 700 "$artifacts" "$artifacts/bin" "$artifacts/logs"
@@ -16,8 +20,8 @@ stop_processes() {
 }
 trap stop_processes EXIT INT TERM
 
-(cd "$workspace/tos-service-protocol" && go build -o "$artifacts/bin/campaign" ./cmd/agent-commerce-carrier-campaign)
-(cd "$workspace/tos-service-gateway" && go build -o "$artifacts/bin/gateway-carrier" ./cmd/tos-service-intent-carrierd)
+(cd "$repo/protocol" && go build -o "$artifacts/bin/campaign" ./cmd/agent-commerce-carrier-campaign)
+(cd "$repo/gateway" && go build -o "$artifacts/bin/gateway-carrier" ./cmd/tos-service-intent-carrierd)
 (cd "$workspace/tos-messenger" && go build -o "$artifacts/bin/messenger-carrier" ./cmd/tos-intent-carrierd)
 
 init_output=$($artifacts/bin/campaign --init-dir "$artifacts/control")

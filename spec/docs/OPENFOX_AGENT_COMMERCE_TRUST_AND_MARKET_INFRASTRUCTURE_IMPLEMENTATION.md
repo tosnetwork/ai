@@ -118,16 +118,17 @@ the required qualified source is not installed, the implementation returns
 ## 5. Local validation record
 
 The subset reproducible in this managed runner was checked with the following
-commands. They assume the three repositories are adjacent checkouts:
+commands. Run them from the root of this repository, with an OpenFox
+checkout beside it:
 
 ```text
-cd tos-service-spec
+cd spec
 python3 scripts/operation-outcome-reference.py
 
-cd ../tos-service-protocol
+cd ../protocol
 go test ./...
 
-cd ../openfox
+cd ../../openfox
 GOWORK=off go test ./pkg/earning -run '^$' -count=1
 GOWORK=off go test ./pkg/earning -run 'Test(BuildAgreementRevision|UniqueUnforkedAgreementLeafTopology|ForkedAgreementCannotEnterPaidDemandEconomicPaths|AgreementProposalPreflightChecksTimeAndParticipants|LiveReservationForNewEscrowExposure|OutcomeLearningCutRequiresPayloadSourceBinding|OwnerLocalClosedEconomyProjection|ImportOutcomeCarrierPage|CounterpartyAgreementPaymentSummary|QualifiedCostEvidence|CostEvidenceCompatibility|ProviderDeliveryOutcomeRisk|ServiceCapabilityOutcomeRisk|OutcomeRiskViews|ObjectiveMilestone|PaidDemandBuyerReservation|PaidDemandFunding)' -count=1
 GOWORK=off go test -race ./pkg/earning -run 'Test(BuildAgreementRevision|UniqueUnforkedAgreementLeafTopology|ForkedAgreementCannotEnterPaidDemandEconomicPaths|AgreementProposalPreflightChecksTimeAndParticipants|LiveReservationForNewEscrowExposure|OutcomeLearningCutRequiresPayloadSourceBinding|OwnerLocalClosedEconomyProjection|ImportOutcomeCarrierPage|CounterpartyAgreementPaymentSummary|QualifiedCostEvidence|CostEvidenceCompatibility|ProviderDeliveryOutcomeRisk|ServiceCapabilityOutcomeRisk|OutcomeRiskViews|ObjectiveMilestone|PaidDemandBuyerReservation|PaidDemandFunding)' -count=1

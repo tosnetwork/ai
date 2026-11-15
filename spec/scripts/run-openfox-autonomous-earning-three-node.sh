@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-workspace=${TOS_WORKSPACE:-$(cd "$(dirname "$0")/../.." && pwd)}
+# Run from this checkout: protocol/, gateway/, execution/ and spec/ are
+# directories of it. openfox, tos-messenger and tos are external sibling
+# checkouts under TOS_WORKSPACE (default: the parent directory of this checkout).
+repo=$(cd "$(dirname "$0")/../.." && pwd)
+workspace=${TOS_WORKSPACE:-$(cd "$repo/.." && pwd)}
 artifacts=${ACCEPTANCE_ARTIFACT_DIR:-$(mktemp -d /tmp/openfox-autonomous-earning.XXXXXX)}
 mkdir -p "$artifacts/logs" "$artifacts/source-loss"
 chmod 700 "$artifacts" "$artifacts/logs" "$artifacts/source-loss"
@@ -34,16 +38,16 @@ for endpoint in "$rpc1" "$rpc2" "$rpc3"; do
   fi
 done
 
-python3 "$workspace/tos-service-spec/scripts/agent-commerce-reference.py" \
+python3 "$repo/spec/scripts/agent-commerce-reference.py" \
   | tee "$artifacts/logs/independent-verifier.log"
 
-(cd "$workspace/tos-service-protocol" && go test ./pkg/agentcommerce ./pkg/buyersdk ./pkg/executiongate ./pkg/nativecore ./pkg/paiddemand ./pkg/toschain) \
+(cd "$repo/protocol" && go test ./pkg/agentcommerce ./pkg/buyersdk ./pkg/executiongate ./pkg/nativecore ./pkg/paiddemand ./pkg/toschain) \
   | tee "$artifacts/logs/protocol.log"
 (cd "$workspace/tos-messenger" && go test ./pkg/economicaction ./pkg/intentcarrier ./pkg/negotiation ./pkg/localapi) \
   | tee "$artifacts/logs/messenger.log"
-(cd "$workspace/tos-service-gateway" && go test ./internal/intentcarrier ./internal/quotesource) \
+(cd "$repo/gateway" && go test ./internal/intentcarrier ./internal/quotesource) \
   | tee "$artifacts/logs/gateway.log"
-(cd "$workspace/tos-ai" && go test ./pkg/commercegate ./pkg/privateingress ./pkg/messengereventbridge) \
+(cd "$repo/execution" && go test ./pkg/commercegate ./pkg/privateingress ./pkg/messengereventbridge) \
   | tee "$artifacts/logs/executor.log"
 (cd "$workspace/openfox" && go test -tags goolm,stdjson ./pkg/earning ./cmd/openfox/internal/earning) \
   | tee "$artifacts/logs/openfox.log"
@@ -55,7 +59,7 @@ python3 "$workspace/tos-service-spec/scripts/agent-commerce-reference.py" \
 
 TOS_WORKSPACE="$workspace" ACCEPTANCE_ARTIFACT_DIR="$artifacts/source-loss" \
   TOS_SERVICE_TOSCTL="$tosctl" TOS_SERVICE_TOSCTL_SHA256="$(sha256sum "$tosctl" | cut -d' ' -f1)" \
-  "$workspace/tos-service-spec/scripts/run-independent-carrier-source-loss.sh" \
+  "$repo/spec/scripts/run-independent-carrier-source-loss.sh" \
   | tee "$artifacts/logs/source-loss.log"
 
 (cd "$workspace/openfox" && \
@@ -71,9 +75,12 @@ TOS_WORKSPACE="$workspace" ACCEPTANCE_ARTIFACT_DIR="$artifacts/source-loss" \
 {
   printf 'schema=tos.openfox.autonomous-earning-acceptance.v1\n'
   printf 'completed_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  for repository in tos-service-spec tos-service-protocol openfox tos-messenger tos-service-gateway tos-ai tos; do
-    printf '%s_commit=%s\n' "$repository" "$(git -C "$workspace/$repository" rev-parse HEAD)"
-    if [[ -n "$(git -C "$workspace/$repository" status --porcelain --untracked-files=all)" ]]; then
+  # spec, protocol, gateway and execution are one checkout, recorded as ai.
+  for checkout in "ai=$repo" "openfox=$workspace/openfox" "tos-messenger=$workspace/tos-messenger" "tos=$workspace/tos"; do
+    repository=${checkout%%=*}
+    path=${checkout#*=}
+    printf '%s_commit=%s\n' "$repository" "$(git -C "$path" rev-parse HEAD)"
+    if [[ -n "$(git -C "$path" status --porcelain --untracked-files=all)" ]]; then
       printf '%s_worktree=modified\n' "$repository"
     else
       printf '%s_worktree=clean\n' "$repository"
