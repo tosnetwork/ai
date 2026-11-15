@@ -1,0 +1,1111 @@
+{
+  "schema": "tos.openfox.service-front-door.local-acceptance.v1",
+  "qualifies_as_public_acceptance": false,
+  "reason": "one host runs every validator, every endpoint and both nodes",
+  "executor_mode": "executor service socket",
+  "started_utc": "2026-11-15T07:45:31.767565+00:00",
+  "openfox_commit": "66b8b4c3b1d264d069ce147de6467b2466ca679c",
+  "openfox_tree_status": [],
+  "openfox_tree_dirty": false,
+  "tos_commit": "5af405dcb1f523be0ff3b812e9f6945275c4945b",
+  "actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+  "network_label": "tos:global-id:3",
+  "terms": {
+    "price": "0.3",
+    "storage_fee": "0.25",
+    "cleanup_bounty": "0.1"
+  },
+  "not_openfox": [
+    "booting the three-validator network (tostester)",
+    "creating each wallet (`tosctl wallet create`), funding it from the zerostate faucet and activating it (`tosctl wallet activate`)",
+    "staging the binaries, chain files, tosctl configurations and vaults for the nodes' user (`install`; as root in the legacy mode)",
+    "the private container runtime and its imported toolchain image, and the root-run executor service in front of it",
+    "this script's own JSON-RPC reads, used only to verify"
+  ],
+  "network": {
+    "network_id": "tos:global-id:3",
+    "genesis_root_hash": "sha256:8b17f55396a0da539f2d01cb4c548e375031495787fe6e8e1191c938c5a46b19",
+    "genesis_file_hash": "sha256:914c820a1e163035f0ed9def792f970651bd9bdfd772c24a67cdff4500aa97d6",
+    "validators": 3,
+    "json_rpc": [
+      "http://127.0.0.1:49880/jsonRPC",
+      "http://127.0.0.1:49881/jsonRPC",
+      "http://127.0.0.1:49882/jsonRPC"
+    ],
+    "base_port": 49800
+  },
+  "wallets": {
+    "provider": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+    "buyer": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f"
+  },
+  "binaries": {
+    "openfox": {
+      "sha256": "b366d5d17183d0d1a53f0d81b3b9e4e17c45c3e8573851100c375dc0e7e21007"
+    },
+    "tosctl": {
+      "sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b"
+    }
+  },
+  "node_user": {
+    "staged_under": "/tos/m1-e2e/ai-fd-1/private/nodes",
+    "uid": 1000,
+    "ownership": [
+      "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes",
+      "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes/bin",
+      "1000:997 755 /tos/m1-e2e/ai-fd-1/private/nodes/bin/openfox",
+      "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes/provider",
+      "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes/buyer",
+      "1000:997 600 /tos/m1-e2e/ai-fd-1/private/nodes/provider/vault.json"
+    ],
+    "executor_service_socket": [
+      "0:997 750 /run/tos-service-executor",
+      "0:997 660 /run/tos-service-executor/executor.sock"
+    ],
+    "why": "the provider node executes through the root-run executor service and reads none of its files, so neither node needs root. The service, its unit and its allow-list were installed by the operator before this run; the run itself uses no root command."
+  },
+  "objects": {
+    "provider_agent_id": "agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa",
+    "provider_agent_address": "0:a58dffb88c86bb73ce13afc13a273fa3574ab73dd6b920cb25bf92600684bfaa",
+    "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+    "capability_id": "cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30",
+    "capability_address": "0:0354ff50b6fff5d07efe4e7fef960d186c0bbb50a1693673215465f7c954b459",
+    "manifest_digest": "sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170",
+    "attestor": "mldsa44:01f79ad54b47cfc1c4a77a5f84d604e12956867f34c416b63cb0b102bb13f8be",
+    "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+    "buyer_agent_id": "agent_d62645f3844c82c737b7e31e1138aaa3c2bd3ed0c2e2f246c21aa29b92ad18be",
+    "buyer_agent_address": "0:2f797853d0fe17bbb175885ff6a056f6cd17059a936d40310c86016b44ef6cee"
+  },
+  "preflight_not_passing": [
+    {
+      "id": "rpc.independence",
+      "status": "unknown",
+      "message": "endpoints have distinct authorities, but whether distinct operators run them is not verified; a quorum of one operator's endpoints is one point of trust"
+    },
+    {
+      "id": "signer.wallet",
+      "status": "unknown",
+      "message": "tosctl offers no way to resolve wallet \"provider\" without signing, so the respond wallet is not checked; preflight never signs"
+    }
+  ],
+  "sale": {
+    "request_hash": "e1f59c429be0492bd8eaa101afc64c126e3c2e2c4b376fc4b60504ba6f75ee9a",
+    "request_id": 0,
+    "response_hash": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a",
+    "artifact_sha256": "85408bc23634922e66be26721425bd8468bddb589b36710fae5a5de1588a624e",
+    "call": {
+      "lt": 94000003,
+      "hash": "KIEn/UYsJHAYBVplZXFZZRM+hqaJogPwR68Qp2Q/+ns=",
+      "in_source": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+      "in_value": 750000000,
+      "op": 1398162177,
+      "query_id": 12112981010652360316,
+      "outs": [
+        {
+          "destination": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+          "value": 199581720
+        }
+      ],
+      "aborted": false,
+      "compute_success": true
+    },
+    "respond": {
+      "lt": 238000003,
+      "hash": "GpkGBX+bYdSpSWBGDYq0c7TDpZIyEVzBjz3gZTU2wKo=",
+      "in_source": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+      "in_value": 10000000,
+      "op": 1398162178,
+      "query_id": 0,
+      "outs": [],
+      "aborted": false,
+      "compute_success": true,
+      "request_id": 0,
+      "response_hash": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a"
+    },
+    "execution_id": "4181b0d564b479de4f83bcd27060f321140d5fd3b368326119e000f199f8a69a"
+  },
+  "withdrawal": {
+    "amount_nanotos": 550000000,
+    "query_id": "17093589432243230687",
+    "transaction": {
+      "lt": 255000003,
+      "hash": "FkusiByy1kM5KFafB1IejJqg3c1YyhmUtQp1h/mTxPc=",
+      "in_source": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+      "in_value": 200000000,
+      "op": 1398162185,
+      "query_id": 17093589432243230687,
+      "outs": [
+        {
+          "destination": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+          "value": 550000000
+        },
+        {
+          "destination": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+          "value": 199834730
+        }
+      ],
+      "aborted": false,
+      "compute_success": true,
+      "withdraw_amount": 550000000
+    }
+  },
+  "serve_log_lines_other_than_pause_notices": {
+    "provider": [],
+    "buyer": []
+  },
+  "ran_as_root": [],
+  "steps": [
+    {
+      "name": "the OpenFox tree is clean at the commit the evidence names",
+      "pass": true,
+      "detail": "clean",
+      "at": "2026-11-15T07:45:31.772124+00:00"
+    },
+    {
+      "name": "every validator serves finalized JSON-RPC",
+      "pass": true,
+      "detail": null,
+      "at": "2026-11-15T07:45:41.987714+00:00"
+    },
+    {
+      "name": "not OpenFox: the provider wallet is created, funded from the faucet and activated with tosctl",
+      "pass": true,
+      "detail": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+      "at": "2026-11-15T07:45:46.465301+00:00"
+    },
+    {
+      "name": "not OpenFox: the buyer wallet is created, funded from the faucet and activated with tosctl",
+      "pass": true,
+      "detail": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+      "at": "2026-11-15T07:45:50.919881+00:00"
+    },
+    {
+      "name": "neither node runs as root: the run itself is unprivileged and stages the nodes' files as its own user",
+      "pass": true,
+      "detail": {
+        "uid": 1000,
+        "staged": {
+          "openfox": "b366d5d17183d0d1a53f0d81b3b9e4e17c45c3e8573851100c375dc0e7e21007",
+          "tosctl": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b"
+        },
+        "built": {
+          "openfox": "b366d5d17183d0d1a53f0d81b3b9e4e17c45c3e8573851100c375dc0e7e21007",
+          "tosctl": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b"
+        },
+        "ownership": [
+          "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes",
+          "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes/bin",
+          "1000:997 755 /tos/m1-e2e/ai-fd-1/private/nodes/bin/openfox",
+          "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes/provider",
+          "1000:997 700 /tos/m1-e2e/ai-fd-1/private/nodes/buyer",
+          "1000:997 600 /tos/m1-e2e/ai-fd-1/private/nodes/provider/vault.json",
+          ""
+        ]
+      },
+      "at": "2026-11-15T07:45:52.441938+00:00"
+    },
+    {
+      "name": "provider init without --yes creates, signs and sends nothing",
+      "pass": true,
+      "detail": "tosctl.pin: done: tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)\nnetwork.domain: done: network \"tos:global-id:3\" with genesis root sha256:8b17f55396a0da539f2d01cb4c548e375031495787fe6e8e1191c938c5a46b19 and file sha256:914c820a1e163035f0ed9def792f970651bd9bdfd772c24a67cdff4500aa97d6, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree\nwallet.address: done: wallet \"provider\" is 0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab\ncontroller.packet: planned: controller \"openfox-packet\" is not in the vault and will be created\nagent.register: planned: an Agent registration will be signed with controller \"openfox-packet\" and sent from wallet \"provider\" (0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab) attaching 2.000000000 TOS\nError: servicebridge: nothing was signed or sent; review the preview and re-run with --yes\n",
+      "at": "2026-11-15T07:45:53.211492+00:00"
+    },
+    {
+      "name": "provider init registered the node's Agent and wrote the rail configuration",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-init.v1",
+        "confirmed": true,
+        "rail_config": "/tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json",
+        "state_dir": "/tos/m1-e2e/ai-fd-1/private/nodes/provider/state",
+        "network": {
+          "network_id": "tos:global-id:3",
+          "genesis_root_hash": "sha256:8b17f55396a0da539f2d01cb4c548e375031495787fe6e8e1191c938c5a46b19",
+          "genesis_file_hash": "sha256:914c820a1e163035f0ed9def792f970651bd9bdfd772c24a67cdff4500aa97d6"
+        },
+        "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+        "tosctl_sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+        "tosctl_pin": "trust_on_first_use",
+        "tosctl_pin_note": "trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256",
+        "wallet_name": "provider",
+        "wallet_address": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+        "packet_controller": "openfox-packet",
+        "packet_key_id": "mldsa44:7666ae448ef51e608682ec4e8d150171efc0fcca51ec2f1b0cc0c5d72cd6e3a4",
+        "agent_id": "agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa",
+        "agent_address": "0:a58dffb88c86bb73ce13afc13a273fa3574ab73dd6b920cb25bf92600684bfaa",
+        "registration_attached_nanotos": "2000000000",
+        "steps": [
+          {
+            "id": "tosctl.pin",
+            "status": "done",
+            "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)"
+          },
+          {
+            "id": "network.domain",
+            "status": "done",
+            "detail": "network \"tos:global-id:3\" with genesis root sha256:8b17f55396a0da539f2d01cb4c548e375031495787fe6e8e1191c938c5a46b19 and file sha256:914c820a1e163035f0ed9def792f970651bd9bdfd772c24a67cdff4500aa97d6, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+          },
+          {
+            "id": "wallet.address",
+            "status": "done",
+            "detail": "wallet \"provider\" is 0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab"
+          },
+          {
+            "id": "controller.packet",
+            "status": "done",
+            "detail": "created controller \"openfox-packet\" in the vault with key id mldsa44:7666ae448ef51e608682ec4e8d150171efc0fcca51ec2f1b0cc0c5d72cd6e3a4"
+          },
+          {
+            "id": "agent.register",
+            "status": "done",
+            "detail": "the registration of Agent agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa is in finalized state at checkpoint 49"
+          },
+          {
+            "id": "config.write",
+            "status": "done",
+            "detail": "wrote the rail configuration /tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json (0600); it reads back strictly"
+          },
+          {
+            "id": "transport",
+            "status": "missing",
+            "detail": "no packet transport is configured: serve and buy refuse to start until this command is run again with --direct-peer or --messenger-socket"
+          }
+        ],
+        "next_steps": [
+          "add a packet transport: run init again with --direct-peer agent_<hex>=<socket> (the peer's Agent id and receiver socket) or --messenger-socket <socket>",
+          "provider: openfox earning service offer --rail-config /tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json --price <TOS> ...",
+          "buyer: openfox earning service buy --rail-config /tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json --offer <file> --source <archive>"
+        ]
+      },
+      "at": "2026-11-15T07:45:56.811045+00:00"
+    },
+    {
+      "name": "provider offer without --yes shows the terms, every attached value and what will be created, and sends nothing",
+      "pass": true,
+      "detail": "executor.service: done: the executor service at /run/tos-service-executor/executor.sock answers as root, is ready, and runs the offered image under the offered limits\ncontroller.attestor: planned: controller \"service-attestor\" is not in the vault and will be created\noffer.preview: owner wallet 0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab; provider Agent agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa\noffer.preview: to be created: attestor controller \"service-attestor\": a new ML-DSA-44 key in the tosctl vault\noffer.preview: to be created: a Service Actor at an address derived from the owner wallet, these terms and that key\noffer.preview: to be created: a manifest naming that actor and key, and a Capability whose id derives from its digest\noffer.preview: deploy Service Actor (derived once the attestor key exists) (code tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c, attestor (derived once the attestor key exists)) funded with 1.200000000 TOS\noffer.preview: terms: price 0.300000000 TOS, storage fee 0.250000000 TOS, cleanup bounty 0.100000000 TOS, response SLA 3600 s, refund-claim window 3600 s\noffer.preview: register Capability (derived once the attestor key exists) version \"1.0.0\" at (derived once the attestor key exists) with manifest (derived once the attestor key exists), attaching 2.000000000 TOS\noffer.preview: update-policy with metadata hash (derived once the attestor key exists) and proof scheme 42d2913f1ad35c71597b62a52a15c9f86fbf4a0f179685acee10230957cafb19, attaching 0.010000000 TOS\noffer.preview: total attached 3.210000000 TOS plus wallet fees; a buyer attaches 0.750000000 TOS to each call\noffer.preview: planned: the actor address, the manifest digest and the Capability id derive from the attestor key, which does not exist yet; the run with --yes creates controller \"service-attestor\", prints them and then sends the three messages above\nError: servicebridge: nothing was signed or sent; review the preview and re-run with --yes\n",
+      "at": "2026-11-15T07:45:57.101852+00:00"
+    },
+    {
+      "name": "provider offer deployed the actor, registered the Capability and set the policy (read from the chain)",
+      "pass": true,
+      "detail": {
+        "offer": {
+          "schema": "tos.openfox.rail-offer-setup.v1",
+          "confirmed": true,
+          "rail_config": "/tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json",
+          "preview": {
+            "owner_wallet": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+            "provider_agent_id": "agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa",
+            "provider_agent_address": "0:a58dffb88c86bb73ce13afc13a273fa3574ab73dd6b920cb25bf92600684bfaa",
+            "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+            "actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+            "attestor_controller": "service-attestor",
+            "attestor_key_id": "mldsa44:01f79ad54b47cfc1c4a77a5f84d604e12956867f34c416b63cb0b102bb13f8be",
+            "terms": {
+              "price_nanotos": "300000000",
+              "storage_fee_nanotos": "250000000",
+              "cleanup_bounty_nanotos": "100000000",
+              "response_sla_seconds": 3600,
+              "refund_claim_window_seconds": 3600
+            },
+            "version": "1.0.0",
+            "manifest_digest": "sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170",
+            "capability_id": "cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30",
+            "capability_address": "0:0354ff50b6fff5d07efe4e7fef960d186c0bbb50a1693673215465f7c954b459",
+            "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+            "proof_scheme_hash": "42d2913f1ad35c71597b62a52a15c9f86fbf4a0f179685acee10230957cafb19",
+            "deploy_funding_nanotos": "1200000000",
+            "capability_registration_attached_nanotos": "2000000000",
+            "update_policy_attached_nanotos": "10000000",
+            "total_attached_nanotos": "3210000000",
+            "buyer_attaches_per_call_nanotos": "750000000",
+            "note": "tosctl signs each message with keys in its custody. The deploy funding stays in the actor as its operating reserve. Fees are paid from the owner wallet on top of the attached values."
+          },
+          "offer_file": "/tos/m1-e2e/ai-fd-1/private/nodes/provider/state/setup/offer.json",
+          "executor_socket": "/run/tos-service-executor/executor.sock",
+          "verification": [
+            {
+              "id": "manifest.local",
+              "status": "pass",
+              "message": "the local manifest sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170 names actor 0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22 and attestor mldsa44:01f79ad54b47cfc1c4a77a5f84d604e12956867f34c416b63cb0b102bb13f8be"
+            },
+            {
+              "id": "chain.registry",
+              "status": "pass",
+              "message": "the Native Registry account reads at the checkpoint under the pinned code hash"
+            },
+            {
+              "id": "chain.capability",
+              "status": "pass",
+              "message": "Capability cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30 version \"1.0.0\" is live, owned by agent_id and commits to the local manifest"
+            },
+            {
+              "id": "chain.actor",
+              "status": "pass",
+              "message": "the actor 0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22 is active and runs the pinned code hash"
+            },
+            {
+              "id": "chain.attestor",
+              "status": "pass",
+              "message": "the actor's attestor is the manifest attestor mldsa44:01f79ad54b47cfc1c4a77a5f84d604e12956867f34c416b63cb0b102bb13f8be"
+            },
+            {
+              "id": "chain.admission",
+              "status": "pass",
+              "message": "the offer passes the protocol's admission verification at checkpoint 71"
+            }
+          ],
+          "steps": [
+            {
+              "id": "executor.service",
+              "status": "done",
+              "detail": "the executor service at /run/tos-service-executor/executor.sock answers as root, is ready, and runs the offered image under the offered limits"
+            },
+            {
+              "id": "controller.attestor",
+              "status": "done",
+              "detail": "created controller \"service-attestor\" in the vault with key id mldsa44:01f79ad54b47cfc1c4a77a5f84d604e12956867f34c416b63cb0b102bb13f8be"
+            },
+            {
+              "id": "actor.deploy",
+              "status": "done",
+              "detail": "the deployment of Service Actor 0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22 is in finalized state at checkpoint 58"
+            },
+            {
+              "id": "capability.register",
+              "status": "done",
+              "detail": "the registration of Capability cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30 is in finalized state at checkpoint 65"
+            },
+            {
+              "id": "actor.policy",
+              "status": "done",
+              "detail": "the policy of actor 0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22 for this Capability version is in finalized state at checkpoint 71"
+            },
+            {
+              "id": "offer.verify",
+              "status": "done",
+              "detail": "the offer passes the preflight's manifest, Capability, actor, attestor and admission checks at checkpoint 71"
+            },
+            {
+              "id": "config.write",
+              "status": "done",
+              "detail": "wrote the provider section of /tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json"
+            },
+            {
+              "id": "offer.file",
+              "status": "done",
+              "detail": "wrote the offer file /tos/m1-e2e/ai-fd-1/private/nodes/provider/state/setup/offer.json; give it to buyers (it holds nothing secret)"
+            }
+          ],
+          "next_steps": [
+            "openfox earning service preflight --rail-config /tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json",
+            "openfox earning service serve --rail-config /tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json"
+          ]
+        },
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+          "next_request_id": 0,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 0,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T07:46:05.376941+00:00"
+    },
+    {
+      "name": "the offer file names the provider's Agent and Capability and holds nothing but public data",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-offer.v1",
+        "capability_id": "cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30",
+        "version": "1.0.0",
+        "provider_agent_id": "agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa",
+        "manifest_digest": "sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170",
+        "updated_unix": 1794728765
+      },
+      "at": "2026-11-15T07:46:05.381775+00:00"
+    },
+    {
+      "name": "buyer init registered the buyer's Agent with a spending policy that allows the provider",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-init.v1",
+        "confirmed": true,
+        "rail_config": "/tos/m1-e2e/ai-fd-1/private/nodes/buyer/rail.json",
+        "state_dir": "/tos/m1-e2e/ai-fd-1/private/nodes/buyer/state",
+        "network": {
+          "network_id": "tos:global-id:3",
+          "genesis_root_hash": "sha256:8b17f55396a0da539f2d01cb4c548e375031495787fe6e8e1191c938c5a46b19",
+          "genesis_file_hash": "sha256:914c820a1e163035f0ed9def792f970651bd9bdfd772c24a67cdff4500aa97d6"
+        },
+        "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+        "tosctl_sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+        "tosctl_pin": "trust_on_first_use",
+        "tosctl_pin_note": "trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256",
+        "wallet_name": "buyer",
+        "wallet_address": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+        "packet_controller": "openfox-packet",
+        "packet_key_id": "mldsa44:5d60608bdc26ef1ef64ffe9c8cbd9029a98c4fea7771cf1c6e151bed45bd64e9",
+        "agent_id": "agent_d62645f3844c82c737b7e31e1138aaa3c2bd3ed0c2e2f246c21aa29b92ad18be",
+        "agent_address": "0:2f797853d0fe17bbb175885ff6a056f6cd17059a936d40310c86016b44ef6cee",
+        "registration_attached_nanotos": "2000000000",
+        "steps": [
+          {
+            "id": "tosctl.pin",
+            "status": "done",
+            "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)"
+          },
+          {
+            "id": "network.domain",
+            "status": "done",
+            "detail": "network \"tos:global-id:3\" with genesis root sha256:8b17f55396a0da539f2d01cb4c548e375031495787fe6e8e1191c938c5a46b19 and file sha256:914c820a1e163035f0ed9def792f970651bd9bdfd772c24a67cdff4500aa97d6, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+          },
+          {
+            "id": "wallet.address",
+            "status": "done",
+            "detail": "wallet \"buyer\" is 0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f"
+          },
+          {
+            "id": "controller.packet",
+            "status": "done",
+            "detail": "created controller \"openfox-packet\" in the vault with key id mldsa44:5d60608bdc26ef1ef64ffe9c8cbd9029a98c4fea7771cf1c6e151bed45bd64e9"
+          },
+          {
+            "id": "agent.register",
+            "status": "done",
+            "detail": "the registration of Agent agent_d62645f3844c82c737b7e31e1138aaa3c2bd3ed0c2e2f246c21aa29b92ad18be is in finalized state at checkpoint 80"
+          },
+          {
+            "id": "config.write",
+            "status": "done",
+            "detail": "wrote the rail configuration /tos/m1-e2e/ai-fd-1/private/nodes/buyer/rail.json (0600); it reads back strictly"
+          }
+        ],
+        "next_steps": [
+          "provider: openfox earning service offer --rail-config /tos/m1-e2e/ai-fd-1/private/nodes/buyer/rail.json --price <TOS> ...",
+          "buyer: openfox earning service buy --rail-config /tos/m1-e2e/ai-fd-1/private/nodes/buyer/rail.json --offer <file> --source <archive>"
+        ]
+      },
+      "at": "2026-11-15T07:46:09.069370+00:00"
+    },
+    {
+      "name": "provider init run again adds the buyer as a direct peer, keeps its Agent and sends nothing",
+      "pass": true,
+      "detail": [
+        {
+          "id": "tosctl.pin",
+          "status": "done",
+          "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (the binary matches the SHA-256 pinned by an earlier run)"
+        },
+        {
+          "id": "network.domain",
+          "status": "done",
+          "detail": "network \"tos:global-id:3\" with genesis root sha256:8b17f55396a0da539f2d01cb4c548e375031495787fe6e8e1191c938c5a46b19 and file sha256:914c820a1e163035f0ed9def792f970651bd9bdfd772c24a67cdff4500aa97d6, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+        },
+        {
+          "id": "wallet.address",
+          "status": "done",
+          "detail": "wallet \"provider\" is 0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab"
+        },
+        {
+          "id": "controller.packet",
+          "status": "already_done",
+          "detail": "controller \"openfox-packet\" exists in the vault with key id mldsa44:7666ae448ef51e608682ec4e8d150171efc0fcca51ec2f1b0cc0c5d72cd6e3a4"
+        },
+        {
+          "id": "agent.register",
+          "status": "already_done",
+          "detail": "the registration of Agent agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa is in finalized state at checkpoint 82"
+        },
+        {
+          "id": "config.write",
+          "status": "done",
+          "detail": "wrote the rail configuration /tos/m1-e2e/ai-fd-1/private/nodes/provider/rail.json (0600); it reads back strictly"
+        }
+      ],
+      "at": "2026-11-15T07:46:09.920389+00:00"
+    },
+    {
+      "name": "buyer serve is running",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-15T07:46:10.930441+00:00"
+    },
+    {
+      "name": "provider preflight is ok",
+      "pass": true,
+      "detail": [
+        {
+          "id": "rpc.independence",
+          "status": "unknown",
+          "message": "endpoints have distinct authorities, but whether distinct operators run them is not verified; a quorum of one operator's endpoints is one point of trust"
+        },
+        {
+          "id": "signer.wallet",
+          "status": "unknown",
+          "message": "tosctl offers no way to resolve wallet \"provider\" without signing, so the respond wallet is not checked; preflight never signs"
+        }
+      ],
+      "at": "2026-11-15T07:46:11.585751+00:00"
+    },
+    {
+      "name": "provider serve is running",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-15T07:46:12.596613+00:00"
+    },
+    {
+      "name": "first purchase: buyer buy --offer built the Quote locally and called the actor",
+      "pass": true,
+      "detail": "price 0.300000000 TOS (refunded only if there is no attested response and the refund is claimed); storage fee 0.250000000 TOS (non-refundable, kept by the provider even on refund); admission allowance 0.200000000 TOS; attached with the call 0.750000000 TOS (unused execution funding is returned); a refund takes two transactions from this wallet inside a 3600 s window after the 3600 s response deadline, expire then claim_refund (claim_refund attaches 0.2 TOS), each paying fees; 0.300000000 TOS is reserved for them\n",
+      "at": "2026-11-15T07:46:15.900397+00:00"
+    },
+    {
+      "name": "buyer purchases shows the result accepted: the purchase is completed",
+      "pass": true,
+      "detail": {
+        "purchase": {
+          "schema": "tos.openfox.rail-purchase.v1",
+          "phase": "completed",
+          "request_hash": "e1f59c429be0492bd8eaa101afc64c126e3c2e2c4b376fc4b60504ba6f75ee9a",
+          "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+          "request_id": 0,
+          "call_lt": 94000003,
+          "call_hash": "288127fd462c247018055a6565715965133e86a689a203f047af10a7643ffa7b",
+          "capability_id": "cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30",
+          "capability_version": "1.0.0",
+          "provider_agent_id": "agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa",
+          "quote_commitment": "tvm-cell-sha256:328ab014e8790f3d72ef95a0109d5287a46609f1cd5eb9e03ab928e2de12475c",
+          "execution_id": "4181b0d564b479de4f83bcd27060f321140d5fd3b368326119e000f199f8a69a",
+          "execution_nonce": "f1451c18b4fc9fc7f5dc5a6ec6d6a540a8bd9ef95233ad31c09d0a0879aaf741",
+          "input_digest": "f99195cfc9a76aacfef05c62da9fec78cb4dd40ec1ba89d1830677296e35a93a",
+          "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+          "price_nanotos": "300000000",
+          "committed_nanotos": "1050000000",
+          "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+          "manifest_digest": "sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170",
+          "status": "responded",
+          "response_deadline": 1794732373,
+          "refund_claim_deadline": 1794735973,
+          "response_hash": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a",
+          "last_action_unix": 1794728780,
+          "created_unix": 1794728773,
+          "updated_unix": 1794728833
+        },
+        "buyer_serve": "",
+        "provider_serve": ""
+      },
+      "at": "2026-11-15T07:47:16.599041+00:00"
+    },
+    {
+      "name": "provider status shows the request responded and the buyer's acknowledgement received",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-provider-request.v1",
+        "state": "acked",
+        "buyer_agent_id": "agent_d62645f3844c82c737b7e31e1138aaa3c2bd3ed0c2e2f246c21aa29b92ad18be",
+        "capability_id": "cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30",
+        "quote_commitment": "tvm-cell-sha256:328ab014e8790f3d72ef95a0109d5287a46609f1cd5eb9e03ab928e2de12475c",
+        "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+        "request_id": 0,
+        "request_hash": "e1f59c429be0492bd8eaa101afc64c126e3c2e2c4b376fc4b60504ba6f75ee9a",
+        "response_hash": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a",
+        "receipt_boc_base64": "te6cckECBQEAAXAABCROV1IxAAEAAAAAavljfwAAAAABAgMEAMAyirAU6HkPPXLvlaAQnVKHpGYJ8c1eueA6uSji3hJHXEGBsNVktHneT4O80nBg8yEUDV/Ts2gyYRngAPGZ+Kaa+ZGVz8mnaqz+8Fxi2p/seMtN1A7BuonRgwZ3KW41qToAwM6mFgFauP3MJitLtxBBAdbLcj+jmupZh77pEQD4aNaAhUCLwjY0ki5mviZyFCW9hGi921ibNnEPrlpd4ViKYk56csDnXzclrI3Xhj/kHuyk4N3P2dSqYvXukU61Keb7EQDAa+kPFSqBDImkZRNHKIEmo/svJzbcZ3rOA3gJU3TLBm2WJLynQJb4EMWyTkiVId3hJPrc+hgIWBZIs4vcG6GxBWo27hyrnFuVWuwMnh0RxcW9xB6euB4QwCHaWVSW5vFwAGAAAAAAAAAAAAAAAAAR4aMAvQY2BKH3DIpNTWeQkN4ldlQIT38HafJpien5zItY+frcpBXu",
+        "artifact_digest": "sha256:85408bc23634922e66be26721425bd8468bddb589b36710fae5a5de1588a624e",
+        "retention_end_unix": 1794818773,
+        "response_deadline": 1794732373,
+        "respond_attempt_unix": 1794728831,
+        "buyer_wallet": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+        "execution_id": "4181b0d564b479de4f83bcd27060f321140d5fd3b368326119e000f199f8a69a",
+        "input_digest": "f99195cfc9a76aacfef05c62da9fec78cb4dd40ec1ba89d1830677296e35a93a",
+        "call_lt": 94000003,
+        "call_hash": "288127fd462c247018055a6565715965133e86a689a203f047af10a7643ffa7b",
+        "price_nanotos": "300000000",
+        "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "sandbox_digest": "sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170",
+        "execution_limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "scratch_bytes": 2147483648,
+          "output_bytes": 1048576,
+          "wall_clock_millis": 180000
+        },
+        "next_delivery_unix": 1794728893,
+        "backoff_seconds": 60,
+        "deliveries": 1,
+        "updated_unix": 1794728833,
+        "source": "record",
+        "slot_state": "completed",
+        "operator_state": "responded",
+        "chain_fact": "responded",
+        "state_reason": "finalized respond with this request's attested response hash"
+      },
+      "at": "2026-11-15T07:47:16.691640+00:00"
+    },
+    {
+      "name": "chain: exactly one request exists, called by the buyer wallet with price, storage fee and allowance",
+      "pass": true,
+      "detail": {
+        "calls": [
+          {
+            "lt": 94000003,
+            "hash": "KIEn/UYsJHAYBVplZXFZZRM+hqaJogPwR68Qp2Q/+ns=",
+            "in_source": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+            "in_value": 750000000,
+            "op": 1398162177,
+            "query_id": 12112981010652360316,
+            "outs": [
+              {
+                "destination": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+                "value": 199581720
+              }
+            ],
+            "aborted": false,
+            "compute_success": true
+          }
+        ],
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+          "next_request_id": 1,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 550000000,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T07:47:16.702009+00:00"
+    },
+    {
+      "name": "chain: the request is responded by the provider wallet and nothing is pending",
+      "pass": true,
+      "detail": {
+        "responds": [
+          {
+            "lt": 238000003,
+            "hash": "GpkGBX+bYdSpSWBGDYq0c7TDpZIyEVzBjz3gZTU2wKo=",
+            "in_source": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+            "in_value": 10000000,
+            "op": 1398162178,
+            "query_id": 0,
+            "outs": [],
+            "aborted": false,
+            "compute_success": true,
+            "request_id": 0,
+            "response_hash": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a"
+          }
+        ],
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+          "next_request_id": 1,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 550000000,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T07:47:16.702097+00:00"
+    },
+    {
+      "name": "chain: the response hash equals the Receipt hash OpenFox reports on both nodes, and is the hash of the Receipt the provider holds",
+      "pass": true,
+      "detail": {
+        "chain": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a",
+        "provider": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a",
+        "buyer": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a",
+        "receipt_cell_hash": "d7f5c4c0e350ea0e86b673544399841e817045b5517fe187e3d0f2eda88fc31a"
+      },
+      "at": "2026-11-15T07:47:16.702368+00:00"
+    },
+    {
+      "name": "the artifact the buyer received hashes to the artifact digest inside the Receipt",
+      "pass": true,
+      "detail": {
+        "received_sha256": "85408bc23634922e66be26721425bd8468bddb589b36710fae5a5de1588a624e",
+        "provider_artifact_digest": "sha256:85408bc23634922e66be26721425bd8468bddb589b36710fae5a5de1588a624e",
+        "digest_in_receipt_cells": true
+      },
+      "at": "2026-11-15T07:47:16.709897+00:00"
+    },
+    {
+      "name": "the provider holds the verified objects of exactly one execution, the purchase's execution id",
+      "pass": true,
+      "detail": [
+        "4181b0d564b479de4f83bcd27060f321140d5fd3b368326119e000f199f8a69a.json"
+      ],
+      "at": "2026-11-15T07:47:16.709947+00:00"
+    },
+    {
+      "name": "provider withdraw without --yes previews the whole credit and sends nothing",
+      "pass": true,
+      "detail": "withdraw: 0.550000000 TOS of 0.550000000 TOS credited (checkpoint 250) from actor 0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22 to owner wallet 0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab, attaching 0.200000000 TOS for fees\nError: servicebridge: nothing was signed or sent; review the preview and re-run with --yes\n",
+      "at": "2026-11-15T07:47:17.226214+00:00"
+    },
+    {
+      "name": "provider withdraw --all --yes reports the withdrawal finalized for the whole credit",
+      "pass": true,
+      "detail": {
+        "report": {
+          "schema": "tos.openfox.rail-withdraw.v1",
+          "confirmed": true,
+          "preview": {
+            "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+            "destination": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+            "credited_revenue_nanotos": "550000000",
+            "amount_nanotos": "550000000",
+            "attached_nanotos": "200000000",
+            "credited_after_nanotos": "0",
+            "checkpoint": 251,
+            "destination_note": "the contract pays a withdrawal to the actor's owner, which is this wallet",
+            "attached_note": "sent with the message to pay its fees; the contract returns what is unused"
+          },
+          "withdrawal": {
+            "schema": "tos.openfox.rail-withdrawal.v1",
+            "query_id": "17093589432243230687",
+            "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+            "destination": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+            "amount_nanotos": "550000000",
+            "attached_nanotos": "200000000",
+            "credited_before_nanotos": "550000000",
+            "anchor": {
+              "lt": 238000003,
+              "hash": "1a9906057f9b61d4a94960460d8ab473b4c3a59232115cc18f3de0653536c0aa"
+            },
+            "state": "finalized",
+            "started_unix": 1794728837,
+            "finalized_checkpoint": 258,
+            "transaction_hash": "164bac881cb2d6433928569f07521e8c9aa0ddcd58ca1994b50a7587f993c4f7",
+            "payout_nanotos": "550000000",
+            "credited_after_nanotos": "0",
+            "detail": "finalized withdraw_revenue paid the amount out of the actor to the owner wallet",
+            "wallet_credit": "not_verified",
+            "updated_unix": 1794728840
+          }
+        },
+        "stderr": "withdraw: 0.550000000 TOS of 0.550000000 TOS credited (checkpoint 251) from actor 0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22 to owner wallet 0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab, attaching 0.200000000 TOS for fees\nwithdraw: finalized at checkpoint 258; the wallet credit itself is not_verified\n"
+      },
+      "at": "2026-11-15T07:47:20.034959+00:00"
+    },
+    {
+      "name": "chain: one withdraw_revenue from the owner wallet with this query id, whose first payout message carries exactly the amount to the owner wallet; the credit is zero afterwards",
+      "pass": true,
+      "detail": {
+        "withdrawals": [
+          {
+            "lt": 255000003,
+            "hash": "FkusiByy1kM5KFafB1IejJqg3c1YyhmUtQp1h/mTxPc=",
+            "in_source": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+            "in_value": 200000000,
+            "op": 1398162185,
+            "query_id": 17093589432243230687,
+            "outs": [
+              {
+                "destination": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+                "value": 550000000
+              },
+              {
+                "destination": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+                "value": 199834730
+              }
+            ],
+            "aborted": false,
+            "compute_success": true,
+            "withdraw_amount": 550000000
+          }
+        ],
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+          "next_request_id": 1,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 0,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T07:47:20.046949+00:00"
+    },
+    {
+      "name": "provider status lists the withdrawal as finalized and no credited revenue",
+      "pass": true,
+      "detail": [
+        {
+          "schema": "tos.openfox.rail-withdrawal.v1",
+          "query_id": "17093589432243230687",
+          "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+          "destination": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+          "amount_nanotos": "550000000",
+          "attached_nanotos": "200000000",
+          "credited_before_nanotos": "550000000",
+          "anchor": {
+            "lt": 238000003,
+            "hash": "1a9906057f9b61d4a94960460d8ab473b4c3a59232115cc18f3de0653536c0aa"
+          },
+          "state": "finalized",
+          "started_unix": 1794728837,
+          "finalized_checkpoint": 258,
+          "transaction_hash": "164bac881cb2d6433928569f07521e8c9aa0ddcd58ca1994b50a7587f993c4f7",
+          "payout_nanotos": "550000000",
+          "credited_after_nanotos": "0",
+          "detail": "finalized withdraw_revenue paid the amount out of the actor to the owner wallet",
+          "wallet_credit": "not_verified",
+          "updated_unix": 1794728840
+        }
+      ],
+      "at": "2026-11-15T07:47:20.120242+00:00"
+    },
+    {
+      "name": "init and offer run again after success change nothing on chain: no transaction on either wallet, the Agents, the actor or the Capability, and the same ids",
+      "pass": true,
+      "detail": {
+        "before": {
+          "provider_wallet": {
+            "address": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+            "state": "active",
+            "last_lt": "255000006",
+            "last_hash": "2abd8QH00ffXTTWwO3ioM2jcbJ7xbAFpp304ma6PQgY="
+          },
+          "buyer_wallet": {
+            "address": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+            "state": "active",
+            "last_lt": "94000006",
+            "last_hash": "EwXb6TVfOAEaKJASP3oFXn1nzU7tu8MxMAoJ6TcafZI="
+          },
+          "provider_agent_address": {
+            "address": "0:a58dffb88c86bb73ce13afc13a273fa3574ab73dd6b920cb25bf92600684bfaa",
+            "state": "active",
+            "last_lt": "62000003",
+            "last_hash": "0miAlqr76ziOpmKcxi5Jk5wf8LkE4ZkL3bHVIB9lRZE="
+          },
+          "buyer_agent_address": {
+            "address": "0:2f797853d0fe17bbb175885ff6a056f6cd17059a936d40310c86016b44ef6cee",
+            "state": "active",
+            "last_lt": "77000003",
+            "last_hash": "kea7mwvnJ5yOy4RibHSFlRMEIVhJyuMCzcDqkYRlpm4="
+          },
+          "actor": {
+            "address": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+            "state": "active",
+            "last_lt": "255000003",
+            "last_hash": "FkusiByy1kM5KFafB1IejJqg3c1YyhmUtQp1h/mTxPc="
+          },
+          "capability_address": {
+            "address": "0:0354ff50b6fff5d07efe4e7fef960d186c0bbb50a1693673215465f7c954b459",
+            "state": "active",
+            "last_lt": "62000005",
+            "last_hash": "XDQD+GTO3BWlbyJI9Tfql2mfVj96XKXLU3VzQzuH8vU="
+          }
+        },
+        "after": {
+          "provider_wallet": {
+            "address": "0:6a2391270b5f754603a1b0a04d943f5b34253ca2026df1862b4321ffe17a14ab",
+            "state": "active",
+            "last_lt": "255000006",
+            "last_hash": "2abd8QH00ffXTTWwO3ioM2jcbJ7xbAFpp304ma6PQgY="
+          },
+          "buyer_wallet": {
+            "address": "0:c6ba46c5d1fc4e781db46f47cd3129f572e7cdf685c7588d06af12dffd19f19f",
+            "state": "active",
+            "last_lt": "94000006",
+            "last_hash": "EwXb6TVfOAEaKJASP3oFXn1nzU7tu8MxMAoJ6TcafZI="
+          },
+          "provider_agent_address": {
+            "address": "0:a58dffb88c86bb73ce13afc13a273fa3574ab73dd6b920cb25bf92600684bfaa",
+            "state": "active",
+            "last_lt": "62000003",
+            "last_hash": "0miAlqr76ziOpmKcxi5Jk5wf8LkE4ZkL3bHVIB9lRZE="
+          },
+          "buyer_agent_address": {
+            "address": "0:2f797853d0fe17bbb175885ff6a056f6cd17059a936d40310c86016b44ef6cee",
+            "state": "active",
+            "last_lt": "77000003",
+            "last_hash": "kea7mwvnJ5yOy4RibHSFlRMEIVhJyuMCzcDqkYRlpm4="
+          },
+          "actor": {
+            "address": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+            "state": "active",
+            "last_lt": "255000003",
+            "last_hash": "FkusiByy1kM5KFafB1IejJqg3c1YyhmUtQp1h/mTxPc="
+          },
+          "capability_address": {
+            "address": "0:0354ff50b6fff5d07efe4e7fef960d186c0bbb50a1693673215465f7c954b459",
+            "state": "active",
+            "last_lt": "62000005",
+            "last_hash": "XDQD+GTO3BWlbyJI9Tfql2mfVj96XKXLU3VzQzuH8vU="
+          }
+        },
+        "not_already_done": []
+      },
+      "at": "2026-11-15T07:47:22.494448+00:00"
+    },
+    {
+      "name": "the offer's manifest digest is the SHA-256 of its manifest bytes",
+      "pass": true,
+      "detail": "sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170",
+      "at": "2026-11-15T07:47:22.494755+00:00"
+    },
+    {
+      "name": "a tampered offer file is refused by buy before any payment, also when its digest is recomputed",
+      "pass": true,
+      "detail": {
+        "flipped": {
+          "exit": 1,
+          "stderr": "Error: servicebridge: the offer's manifest does not hash to the digest the offer states"
+        },
+        "flipped-and-rehashed": {
+          "exit": 1,
+          "stderr": "Error: servicebridge: quote: servicebridge: the offer file does not match finalized state: the finalized manifest digest of version \"1.0.0\" is sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170, but the offer's manifest hashes to sha256:ba9236e3bada2603fbe2c527042eca3b0de5f45fb2968024e3f42ab78a387e1d"
+        }
+      },
+      "at": "2026-11-15T07:47:23.080547+00:00"
+    },
+    {
+      "name": "provider pause is in effect",
+      "pass": true,
+      "detail": {
+        "already_paused": false,
+        "paused": true,
+        "paused_unix": 1794728843,
+        "reason": "front-door acceptance run"
+      },
+      "at": "2026-11-15T07:47:23.214826+00:00"
+    },
+    {
+      "name": "while paused: buyer buy --offer built the Quote locally and called the actor",
+      "pass": true,
+      "detail": "price 0.300000000 TOS (refunded only if there is no attested response and the refund is claimed); storage fee 0.250000000 TOS (non-refundable, kept by the provider even on refund); admission allowance 0.200000000 TOS; attached with the call 0.750000000 TOS (unused execution funding is returned); a refund takes two transactions from this wallet inside a 3600 s window after the 3600 s response deadline, expire then claim_refund (claim_refund attaches 0.2 TOS), each paying fees; 0.300000000 TOS is reserved for them\n",
+      "at": "2026-11-15T07:47:26.423993+00:00"
+    },
+    {
+      "name": "while paused the second purchase is held: called and delivered, but not admitted, executed or responded",
+      "pass": true,
+      "detail": {
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+          "next_request_id": 2,
+          "pending_count": 1,
+          "live_count": 1,
+          "withdrawable_revenue": 0,
+          "locked_storage_fees": 250000000,
+          "pending_liability": 300000000,
+          "refundable_liability": 0
+        },
+        "provider_request": {},
+        "executions": [
+          "4181b0d564b479de4f83bcd27060f321140d5fd3b368326119e000f199f8a69a.json"
+        ],
+        "provider_serve": " admissions are paused by the owner\n2026-11-15T07:47:56Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n2026-11-15T07:48:01Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n2026-11-15T07:48:06Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n2026-11-15T07:48:11Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n"
+      },
+      "at": "2026-11-15T07:48:16.695058+00:00"
+    },
+    {
+      "name": "after resume the held purchase is admitted, executed, responded and accepted",
+      "pass": true,
+      "detail": {
+        "purchase": {
+          "schema": "tos.openfox.rail-purchase.v1",
+          "phase": "completed",
+          "request_hash": "19809cb68da46a13af2e8f9467a3e4d8a05893705625004cecca3f0d0014d0d3",
+          "actor": "0:dcdd2a320b655e5c7cb744746a76138c6b25b3d5d281e662c7bb4e54c3870b22",
+          "request_id": 1,
+          "call_lt": 271000003,
+          "call_hash": "b725c475f344b64e4629c6a5c5e7aad91a77d8a40c17e22f64b54763c5c23923",
+          "capability_id": "cap_e8f5337926a1d9923ff3865caf62a608cb5e4ff792f7afa3c3293b6f1ae69e30",
+          "capability_version": "1.0.0",
+          "provider_agent_id": "agent_bd063604a1f70c8a4d4d679090de257654084f7f0769f26989e9f9cc8b58f9fa",
+          "quote_commitment": "tvm-cell-sha256:9df79b60b64c5cd311358c8c88101c179311d616dac1fbdc72d362375f2e16b8",
+          "execution_id": "405bdd25f8ccb2a33bf2515f1d7ce75e5d5e0b73a29be97edc9f8ecce7c615fa",
+          "execution_nonce": "caa7ea5396a845ec50423ecc783b631a667b0602187d97dfa324184dc953ef8b",
+          "input_digest": "f99195cfc9a76aacfef05c62da9fec78cb4dd40ec1ba89d1830677296e35a93a",
+          "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+          "price_nanotos": "300000000",
+          "committed_nanotos": "1050000000",
+          "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+          "manifest_digest": "sha256:6a36ee1cab9c5b955aec0c9e1d11c5c5bdc41e9eb81e10c021da595496e6f170",
+          "status": "responded",
+          "response_deadline": 1794732444,
+          "refund_claim_deadline": 1794736044,
+          "response_hash": "2325b015822610d8d5f33988f4ac976cac9cd7ac9cb1ee51182a7e9935f9ffca",
+          "last_action_unix": 1794728850,
+          "created_unix": 1794728843,
+          "updated_unix": 1794728952
+        },
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "b7451cf6d9d331af29304d2d4560f8fa7eed316f9cde8c8be81d1b05e001f034",
+          "next_request_id": 2,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 550000000,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T07:49:12.445654+00:00"
+    },
+    {
+      "name": "both serve processes ran until the end of the run and stopped cleanly on SIGTERM",
+      "pass": true,
+      "detail": {
+        "running": {
+          "buyer": true,
+          "provider": true
+        },
+        "exit": {
+          "buyer": 0,
+          "provider": 0
+        },
+        "log_tail": {
+          "provider": [],
+          "buyer": []
+        }
+      },
+      "at": "2026-11-15T07:49:12.633247+00:00"
+    },
+    {
+      "name": "no home directory path or login name in the transcripts or logs",
+      "pass": true,
+      "detail": {},
+      "at": "2026-11-15T07:49:12.656391+00:00"
+    },
+    {
+      "name": "no home directory path or login name in evidence.json",
+      "pass": true,
+      "detail": [],
+      "at": "2026-11-15T07:49:12.871838+00:00"
+    }
+  ],
+  "finished_utc": "2026-11-15T07:49:12.867707+00:00",
+  "result": "ALL PASS"
+}

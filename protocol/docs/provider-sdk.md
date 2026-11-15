@@ -79,7 +79,7 @@ transport access only and cannot authorize a Native transition.
 
 Capability publication does not start an executor or grant it signing
 authority. Deploy the provider-local runtime using the reviewed template under
-`tos-ai/deploy/provider`, keep raw containerd inaccessible to the gateway, and
+`execution/deploy/provider`, keep raw containerd inaccessible to the gateway, and
 keep all signing keys in the separate `tosctl` custody boundary.
 
 ## Journaled, restartable publication

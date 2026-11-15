@@ -11,10 +11,10 @@ the Capability from public documentation in one working session.
 
 - finalized typed TOS state is the sole authority for Agent and Capability
   publication;
-- `tos-service-protocol/pkg/providersdk` prepares canonical bytes, verifies external
+- `protocol/pkg/providersdk` prepares canonical bytes, verifies external
   ML-DSA-44 controller signatures (through `tosctl`), relays an exact reviewed action, and waits for the
   matching finalized state;
-- `tos-service-protocol/pkg/nativeclient` transports Native Submit/Resolve requests and
+- `protocol/pkg/nativeclient` transports Native Submit/Resolve requests and
   requires HTTPS unless loopback development is explicitly selected;
 - neither SDK accepts a private key or stores canonical provider state;
 - a relay acknowledgement is not publication success;
@@ -42,7 +42,7 @@ the Capability from public documentation in one working session.
    network, and checkpoint.
 5. Serve the canonical manifest bytes under their digest. Search caches may
    index the chain-derived association but cannot create or replace it.
-6. Install the dedicated provider runtime from `tos-ai/deploy/provider`. The
+6. Install the dedicated provider runtime from `execution/deploy/provider`. The
    private containerd socket stays root-owned and unavailable to the gateway;
    the executor has no signing key.
 7. Complete the existing direct Accepted Quote, funded escrow, bounded
@@ -51,12 +51,12 @@ the Capability from public documentation in one working session.
 
 ## Current implementation
 
-- Go SDK guide: `tos-service-protocol/docs/provider-sdk.md`
-- public transport: `tos-service-protocol/pkg/nativeclient`
-- provider publication: `tos-service-protocol/pkg/providersdk`
+- Go SDK guide: [`protocol/docs/provider-sdk.md`](../../protocol/docs/provider-sdk.md)
+- public transport: `protocol/pkg/nativeclient`
+- provider publication: `protocol/pkg/providersdk`
 - public manifest publication and discovery CLI:
-  `tos-service-protocol/cmd/tos-service-discovery`
-- runtime deployment: `tos-ai/deploy/provider`
+  `protocol/cmd/tos-service-discovery`
+- runtime deployment: [`execution/deploy/provider`](../../execution/deploy/provider/)
 - canonical manifest: `docs/SOFTWARE_WORK_MANIFEST_V1.md`
 - commercial lifecycle: `docs/GATE_D_EXTERNAL_PILOT.md`
 

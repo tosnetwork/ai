@@ -56,7 +56,7 @@ the required fresh-buyer onboarding session.
 1. Create an owner-private `0700` budget directory and choose explicit window,
    purchase-count, per-purchase, and total atomic-unit limits.
 2. Obtain a Quote Proposal and retrieve the manifest independently by its
-   digest. Use `tos-service-protocol/pkg/buyersdk` to strictly decode the manifest and
+   digest. Use `protocol/pkg/buyersdk` to strictly decode the manifest and
    verify the exact finalized Capability version and provider ownership.
 3. Resolve the quoted TOS stablecoin through finalized TOS state. Verify its
    master identity, wallet code, buyer wallet, balance, and checkpoint.
@@ -92,8 +92,8 @@ procedure.
 
 ## Current implementation and remaining acceptance
 
-- buyer safety boundary: `tos-service-protocol/pkg/buyersdk`
-- Go guide: `tos-service-protocol/docs/buyer-sdk.md`
+- buyer safety boundary: `protocol/pkg/buyersdk`
+- Go guide: [`protocol/docs/buyer-sdk.md`](../../protocol/docs/buyer-sdk.md)
 - exact prepared-message broadcast boundary: `tos` commit
   `d9d725534cb1a9120b1e49854b360c01f043c22a`
 - production `tosctl` funding adapter: `tos-service-protocol` commit

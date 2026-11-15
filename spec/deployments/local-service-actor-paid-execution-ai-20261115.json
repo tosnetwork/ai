@@ -1,0 +1,1120 @@
+{
+  "schema": "tos.service.service-actor-buyer.local-acceptance.v1",
+  "qualifies_as_public_acceptance": false,
+  "reason": "one host runs every validator and endpoint",
+  "started_utc": "2026-11-15T07:49:30.151209+00:00",
+  "tos_source": "/tos/tosctl-main-build",
+  "tos_build": "/tos/tosctl-main-build/build-clang21",
+  "tosctl": {
+    "path": "/tos/tosctl-main-build/target/release/tosctl",
+    "sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b"
+  },
+  "protocol_commit": "ba76780bb1812b6b84ecf34cb499808264ab92e5",
+  "protocol_tree_status": [],
+  "protocol_tree_dirty": false,
+  "actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+  "network_label": "tos:global-id:3",
+  "stand_ins": {
+    "manifest_store": "local directory of canonical manifest CBOR files named by sha256 digest",
+    "quote_source": "service-actor-e2e-fixture quote: pkg/quoteprovider over finalized state, no gateway"
+  },
+  "network": {
+    "network_id": "tos:global-id:3",
+    "genesis_root_hash": "sha256:3e41fbbe4e6657eb0684c06420f31abd07064879cf815de3960c25c16699e485",
+    "genesis_file_hash": "sha256:9fe9e6bb425032fa98396862ab0faf950ddced87748fa0d70d9f19d5db6f3e0b",
+    "validators": 3,
+    "json_rpc": [
+      "http://127.0.0.1:47680/jsonRPC",
+      "http://127.0.0.1:47681/jsonRPC",
+      "http://127.0.0.1:47682/jsonRPC"
+    ],
+    "base_port": 47600
+  },
+  "wallets": {
+    "provider": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+    "buyer": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a"
+  },
+  "objects": {
+    "agent_id": "agent_fd9b09317ab9a8ddd1cb347eeb60b99e8a69afe6a7886fbca782021669e139e8",
+    "agent_address": "0:6b8ffa2b52450a994b7a17fd785a61b01356207c9685c45dda7b29e7cbaf6719",
+    "capability_id": "cap_14f54443bfc889a0e6856eb54ae3a81e93f2715d2ebcda4ad3b6578f88c9ebf8",
+    "capability_address": "0:1d6f9081c77480cc2ebc25f034dc12b79883887f3d5d0cf40e70c6ae366903dc",
+    "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+    "manifest_digest": "sha256:dd495a5aab9db58f71f85453adb78daff3e721cd80e6e51a0e99acbe911f9be3",
+    "attestor": "mldsa44:13294092d684a6b15d9f88097d2fd900d40b735d7a12146d94f7abdecb9d521c",
+    "metadata_hash": "92bee0173b7bae6a27992f299b3d27eb1e6c43126c385dde87a00fe3d88e95dd"
+  },
+  "execute": {
+    "executor": {
+      "built": "/tos/ai-migration/e2e-bin/software-work-execute",
+      "sha256": "0dbe37498462bfbf62daee848c5e13b1e39de6f1f78e8d7bbce84c9dfb824e59",
+      "staged_sha256": "0dbe37498462bfbf62daee848c5e13b1e39de6f1f78e8d7bbce84c9dfb824e59",
+      "tos_ai_commit": "ba76780bb1812b6b84ecf34cb499808264ab92e5",
+      "tos_ai_commit_source": "operator-asserted (E2E_TOS_AI_COMMIT), not derived from the binary"
+    },
+    "provider_root": "/tos/m1-e2e-root/ai-exec-2",
+    "provider_root_ownership": [
+      "root:root 700 /tos/m1-e2e-root",
+      "root:root 700 /tos/m1-e2e-root/ai-exec-2",
+      "root:root 700 /tos/m1-e2e-root/ai-exec-2/bin",
+      "root:root 755 /tos/m1-e2e-root/ai-exec-2/bin/software-work-execute",
+      "root:root 600 /tos/m1-e2e-root/ai-exec-2/etc/rail.json"
+    ],
+    "image_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+    "invocation": "test ./... -count=1",
+    "manifest_digest": "sha256:dd495a5aab9db58f71f85453adb78daff3e721cd80e6e51a0e99acbe911f9be3",
+    "rail_config": {
+      "schema": "tos.ai.railgate-config.v1",
+      "network": {
+        "network_id": "tos:global-id:3",
+        "genesis_root_hash": "sha256:3e41fbbe4e6657eb0684c06420f31abd07064879cf815de3960c25c16699e485",
+        "genesis_file_hash": "sha256:9fe9e6bb425032fa98396862ab0faf950ddced87748fa0d70d9f19d5db6f3e0b"
+      },
+      "rpc_endpoints": [
+        "http://127.0.0.1:47680/jsonRPC",
+        "http://127.0.0.1:47681/jsonRPC",
+        "http://127.0.0.1:47682/jsonRPC"
+      ],
+      "quorum": 0,
+      "registry_code_boc_file": "/tos/m1-e2e-root/ai-exec-2/etc/registry-code.boc",
+      "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+      "provider_agent_id": "agent_fd9b09317ab9a8ddd1cb347eeb60b99e8a69afe6a7886fbca782021669e139e8",
+      "capability_id": "cap_14f54443bfc889a0e6856eb54ae3a81e93f2715d2ebcda4ad3b6578f88c9ebf8",
+      "version": "1.0.0",
+      "manifest_file": "/tos/m1-e2e-root/ai-exec-2/etc/manifest.cbor",
+      "respond_budget_seconds": 120
+    },
+    "input_digest_domain": "tos.service.e2e.software-work-input.v1",
+    "request_snapshot": {
+      "request_id": 1,
+      "found": true,
+      "caller": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+      "price": "0.11",
+      "storage_fee": "0.2",
+      "cleanup_bounty": "0.1",
+      "response_deadline": "2026-11-15 08:50:09 UTC",
+      "refund_claim_deadline": "2026-11-15 09:50:09 UTC",
+      "policy_version": 2,
+      "request_hash": "71d140c0faed5df2552292d146141fa1b326a60599c5fe130171c3a8fba3ba5d",
+      "terms_hash": "90751ce412faa8035ff1f9f4d650aa8dc4f95d44848ab1fb9548030b8c204cb3",
+      "attestor_key_id": "mldsa44:13294092d684a6b15d9f88097d2fd900d40b735d7a12146d94f7abdecb9d521c"
+    },
+    "completed": {
+      "request_id": 1,
+      "request_hash": "71d140c0faed5df2552292d146141fa1b326a60599c5fe130171c3a8fba3ba5d",
+      "exit_code": 0,
+      "status": "completed",
+      "slot_state": "completed",
+      "respond_check": "passed",
+      "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+      "receipt_boc_base64": "te6cckECBQEAAXAABCROV1IxAAEAAAAAavlkXQAAAAABAgMEAMCrVg3nOTmvy+/NiBa1od9/1Vm6TfRGjVLe+UbfEvFDAbTiIb43e/oRX3a4pQd8UUvqzwutpKVezO+gxVLddO5h3DIJpACmj8p1DzgrxHCId3pT2WcOdHu2uj4kzAvj6+IAwLpNZ8StFdBlY4NrmIjMXBVaHOsdhM76MaQqqgcs2caJ4GP4dofe93UyaEuqbKXnmrKmzcLPxvlvMJgibQsGaOjyFQl+/Dux+Ru4WliEDkNT6pIXDFIEHknNjrMS5LVeYQDAa+kPFSqBDImkZRNHKIEmo/svJzbcZ3rOA3gJU3TLBm2WJLynQJb4EMWyTkiVId3hJPrc+hgIWBZIs4vcG6GxBd1JWlqrnbWPcfhUU623ja/z5yHNgOblGg6ZrL6RH5vjAGAAAAAAAAAAAAAAAAAGjneA/ZsJMXq5qN3RyzR+62C5noppr+aniG+8p4ICFmnhOejFQzAr",
+      "retain_until_unix": 1794819009,
+      "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+      "outcome": {
+        "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+        "execution_id": "sha256:b4e221be377bfa115f76b8a5077c514beacf0bada4a55eccefa0c552dd74ee61",
+        "input_digest": "sha256:dc3209a400a68fca750f382bc47088777a53d9670e747bb6ba3e24cc0be3ebe2",
+        "result_digest": "sha256:ba4d67c4ad15d06563836b9888cc5c155a1ceb1d84cefa31a42aaa072cd9c689",
+        "artifact": {
+          "Digest": "sha256:e063f87687def77532684baa6ca5e79ab2a6cdc2cfc6f96f3098226d0b0668e8",
+          "MediaType": "application/vnd.tos.service.software-artifact.v1+tar",
+          "SizeBytes": 3072
+        },
+        "report": {
+          "Digest": "sha256:f215097efc3bb1f91bb85a58840e4353ea92170c52041e49cd8eb312e4b55e61",
+          "MediaType": "application/vnd.tos.service.test-report.v1+json",
+          "SizeBytes": 362
+        },
+        "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "sandbox_digest": "sha256:dd495a5aab9db58f71f85453adb78daff3e721cd80e6e51a0e99acbe911f9be3",
+        "exit_code": 0,
+        "completed_at_unix": 1794729053
+      },
+      "error": null
+    },
+    "rerun_pending": {
+      "exit_code": 3,
+      "report": {
+        "status": "already_taken",
+        "exit_code": 3,
+        "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+        "request_id": 1,
+        "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+        "slot_state": "completed",
+        "error": "railgate: this request already has an execution slot"
+      },
+      "slots_before": {
+        "entries": 4,
+        "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+      },
+      "slots_after": {
+        "entries": 4,
+        "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+      }
+    },
+    "receipt_check": {
+      "artifact_digest": "sha256:e063f87687def77532684baa6ca5e79ab2a6cdc2cfc6f96f3098226d0b0668e8",
+      "completed_at": 1794729053,
+      "exit_code": 0,
+      "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+      "releasable": true,
+      "report_digest": "sha256:f215097efc3bb1f91bb85a58840e4353ea92170c52041e49cd8eb312e4b55e61",
+      "request_hash": "71d140c0faed5df2552292d146141fa1b326a60599c5fe130171c3a8fba3ba5d",
+      "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+      "result_digest": "sha256:ba4d67c4ad15d06563836b9888cc5c155a1ceb1d84cefa31a42aaa072cd9c689"
+    },
+    "responded": {
+      "checkpoint": 203,
+      "phase": "admitted",
+      "found": true,
+      "request_id": 1,
+      "state": "responded",
+      "status": "responded",
+      "response_deadline": 1794732609,
+      "refund_claim_deadline": 1794736209,
+      "call_transaction": {
+        "lt": 88000003,
+        "hash": "e8e8be7cc46562703020b5670852bdbe436d02303208c0eb1d29911253a077ac"
+      },
+      "outcome": {
+        "lt": 200000003,
+        "hash": "797bcc3dac2d564f0697f9c1118357aa53a12df46f79b5e31f775d3f24735e6a",
+        "now": 1794729054,
+        "kind": "respond",
+        "sender": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+        "value_nanotos": "10000000",
+        "exit_code": 0,
+        "opcode": 1398162178,
+        "request_id": 1,
+        "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+        "signed": true
+      },
+      "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484"
+    },
+    "respond_settlement": {
+      "actor_transactions": [
+        {
+          "lt": 200000003,
+          "hash": "eXvMPawtVk8Gl/nBEYNXqlOhLfRvebXjH3ddPyRzXmo=",
+          "in_source": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+          "in_value": 10000000,
+          "in_created_lt": 200000002,
+          "outs": [],
+          "total_fees": 480499,
+          "aborted": false,
+          "compute_success": true
+        }
+      ],
+      "payouts": [],
+      "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3": {
+        "delta": -10439132,
+        "inbound": 0,
+        "outbound": 10000000,
+        "forwarding_fees": 132268,
+        "fees": 306864,
+        "exact": true,
+        "transactions": [
+          {
+            "lt": 200000001,
+            "hash": "TGTj7rCk1VrDG2DR8uqUSJenWkY3L51tPA7NuH7FKkA=",
+            "in_source": null,
+            "in_value": 0,
+            "in_created_lt": null,
+            "outs": [
+              {
+                "destination": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+                "value": 10000000,
+                "fwd_fee": 132268,
+                "ihr_fee": 0,
+                "created_lt": 200000002
+              }
+            ],
+            "total_fees": 306864,
+            "aborted": false,
+            "compute_success": true
+          }
+        ]
+      }
+    },
+    "rerun_responded": {
+      "exit_code": 6,
+      "report": {
+        "status": "not_admitted",
+        "exit_code": 6,
+        "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+        "request_id": 1,
+        "error": "railgate: request 1 is responded, not pending"
+      },
+      "slots_before": {
+        "entries": 4,
+        "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+      },
+      "slots_after": {
+        "entries": 4,
+        "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+      },
+      "status_after": {
+        "checkpoint": 205,
+        "phase": "admitted",
+        "found": true,
+        "request_id": 1,
+        "state": "responded",
+        "status": "responded",
+        "response_deadline": 1794732609,
+        "refund_claim_deadline": 1794736209,
+        "call_transaction": {
+          "lt": 88000003,
+          "hash": "e8e8be7cc46562703020b5670852bdbe436d02303208c0eb1d29911253a077ac"
+        },
+        "outcome": {
+          "lt": 200000003,
+          "hash": "797bcc3dac2d564f0697f9c1118357aa53a12df46f79b5e31f775d3f24735e6a",
+          "now": 1794729054,
+          "kind": "respond",
+          "sender": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+          "value_nanotos": "10000000",
+          "exit_code": 0,
+          "opcode": 1398162178,
+          "request_id": 1,
+          "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+          "signed": true
+        },
+        "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484"
+      }
+    },
+    "execution_failed": {
+      "request_id": 2,
+      "request_hash": "6e89a7e160334061c1c8b7b19e179008ccb23d62dd4cf9afac33cab2715a0fe0",
+      "exit_code": 7,
+      "report": {
+        "status": "execution_failed",
+        "exit_code": 7,
+        "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+        "request_id": 2,
+        "quote_commitment": "tvm-cell-sha256:e967d3fd330b8627fdf11809ec07da4afb6e04bfeae928862a6ce5f19c5a67e5",
+        "slot_state": "failed",
+        "error": "software-work objective success condition failed"
+      },
+      "status_after": {
+        "checkpoint": 329,
+        "phase": "admitted",
+        "found": true,
+        "request_id": 2,
+        "state": "pending",
+        "status": "pending",
+        "response_deadline": 1794732658,
+        "refund_claim_deadline": 1794736258,
+        "call_transaction": {
+          "lt": 209000003,
+          "hash": "99b8038fd2ebc5aceaee174cabb800a7d1d2b2ea30781ee1f7248751363f3802"
+        }
+      },
+      "slots_before": {
+        "entries": 4,
+        "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+      },
+      "slots_after": {
+        "entries": 6,
+        "sha256": "a05696a5590d854945bc339347845d90ea259109725ee6ca778aa629877c2253"
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "the protocol tree is clean at the commit the evidence names",
+      "pass": true,
+      "detail": "clean",
+      "at": "2026-11-15T07:49:30.153990+00:00"
+    },
+    {
+      "name": "every validator serves finalized JSON-RPC",
+      "pass": true,
+      "detail": null,
+      "at": "2026-11-15T07:49:40.402615+00:00"
+    },
+    {
+      "name": "provider wallet funded",
+      "pass": true,
+      "detail": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+      "at": "2026-11-15T07:49:42.703376+00:00"
+    },
+    {
+      "name": "provider wallet active",
+      "pass": true,
+      "detail": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+      "at": "2026-11-15T07:49:44.932264+00:00"
+    },
+    {
+      "name": "buyer wallet funded",
+      "pass": true,
+      "detail": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+      "at": "2026-11-15T07:49:47.149393+00:00"
+    },
+    {
+      "name": "buyer wallet active",
+      "pass": true,
+      "detail": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+      "at": "2026-11-15T07:49:49.361346+00:00"
+    },
+    {
+      "name": "provider Agent registered in the Native Registry",
+      "pass": true,
+      "detail": {
+        "agent_id": "agent_fd9b09317ab9a8ddd1cb347eeb60b99e8a69afe6a7886fbca782021669e139e8",
+        "address": "0:6b8ffa2b52450a994b7a17fd785a61b01356207c9685c45dda7b29e7cbaf6719"
+      },
+      "at": "2026-11-15T07:49:52.445948+00:00"
+    },
+    {
+      "name": "Service Actor deployed with an ML-DSA-44 attestor",
+      "pass": true,
+      "detail": {
+        "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+        "attestor": "mldsa44:13294092d684a6b15d9f88097d2fd900d40b735d7a12146d94f7abdecb9d521c"
+      },
+      "at": "2026-11-15T07:49:54.861391+00:00"
+    },
+    {
+      "name": "deployed actor runs the pinned release code",
+      "pass": true,
+      "detail": {
+        "account": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+        "pinned": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c"
+      },
+      "at": "2026-11-15T07:49:54.899397+00:00"
+    },
+    {
+      "name": "Capability registered with the key 21 manifest",
+      "pass": true,
+      "detail": {
+        "capability_id": "cap_14f54443bfc889a0e6856eb54ae3a81e93f2715d2ebcda4ad3b6578f88c9ebf8",
+        "address": "0:1d6f9081c77480cc2ebc25f034dc12b79883887f3d5d0cf40e70c6ae366903dc",
+        "manifest_digest": "sha256:dd495a5aab9db58f71f85453adb78daff3e721cd80e6e51a0e99acbe911f9be3"
+      },
+      "at": "2026-11-15T07:49:57.733143+00:00"
+    },
+    {
+      "name": "actor metadata_hash is NSM1 of the Capability version",
+      "pass": true,
+      "detail": {
+        "metadata_hash": "92bee0173b7bae6a27992f299b3d27eb1e6c43126c385dde87a00fe3d88e95dd",
+        "proof_scheme_hash": "42d2913f1ad35c71597b62a52a15c9f86fbf4a0f179685acee10230957cafb19"
+      },
+      "at": "2026-11-15T07:50:00.148723+00:00"
+    },
+    {
+      "name": "discovery pinned to another actor code hash is refused",
+      "pass": true,
+      "detail": "tos-service-buyer: quorum not reached: 0 value groups and 3 endpoint errors (first: NATIVE_WRONG_CONTRACT: Native account code hash mismatch)",
+      "at": "2026-11-15T07:50:00.211178+00:00"
+    },
+    {
+      "name": "buyer discovered and verified the offer",
+      "pass": true,
+      "detail": {
+        "checkpoint": 62,
+        "capability_id": "cap_14f54443bfc889a0e6856eb54ae3a81e93f2715d2ebcda4ad3b6578f88c9ebf8",
+        "capability_version": "1.0.0",
+        "provider_agent_id": "agent_fd9b09317ab9a8ddd1cb347eeb60b99e8a69afe6a7886fbca782021669e139e8",
+        "manifest_digest": "sha256:dd495a5aab9db58f71f85453adb78daff3e721cd80e6e51a0e99acbe911f9be3",
+        "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+        "actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+        "attestor_key_id": "mldsa44:13294092d684a6b15d9f88097d2fd900d40b735d7a12146d94f7abdecb9d521c",
+        "policy_version": 1,
+        "terms_hash": "65afd0c0d3bfa7a69a374719251a55cb281b11f0d4c3ed8d14066ac68d81c274",
+        "price_nanotos": "100000000",
+        "storage_fee_nanotos": "200000000",
+        "cleanup_bounty_nanotos": "100000000",
+        "response_sla_seconds": 3600,
+        "refund_claim_window_seconds": 3600,
+        "open_access": true,
+        "storage_fee_refundable": false
+      },
+      "at": "2026-11-15T07:50:00.279615+00:00"
+    },
+    {
+      "name": "provider quoted the finalized actor terms",
+      "pass": true,
+      "detail": {
+        "expires_at": 1794729900,
+        "package": "/tos/m1-e2e/ai-exec-2/private/quote-1.json",
+        "price_nanotos": "100000000",
+        "terms_hash": "65afd0c0d3bfa7a69a374719251a55cb281b11f0d4c3ed8d14066ac68d81c274"
+      },
+      "at": "2026-11-15T07:50:00.339256+00:00"
+    },
+    {
+      "name": "buyer prepared the call",
+      "pass": true,
+      "detail": {
+        "request_hash": "5489932fac4fd253ccea13bd81f531f0e735710470aafc531fa5e3053faa1dac",
+        "query_id": 8052606263260909045,
+        "terms_hash": "65afd0c0d3bfa7a69a374719251a55cb281b11f0d4c3ed8d14066ac68d81c274",
+        "payment_nanotos": "500000000"
+      },
+      "at": "2026-11-15T07:50:00.425197+00:00"
+    },
+    {
+      "name": "buyer called through tosctl agent service send with the quoted terms hash",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-15T07:50:03.147307+00:00"
+    },
+    {
+      "name": "the finalized call is admitted and pending, verified from its snapshot",
+      "pass": true,
+      "detail": {
+        "checkpoint": 70,
+        "phase": "admitted",
+        "found": true,
+        "request_id": 0,
+        "state": "pending",
+        "status": "pending",
+        "response_deadline": 1794732601,
+        "refund_claim_deadline": 1794736201,
+        "call_transaction": {
+          "lt": 66000003,
+          "hash": "c234ce9bd05a84e2ee82477e4eddbbe62fb4f2ac4c4032899d4634a296099fc3"
+        }
+      },
+      "at": "2026-11-15T07:50:03.239169+00:00"
+    },
+    {
+      "name": "the buyer resolves the request as responded with the attested response hash",
+      "pass": true,
+      "detail": {
+        "checkpoint": 75,
+        "phase": "admitted",
+        "found": true,
+        "request_id": 0,
+        "state": "responded",
+        "status": "responded",
+        "response_deadline": 1794732601,
+        "refund_claim_deadline": 1794736201,
+        "call_transaction": {
+          "lt": 66000003,
+          "hash": "c234ce9bd05a84e2ee82477e4eddbbe62fb4f2ac4c4032899d4634a296099fc3"
+        },
+        "outcome": {
+          "lt": 72000003,
+          "hash": "99261b50891374eb2cdf7385d03bad959112ace91686c1fc2e8a0d0e36db02a5",
+          "now": 1794729003,
+          "kind": "respond",
+          "sender": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+          "value_nanotos": "10000000",
+          "exit_code": 0,
+          "opcode": 1398162178,
+          "response_hash": "ecb4891d28f4fa682dfb6a19ef0b0ae65edbea1d859a6469eb56f8ffb540523d",
+          "signed": true
+        },
+        "response_hash": "ecb4891d28f4fa682dfb6a19ef0b0ae65edbea1d859a6469eb56f8ffb540523d"
+      },
+      "at": "2026-11-15T07:50:05.545559+00:00"
+    },
+    {
+      "name": "the rebuilt request index shows the responded request",
+      "pass": true,
+      "detail": {
+        "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+        "checkpoint": 76,
+        "requests": [
+          {
+            "request_id": 0,
+            "caller": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+            "request_hash": "5489932fac4fd253ccea13bd81f531f0e735710470aafc531fa5e3053faa1dac",
+            "terms_hash": "65afd0c0d3bfa7a69a374719251a55cb281b11f0d4c3ed8d14066ac68d81c274",
+            "price_nanotos": "100000000",
+            "storage_fee_nanotos": "200000000",
+            "attestor_key_id": "mldsa44:13294092d684a6b15d9f88097d2fd900d40b735d7a12146d94f7abdecb9d521c",
+            "response_deadline": 1794732601,
+            "refund_claim_deadline": 1794736201,
+            "call_transaction": {
+              "lt": 66000003,
+              "hash": "c234ce9bd05a84e2ee82477e4eddbbe62fb4f2ac4c4032899d4634a296099fc3"
+            },
+            "query_id": 8052606263260909045,
+            "state": "responded",
+            "status": "responded",
+            "outcome": {
+              "lt": 72000003,
+              "hash": "99261b50891374eb2cdf7385d03bad959112ace91686c1fc2e8a0d0e36db02a5",
+              "now": 1794729003,
+              "kind": "respond",
+              "sender": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+              "value_nanotos": "10000000",
+              "exit_code": 0,
+              "opcode": 1398162178,
+              "response_hash": "ecb4891d28f4fa682dfb6a19ef0b0ae65edbea1d859a6469eb56f8ffb540523d",
+              "signed": true
+            }
+          }
+        ],
+        "authority": "derived index; verify against finalized state before acting"
+      },
+      "at": "2026-11-15T07:50:05.604747+00:00"
+    },
+    {
+      "name": "a call prepared under terms the provider changed is refused before sending",
+      "pass": true,
+      "detail": {
+        "stderr": "tos-service-buyer: Service Actor admission step 8: the Quote terms_hash is not the actor's current terms_hash",
+        "phase": "prepared",
+        "next_request_id_before": 1,
+        "next_request_id_after": 1
+      },
+      "at": "2026-11-15T07:50:08.622306+00:00"
+    },
+    {
+      "name": "the provider staged the executor, rail config and manifest root-owned and private outside the work directory",
+      "pass": true,
+      "detail": {
+        "executor": {
+          "built": "/tos/ai-migration/e2e-bin/software-work-execute",
+          "sha256": "0dbe37498462bfbf62daee848c5e13b1e39de6f1f78e8d7bbce84c9dfb824e59",
+          "staged_sha256": "0dbe37498462bfbf62daee848c5e13b1e39de6f1f78e8d7bbce84c9dfb824e59",
+          "tos_ai_commit": "ba76780bb1812b6b84ecf34cb499808264ab92e5",
+          "tos_ai_commit_source": "operator-asserted (E2E_TOS_AI_COMMIT), not derived from the binary"
+        },
+        "provider_root": "/tos/m1-e2e-root/ai-exec-2",
+        "ownership": [
+          "root:root 700 /tos/m1-e2e-root",
+          "root:root 700 /tos/m1-e2e-root/ai-exec-2",
+          "root:root 700 /tos/m1-e2e-root/ai-exec-2/bin",
+          "root:root 755 /tos/m1-e2e-root/ai-exec-2/bin/software-work-execute",
+          "root:root 600 /tos/m1-e2e-root/ai-exec-2/etc/rail.json",
+          ""
+        ]
+      },
+      "at": "2026-11-15T07:50:08.968351+00:00"
+    },
+    {
+      "name": "paid-pass: the buyer called with the source's input digest and the request is pending",
+      "pass": true,
+      "detail": {
+        "checkpoint": 91,
+        "phase": "admitted",
+        "found": true,
+        "request_id": 1,
+        "state": "pending",
+        "status": "pending",
+        "response_deadline": 1794732609,
+        "refund_claim_deadline": 1794736209,
+        "call_transaction": {
+          "lt": 88000003,
+          "hash": "e8e8be7cc46562703020b5670852bdbe436d02303208c0eb1d29911253a077ac"
+        }
+      },
+      "at": "2026-11-15T07:50:11.882709+00:00"
+    },
+    {
+      "name": "paid-pass: the buyer wallet pays exactly the call payment and reconciles exactly",
+      "pass": true,
+      "detail": {
+        "payment_nanotos": "510000000",
+        "settlement": {
+          "actor_transactions": [
+            {
+              "lt": 88000003,
+              "hash": "6Oi+fMRlYnAwILVnCFK9vkNtAjAyCMDrHSmRElOgd6w=",
+              "in_source": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+              "in_value": 510000000,
+              "in_created_lt": 88000002,
+              "outs": [
+                {
+                  "destination": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+                  "value": 199582080,
+                  "fwd_fee": 67,
+                  "ihr_fee": 0,
+                  "created_lt": 88000005
+                }
+              ],
+              "total_fees": 417854,
+              "aborted": false,
+              "compute_success": true
+            }
+          ],
+          "payouts": [
+            {
+              "destination": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+              "value": 199582080,
+              "fwd_fee": 67,
+              "ihr_fee": 0,
+              "created_lt": 88000005
+            }
+          ],
+          "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a": {
+            "delta": -310476811,
+            "inbound": 199582080,
+            "outbound": 510000000,
+            "forwarding_fees": 4127,
+            "fees": 54764,
+            "exact": true,
+            "transactions": [
+              {
+                "lt": 88000006,
+                "hash": "kQW3OGukU1V3/SAmlB/NDL1/Tatn8soVPSZ54Dpg6hg=",
+                "in_source": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+                "in_value": 199582080,
+                "in_created_lt": 88000005,
+                "outs": [],
+                "total_fees": 4090,
+                "aborted": false,
+                "compute_success": true
+              },
+              {
+                "lt": 88000001,
+                "hash": "2pgFdQd7w7JZ0eK9hN+7lEODLD5hkdFWPLfCZX29zk8=",
+                "in_source": null,
+                "in_value": 0,
+                "in_created_lt": null,
+                "outs": [
+                  {
+                    "destination": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+                    "value": 510000000,
+                    "fwd_fee": 4127,
+                    "ihr_fee": 0,
+                    "created_lt": 88000002
+                  }
+                ],
+                "total_fees": 50674,
+                "aborted": false,
+                "compute_success": true
+              }
+            ]
+          }
+        }
+      },
+      "at": "2026-11-15T07:50:11.883027+00:00"
+    },
+    {
+      "name": "paid-pass: the staged archive is the one the request's input digest commits",
+      "pass": true,
+      "detail": {
+        "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+        "input_digest": "dc3209a400a68fca750f382bc47088777a53d9670e747bb6ba3e24cc0be3ebe2"
+      },
+      "at": "2026-11-15T07:50:11.933724+00:00"
+    },
+    {
+      "name": "paid: the provider executed the request once in the sandbox and recorded its Receipt hash",
+      "pass": true,
+      "detail": {
+        "request_id": 1,
+        "request_hash": "71d140c0faed5df2552292d146141fa1b326a60599c5fe130171c3a8fba3ba5d",
+        "exit_code": 0,
+        "status": "completed",
+        "slot_state": "completed",
+        "respond_check": "passed",
+        "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+        "receipt_boc_base64": "te6cckECBQEAAXAABCROV1IxAAEAAAAAavlkXQAAAAABAgMEAMCrVg3nOTmvy+/NiBa1od9/1Vm6TfRGjVLe+UbfEvFDAbTiIb43e/oRX3a4pQd8UUvqzwutpKVezO+gxVLddO5h3DIJpACmj8p1DzgrxHCId3pT2WcOdHu2uj4kzAvj6+IAwLpNZ8StFdBlY4NrmIjMXBVaHOsdhM76MaQqqgcs2caJ4GP4dofe93UyaEuqbKXnmrKmzcLPxvlvMJgibQsGaOjyFQl+/Dux+Ru4WliEDkNT6pIXDFIEHknNjrMS5LVeYQDAa+kPFSqBDImkZRNHKIEmo/svJzbcZ3rOA3gJU3TLBm2WJLynQJb4EMWyTkiVId3hJPrc+hgIWBZIs4vcG6GxBd1JWlqrnbWPcfhUU623ja/z5yHNgOblGg6ZrL6RH5vjAGAAAAAAAAAAAAAAAAAGjneA/ZsJMXq5qN3RyzR+62C5noppr+aniG+8p4ICFmnhOejFQzAr",
+        "retain_until_unix": 1794819009,
+        "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+        "outcome": {
+          "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+          "execution_id": "sha256:b4e221be377bfa115f76b8a5077c514beacf0bada4a55eccefa0c552dd74ee61",
+          "input_digest": "sha256:dc3209a400a68fca750f382bc47088777a53d9670e747bb6ba3e24cc0be3ebe2",
+          "result_digest": "sha256:ba4d67c4ad15d06563836b9888cc5c155a1ceb1d84cefa31a42aaa072cd9c689",
+          "artifact": {
+            "Digest": "sha256:e063f87687def77532684baa6ca5e79ab2a6cdc2cfc6f96f3098226d0b0668e8",
+            "MediaType": "application/vnd.tos.service.software-artifact.v1+tar",
+            "SizeBytes": 3072
+          },
+          "report": {
+            "Digest": "sha256:f215097efc3bb1f91bb85a58840e4353ea92170c52041e49cd8eb312e4b55e61",
+            "MediaType": "application/vnd.tos.service.test-report.v1+json",
+            "SizeBytes": 362
+          },
+          "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+          "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+          "sandbox_digest": "sha256:dd495a5aab9db58f71f85453adb78daff3e721cd80e6e51a0e99acbe911f9be3",
+          "exit_code": 0,
+          "completed_at_unix": 1794729053
+        },
+        "error": null
+      },
+      "at": "2026-11-15T07:50:54.021965+00:00"
+    },
+    {
+      "name": "paid again while the request is pending: already taken, not executed again, slots and journal unchanged",
+      "pass": true,
+      "detail": {
+        "exit_code": 3,
+        "report": {
+          "status": "already_taken",
+          "exit_code": 3,
+          "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+          "request_id": 1,
+          "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+          "slot_state": "completed",
+          "error": "railgate: this request already has an execution slot"
+        },
+        "slots_before": {
+          "entries": 4,
+          "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+        },
+        "slots_after": {
+          "entries": 4,
+          "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+        }
+      },
+      "at": "2026-11-15T07:50:54.340917+00:00"
+    },
+    {
+      "name": "paid: the artifact and report are stored intact before respond",
+      "pass": true,
+      "detail": {
+        "artifact": "sha256:e063f87687def77532684baa6ca5e79ab2a6cdc2cfc6f96f3098226d0b0668e8",
+        "report": "sha256:f215097efc3bb1f91bb85a58840e4353ea92170c52041e49cd8eb312e4b55e61"
+      },
+      "at": "2026-11-15T07:50:54.362561+00:00"
+    },
+    {
+      "name": "the attestor's check releases the Receipt: it binds exactly the request the finalized snapshot names",
+      "pass": true,
+      "detail": {
+        "artifact_digest": "sha256:e063f87687def77532684baa6ca5e79ab2a6cdc2cfc6f96f3098226d0b0668e8",
+        "completed_at": 1794729053,
+        "exit_code": 0,
+        "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+        "releasable": true,
+        "report_digest": "sha256:f215097efc3bb1f91bb85a58840e4353ea92170c52041e49cd8eb312e4b55e61",
+        "request_hash": "71d140c0faed5df2552292d146141fa1b326a60599c5fe130171c3a8fba3ba5d",
+        "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+        "result_digest": "sha256:ba4d67c4ad15d06563836b9888cc5c155a1ceb1d84cefa31a42aaa072cd9c689"
+      },
+      "at": "2026-11-15T07:50:54.388594+00:00"
+    },
+    {
+      "name": "paid: the outcome binds the anchored Quote, execution, input, source, toolchain and manifest",
+      "pass": true,
+      "detail": {
+        "outcome": {
+          "quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+          "execution_id": "sha256:b4e221be377bfa115f76b8a5077c514beacf0bada4a55eccefa0c552dd74ee61",
+          "input_digest": "sha256:dc3209a400a68fca750f382bc47088777a53d9670e747bb6ba3e24cc0be3ebe2",
+          "result_digest": "sha256:ba4d67c4ad15d06563836b9888cc5c155a1ceb1d84cefa31a42aaa072cd9c689",
+          "artifact": {
+            "Digest": "sha256:e063f87687def77532684baa6ca5e79ab2a6cdc2cfc6f96f3098226d0b0668e8",
+            "MediaType": "application/vnd.tos.service.software-artifact.v1+tar",
+            "SizeBytes": 3072
+          },
+          "report": {
+            "Digest": "sha256:f215097efc3bb1f91bb85a58840e4353ea92170c52041e49cd8eb312e4b55e61",
+            "MediaType": "application/vnd.tos.service.test-report.v1+json",
+            "SizeBytes": 362
+          },
+          "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+          "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+          "sandbox_digest": "sha256:dd495a5aab9db58f71f85453adb78daff3e721cd80e6e51a0e99acbe911f9be3",
+          "exit_code": 0,
+          "completed_at_unix": 1794729053
+        },
+        "anchored_quote_commitment": "tvm-cell-sha256:ab560de73939afcbefcd8816b5a1df7fd559ba4df4468d52def946df12f14301",
+        "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d"
+      },
+      "at": "2026-11-15T07:50:54.388796+00:00"
+    },
+    {
+      "name": "the buyer resolves the paid request as responded with exactly the Receipt hash",
+      "pass": true,
+      "detail": {
+        "checkpoint": 203,
+        "phase": "admitted",
+        "found": true,
+        "request_id": 1,
+        "state": "responded",
+        "status": "responded",
+        "response_deadline": 1794732609,
+        "refund_claim_deadline": 1794736209,
+        "call_transaction": {
+          "lt": 88000003,
+          "hash": "e8e8be7cc46562703020b5670852bdbe436d02303208c0eb1d29911253a077ac"
+        },
+        "outcome": {
+          "lt": 200000003,
+          "hash": "797bcc3dac2d564f0697f9c1118357aa53a12df46f79b5e31f775d3f24735e6a",
+          "now": 1794729054,
+          "kind": "respond",
+          "sender": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+          "value_nanotos": "10000000",
+          "exit_code": 0,
+          "opcode": 1398162178,
+          "request_id": 1,
+          "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+          "signed": true
+        },
+        "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484"
+      },
+      "at": "2026-11-15T07:50:56.763562+00:00"
+    },
+    {
+      "name": "the provider wallet's respond reconciles exactly",
+      "pass": true,
+      "detail": {
+        "actor_transactions": [
+          {
+            "lt": 200000003,
+            "hash": "eXvMPawtVk8Gl/nBEYNXqlOhLfRvebXjH3ddPyRzXmo=",
+            "in_source": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+            "in_value": 10000000,
+            "in_created_lt": 200000002,
+            "outs": [],
+            "total_fees": 480499,
+            "aborted": false,
+            "compute_success": true
+          }
+        ],
+        "payouts": [],
+        "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3": {
+          "delta": -10439132,
+          "inbound": 0,
+          "outbound": 10000000,
+          "forwarding_fees": 132268,
+          "fees": 306864,
+          "exact": true,
+          "transactions": [
+            {
+              "lt": 200000001,
+              "hash": "TGTj7rCk1VrDG2DR8uqUSJenWkY3L51tPA7NuH7FKkA=",
+              "in_source": null,
+              "in_value": 0,
+              "in_created_lt": null,
+              "outs": [
+                {
+                  "destination": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+                  "value": 10000000,
+                  "fwd_fee": 132268,
+                  "ihr_fee": 0,
+                  "created_lt": 200000002
+                }
+              ],
+              "total_fees": 306864,
+              "aborted": false,
+              "compute_success": true
+            }
+          ]
+        }
+      },
+      "at": "2026-11-15T07:50:56.763787+00:00"
+    },
+    {
+      "name": "paid again after respond: not admitted, not executed, slots and journal unchanged, still the one response",
+      "pass": true,
+      "detail": {
+        "exit_code": 6,
+        "report": {
+          "status": "not_admitted",
+          "exit_code": 6,
+          "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+          "request_id": 1,
+          "error": "railgate: request 1 is responded, not pending"
+        },
+        "slots_before": {
+          "entries": 4,
+          "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+        },
+        "slots_after": {
+          "entries": 4,
+          "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+        },
+        "status_after": {
+          "checkpoint": 205,
+          "phase": "admitted",
+          "found": true,
+          "request_id": 1,
+          "state": "responded",
+          "status": "responded",
+          "response_deadline": 1794732609,
+          "refund_claim_deadline": 1794736209,
+          "call_transaction": {
+            "lt": 88000003,
+            "hash": "e8e8be7cc46562703020b5670852bdbe436d02303208c0eb1d29911253a077ac"
+          },
+          "outcome": {
+            "lt": 200000003,
+            "hash": "797bcc3dac2d564f0697f9c1118357aa53a12df46f79b5e31f775d3f24735e6a",
+            "now": 1794729054,
+            "kind": "respond",
+            "sender": "0:3596cc6c87173f52efdb17ee6e7a373fcfaa9e5588647e4a85743431e0c05ca3",
+            "value_nanotos": "10000000",
+            "exit_code": 0,
+            "opcode": 1398162178,
+            "request_id": 1,
+            "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484",
+            "signed": true
+          },
+          "response_hash": "327e6c68d8c7025c1cbec34991cd43c856c2c5944148c0f62f56919b68dec484"
+        }
+      },
+      "at": "2026-11-15T07:50:57.223714+00:00"
+    },
+    {
+      "name": "paid-fail: the buyer called with the source's input digest and the request is pending",
+      "pass": true,
+      "detail": {
+        "checkpoint": 212,
+        "phase": "admitted",
+        "found": true,
+        "request_id": 2,
+        "state": "pending",
+        "status": "pending",
+        "response_deadline": 1794732658,
+        "refund_claim_deadline": 1794736258,
+        "call_transaction": {
+          "lt": 209000003,
+          "hash": "99b8038fd2ebc5aceaee174cabb800a7d1d2b2ea30781ee1f7248751363f3802"
+        }
+      },
+      "at": "2026-11-15T07:51:00.352337+00:00"
+    },
+    {
+      "name": "paid-fail: the buyer wallet pays exactly the call payment and reconciles exactly",
+      "pass": true,
+      "detail": {
+        "payment_nanotos": "510000000",
+        "settlement": {
+          "actor_transactions": [
+            {
+              "lt": 209000003,
+              "hash": "mbgDj9Lrxazq7hdMq7gAp9HSsuoweB7h9ySHUTY/OAI=",
+              "in_source": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+              "in_value": 510000000,
+              "in_created_lt": 209000002,
+              "outs": [
+                {
+                  "destination": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+                  "value": 199582080,
+                  "fwd_fee": 67,
+                  "ihr_fee": 0,
+                  "created_lt": 209000005
+                }
+              ],
+              "total_fees": 417854,
+              "aborted": false,
+              "compute_success": true
+            }
+          ],
+          "payouts": [
+            {
+              "destination": "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a",
+              "value": 199582080,
+              "fwd_fee": 67,
+              "ihr_fee": 0,
+              "created_lt": 209000005
+            }
+          ],
+          "0:e139677ce32a2d8cbadc37c15fb01920f906e5944c7d6190d64aaf2ac1c1200a": {
+            "delta": -310476812,
+            "inbound": 199582080,
+            "outbound": 510000000,
+            "forwarding_fees": 4127,
+            "fees": 54765,
+            "exact": true,
+            "transactions": [
+              {
+                "lt": 209000006,
+                "hash": "glRawc8S4GdP+Os2eQBBlZPWntHhK42MDjuw0jzyn9I=",
+                "in_source": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+                "in_value": 199582080,
+                "in_created_lt": 209000005,
+                "outs": [],
+                "total_fees": 4090,
+                "aborted": false,
+                "compute_success": true
+              },
+              {
+                "lt": 209000001,
+                "hash": "Uuo12U7v2HuKntPXEWhAs6/+3fc//qlPqxA/nlZlC24=",
+                "in_source": null,
+                "in_value": 0,
+                "in_created_lt": null,
+                "outs": [
+                  {
+                    "destination": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+                    "value": 510000000,
+                    "fwd_fee": 4127,
+                    "ihr_fee": 0,
+                    "created_lt": 209000002
+                  }
+                ],
+                "total_fees": 50675,
+                "aborted": false,
+                "compute_success": true
+              }
+            ]
+          }
+        }
+      },
+      "at": "2026-11-15T07:51:00.352564+00:00"
+    },
+    {
+      "name": "paid-fail: the staged archive is the one the request's input digest commits",
+      "pass": true,
+      "detail": {
+        "source_digest": "sha256:a9e634ac59052e2f365f157f71f0553b82f51ec4f1bf067d01b9d4c616aa7f1f",
+        "input_digest": "3961cce5d687753f969eab39cb0800654020a6f1811835370715b3bd063d8fce"
+      },
+      "at": "2026-11-15T07:51:00.415093+00:00"
+    },
+    {
+      "name": "the slot and journal digest changes when a paid run admits a new request",
+      "pass": true,
+      "detail": {
+        "before": {
+          "entries": 4,
+          "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+        },
+        "after": {
+          "entries": 6,
+          "sha256": "a05696a5590d854945bc339347845d90ea259109725ee6ca778aa629877c2253"
+        }
+      },
+      "at": "2026-11-15T07:51:47.029852+00:00"
+    },
+    {
+      "name": "paid with a failing test: execution_failed, no Receipt hash, the request stays pending",
+      "pass": true,
+      "detail": {
+        "request_id": 2,
+        "request_hash": "6e89a7e160334061c1c8b7b19e179008ccb23d62dd4cf9afac33cab2715a0fe0",
+        "exit_code": 7,
+        "report": {
+          "status": "execution_failed",
+          "exit_code": 7,
+          "actor": "0:8571916a022d12b62badfdc9efc7d20ec7cf337e56d4efdb1fad8f70438d1ba5",
+          "request_id": 2,
+          "quote_commitment": "tvm-cell-sha256:e967d3fd330b8627fdf11809ec07da4afb6e04bfeae928862a6ce5f19c5a67e5",
+          "slot_state": "failed",
+          "error": "software-work objective success condition failed"
+        },
+        "status_after": {
+          "checkpoint": 329,
+          "phase": "admitted",
+          "found": true,
+          "request_id": 2,
+          "state": "pending",
+          "status": "pending",
+          "response_deadline": 1794732658,
+          "refund_claim_deadline": 1794736258,
+          "call_transaction": {
+            "lt": 209000003,
+            "hash": "99b8038fd2ebc5aceaee174cabb800a7d1d2b2ea30781ee1f7248751363f3802"
+          }
+        },
+        "slots_before": {
+          "entries": 4,
+          "sha256": "baa2dd42183afd3a3e7584064505414092f1a5bd646a0898f2b5a275387955d3"
+        },
+        "slots_after": {
+          "entries": 6,
+          "sha256": "a05696a5590d854945bc339347845d90ea259109725ee6ca778aa629877c2253"
+        }
+      },
+      "at": "2026-11-15T07:51:47.030096+00:00"
+    }
+  ],
+  "finished_utc": "2026-11-15T07:51:47.242714+00:00",
+  "result": "ALL PASS"
+}
