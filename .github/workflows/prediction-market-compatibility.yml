@@ -1,21 +1,13 @@
 name: PredictionMarket compatibility
 
+# Runs on every pull request and every push to main. A paths filter is
+# evaluated against only the first 300 changed files of a pull request, so on
+# a large change it can skip this check even when the manifest or its vectors
+# changed; the check takes seconds.
 on:
   pull_request:
-    paths:
-      - "spec/manifests/prediction-market-v1-compatibility.json"
-      - "spec/scripts/verify-prediction-market-compatibility.py"
-      - "spec/test-vectors/prediction-market-v1.json"
-      - "spec/test-vectors/agent-commerce-semantic-action-v1.json"
-      - ".github/workflows/prediction-market-compatibility.yml"
   push:
     branches: [main]
-    paths:
-      - "spec/manifests/prediction-market-v1-compatibility.json"
-      - "spec/scripts/verify-prediction-market-compatibility.py"
-      - "spec/test-vectors/prediction-market-v1.json"
-      - "spec/test-vectors/agent-commerce-semantic-action-v1.json"
-      - ".github/workflows/prediction-market-compatibility.yml"
 
 permissions:
   contents: read

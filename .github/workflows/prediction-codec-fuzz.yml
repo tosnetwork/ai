@@ -1,10 +1,10 @@
 name: Prediction codec fuzz
 
+# Runs on every pull request. A paths filter is evaluated against only the
+# first 300 changed files of a pull request, so on a large change it can skip
+# this workflow even when the decoders changed; the run is bounded and cheap.
 on:
   pull_request:
-    paths:
-      - ".github/workflows/prediction-codec-fuzz.yml"
-      - "protocol/pkg/predictionmarket/**"
 
 permissions:
   contents: read
