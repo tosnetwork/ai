@@ -1,0 +1,50 @@
+[Unit]
+Description=TOS Service Protocol executor artifact collection
+Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+# Nothing to collect before the executor has created its store.
+ConditionPathIsDirectory=/var/lib/tos-service-executor/artifacts
+
+[Service]
+Type=oneshot
+# Deletes the objects of jobs whose retention ended, at most 1024 jobs per
+# run, and prints a JSON report to the journal. It may run while the executor
+# is serving: both take the store's retention lock for each step and wait a
+# bounded time for the other, and it never opens the executor's journal,
+# FIFOs or sockets. A run that cannot get the lock in time fails and the
+# next timer run does the work.
+ExecStart=/usr/local/libexec/tos-service/software-work-execute artifacts-gc \
+  --state-dir /var/lib/tos-service-executor --limit 1024
+# A sweep waits up to 60 s for the retention lock per step.
+TimeoutStartSec=900s
+UMask=0077
+MemoryMax=512M
+TasksMax=128
+
+# The sweep only reads and deletes files it owns under the state directory.
+ReadWritePaths=/var/lib/tos-service-executor
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Root needs no capability for this: it owns everything it touches.
+CapabilityBoundingSet=
+AmbientCapabilities=

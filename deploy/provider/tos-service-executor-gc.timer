@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly TOS Service Protocol executor artifact collection
+Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+
+[Timer]
+# The store admits 65 536 retained jobs; an hourly sweep of up to 1024
+# expired jobs keeps it far from that bound at one job at a time.
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
