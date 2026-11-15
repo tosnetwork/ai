@@ -58,10 +58,12 @@ the directory in this table:
 | `tosnetwork/tos-service-protocol` | its history up to `49a25714e971f3f5b5ad7ad3fe8915936752efd4` | `protocol/` | `0cec503e0d72e7159c55eff237e03a201707c23d` |
 | `tosnetwork/tos-service-gateway` | its history up to `4561e4ac44a3de1245a60f81f9061ca92756dc1c` | `gateway/` | `446a6cfa3d9181556b7ee6167bb5666a2fda294d` |
 | `tosnetwork/tos-ai` | its history up to `9e0728c8e53bcd4c4c71eb02d676021e4d4d9d1b` | `execution/` | `cf1b38fcc7b16a05a9c516b081bdeedd5f465c81` |
+| `tosnetwork/tos-messenger` | its history up to `5668b3a2b5f12f8454abf35ba241eb8c454ec6cb` | `messenger/` | `2c374cd5fb5f29cedc733f90a02ce00de7139d59` |
 
 Each import commit is a byte-exact copy of the former repository's tree at its
 import point; the module paths were rewritten afterwards, in their own
-commits (`tosnetwork/ai` #2, merged as `ba76780b`). Commits made after an
+commits (`tosnetwork/ai` #2, merged as `ba76780b`, for the first four;
+messenger/ in the pull request that imported it). Commits made after an
 import point exist only in this repository.
 
 Records produced from this repository keep the field names of the former

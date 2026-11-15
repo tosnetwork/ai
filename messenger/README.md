@@ -1,8 +1,8 @@
 # TOS Messenger
 
 Implementation repository for the decentralized Agent-native Messenger described in
-[`tosnetwork/tos-service-spec`](https://github.com/tosnetwork/tos-service-spec)
-`docs/AGENT_NATIVE_MESSENGER_V1.md` and its conversation-and-commerce profile.
+[`spec/docs/AGENT_NATIVE_MESSENGER_V1.md`](../spec/docs/AGENT_NATIVE_MESSENGER_V1.md)
+and its conversation-and-commerce profile.
 
 ## What this is, and what it is not
 
