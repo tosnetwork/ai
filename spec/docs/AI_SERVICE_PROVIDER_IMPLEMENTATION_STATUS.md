@@ -153,6 +153,85 @@ Not covered by this record:
   purchase whose call never landed (see
   [Not delivered by these changes](#not-delivered-by-these-changes)).
 
+## Repository consolidation
+
+`tos-service-spec`, `tos-service-protocol`, `tos-service-gateway` and `tos-ai`
+were merged into `tosnetwork/ai` as `spec/`, `protocol/`, `gateway/` and
+`execution/`, with their full history (every original commit keeps its SHA;
+the mapping is in [`deployments/README.md`](../deployments/README.md#former-repositories)).
+The move changes paths only. Binary names, the `tos.service.v1` schema, protocol
+domains and signing domains are unchanged.
+
+| Change | Pull request, reviewed head, merge | What it does |
+|---|---|---|
+| Protocol pins aligned first | `tos-service-gateway` #27 (merge `4561e4ac`), `tos-ai` #18 (merge `9e0728c8`) | Both raise their `tos-service-protocol` requirement to `49a25714`, the protocol import point, so the single module changes no protocol code for any component |
+| Import | `ai` #2, head `1d2695ee`, merge `ba76780b` | Import commits `c252b68` (spec at `a67148cc`), `0cec503` (protocol at `49a25714`), `446a6cf` (gateway at `4561e4ac`), `cf1b38f` (tos-ai at `9e0728c8`); scripted import-path rewrite; one root `go.mod`; regenerated `protocol/gen`; root `make verify` and CI; boundary lint; relative links |
+| Messenger switch | `tos-messenger` #36, head `f4b12df1`, merge `57d96473` | Imports `ai/protocol` instead of `tos-service-protocol`; x/text v0.43.0 fixes GO-2026-5970, which govulncheck reported as called before |
+| OpenFox switch | `openfox` #37, head `66b8b4c3`, merge `03a256e1` | Imports `ai/protocol` and `ai/execution` instead of `tos-service-protocol` and `tos-ai`, and uses messenger `57d96473` |
+
+Gates, all run locally:
+
+- **Import:** each import commit's subtree equals the source tree at its import
+  point. Re-running `scripts/rewrite-imports.sh` reproduces the rewrite commit.
+  The `protocol/api` descriptor is unchanged apart from `go_package`, and
+  `spec/proto` matches it. 80 frozen vector, golden, fixture, schema, manifest
+  and evidence files are byte-identical to the sources.
+- **`ai`:** `make verify` (with `-race` and the pinned tosctl) passes the same
+  65 test packages as the three source suites at their import points. `--help`
+  of all 23 `cmd/` binaries and 13 subcommands is unchanged. The boundary lint
+  passes on host, windows, darwin and a textual import scan, and goes red on a
+  forbidden import in a windows-only file. `govulncheck` reports nothing.
+- **Consumers:** messenger: the same 67 packages pass `make verify`, and
+  `--help` of its 18 binaries is unchanged. OpenFox: the same 107 packages pass
+  the CI test form; the `-race` run passes the same 106 packages and fails the
+  same one as `main`. Neither consumer links an old module path. Only
+  `ai/protocol/gen/tos/service/v1` registers `tos/service/v1/native.proto`.
+- **Dependency weight:** no container-runtime module of `execution/` is linked
+  into a consumer binary. The consumers' binaries shrink slightly (messenger
+  −204,512 bytes over 18 binaries, OpenFox −172,301 bytes over 11), so `ai`
+  stays one module.
+
+Two runs rebuilt from the merged code. Both are local integration evidence
+only: one host runs every validator, every endpoint and both nodes, so neither
+qualifies as public or independent acceptance.
+
+| Record | What it proves | Code | Result |
+|---|---|---|---|
+| [`local-service-actor-paid-execution-ai-20261115.json`](../deployments/local-service-actor-paid-execution-ai-20261115.json) (sha256 `606b3e704c8e8e424098702808be3c4edb92d3fa0ef89d7f291b45dc6222a9ba`, copied byte for byte) | `protocol/scripts/service-actor-buyer-e2e.sh` with `E2E_EXECUTE=1` (short form, no `E2E_LIFECYCLE`), 2026-11-15 07:49 to 07:51 UTC, on a fresh three-validator network (tosctl sha256 `6de21cb2…`, Service Actor release code hash `…d63e09428e42aa0c`). Paid execution through the legacy root command, with `software-work-execute` built from `ai` `execution/cmd/software-work-execute` (sha256 `0dbe3749…`) | `ai` `ba76780b` (clean tree: `protocol_tree_dirty` false) | ALL PASS, 37 of 37; `qualifies_as_public_acceptance: false` |
+| [`local-openfox-front-door-ai-20261115.json`](../deployments/local-openfox-front-door-ai-20261115.json) (sha256 `23024529fa929cfde72ef1a20e69f126c15d5bcf0531c4115192b17c27e98463`, copied byte for byte) | `openfox` `scripts/service-front-door-e2e.sh` with `E2E_EXECUTOR_SOCKET`, 2026-11-15 07:45 to 07:49 UTC (`tos` `5af405dcb`, the same tosctl and code hash), `executor_mode` `executor service socket`. Both nodes run as an ordinary user and no root command is used (`ran_as_root` empty). The operator reinstalled the root executor service from `ai`-built binaries (`software-work-executord` sha256 `8fef5233…`, `software-work-execute` `0dbe3749…`); the unit files are byte-identical to `execution/deploy/provider`. The record binds only the `openfox` and `tosctl` digests, so the service binaries are operator-asserted | `openfox` `66b8b4c3` (clean tree; its tree is the tree of merge `03a256e1`) | ALL PASS, 37 of 37; `qualifies_as_public_acceptance: false` |
+
+An earlier paid-execution attempt ran at the same time as the front-door run
+and failed 4 of 37 checks. The legacy command refused a private containerd
+namespace that held the executor service's containers ("containerd backend
+namespace is not clean"), so the failure was fail-closed. That attempt is not
+evidence.
+
+### Open follow-ups of the consolidation
+
+- The legacy root command and the executor service must not share the private
+  containerd namespace at the same time. Run them one after the other, or give
+  them separate namespaces; this is an operator note until a guard exists.
+- `spec/scripts/run-openfox-autonomous-earning-three-node.sh` names packages
+  that no longer exist (`execution/pkg/messengereventbridge`,
+  `protocol/pkg/executiongate`, `protocol/pkg/paiddemand`). This predates the
+  move (review of `ai` #2). Update the package lists or retire the script.
+- Gateway: a Quote profile whose Agent Packet transport names another Agent
+  loads at startup, but every quote request then fails as a retryable
+  dependency error (`tos-service-gateway` #27). A startup check would refuse it
+  early.
+- `tos-messenger` CI (`verify`) has been red on `main` since `22d8c4e`
+  (2026-11-08). The sandboxed attachment-scanner tests fail on the GitHub
+  runners; the local `make verify` passes.
+- OpenFox `main`: a data race in `web/backend/api`
+  (`TestStartGatewayLocked_ForwardsWildcardHostForPublicLauncher`) under
+  `-race`. CI does not run `-race`.
+- `tos-messenger` still mentions `tos-service-protocol` in prose (three places:
+  `docs/AGENT_PACKET_BRIDGE.md`, `pkg/chainagent/resolver.go`,
+  `pkg/payload/agent_gift.go`).
+- Planned later, each as its own reviewed change: make `spec/proto` the single
+  schema source and remove `protocol/api`, and reconcile the diverged copies of
+  `internal/osguard` and `internal/actionauthoritytest`.
+
 ## Not delivered by these changes
 
 - WP-07 independent commercial acceptance: a provider and buyer outside the
