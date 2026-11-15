@@ -38,9 +38,18 @@ const (
 	// SlotAbandoned: the pre-execution check refused; nothing ran.
 	SlotAbandoned SlotState = "abandoned"
 	// SlotAmbiguous: a started execution has no recorded outcome; it is never
-	// re-run or attested, and the buyer's refund path applies.
+	// re-run, and it is never attested unless Reconcile records the outcome
+	// an at-most-once executor kept for it. Otherwise the buyer's refund
+	// path applies.
 	SlotAmbiguous SlotState = "ambiguous"
 )
+
+// AmbiguousAfterRestart is the recorded cause of a slot that was found
+// started when its gate was opened: the process that started the execution
+// ended before it recorded an outcome. It is the only cause Reconcile
+// accepts. An ambiguous slot without a recorded cause, written before causes
+// were recorded, stays ambiguous for good.
+const AmbiguousAfterRestart = "restart"
 
 var (
 	// ErrSlotTaken reports a claim whose slot already exists: it is never
@@ -49,6 +58,14 @@ var (
 	// ErrNotPendingNow reports that the fresh pre-execution check refused and
 	// the slot was abandoned without running anything.
 	ErrNotPendingNow = errors.New("railgate: the request no longer admits execution; nothing ran")
+
+	// ErrNotReconcilable reports a slot Reconcile leaves as it is: there is
+	// none for the claim, it holds another request, or it is in a state
+	// other than ambiguous after a restart.
+	ErrNotReconcilable = errors.New("railgate: this slot cannot be reconciled")
+	// ErrReconcileConflict reports a slot already completed with another
+	// response hash than the one offered; it keeps the recorded one.
+	ErrReconcileConflict = errors.New("railgate: the slot is completed with another response hash")
 
 	responseHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
@@ -78,7 +95,13 @@ type Slot struct {
 	RequestHash     string    `json:"request_hash"`
 	State           SlotState `json:"state"`
 	ResponseHash    string    `json:"response_hash,omitempty"`
-	UpdatedUnix     int64     `json:"updated_unix"`
+	// AmbiguousCause says why an ambiguous slot is ambiguous; empty for a
+	// slot of any other state.
+	AmbiguousCause string `json:"ambiguous_cause,omitempty"`
+	// Reconciled marks a completed slot whose outcome was recorded by
+	// Reconcile after a restart rather than by the run that started it.
+	Reconciled  bool  `json:"reconciled,omitempty"`
+	UpdatedUnix int64 `json:"updated_unix"`
 }
 
 // Key returns the slot's identity.
@@ -92,9 +115,11 @@ func (s Slot) valid() bool {
 	}
 	switch s.State {
 	case SlotCompleted:
-		return responseHashPattern.MatchString(s.ResponseHash)
-	case SlotAdmitted, SlotStarted, SlotFailed, SlotAbandoned, SlotAmbiguous:
-		return s.ResponseHash == ""
+		return responseHashPattern.MatchString(s.ResponseHash) && s.AmbiguousCause == ""
+	case SlotAmbiguous:
+		return s.ResponseHash == "" && !s.Reconciled && (s.AmbiguousCause == "" || s.AmbiguousCause == AmbiguousAfterRestart)
+	case SlotAdmitted, SlotStarted, SlotFailed, SlotAbandoned:
+		return s.ResponseHash == "" && !s.Reconciled && s.AmbiguousCause == ""
 	default:
 		return false
 	}
@@ -110,7 +135,8 @@ type Gate struct {
 }
 
 // OpenGate opens or creates an owner-private slot directory. Every slot found
-// started without an outcome becomes ambiguous before the gate is returned.
+// started without an outcome becomes ambiguous, with the restart recorded as
+// its cause, before the gate is returned.
 func OpenGate(verifier *Verifier, directory string) (*Gate, error) {
 	if verifier == nil || !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
 		return nil, errors.New("railgate: invalid gate configuration")
@@ -157,7 +183,7 @@ func (g *Gate) recover() error {
 			return err
 		}
 		if slot.State == SlotStarted {
-			slot.State, slot.UpdatedUnix = SlotAmbiguous, g.now().Unix()
+			slot.State, slot.AmbiguousCause, slot.UpdatedUnix = SlotAmbiguous, AmbiguousAfterRestart, g.now().Unix()
 			if err := g.write(slot, false); err != nil {
 				return err
 			}
@@ -241,6 +267,94 @@ func (g *Gate) Complete(key SlotKey, responseHash string) error {
 // Fail records an execution that ran and did not succeed.
 func (g *Gate) Fail(key SlotKey) error {
 	return g.transition(key, SlotStarted, SlotFailed, "")
+}
+
+// Reconcile records the outcome of an execution whose slot became ambiguous
+// because the process that started it ended before recording one, and
+// returns the completed slot with the freshly verified request, ready for
+// Recheck.
+//
+// The caller asserts that responseHash is the response hash of the one
+// successful outcome an at-most-once executor recorded for this execution
+// id, obtained by asking the executor again with the identical request.
+// The caller cannot tell whether that outcome was replayed from the
+// executor's journal or the job ran only now, on the second ask: the process
+// may have ended after the slot was marked started and before the request
+// reached the executor. Such a late run did not pass Run's pre-execution
+// check of the execution budget, so the provider may have done work for a
+// request it can no longer answer in time. That is the provider's own loss
+// and never a wrong attestation: attesting stays gated by the fresh
+// verification here and by Recheck.
+//
+// The gate cannot verify where the outcome came from, so it verifies
+// everything it can itself, and more than Complete does:
+//
+//   - the claim is verified at a fresh checkpoint exactly as Recheck
+//     verifies it: the request is still pending, with the respond budget
+//     ahead of its deadline;
+//   - the claim is the slot's own request: same quote commitment, actor and
+//     request id, and the same request hash, which commits to the quote, the
+//     execution id and the input digest;
+//   - the slot is ambiguous with the restart recorded as its cause. A slot
+//     in any other state, or ambiguous without that cause, is refused with
+//     ErrNotReconcilable and left as it is.
+//
+// Only a success can be reconciled: there is no way to record a failed or
+// unknown outcome here, and such a slot stays ambiguous. The transition is
+// durable before Reconcile returns. It is idempotent: reconciling a slot
+// that is already completed with the same response hash succeeds and changes
+// nothing, and with another hash it is refused with ErrReconcileConflict.
+// A verification failure returns the verifier's error and changes nothing.
+func (g *Gate) Reconcile(ctx context.Context, claim Claim, responseHash string) (Slot, *Verified, error) {
+	if g == nil || ctx == nil {
+		return Slot{}, nil, errors.New("railgate: invalid gate")
+	}
+	if !responseHashPattern.MatchString(responseHash) {
+		return Slot{}, nil, errors.New("railgate: invalid response hash")
+	}
+	verified, err := g.verifier.verify(ctx, claim, g.verifier.config.RespondBudget)
+	if err != nil {
+		return Slot{}, nil, err
+	}
+	slot, err := g.reconcile(verified.SlotKey(), hex.EncodeToString(verified.RequestHash[:]), responseHash)
+	if err != nil {
+		return slot, nil, err
+	}
+	return slot, verified, nil
+}
+
+// reconcile is the durable half of Reconcile for a verified request. It
+// returns the slot as recorded whenever one was read.
+func (g *Gate) reconcile(key SlotKey, requestHash, responseHash string) (Slot, error) {
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+	slot, found, err := g.lookup(key)
+	if err != nil {
+		return Slot{}, err
+	}
+	if !found {
+		return Slot{}, fmt.Errorf("%w: no slot for this request", ErrNotReconcilable)
+	}
+	if slot.RequestHash != requestHash {
+		return slot, fmt.Errorf("%w: the claim names another request than the slot", ErrNotReconcilable)
+	}
+	switch {
+	case slot.State == SlotCompleted && slot.ResponseHash == responseHash:
+		return slot, nil
+	case slot.State == SlotCompleted:
+		return slot, ErrReconcileConflict
+	case slot.State != SlotAmbiguous:
+		return slot, fmt.Errorf("%w: slot is %s", ErrNotReconcilable, slot.State)
+	case slot.AmbiguousCause != AmbiguousAfterRestart:
+		return slot, fmt.Errorf("%w: slot is ambiguous for another cause than a restart", ErrNotReconcilable)
+	}
+	completed := slot
+	completed.State, completed.ResponseHash, completed.AmbiguousCause = SlotCompleted, responseHash, ""
+	completed.Reconciled, completed.UpdatedUnix = true, g.now().Unix()
+	if err := g.write(completed, false); err != nil {
+		return slot, err
+	}
+	return completed, nil
 }
 
 // Recheck proves the slot's request is still pending, unchanged and with the

@@ -23,8 +23,10 @@ const (
 	// verified request refused it; the slot is abandoned and nothing ran.
 	StatusRefusedBeforeExecution Status = "refused_before_execution"
 	// StatusAmbiguous: an execution may have run without a recorded
-	// outcome, or the slot could not be updated. It is never re-run or
-	// attested; the buyer's refund path applies.
+	// outcome, or the slot could not be updated. It is never re-run. It is
+	// attested only if Gate.Reconcile later records the outcome an
+	// at-most-once executor kept for it; otherwise the buyer's refund path
+	// applies.
 	StatusAmbiguous Status = "ambiguous"
 	// StatusNotAdmitted: verification at a fresh checkpoint refused the
 	// claim; no slot was created and nothing ran.
