@@ -275,11 +275,19 @@ func (g *Gate) Fail(key SlotKey) error {
 // Recheck.
 //
 // The caller asserts that responseHash is the response hash of the one
-// successful outcome an at-most-once executor recorded for this very
-// execution: the executor was asked again with the identical request and
-// answered from its own journal, without running anything. The gate cannot
-// verify where the outcome came from, so it verifies everything it can
-// itself, and more than Complete does:
+// successful outcome an at-most-once executor recorded for this execution
+// id, obtained by asking the executor again with the identical request.
+// The caller cannot tell whether that outcome was replayed from the
+// executor's journal or the job ran only now, on the second ask: the process
+// may have ended after the slot was marked started and before the request
+// reached the executor. Such a late run did not pass Run's pre-execution
+// check of the execution budget, so the provider may have done work for a
+// request it can no longer answer in time. That is the provider's own loss
+// and never a wrong attestation: attesting stays gated by the fresh
+// verification here and by Recheck.
+//
+// The gate cannot verify where the outcome came from, so it verifies
+// everything it can itself, and more than Complete does:
 //
 //   - the claim is verified at a fresh checkpoint exactly as Recheck
 //     verifies it: the request is still pending, with the respond budget
