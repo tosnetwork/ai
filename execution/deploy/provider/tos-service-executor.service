@@ -1,6 +1,6 @@
 [Unit]
 Description=TOS Service Protocol software-work executor service
-Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+Documentation=https://github.com/tosnetwork/ai/tree/main/execution/deploy/provider
 # The executor is useless without its private containerd and must never
 # outlive it: a stop or failure of the daemon stops this service too.
 Requires=tos-service-containerd.service

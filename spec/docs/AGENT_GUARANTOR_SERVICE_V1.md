@@ -12,7 +12,7 @@ software-work commercial lifecycle or the root Agentic Internet operation gate.
 
 **Profile URI:** `tos.agent-service.guarantor.v1`
 
-**Issue:** [tos-service-spec #56](https://github.com/tosnetwork/tos-service-spec/issues/56)
+**Issue:** tos-service-spec #56 (closed; that repository is archived and no longer public)
 
 **Implementation evidence:**
 [Agent Guarantor V1 implementation report](AGENT_GUARANTOR_SERVICE_V1_IMPLEMENTATION_REPORT.md).

@@ -1,6 +1,6 @@
 [Unit]
 Description=Hourly TOS Service Protocol executor artifact collection
-Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+Documentation=https://github.com/tosnetwork/ai/tree/main/execution/deploy/provider
 
 [Timer]
 # Each run collects at most 128 expired jobs, so 128 per hour. At one job at
