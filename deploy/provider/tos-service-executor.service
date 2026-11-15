@@ -1,0 +1,77 @@
+[Unit]
+Description=TOS Service Protocol software-work executor service
+Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+# The executor is useless without its private containerd and must never
+# outlive it: a stop or failure of the daemon stops this service too.
+Requires=tos-service-containerd.service
+After=tos-service-containerd.service
+# A start that keeps failing (for example a namespace left unclean by a
+# crash, which the executor refuses to adopt) ends in the failed state
+# instead of retrying forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+# TOS_EXECUTOR_ALLOWED_UIDS and TOS_EXECUTOR_SOCKET_GID. Both are required:
+# an unset variable expands to an empty argument, which the executor refuses.
+EnvironmentFile=/etc/tos-service/executor.env
+ExecStart=/usr/local/libexec/tos-service/software-work-executord \
+  --socket /run/tos-service-executor/executor.sock \
+  --socket-gid ${TOS_EXECUTOR_SOCKET_GID} \
+  --allow-uids ${TOS_EXECUTOR_ALLOWED_UIDS} \
+  --containerd-socket /run/tos-service-containerd/containerd.sock \
+  --fifo-dir /run/tos-service-executor-private/fifos \
+  --state-dir /var/lib/tos-service-executor
+Restart=on-failure
+RestartSec=5s
+# On stop the executor waits up to its --stop-grace (200 s, past the frozen
+# 180 s wall clock) for a running job to record its outcome, then cancels it
+# and waits for the container to be cleaned up. Killing it earlier would
+# leave that execution ambiguous.
+TimeoutStopSec=270s
+OOMScoreAdjust=-500
+
+# Both runtime directories are created root:root 0700. The executor itself
+# opens the first to 0750 root:<socket gid> once its socket is 0660
+# root:<socket gid>; the second holds the FIFOs and staged workspaces and
+# stays 0700. Both are removed when the service stops.
+RuntimeDirectory=tos-service-executor tos-service-executor-private
+RuntimeDirectoryMode=0700
+# The at-most-once journal and the artifact store. Never delete it: it is
+# the record of which executions already ran.
+StateDirectory=tos-service-executor
+StateDirectoryMode=0700
+UMask=0077
+
+# The executor talks only to two Unix sockets and its own directories.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Root's only use of privilege here is giving the socket and its directory
+# to the callers' group. Everything else it touches it owns.
+CapabilityBoundingSet=CAP_CHOWN
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

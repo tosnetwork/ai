@@ -62,6 +62,18 @@ type Outcome struct {
 	CompletedAtUnix uint64                   `json:"completed_at_unix"`
 }
 
+// ErrAmbiguous reports an execution identity that was claimed without a
+// recorded outcome: a run may have happened, so it is never run again.
+var ErrAmbiguous = errors.New("software-work execution outcome is ambiguous")
+
+// ErrRequestMismatch reports a request whose fields are malformed or do not
+// match the commitments it carries; nothing was claimed for it.
+var ErrRequestMismatch = errors.New("software-work request does not match its commitments")
+
+// ErrConflict reports an execution identity already bound to a request with
+// other commitments.
+var ErrConflict = errors.New("execution identity conflicts with another request")
+
 type Runner struct {
 	executor executor.Executor
 	store    *artifactstore.Store
@@ -94,7 +106,7 @@ func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) 
 		if record.State == "complete" {
 			return record.Outcome, nil
 		}
-		return Outcome{}, errors.New("software-work execution outcome is ambiguous")
+		return Outcome{}, ErrAmbiguous
 	}
 	spec := executor.Spec{
 		ImageDigest: r.contract.ToolchainDigest, Entrypoint: append([]string{r.contract.Executable}, r.contract.Arguments...),
@@ -153,6 +165,29 @@ func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) 
 	return outcome, nil
 }
 
+// Recorded reports what the journal already holds for request without
+// claiming it, so a long-running caller can answer a repeated request while
+// its execution slots are busy. It returns the recorded outcome and true for
+// a completed execution, false when the identity was never claimed,
+// ErrAmbiguous for a claim without an outcome and ErrConflict for an identity
+// bound to other commitments.
+func (r *Runner) Recorded(request Request) (Outcome, bool, error) {
+	if r == nil || r.journal == nil {
+		return Outcome{}, false, errors.New("invalid software-work execution request")
+	}
+	if err := validateRequest(r.contract, request); err != nil {
+		return Outcome{}, false, err
+	}
+	record, found, err := r.journal.lookup(request.ExecutionID, requestFingerprint(r.contract, request))
+	if err != nil || !found {
+		return Outcome{}, false, err
+	}
+	if record.State != "complete" {
+		return Outcome{}, false, ErrAmbiguous
+	}
+	return record.Outcome, true, nil
+}
+
 func validateContract(value Contract) error {
 	if !executionIDPattern.MatchString(value.ManifestDigest) || !executionIDPattern.MatchString(value.ToolchainDigest) ||
 		value.SandboxDigest != value.ManifestDigest || value.Executable == "" || len(value.Arguments) == 0 ||
@@ -183,7 +218,7 @@ func validateRequest(contract Contract, value Request) error {
 	if !quoteCommitmentPattern.MatchString(value.QuoteCommitment) || !executionIDPattern.MatchString(value.ExecutionID) ||
 		!executionIDPattern.MatchString(value.InputDigest) || !executionIDPattern.MatchString(value.SourceDigest) ||
 		digest(value.SourceArchive) != value.SourceDigest || uint64(len(value.SourceArchive)) > contract.Limits.DiskBytes {
-		return errors.New("software-work request does not match its commitments")
+		return ErrRequestMismatch
 	}
 	return nil
 }
