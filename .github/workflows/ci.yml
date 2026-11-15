@@ -18,7 +18,10 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    # Pinned to the image messenger's attachment sandbox tests were verified
+    # on: it provides bubblewrap and a user systemd manager. An unannounced
+    # image change must not silently change what those tests cover.
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       # The two checkouts are siblings so the repository's own format and
@@ -38,6 +41,9 @@ jobs:
           path: tos
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # make verify checks the format of messenger's OpenMLS driver.
+          components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: tos/tosctl/src -> target
@@ -63,6 +69,17 @@ jobs:
           echo "expected=${{ github.event.pull_request.head.sha || github.sha }}"
           echo "actual=$(git rev-parse HEAD)"
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      # Messenger's attachment scanner runs a pinned, staged copy of
+      # bubblewrap in an unprivileged user namespace. The runner restricts
+      # such namespaces through AppArmor and no profile covers the staged
+      # copy, so bwrap cannot configure the sandbox ("loopback: Failed
+      # RTM_NEWADDR: Operation not permitted"). Lift the restriction for this
+      # job, and install bubblewrap where an image lacks it; make verify then
+      # fails if any sandbox test skips (make messenger-sandbox).
+      - name: Provide the attachment scanner sandbox
+        run: |
+          command -v bwrap >/dev/null || { sudo apt-get update && sudo apt-get install -y bubblewrap; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Verify the repository
         working-directory: ai
         run: make verify

@@ -1,0 +1,74 @@
+name: messenger
+
+# The checks messenger/ ran as its own repository besides make verify (which
+# the ci workflow runs): cross-builds, native fuzzing and the vector job.
+# No paths filter: one is evaluated against only the first 300 changed files
+# of a pull request, so it can skip these jobs on a large change.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: off
+
+jobs:
+  # A single-writer journal, a UDP probe, and a binary DHT value all have
+  # assumptions about word size and endianness that only another architecture
+  # can disprove.
+  cross-build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux/amd64, linux/arm64, linux/arm, linux/riscv64, darwin/arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.11"
+          cache: true
+      - name: build ${{ matrix.target }}
+        run: make messenger-cross-build MESSENGER_CROSS_TARGETS=${{ matrix.target }}
+
+  # Every Fuzz target of each package, bounded by an execution count (the
+  # Makefile's MESSENGER_FUZZ_EXECUTIONS), not a duration.
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - ./messenger/pkg/identity
+          - ./messenger/pkg/directory
+          - ./messenger/pkg/envelope
+          - ./messenger/pkg/probe
+          - ./messenger/pkg/fault
+          - ./messenger/pkg/attachments
+          - ./messenger/pkg/attachmentapi
+          - ./messenger/pkg/attachmentops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.11"
+          cache: true
+      - name: fuzz ${{ matrix.package }}
+        run: make messenger-fuzz MESSENGER_FUZZ_PACKAGES=${{ matrix.package }}
+
+  # Vectors are what a second implementation checks itself against, so a
+  # change to one has to be deliberate rather than incidental.
+  vectors:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.11"
+          cache: true
+      - name: vectors are unchanged
+        run: make messenger-vectors

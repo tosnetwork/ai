@@ -1,6 +1,7 @@
 #!/bin/sh
-# Component boundaries: gateway/ must not depend on execution/, and protocol/
-# must depend on neither gateway/ nor execution/.
+# Component boundaries: gateway/ must not depend on execution/; protocol/
+# must depend on neither gateway/ nor execution/; messenger/ may depend on
+# protocol/ only; and no component depends on messenger/.
 #
 # The package graph is followed transitively, test-only imports included, for
 # the host platform and for every other platform the tree has build-tagged
@@ -59,13 +60,17 @@ text() {
 }
 
 for platform in host windows darwin; do
-  graph "$platform" gateway execution
-  graph "$platform" protocol gateway execution
+  graph "$platform" gateway execution messenger
+  graph "$platform" protocol gateway execution messenger
+  graph "$platform" execution messenger
+  graph "$platform" messenger gateway execution
 done
-text gateway execution
-text protocol gateway execution
+text gateway execution messenger
+text protocol gateway execution messenger
+text execution messenger
+text messenger gateway execution
 
 if [ "$status" = 0 ]; then
-  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither"
+  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither; messenger/ depends on protocol/ only; nothing depends on messenger/"
 fi
 exit "$status"
