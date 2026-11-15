@@ -2,6 +2,7 @@ package nativegateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,10 +67,16 @@ func (b *backendStub) SubmitNativeAction(context.Context, *connect.Request[nativ
 
 type discoveryStub struct{ published, listed, searched, loaded int }
 
-type quoteStub struct{ calls int }
+type quoteStub struct {
+	calls int
+	err   error
+}
 
 func (q *quoteStub) RequestQuoteProposal(context.Context, *nativev1.RequestQuoteProposalRequest) (*nativev1.QuoteProposalPackageV1, error) {
 	q.calls++
+	if q.err != nil {
+		return nil, q.err
+	}
 	return &nativev1.QuoteProposalPackageV1{}, nil
 }
 
@@ -97,6 +104,29 @@ func TestQuoteExchangeRequiresReadPermissionAndCompletePreimages(t *testing.T) {
 	}
 	if source.calls != 1 {
 		t.Fatalf("quote source calls=%d", source.calls)
+	}
+}
+
+// A Quote source's read failure reaches a remote caller as its fixed class
+// only: the cause, which can name the gateway's configured endpoints, stays
+// inside the gateway.
+func TestQuoteReadFailuresAreAnsweredWithoutTheirCause(t *testing.T) {
+	provider := testQuoteProvider(t)
+	server := &Server{Authorizer: NewTokenAuthorizer("read-secret", "relay-secret"), QuoteSource: provider,
+		Network: &nativev1.NetworkDomain{NetworkId: "test", GenesisRootHash: "sha256:" + strings.Repeat("11", 32),
+			GenesisFileHash: "sha256:" + strings.Repeat("22", 32)}}
+	request := connect.NewRequest(&nativev1.RequestQuoteProposalRequest{Context: &nativev1.RequestContext{RequestId: "request",
+		CallerId: "buyer", DeadlineUnixMillis: time.Now().Add(time.Minute).UnixMilli()},
+		CapabilityId: "cap_" + strings.Repeat("33", 32), CapabilityVersion: "1.0.0",
+		BuyerAddress: "0:" + strings.Repeat("44", 32)})
+	request.Header().Set("Authorization", "Bearer read-secret")
+	_, err := server.RequestQuoteProposal(context.Background(), request)
+	requirePublicDetail(t, err, nativev1.NativeErrorCodeV1_NATIVE_ERROR_CODE_V1_PUBLIC_DEPENDENCY_UNAVAILABLE,
+		nativev1.RetryDispositionV1_RETRY_DISPOSITION_V1_SAME_REQUEST_AFTER_BACKOFF)
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) || connectErr.Message() != "finalized state is unavailable" ||
+		strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("the public answer is %v", err)
 	}
 }
 func (d *discoveryStub) Search(context.Context, string, uint32, string) (*capabilitycatalog.SearchPage, error) {

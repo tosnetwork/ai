@@ -50,15 +50,13 @@ func (r *SimplifiedNativeResolver) ResolveState(ctx context.Context, objectID, e
 
 // ResolveNativeAtCheckpoint resolves an address-selected Native object at the
 // exact DNS checkpoint. It rejects both checkpoint substitution and an account
-// whose embedded object ID does not reproduce the supplied address.
+// whose embedded object ID does not reproduce the supplied address. The
+// checkpoint must not be older than this resolver's fences, and a successful
+// read advances them to it.
 func (r *SimplifiedNativeResolver) ResolveNativeAtCheckpoint(ctx context.Context, account string, checkpoint *nativev1.DNSCheckpointV1) (*nativev1.NativeStateV1, bool, error) {
 	if r == nil || ctx == nil || checkpoint == nil || checkpoint.Workchain != -1 || checkpoint.Sequence == 0 ||
 		len(checkpoint.RootHash) != 32 || len(checkpoint.FileHash) != 32 {
 		return nil, false, errors.New("invalid DNS Native checkpoint request")
-	}
-	canonical, err := CanonicalAddress(account)
-	if err != nil {
-		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadAction, "invalid DNS Native account", err)
 	}
 	r.mu.Lock()
 	if checkpoint.Sequence < r.highWater {
@@ -66,6 +64,45 @@ func (r *SimplifiedNativeResolver) ResolveNativeAtCheckpoint(ctx context.Context
 		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadSequence, "DNS Native checkpoint regressed", nil)
 	}
 	r.mu.Unlock()
+	state, found, err := r.readNativeAtCheckpoint(ctx, account, checkpoint)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := r.commitCheckpoint(checkpoint.Sequence); err != nil {
+		return nil, false, err
+	}
+	return state, found, nil
+}
+
+// resolveNativeAtAdmittedCheckpoint reads like ResolveNativeAtCheckpoint at a
+// checkpoint admitCheckpoint already checked against this resolver's fences:
+// a Service Actor session's own checkpoint. The fences moving past it since
+// the session opened (another process, or a later session, observed a newer
+// checkpoint) is not a regression of this read and does not refuse it. A
+// validated read raises the fences to the checkpoint when they are below
+// it, and never lowers them.
+func (r *SimplifiedNativeResolver) resolveNativeAtAdmittedCheckpoint(ctx context.Context, account string, checkpoint *nativev1.DNSCheckpointV1) (*nativev1.NativeStateV1, bool, error) {
+	if r == nil || ctx == nil || checkpoint == nil || checkpoint.Workchain != -1 || checkpoint.Sequence == 0 ||
+		len(checkpoint.RootHash) != 32 || len(checkpoint.FileHash) != 32 {
+		return nil, false, errors.New("invalid DNS Native checkpoint request")
+	}
+	state, found, err := r.readNativeAtCheckpoint(ctx, account, checkpoint)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := r.raiseCheckpoint(checkpoint.Sequence); err != nil {
+		return nil, false, err
+	}
+	return state, found, nil
+}
+
+// readNativeAtCheckpoint is the quorum read and exact decode of both
+// resolutions at a checkpoint; it consults no fence.
+func (r *SimplifiedNativeResolver) readNativeAtCheckpoint(ctx context.Context, account string, checkpoint *nativev1.DNSCheckpointV1) (*nativev1.NativeStateV1, bool, error) {
+	canonical, err := CanonicalAddress(account)
+	if err != nil {
+		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadAction, "invalid DNS Native account", err)
+	}
 	vote, _, err := quorumRead(ctx, r.chain.nodes, r.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
 		return readNativeAccountAt(ctx, node, canonical, checkpoint.Sequence, r.network, r.locator.CodeHash)
 	})
@@ -77,9 +114,6 @@ func (r *SimplifiedNativeResolver) ResolveNativeAtCheckpoint(ctx context.Context
 		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadSequence, "DNS and Native checkpoint hashes differ", nil)
 	}
 	if !vote.Found {
-		if err := r.commitCheckpoint(checkpoint.Sequence); err != nil {
-			return nil, false, err
-		}
 		return nil, false, nil
 	}
 	data, err := decodeCellBOC(vote.Data)
@@ -101,9 +135,6 @@ func (r *SimplifiedNativeResolver) ResolveNativeAtCheckpoint(ctx context.Context
 	state.Reference = &nativev1.ChainReference{Workchain: r.locator.Workchain, Account: canonical,
 		LogicalTime: lt, TransactionHash: "sha256:" + hex.EncodeToString(txHash), ContractCodeHash: identity.CodeHash,
 		FinalizedCheckpoint: checkpoint.Sequence}
-	if err := r.commitCheckpoint(checkpoint.Sequence); err != nil {
-		return nil, false, err
-	}
 	return state, true, nil
 }
 
@@ -169,6 +200,49 @@ func (r *SimplifiedNativeResolver) resolveFinalizedState(ctx context.Context, ob
 		return nil, false, time.Time{}, err
 	}
 	return state, true, observation.observedAt, nil
+}
+
+// admitCheckpoint refuses a freshly observed finalized checkpoint below this
+// resolver's fences (in memory, and durable across every process sharing
+// the file) and records nothing: the fences advance only after a complete
+// account observation validates. A Service Actor session is opened only at
+// a checkpoint this admits.
+func (r *SimplifiedNativeResolver) admitCheckpoint(value uint64) error {
+	if r == nil {
+		return errors.New("simplified Native resolver is not configured")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if value == 0 || value < r.highWater {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native finalized checkpoint regressed", nil)
+	}
+	if r.checkpoint == nil {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native durable checkpoint is unavailable", nil)
+	}
+	if err := r.checkpoint.check(value); err != nil {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native durable checkpoint rejected observation", err)
+	}
+	return nil
+}
+
+// raiseCheckpoint records a validated observation at an admitted checkpoint:
+// the fences rise to it when below it and are otherwise unchanged.
+func (r *SimplifiedNativeResolver) raiseCheckpoint(value uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if value == 0 {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native finalized checkpoint is zero", nil)
+	}
+	if r.checkpoint == nil {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native durable checkpoint is unavailable", nil)
+	}
+	if err := r.checkpoint.raise(value); err != nil {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native durable checkpoint rejected observation", err)
+	}
+	if value > r.highWater {
+		r.highWater = value
+	}
+	return nil
 }
 
 func (r *SimplifiedNativeResolver) commitCheckpoint(value uint64) error {

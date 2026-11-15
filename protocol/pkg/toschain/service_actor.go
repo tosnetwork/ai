@@ -112,7 +112,10 @@ type ServiceActorSession struct {
 }
 
 // Begin opens a session at a fresh finalized checkpoint, refusing a
-// checkpoint older than one already served.
+// checkpoint older than one already served: older than the Service Actor
+// fence or the registry fence, which other processes sharing the state
+// directory advance too. Reads inside the session are then taken at that
+// checkpoint and are not refused when the fences move on.
 func (r *ServiceActorReader) Begin(ctx context.Context) (*ServiceActorSession, error) {
 	if r == nil || ctx == nil {
 		return nil, errors.New("Service Actor reader is not configured")
@@ -125,6 +128,13 @@ func (r *ServiceActorReader) Begin(ctx context.Context) (*ServiceActorSession, e
 	defer r.mu.Unlock()
 	if observation.seqno == 0 || observation.seqno < r.highWater {
 		return nil, nativecore.NewProtocolError(nativecore.ErrBadSequence, "Service Actor finalized checkpoint regressed", nil)
+	}
+	// The session's registry reads are taken at this checkpoint and are not
+	// refused when the registry fences move on later, so the checkpoint is
+	// checked against them here: a session never opens below what any
+	// process sharing them recorded.
+	if err := r.registry.admitCheckpoint(observation.seqno); err != nil {
+		return nil, err
 	}
 	if err := r.checkpoint.checkAndAdvance(observation.seqno); err != nil {
 		return nil, nativecore.NewProtocolError(nativecore.ErrBadSequence, "Service Actor durable checkpoint rejected observation", err)
@@ -205,7 +215,10 @@ func (s *ServiceActorSession) ResolveRegistry(ctx context.Context, objectID stri
 	if err != nil {
 		return nil, false, err
 	}
-	state, found, err := registry.ResolveNativeAtCheckpoint(ctx, identity.Address, &nativev1.DNSCheckpointV1{Workchain: -1,
+	// The checkpoint was checked against the registry fences when the
+	// session opened; a fence that moved on since then does not make a read
+	// at it a regression. The validated read raises the fences to it.
+	state, found, err := registry.resolveNativeAtAdmittedCheckpoint(ctx, identity.Address, &nativev1.DNSCheckpointV1{Workchain: -1,
 		Sequence: s.seqno, RootHash: root[:], FileHash: file[:]})
 	if err != nil || !found {
 		return state, found, err
