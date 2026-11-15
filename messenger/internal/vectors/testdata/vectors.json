@@ -1,0 +1,113 @@
+[
+  {
+    "name": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"}",
+    "canonical_sha256": "sha256:f24dcc0e35921e3b0fa9be623934afde6e68a6e7d7893f8cef6c1828644ad5dc",
+    "digest": "sha256:f24dcc0e35921e3b0fa9be623934afde6e68a6e7d7893f8cef6c1828644ad5dc"
+  },
+  {
+    "name": "descriptor-policy",
+    "wire": "{\"schema\":\"tos.messaging.descriptor-policy.v1\",\"max_envelope_bytes\":131072,\"max_lifetime_seconds\":86400,\"allow_https_endpoint\":true,\"require_adnl\":false}",
+    "canonical_sha256": "sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a",
+    "digest": "sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a"
+  },
+  {
+    "name": "empty-relay-set",
+    "wire": "",
+    "canonical_sha256": "",
+    "digest": "sha256:09814ff3195302b0b11123e0b08daca08ec8874e4653d866aec0ece6ba654ade"
+  },
+  {
+    "name": "contact-descriptor",
+    "wire": "{\"schema\":\"tos.messaging.contact-descriptor.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"delegation_digest\":\"sha256:f24dcc0e35921e3b0fa9be623934afde6e68a6e7d7893f8cef6c1828644ad5dc\",\"supported_messaging_versions\":[1],\"supported_a2a_versions\":[\"0.3\"],\"supported_mcp_versions\":[\"2025-06-18\"],\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"optional_https_endpoint\":\"https://endpoint.example/messaging\",\"prekey_bundle_digest\":\"sha256:7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a\",\"mailbox_relay_set_digest\":\"sha256:09814ff3195302b0b11123e0b08daca08ec8874e4653d866aec0ece6ba654ade\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\",\"maximum_envelope_bytes\":65536,\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"c5d68a0e4ff6c2d57323f1150544d2b6f4f56c6631d78ed769b7562b47a91fd4c59d755728204196e04c327681e1d1f4fe4aa82a89fa0070cec4cd68adf4100e\"}",
+    "canonical_sha256": "sha256:d40a84e2ca2c34debe12c9a61bcd135aa0067cb13ebe8ed298e22342ca1344f2",
+    "digest": "sha256:d40a84e2ca2c34debe12c9a61bcd135aa0067cb13ebe8ed298e22342ca1344f2"
+  },
+  {
+    "name": "dht-locator",
+    "wire": "017e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46ad40a84e2ca2c34debe12c9a61bcd135aa0067cb13ebe8ed298e22342ca1344f2000000006b49d200000000006b49e010002468747470733a2f2f6469726563746f72792e6578616d706c652f64657363726970746f72feddce52c3e27280e38b634a0a7500d1a6be7932d1f261de1c30c243f0aab8ea98df2c7998fe342f7c4b53259d83e4200716a0cedcf32e69568b83d285afba0b",
+    "canonical_sha256": "sha256:5cf16fbd026af8d101d8973db44148d6a374200c244fec191bfdd4fe2a2d679e"
+  },
+  {
+    "name": "prekey-bundle",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"}",
+    "canonical_sha256": "sha256:b0587149d2503cd0caed4001a9b819886789266efc6b7dd77156fd5b1440b488",
+    "digest": "sha256:b0587149d2503cd0caed4001a9b819886789266efc6b7dd77156fd5b1440b488"
+  },
+  {
+    "name": "prekey-bundle-set",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle-set.v2\",\"bundles\":[{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"},{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_7777777777777777777777777777777777777777777777777777777777777777\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6419f19cfda7944694903f03008a5c56fc06e449cc305c312be7bdabe6f8e2a9b7be4445bf75c0097b0ee602aa6c1c85fb5085b59fc137e446d3cef75c276800\"}]}",
+    "canonical_sha256": "sha256:71cf1c5af51ca0e86181467a8b016b4fec7abb82678650e01d0b52b04fffa087",
+    "digest": "sha256:71cf1c5af51ca0e86181467a8b016b4fec7abb82678650e01d0b52b04fffa087"
+  },
+  {
+    "name": "encrypted-attachment-candidate",
+    "wire": "{\"manifest\":{\"schema\":\"tos.messaging.encrypted-attachment.v1\",\"algorithm\":\"AES-256-GCM\",\"attachment_id_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"nonce_prefix_hex\":\"5d5d5d5d\",\"plaintext_bytes\":25,\"chunk_bytes\":262144,\"metadata_digest\":\"sha256:4ed26b5a09fed613cd9a7adfd58b900be2f01c2656964faf5dc611091c24e2ca\",\"chunk_digests\":[\"sha256:d265e0cc9657e7b4411b32919015352994a36f5a2072a084d611f437b19c68a5\"]},\"key_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"metadata\":{\"filename\":\"vector.txt\",\"media_type\":\"text/plain\",\"plaintext_digest\":\"sha256:d828b946880cc1e577cee7bb1b5df1db56d960d1c315fd0e754d6fb419d7e8e5\",\"expires_at_unix\":1800003600}}",
+    "canonical_sha256": "sha256:bfdf4d5b079462e31a59f2981734590fd0c430c3ce9784d2b1e3f9e9d5847b7f",
+    "digest": "sha256:bfdf4d5b079462e31a59f2981734590fd0c430c3ce9784d2b1e3f9e9d5847b7f"
+  },
+  {
+    "name": "mls-device-credential-candidate",
+    "wire": "{\"schema\":\"tos.messaging.mls-device-credential.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"device_set_digest\":\"sha256:71cf1c5af51ca0e86181467a8b016b4fec7abb82678650e01d0b52b04fffa087\",\"leaf_signature_public_key_hex\":\"17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce\",\"cipher_suite\":1,\"key_package_base64\":\"Zml4ZWQgUkZDIDk0MjAgS2V5UGFja2FnZSBjYW5kaWRhdGUgYnl0ZXM=\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"5a15e8b8330c4efa1ef4c698e0407653fcdb085abf1bd6642c944763cb034e1891bd130f4b531a4cf4515584bb6e1a458bf7f7a8db992e2ac519bfe04a8e390c\"}",
+    "canonical_sha256": "sha256:8703b26dbe6981cb153df7c11cef171cb10f43b0c7491afe8197ec7e860403df",
+    "digest": "sha256:8703b26dbe6981cb153df7c11cef171cb10f43b0c7491afe8197ec7e860403df"
+  },
+  {
+    "name": "mls-basic-credential-identity-candidate",
+    "wire": "746f732e6d6573736167696e672e6d6c732d62617369632d63726564656e7469616c2e76310000000025746f732e6d6573736167696e672e6d6c732d62617369632d63726564656e7469616c2e763100000009746f732d6c6f63616c00000020aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00000020bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb000000466167656e745f32323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232000000446d65705f37653033666538373431353437656433353330616533386462633639306134323237336462386463653037656464613035356633303964323666323466343661000000446465765f34343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434000000477368613235363a373163663163356166353163613065383631383134363761386230313662346665633761626238323637383635306530316430623532623034666666613038370000002017cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce00000001",
+    "canonical_sha256": "sha256:011d840437492c3e743b3ffb0a64a037c01f108ce6fd0341079962cb3eb1fafd"
+  },
+  {
+    "name": "mls-group-id-candidate",
+    "wire": "f4c2ecced7e470474826e8c02e983104d6133868d83381ddc7fb9b600b42754b",
+    "canonical_sha256": "sha256:f4c2ecced7e470474826e8c02e983104d6133868d83381ddc7fb9b600b42754b"
+  },
+  {
+    "name": "e2ee-binding",
+    "wire": "746f732e6d6573736167696e672e653265652d62696e64696e672e76320000000009746f732d6c6f63616c00000020aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00000020bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb00000023746f732e6d6573736167696e672e653265652e6578616d706c652d73756974652e763100000045636f6e765f31313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131000000466167656e745f32323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232000000446d65705f37653033666538373431353437656433353330616533386462633639306134323237336462386463653037656464613035356633303964323666323466343661000000446465765f34343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434000000466167656e745f35353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535000000446d65705f36363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636000000446465765f37373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737",
+    "canonical_sha256": "sha256:23766b64e7306622a1b65906d0cb930c436fff15608134fe1af7ca0ba8e7802b"
+  },
+  {
+    "name": "messaging-event",
+    "wire": "{\"schema\":\"tos.messaging.event.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"event_id\":\"evt_907a3ee25f59981718c2021d8dedd81451f45159878e7fc97b95201d216e0614\",\"sender_agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"sender_messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"sender_device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"created_at_unix\":1800000010,\"event_kind\":\"text\",\"payload_schema\":\"tos.messaging.payload.text.v1\",\"content_base64\":\"dG9zLm1lc3NhZ2luZy5wYXlsb2FkLnYxAHRvcy5tZXNzYWdpbmcucGF5bG9hZC50ZXh0LnYxAAAAABl0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04AAAABWhlbGxvAAAAAA==\",\"rendering\":\"hello\"}",
+    "canonical_sha256": "sha256:907a3ee25f59981718c2021d8dedd81451f45159878e7fc97b95201d216e0614",
+    "digest": "evt_907a3ee25f59981718c2021d8dedd81451f45159878e7fc97b95201d216e0614"
+  },
+  {
+    "name": "relay-envelope",
+    "wire": "{\"schema\":\"tos.messaging.relay-envelope.v1\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"message_id\":\"msg_6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b\",\"ciphertext_base64\":\"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5\",\"ciphertext_size\":42,\"expires_at_unix\":1800003600,\"storage_token\":\"quota-token.1\"}",
+    "canonical_sha256": "sha256:48dc40554b826d27199b5ad4405fe21b08fde8368644a71d5a9ee8cb129eebc9"
+  },
+  {
+    "name": "stored-ack",
+    "wire": "{\"schema\":\"tos.messaging.stored-ack.v1\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"message_id\":\"msg_6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b\",\"ciphertext_digest\":\"sha256:1a77b7fec89866d1b530d5fd4d0e4fdfdd42bfdbc5c25d26f31e530d9ee72a02\",\"stored_at_unix\":1800000011,\"expires_at_unix\":1800003600,\"relay_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"relay_signature_hex\":\"5860de18009e2d715d173563fa7626929fbf7e7e1319ede45b84a02c337ad4da6b18f5690fc523823f064c145c6cf228ff8cf2b837d80fa2194c267dc21b6602\"}",
+    "canonical_sha256": "sha256:465ec6e1c3061c251e6ce3a79eb40832dfdda63d3f9b92a359676de5a0088633"
+  },
+  {
+    "name": "mailbox-capability-grant",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-capability-grant.v1\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"relay_public_key_hex\":\"c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f73242\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"capability_public_key_hex\":\"d759793bbc13a2819a827c76adb6fba8a49aee007f49f2d0992d99b825ad2c48\",\"operations\":[\"delete\",\"deposit\",\"read\"],\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6d9403abcdbba856adc46cc3565f06522472a739186cc035c70a28946f77cae073d332acf789368b38ffd78bcd31166c6a8667b6dd0e782f07b1783d11fbfa04\"}",
+    "canonical_sha256": "sha256:4e88e4e90d20a64fc99396aecdb422b4f6dbb9ed59437b493613307504d61252",
+    "digest": "sha256:4e88e4e90d20a64fc99396aecdb422b4f6dbb9ed59437b493613307504d61252"
+  },
+  {
+    "name": "mailbox-access-request",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-access-request.v1\",\"grant_digest\":\"sha256:4e88e4e90d20a64fc99396aecdb422b4f6dbb9ed59437b493613307504d61252\",\"operation\":\"read\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"body_digest\":\"sha256:c1659b66de6302a3c67ef35d523778c8ad1eaef52e2821f46c14093b7d40fddf\",\"nonce_hex\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"issued_at_unix\":1800000010,\"expires_at_unix\":1800000070,\"capability_signature_hex\":\"2c87f75f6fff8c0cf5a6a7c58c962398628bce4da32312ddc3f9f92fea0ee41d4ca95ff96c10d52b7df1103643608ce6361842e6f25b7d9c8e519d663fd1db02\"}",
+    "canonical_sha256": "sha256:ccc34aa73527a52f5b66d983b95adf9fe73452a54b55cfc3e8061d7a37a42bdc"
+  },
+  {
+    "name": "conformance-report",
+    "wire": "{\"schema\":\"tos.messaging.conformance-report.v1\",\"implementation\":\"example.org/independent-messenger\",\"implementation_commit\":\"release-1\",\"toolchain\":\"rustc-1.90\",\"run_at_unix\":1800000012,\"artifacts\":[{\"name\":\"adversarial\",\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},{\"name\":\"e2ee\",\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"},{\"name\":\"objects\",\"sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\"}],\"positive_checks\":12,\"adversarial_checks\":44,\"consumer_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"signature_hex\":\"004f9c7cd2acc10590948f93e9f2d9cdc8725b1acc07cd11001f36d6ce3c005772ea459f3d70adad9abb0f09f6f0cdfed52c234cf859124643c1a57a626e1b0c\"}",
+    "canonical_sha256": "sha256:f7212dde836439ded68e0910fd4f3f35d6e0fea15898465c9b59f698de08bf43"
+  },
+  {
+    "name": "fault-response",
+    "wire": "{\"schema\":\"tos.messaging.fault-response.v1\",\"code\":\"rate-limited\",\"retry_after_seconds\":30}",
+    "canonical_sha256": "sha256:627a40a5aab6232c569d70635d7445449a647392960a41299bbec16c8a321d57"
+  },
+  {
+    "name": "reachability-policy",
+    "wire": "746f732e6d6573736167696e672e72656163686162696c6974792d706f6c6963792e76340000000024746f732e6d6573736167696e672e72656163686162696c6974792d706f6c6963792e7634000000000000001e0000000000000003000000000000000300000000000000140000000000001f40000000000000251c000000000000232800000000000023280000000000002328000000000000232800000000000023280000000000002328000000000000000a000000000000000a000000000000000a000000000000000a000000020000040000001ff000000001003d090100000000001e8480000000000000009600000001000000147372765f3339306135393532373632636265653400000003000000477368613235363a37643837393930396330656531643334356637333566326135376362633237666564383034633937303661313736303665356364393537343263356530616162000000477368613235363a39623532343733316364346137353437663534376664336335363437626339356166366635643965623537643634323930633832373338653862393163376632000000477368613235363a61623030616234613966663034323230663066656565326339343763643065316536373765316461343362373865316362643961386363363838646239316637",
+    "canonical_sha256": "sha256:2c4203b8d3a0c9e086c09fa5aa038567de655cf6b3442e5e6ffa99c24eacc971",
+    "digest": "sha256:2c4203b8d3a0c9e086c09fa5aa038567de655cf6b3442e5e6ffa99c24eacc971"
+  }
+]

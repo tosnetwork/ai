@@ -1,0 +1,189 @@
+{
+  "schema": "tos.messaging.reachability-policy.v4",
+  "min_samples_per_cell": 30,
+  "min_operators_per_cell": 3,
+  "min_sites_per_cell": 3,
+  "max_trials_per_operator_per_cell": 20,
+  "direct_viable_rate": 0.8,
+  "tunnel_viable_rate": 0.95,
+  "min_direct_survival_rate": 0.9,
+  "min_tunnel_survival_rate": 0.9,
+  "min_reconnect_success_rate": 0.9,
+  "min_sized_echo_success_rate": 0.9,
+  "min_rldp_transfer_success_rate": 0.9,
+  "min_rldp_same_transfer_recovery_rate": 0.9,
+  "min_survival_samples_per_cell": 10,
+  "min_reconnect_samples_per_mobility_cell": 10,
+  "min_sized_echo_samples_per_cell": 10,
+  "min_rldp_transfer_samples_per_cell": 10,
+  "required_sized_echo_payloads": [
+    1024,
+    8176
+  ],
+  "required_rldp_transfers": [
+    {
+      "payload_bytes": 4000001,
+      "interrupt_after_bytes": 2000000,
+      "min_interruption_millis": 150
+    }
+  ],
+  "coordinators": [
+    "srv_0a21b88b9a269533"
+  ],
+  "required_scenarios": [
+    {
+      "initiator": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "endpoint-independent",
+        "carrier": "consumer-isp",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "desktop",
+        "mapping_assistance": "none"
+      },
+      "responder": {
+        "address_family": "ipv4",
+        "public_reachability": "public",
+        "nat_behavior": "none",
+        "carrier": "datacenter",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "server",
+        "mapping_assistance": "none"
+      }
+    },
+    {
+      "initiator": {
+        "address_family": "ipv4",
+        "public_reachability": "public",
+        "nat_behavior": "none",
+        "carrier": "datacenter",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "server",
+        "mapping_assistance": "none"
+      },
+      "responder": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "endpoint-independent",
+        "carrier": "consumer-isp",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "desktop",
+        "mapping_assistance": "none"
+      }
+    },
+    {
+      "initiator": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "address-and-port-dependent",
+        "carrier": "consumer-isp",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "desktop",
+        "mapping_assistance": "none"
+      },
+      "responder": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "symmetric",
+        "carrier": "carrier-grade-nat",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "edge-arm",
+        "mapping_assistance": "none"
+      }
+    },
+    {
+      "initiator": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "symmetric",
+        "carrier": "carrier-grade-nat",
+        "udp_policy": "rate-limited",
+        "mobility": "stationary",
+        "endpoint_class": "edge-riscv",
+        "mapping_assistance": "none"
+      },
+      "responder": {
+        "address_family": "ipv4",
+        "public_reachability": "public",
+        "nat_behavior": "none",
+        "carrier": "datacenter",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "server",
+        "mapping_assistance": "none"
+      }
+    },
+    {
+      "initiator": {
+        "address_family": "ipv6",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "symmetric",
+        "carrier": "mobile-carrier",
+        "udp_policy": "rate-limited",
+        "mobility": "wifi-to-mobile",
+        "endpoint_class": "mobile",
+        "mapping_assistance": "none"
+      },
+      "responder": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "address-and-port-dependent",
+        "carrier": "consumer-isp",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "desktop",
+        "mapping_assistance": "none"
+      }
+    },
+    {
+      "initiator": {
+        "address_family": "ipv6",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "address-dependent",
+        "carrier": "mobile-carrier",
+        "udp_policy": "rate-limited",
+        "mobility": "mobile-to-wifi",
+        "endpoint_class": "mobile",
+        "mapping_assistance": "none"
+      },
+      "responder": {
+        "address_family": "ipv6",
+        "public_reachability": "public",
+        "nat_behavior": "none",
+        "carrier": "datacenter",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "server",
+        "mapping_assistance": "none"
+      }
+    },
+    {
+      "initiator": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "endpoint-independent",
+        "carrier": "consumer-isp",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "edge-arm",
+        "mapping_assistance": "static-port-mapping"
+      },
+      "responder": {
+        "address_family": "ipv4",
+        "public_reachability": "behind-nat",
+        "nat_behavior": "symmetric",
+        "carrier": "carrier-grade-nat",
+        "udp_policy": "allowed",
+        "mobility": "stationary",
+        "endpoint_class": "edge-arm",
+        "mapping_assistance": "none"
+      }
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# Local state and build output
+/build/
+*.test
+/rust/openmls-driver/target/

@@ -1,0 +1,117 @@
+package localapi
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/firewall"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
+)
+
+func selfCheckTerms() *negotiation.Terms {
+	return &negotiation.Terms{
+		CapabilityID:           "cap_" + strings.Repeat("9", 64),
+		CapabilityVersion:      "1.0.0",
+		CapabilityClass:        "software.audit",
+		ProviderAgentID:        "agent_" + strings.Repeat("5", 64),
+		ManifestDigest:         "sha256:" + strings.Repeat("d", 64),
+		TransportBindingDigest: "sha256:" + strings.Repeat("e", 64),
+		Price: negotiation.Money{Asset: negotiation.Asset{
+			Network: negotiation.Network{
+				ID:              "tos-local",
+				GenesisRootHash: strings.Repeat("1", 64),
+				GenesisFileHash: strings.Repeat("2", 64),
+			},
+			Workchain: 0, AccountID: strings.Repeat("a", 64),
+			MasterCodeHash: "tvm-cell-sha256:" + strings.Repeat("b", 64),
+			WalletCodeHash: "tvm-cell-sha256:" + strings.Repeat("c", 64), Decimals: 6,
+		}, Atomic: "100"},
+		EscrowTermsDigest:   "sha256:" + strings.Repeat("f", 64),
+		DisputePolicyDigest: "sha256:" + strings.Repeat("1", 64),
+		NotAfterUnix:        1_800_000_000 + 3600,
+	}
+}
+
+// The daemon's own check: a stored approval whose structured fields reproduce
+// its identifier is presentable, and one whose summary was swapped for a gentler
+// one -- while the identifier still commits the real action -- is not. This is
+// what stops a runtime showing the owner a mild description of a harsher action.
+func TestApprovalReproducesID(t *testing.T) {
+	origins := []firewall.Origin{{
+		AgentID: "agent_" + strings.Repeat("2", 64), EndpointID: "mep_" + strings.Repeat("3", 64),
+		DeviceID: "dev_" + strings.Repeat("6", 64), EventID: "evt_" + strings.Repeat("4", 64),
+		ConversationID: "conv_" + strings.Repeat("5", 64), Kind: "text", ReceivedAtUnix: 1_800_000_000,
+	}}
+	terms := selfCheckTerms()
+	action := firewall.Action{
+		Effect: firewall.EffectSpend, Summary: "pay 100 for an audit",
+		DerivedFrom: origins, Terms: terms,
+	}
+	id, err := firewall.ActionID(action)
+	if err != nil {
+		t.Fatalf("action id: %v", err)
+	}
+	approval := eventlog.Approval{
+		ActionID: id, Effect: string(firewall.EffectSpend), Summary: action.Summary,
+		Origins: toApprovalOrigins(origins), Terms: terms,
+	}
+	if !approvalReproducesID(approval) {
+		t.Fatal("a faithful record did not reproduce its own identifier")
+	}
+
+	// The runtime shows a gentle summary while the identifier still commits the
+	// real one: the record no longer reproduces its identifier.
+	tampered := approval
+	tampered.Summary = "say hello"
+	if approvalReproducesID(tampered) {
+		t.Fatal("a swapped summary still reproduced the identifier")
+	}
+
+	// A swapped price is likewise caught: the terms are part of the identifier.
+	cheaper := *terms
+	cheaper.Price.Atomic = "1"
+	priceTampered := approval
+	priceTampered.Terms = &cheaper
+	if approvalReproducesID(priceTampered) {
+		t.Fatal("a swapped price still reproduced the identifier")
+	}
+
+	tool := firewall.Action{Effect: firewall.EffectToolCall, Summary: "invoke scanner",
+		IdempotencyKey: "idem_" + strings.Repeat("a", 64)}
+	toolID, err := firewall.ActionID(tool)
+	if err != nil {
+		t.Fatalf("tool action id: %v", err)
+	}
+	toolApproval := eventlog.Approval{ActionID: toolID, Effect: string(tool.Effect),
+		Summary: tool.Summary, IdempotencyKey: tool.IdempotencyKey}
+	if !approvalReproducesID(toolApproval) {
+		t.Fatal("a faithful tool approval did not reproduce its identifier")
+	}
+	toolApproval.IdempotencyKey = "idem_" + strings.Repeat("b", 64)
+	if approvalReproducesID(toolApproval) {
+		t.Fatal("a swapped tool idempotency key reproduced the identifier")
+	}
+
+	physical := firewall.Action{Effect: firewall.EffectPhysicalIO, Summary: "read local sensor",
+		IdempotencyKey: "idem_" + strings.Repeat("c", 64),
+		Physical: &firewall.PhysicalOperation{CapabilityID: "cap_" + strings.Repeat("d", 64),
+			Tool: "i2c", Operation: "read",
+			ArgumentsDigest: "sha256:16384135fc236bb03583cf3024b9fb573cc1ae45f908a98d0601d2ab45f8cfbe",
+			ArgumentsJSON:   `{"action":"read"}`}}
+	physicalID, err := firewall.ActionID(physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	physicalApproval := eventlog.Approval{ActionID: physicalID, Effect: string(physical.Effect),
+		Summary: physical.Summary, IdempotencyKey: physical.IdempotencyKey,
+		Physical: toApprovalPhysical(physical.Physical)}
+	if !approvalReproducesID(physicalApproval) {
+		t.Fatal("a faithful physical approval did not reproduce its identifier")
+	}
+	physicalApproval.Physical.ArgumentsDigest = "sha256:fc8d3bb5fdbbf709135d031562103a482a000d9f0385762020409ca235915f85"
+	physicalApproval.Physical.ArgumentsJSON = `{"action":"read","length":2}`
+	if approvalReproducesID(physicalApproval) {
+		t.Fatal("swapped physical arguments reproduced the identifier")
+	}
+}

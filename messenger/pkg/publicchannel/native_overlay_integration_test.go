@@ -1,0 +1,792 @@
+package publicchannel
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"encoding/hex"
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/tosutils-go/adnl"
+	"github.com/tosnetwork/tosutils-go/adnl/address"
+	"github.com/tosnetwork/tosutils-go/adnl/overlay"
+)
+
+func TestNativeOverlayIDMatchesDHTNodeDerivation(t *testing.T) {
+	if publicChannelRaceEnabled {
+		t.Skip("tosutils-go's TL serializer is incompatible with race/checkptr; make test-adnl runs this test without race")
+	}
+	channelID := "channel_000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+	wantHex := "e1d36115478b0ec32f5aafc4ce748df227a2578d3a727b6542296474974aa64f"
+	got, err := NativeOverlayID(channelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(got) != wantHex {
+		t.Fatalf("native Overlay ID = %x, want %s", got, wantHex)
+	}
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x30}, ed25519.SeedSize))
+	node, err := overlay.NewNode(mustDecodeHex(t, channelID[len("channel_"):]), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(node.Overlay, got) {
+		t.Fatalf("DHT node Overlay = %x, carrier Overlay = %x", node.Overlay, got)
+	}
+}
+
+func mustDecodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+	raw, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestNativeOverlayADNLRLDPHistoryRoundTrip(t *testing.T) {
+	if publicChannelRaceEnabled {
+		t.Skip("tosutils-go's TL serializer is incompatible with race/checkptr; make test-adnl runs this test without race")
+	}
+	profile, authority, authorityKey, publisher, publisherKey, delegations := storeFixture(t)
+	digest, _ := profile.Digest()
+	first := signedPost(t, profile, digest, publisher, publisherKey, 1, "", nil, channelNow, "native root")
+	firstID, _ := first.ID()
+	hide, err := SignEvent(Event{ChannelID: profile.ChannelID, ProfileDigest: digest,
+		PublisherAgentID: authority.AgentID, PublisherEndpointID: authority.EndpointID,
+		Sequence: 1, Parents: []string{firstID}, PublishedAtUnix: channelNow + 1,
+		Kind: KindHide, TargetEventID: firstID}, authorityKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hideID, _ := hide.ID()
+	now := time.Unix(int64(channelNow+2), 0)
+	want, err := VerifyHistory(profile, []Event{hide, first}, authority, delegations, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	available := map[string]Event{firstID: first, hideID: hide}
+	serverKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x31}, ed25519.SeedSize))
+	clientKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x32}, ed25519.SeedSize))
+
+	for attempt := 0; attempt < 2; attempt++ {
+		got := runNativeCarrierPair(t, profile, authority, delegations, now, serverKey, clientKey, want, available, first)
+		if got.Digest() != want.Digest() {
+			t.Fatalf("attempt %d history digest = %q, want %q", attempt, got.Digest(), want.Digest())
+		}
+	}
+}
+
+func TestNativeNodeDiscoversSyncsAndRestartsADNL(t *testing.T) {
+	if publicChannelRaceEnabled {
+		t.Skip("tosutils-go's TL serializer is incompatible with race/checkptr; make test-adnl runs this test without race")
+	}
+	profile, authority, _, publisher, publisherKey, delegations := storeFixture(t)
+	digest, _ := profile.Digest()
+	first := signedPost(t, profile, digest, publisher, publisherKey, 1, "", nil, channelNow, "node assembly")
+	want, err := VerifyHistory(profile, []Event{first}, authority, delegations, time.Unix(int64(channelNow+2), 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := func() time.Time { return time.Unix(int64(channelNow+2), 0) }
+	directory := &memoryNativeDirectory{records: make(map[string]NativeDiscoveredPeer)}
+	serverKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x41}, ed25519.SeedSize))
+	clientKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
+	serverStore := openAppliedNativeStore(t, profile, authority, delegations, now())
+	if _, _, err := serverStore.CommitHistory(profile, want.Events(), authority, delegations, now()); err != nil {
+		t.Fatal(err)
+	}
+	defer serverStore.Close()
+	clientRoot := filepath.Join(t.TempDir(), "store")
+	clientStore := openAppliedNativeStoreAt(t, clientRoot, profile, authority, delegations, now())
+	mirrorRoot := filepath.Join(t.TempDir(), "sites")
+	sitesPublisher := &countingSitesPublisher{bagID: strings.Repeat("cd", 32)}
+	clientMirror, err := OpenSitesMirror(mirrorRoot, sitesPublisher)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serverGateway := adnl.NewGateway(serverKey)
+	clientGateway := adnl.NewGateway(clientKey)
+	sitesHints := make(chan SitesHint, 1)
+	if err := serverGateway.StartServer(reserveNativeUDPAddress(t)); err != nil {
+		t.Fatal(err)
+	}
+	defer serverGateway.Close()
+	if err := clientGateway.StartServer(reserveNativeUDPAddress(t)); err != nil {
+		t.Fatal(err)
+	}
+	serverNode, err := NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+		Delegations: delegations, Store: serverStore, LocalKey: serverKey, Gateway: serverGateway,
+		Directory: directory, Now: now, OnSitesHint: func(_ string, hint SitesHint) error {
+			select {
+			case sitesHints <- hint:
+			default:
+			}
+			return nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverNode.Close()
+	clientNode, err := NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+		Delegations: delegations, Store: clientStore, LocalKey: clientKey, Gateway: clientGateway,
+		Directory: directory, Sites: clientMirror, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := serverNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitNativeHistory(t, ctx, clientStore, profile, authority, delegations, now(), want.Digest())
+	waitSitesPublications(t, ctx, sitesPublisher, 1)
+	select {
+	case hint := <-sitesHints:
+		if hint.HistoryDigest != want.Digest() || hint.BagID != sitesPublisher.bagID {
+			t.Fatalf("unexpected propagated Sites hint: %#v", hint)
+		}
+	case <-ctx.Done():
+		t.Fatal("Sites BagID hint was not propagated over native Overlay")
+	}
+	clientNode.Close()
+	if err := clientMirror.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientGateway.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	clientStore = openAppliedNativeStoreAt(t, clientRoot, profile, authority, delegations, now())
+	defer clientStore.Close()
+	clientMirror, err = OpenSitesMirror(mirrorRoot, sitesPublisher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientMirror.Close()
+	clientGateway = adnl.NewGateway(clientKey)
+	if err := clientGateway.StartServer(reserveNativeUDPAddress(t)); err != nil {
+		t.Fatal(err)
+	}
+	defer clientGateway.Close()
+	clientNode, err = NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+		Delegations: delegations, Store: clientStore, LocalKey: clientKey, Gateway: clientGateway,
+		Directory: directory, Sites: clientMirror, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientNode.Close()
+	peers, found, events, gotDigest := clientNode.Stats()
+	if peers != 0 || !found || events != 1 || gotDigest != want.Digest() {
+		t.Fatalf("restarted node stats = peers=%d found=%t events=%d digest=%q", peers, found, events, gotDigest)
+	}
+	if err := clientNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clientNode.scheduleMirror(want)
+	clientNode.Close()
+	if sitesPublisher.Count() != 1 {
+		t.Fatalf("Sites history republished after durable restart: calls=%d", sitesPublisher.Count())
+	}
+}
+
+func TestNativeNodeSingleFlightsSameHeadAcrossADNLPeers(t *testing.T) {
+	if publicChannelRaceEnabled {
+		t.Skip("tosutils-go's TL serializer is incompatible with race/checkptr; make test-adnl runs this test without race")
+	}
+	profile, authority, _, publisher, publisherKey, delegations := storeFixture(t)
+	profileDigest, _ := profile.Digest()
+	event := signedPost(t, profile, profileDigest, publisher, publisherKey, 1, "", nil,
+		channelNow, "same Head from two native peers")
+	now := func() time.Time { return time.Unix(int64(channelNow+2), 0) }
+	want, err := VerifyHistory(profile, []Event{event}, authority, delegations, now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := &memoryNativeDirectory{records: make(map[string]NativeDiscoveredPeer)}
+	serverKeys := []ed25519.PrivateKey{
+		ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x51}, ed25519.SeedSize)),
+		ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x52}, ed25519.SeedSize)),
+	}
+	clientKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x53}, ed25519.SeedSize))
+
+	serverNodes := make([]*NativeNode, 0, len(serverKeys))
+	serverStores := make([]*Store, 0, len(serverKeys))
+	serverAddresses := make([]string, 0, len(serverKeys))
+	serverIDs := make([]string, 0, len(serverKeys))
+	for _, key := range serverKeys {
+		store := openAppliedNativeStore(t, profile, authority, delegations, now())
+		defer store.Close()
+		gateway := adnl.NewGateway(key)
+		listen := reserveNativeUDPAddress(t)
+		if err := gateway.StartServer(listen); err != nil {
+			t.Fatal(err)
+		}
+		defer gateway.Close()
+		node, err := NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+			Delegations: delegations, Store: store, LocalKey: key, Gateway: gateway,
+			Directory: directory, Now: now, Logf: t.Logf})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer node.Close()
+		serverStores = append(serverStores, store)
+		serverAddresses = append(serverAddresses, listen)
+		serverIDs = append(serverIDs, string(gateway.GetID()))
+		serverNodes = append(serverNodes, node)
+	}
+	clientStore := openAppliedNativeStore(t, profile, authority, delegations, now())
+	defer clientStore.Close()
+	clientGateway := adnl.NewGateway(clientKey)
+	if err := clientGateway.StartClient(); err != nil {
+		t.Fatal(err)
+	}
+	defer clientGateway.Close()
+	clientNode, err := NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+		Delegations: delegations, Store: clientStore, LocalKey: clientKey, Gateway: clientGateway,
+		Directory: directory, Now: now, Logf: t.Logf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientNode.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	clientAllowed := make(map[string]ed25519.PublicKey, len(serverKeys))
+	for index, key := range serverKeys {
+		clientAllowed[serverIDs[index]] = append(ed25519.PublicKey(nil), key.Public().(ed25519.PublicKey)...)
+		serverNodes[index].replaceAllowed(map[string]ed25519.PublicKey{
+			string(clientGateway.GetID()): append(ed25519.PublicKey(nil), clientKey.Public().(ed25519.PublicKey)...),
+		})
+	}
+	clientNode.replaceAllowed(clientAllowed)
+	for index, key := range serverKeys {
+		peer, err := clientGateway.RegisterClient(serverAddresses[index], key.Public().(ed25519.PublicKey))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pingCtx, pingCancel := context.WithTimeout(ctx, 3*time.Second)
+		_, err = peer.Ping(pingCtx)
+		pingCancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := clientNode.attach(peer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	serverCarriers := make([]*NativeCarrier, 0, len(serverNodes))
+	for {
+		peers, _, _, _ := clientNode.Stats()
+		serverCarriers = serverCarriers[:0]
+		for _, node := range serverNodes {
+			node.mutex.Lock()
+			carrier := node.carriers[string(clientGateway.GetID())]
+			node.mutex.Unlock()
+			if carrier != nil {
+				serverCarriers = append(serverCarriers, carrier)
+			}
+		}
+		if peers == len(serverNodes) && len(serverCarriers) == len(serverNodes) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("three-node carrier assembly incomplete: client_peers=%d server_carriers=%d", peers, len(serverCarriers))
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	for _, node := range serverNodes {
+		node.mutex.Lock()
+	}
+	var unlockOnce sync.Once
+	unlockProviders := func() {
+		unlockOnce.Do(func() {
+			for _, node := range serverNodes {
+				node.mutex.Unlock()
+			}
+		})
+	}
+	defer unlockProviders()
+	for index, node := range serverNodes {
+		history, _, err := serverStores[index].CommitHistory(profile, want.Events(), authority, delegations, now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		historyIndex, err := indexNativeHistory(history)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node.history, node.historyByID, node.historyFound = history, historyIndex, true
+	}
+	if err := serverCarriers[0].PublishHead(ctx, want.Head()); err != nil {
+		t.Fatal(err)
+	}
+	for nativeServedFetches(serverCarriers[0]) != 1 {
+		select {
+		case <-ctx.Done():
+			t.Fatal("no native history fetch started")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if err := serverCarriers[1].PublishHead(ctx, want.Head()); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		clientNode.mutex.Lock()
+		active, pending := len(clientNode.syncs.activeHeads), len(clientNode.syncs.pending)
+		clientNode.mutex.Unlock()
+		if active == 1 && pending == 1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("same-Head peer was not single-flighted: active=%d pending=%d", active, pending)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := nativeServedFetches(serverCarriers[0]) + nativeServedFetches(serverCarriers[1]); got != 1 {
+		t.Fatalf("same Head started %d native history fetches while the first was blocked", got)
+	}
+	unlockProviders()
+	waitNativeHistory(t, ctx, clientStore, profile, authority, delegations, now(), want.Digest())
+	if got := nativeServedFetches(serverCarriers[0]) + nativeServedFetches(serverCarriers[1]); got != 1 {
+		t.Fatalf("native history fetches = %d, want exactly one", got)
+	}
+	clientNode.mutex.Lock()
+	active, pending := len(clientNode.syncs.activeHeads), len(clientNode.syncs.pending)
+	clientNode.mutex.Unlock()
+	if active != 0 || pending != 0 {
+		t.Fatalf("successful native synchronization retained work: active=%d pending=%d", active, pending)
+	}
+}
+
+func nativeServedFetches(carrier *NativeCarrier) uint32 {
+	carrier.usageMutex.Lock()
+	defer carrier.usageMutex.Unlock()
+	return carrier.served
+}
+
+func TestNativeNodeADNLSitesCatchUpWithoutRLDPHistory(t *testing.T) {
+	if publicChannelRaceEnabled {
+		t.Skip("tosutils-go's TL serializer is incompatible with race/checkptr; make test-adnl runs this test without race")
+	}
+	profile, authority, _, publisher, publisherKey, delegations := storeFixture(t)
+	profileDigest, _ := profile.Digest()
+	event := signedPost(t, profile, profileDigest, publisher, publisherKey, 1, "", nil, channelNow, "Sites-only catch-up")
+	now := func() time.Time { return time.Unix(int64(channelNow+2), 0) }
+	want, err := VerifyHistory(profile, []Event{event}, authority, delegations, now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceParent := filepath.Join(t.TempDir(), "source")
+	if err := os.Mkdir(sourceParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source, _, err := ExportSitesSnapshot(sourceParent, profile, want, authority, delegations, now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloader := &copyingSitesDownloader{source: source}
+	catchUpRoot := filepath.Join(t.TempDir(), "catchup")
+	catchUp, err := OpenSitesCatchUp(catchUpRoot, downloader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := &memoryNativeDirectory{records: make(map[string]NativeDiscoveredPeer)}
+	serverKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x51}, ed25519.SeedSize))
+	clientKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x52}, ed25519.SeedSize))
+	serverStore := openAppliedNativeStore(t, profile, authority, delegations, now())
+	defer serverStore.Close()
+	clientRoot := filepath.Join(t.TempDir(), "client-store")
+	clientStore := openAppliedNativeStoreAt(t, clientRoot, profile, authority, delegations, now())
+	serverGateway := adnl.NewGateway(serverKey)
+	clientGateway := adnl.NewGateway(clientKey)
+	if err := serverGateway.StartServer(reserveNativeUDPAddress(t)); err != nil {
+		t.Fatal(err)
+	}
+	defer serverGateway.Close()
+	if err := clientGateway.StartServer(reserveNativeUDPAddress(t)); err != nil {
+		t.Fatal(err)
+	}
+	serverNode, err := NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+		Delegations: delegations, Store: serverStore, LocalKey: serverKey, Gateway: serverGateway,
+		Directory: directory, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverNode.Close()
+	clientNode, err := NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+		Delegations: delegations, Store: clientStore, LocalKey: clientKey, Gateway: clientGateway,
+		Directory: directory, SitesCatchUp: catchUp, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := serverNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverNode.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var carrier *NativeCarrier
+	for carrier == nil {
+		serverNode.mutex.Lock()
+		for _, item := range serverNode.carriers {
+			carrier = item
+			break
+		}
+		serverNode.mutex.Unlock()
+		if carrier != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("native Sites test did not establish an authenticated carrier")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	hint := SitesHint{Schema: SitesHintSchema, ChannelID: profile.ChannelID,
+		ProfileDigest: profileDigest, HistoryDigest: want.Digest(), BagID: strings.Repeat("ef", 32)}
+	if err := carrier.PublishSitesHint(ctx, hint); err != nil {
+		t.Fatal(err)
+	}
+	waitNativeHistory(t, ctx, clientStore, profile, authority, delegations, now(), want.Digest())
+	if downloader.Count() != 1 {
+		t.Fatalf("Sites-only native catch-up download calls=%d", downloader.Count())
+	}
+	clientNode.Close()
+	if err := catchUp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientGateway.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	clientStore = openAppliedNativeStoreAt(t, clientRoot, profile, authority, delegations, now())
+	defer clientStore.Close()
+	catchUp, err = OpenSitesCatchUp(catchUpRoot, downloader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catchUp.Close()
+	clientGateway = adnl.NewGateway(clientKey)
+	clientNode, err = NewNativeNode(NativeNodeConfig{Profile: profile, Authority: authority,
+		Delegations: delegations, Store: clientStore, LocalKey: clientKey, Gateway: clientGateway,
+		Directory: directory, SitesCatchUp: catchUp, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientNode.Close()
+	clientNode.mutex.Lock()
+	restored := clientNode.sitesFound && clientNode.sitesReceipt.Hint() == hint
+	clientNode.mutex.Unlock()
+	if !restored || downloader.Count() != 1 {
+		t.Fatalf("Sites-only restart locator restored=%t download calls=%d", restored, downloader.Count())
+	}
+}
+
+type memoryNativeDirectory struct {
+	mutex   sync.Mutex
+	records map[string]NativeDiscoveredPeer
+}
+
+type countingSitesPublisher struct {
+	mutex sync.Mutex
+	bagID string
+	calls int
+}
+
+func (p *countingSitesPublisher) Publish(ctx context.Context, snapshot string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if info, err := os.Lstat(snapshot); err != nil || !info.IsDir() {
+		return "", errors.New("Sites publisher received no snapshot")
+	}
+	p.mutex.Lock()
+	p.calls++
+	p.mutex.Unlock()
+	return p.bagID, nil
+}
+
+func (p *countingSitesPublisher) Count() int {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.calls
+}
+
+func (d *memoryNativeDirectory) Publish(_ context.Context, overlayKey []byte, key ed25519.PrivateKey,
+	list address.List, _ time.Duration) error {
+	if len(overlayKey) != 32 || len(key) != ed25519.PrivateKeySize {
+		return errors.New("invalid memory directory publication")
+	}
+	addresses := make([]string, 0, len(list.Addresses))
+	for _, item := range list.Addresses {
+		dial, err := address.DialString(item)
+		if err == nil {
+			addresses = append(addresses, dial)
+		}
+	}
+	if len(addresses) == 0 {
+		return errors.New("memory directory publication has no address")
+	}
+	public := key.Public().(ed25519.PublicKey)
+	d.mutex.Lock()
+	d.records[hex.EncodeToString(public)] = NativeDiscoveredPeer{PublicKey: append(ed25519.PublicKey(nil), public...), Addresses: addresses}
+	d.mutex.Unlock()
+	return nil
+}
+
+func (d *memoryNativeDirectory) Discover(context.Context, []byte) ([]NativeDiscoveredPeer, error) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	result := make([]NativeDiscoveredPeer, 0, len(d.records))
+	for _, record := range d.records {
+		result = append(result, record)
+	}
+	return result, nil
+}
+
+func openAppliedNativeStore(t *testing.T, profile Profile, authority identity.Delegation,
+	delegations map[string]identity.Delegation, now time.Time) *Store {
+	t.Helper()
+	return openAppliedNativeStoreAt(t, filepath.Join(t.TempDir(), "store"), profile, authority, delegations, now)
+}
+
+func openAppliedNativeStoreAt(t *testing.T, root string, profile Profile, authority identity.Delegation,
+	delegations map[string]identity.Delegation, now time.Time) *Store {
+	t.Helper()
+	store, err := OpenStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ApplyProfile(profile, authority, delegations, now); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	return store
+}
+
+func waitNativeHistory(t *testing.T, ctx context.Context, store *Store, profile Profile,
+	authority identity.Delegation, delegations map[string]identity.Delegation, now time.Time, want string) {
+	t.Helper()
+	for {
+		history, found, err := store.LoadHistory(profile, authority, delegations, now)
+		if err == nil && found && history.Digest() == want {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("native node history was not committed: found=%t err=%v", found, err)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func waitSitesPublications(t *testing.T, ctx context.Context, publisher *countingSitesPublisher, want int) {
+	t.Helper()
+	for publisher.Count() != want {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("Sites publication count=%d, want %d", publisher.Count(), want)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func runNativeCarrierPair(t *testing.T, profile Profile, authority identity.Delegation,
+	delegations map[string]identity.Delegation, now time.Time, serverKey, clientKey ed25519.PrivateKey,
+	want History, available map[string]Event, announced Event) History {
+	t.Helper()
+	listen := reserveNativeUDPAddress(t)
+	serverGateway := adnl.NewGateway(serverKey)
+	clientGateway := adnl.NewGateway(clientKey)
+	serverCarriers := make(chan *NativeCarrier, 1)
+	serverErrors := make(chan error, 1)
+	serverGateway.SetConnectionHandler(func(peer adnl.Peer) error {
+		guard, err := NewSyncGuard(profile.ChannelID, want.ProfileDigest(), DefaultSyncLimits())
+		if err != nil {
+			return err
+		}
+		carrier, err := NewNativeCarrier(peer, serverKey, NativeCarrierConfig{Profile: profile,
+			Authority: authority, Delegations: delegations, Now: func() time.Time { return now }, Guard: guard,
+			Provider: func(FetchRequest) (map[string]Event, error) { return available, nil },
+			OnEvent: func(_ string, event Event) error {
+				id, _ := event.ID()
+				wantID, _ := announced.ID()
+				if id != wantID {
+					return errors.New("native Overlay announced another Event")
+				}
+				select {
+				case serverErrors <- nil:
+				default:
+				}
+				return nil
+			},
+		})
+		if err != nil {
+			return err
+		}
+		select {
+		case serverCarriers <- carrier:
+		default:
+			carrier.Close()
+		}
+		return nil
+	})
+	if err := serverGateway.StartServer(listen); err != nil {
+		t.Fatal(err)
+	}
+	defer serverGateway.Close()
+	if err := clientGateway.StartClient(); err != nil {
+		t.Fatal(err)
+	}
+	defer clientGateway.Close()
+	peer, err := clientGateway.RegisterClient(listen, serverKey.Public().(ed25519.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientGuard, err := NewSyncGuard(profile.ChannelID, want.ProfileDigest(), DefaultSyncLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	heads := make(chan Head, 1)
+	sites := make(chan SitesHint, 1)
+	clientCarrier, err := NewNativeCarrier(peer, clientKey, NativeCarrierConfig{Profile: profile,
+		Authority: authority, Delegations: delegations, Now: func() time.Time { return now }, Guard: clientGuard,
+		OnHead: func(_ string, head Head) error {
+			select {
+			case heads <- head:
+			default:
+			}
+			return nil
+		},
+		OnSites: func(_ string, hint SitesHint) error {
+			select {
+			case sites <- hint:
+			default:
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientCarrier.Close()
+	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_, err = peer.Ping(pingCtx)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var serverCarrier *NativeCarrier
+	select {
+	case serverCarrier = <-serverCarriers:
+	case <-time.After(3 * time.Second):
+		t.Fatal("native Overlay server carrier was not assembled")
+	}
+	defer serverCarrier.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := serverCarrier.PublishHead(ctx, want.Head()); err != nil {
+		t.Fatal(err)
+	}
+	var head Head
+	select {
+	case head = <-heads:
+	case <-ctx.Done():
+		t.Fatal("native Overlay head announcement was not delivered")
+	}
+	hint := SitesHint{Schema: SitesHintSchema, ChannelID: profile.ChannelID,
+		ProfileDigest: want.ProfileDigest(), HistoryDigest: want.Digest(), BagID: strings.Repeat("ef", 32)}
+	if err := serverCarrier.PublishSitesHint(ctx, hint); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-sites:
+		if got != hint {
+			t.Fatalf("native Overlay Sites hint = %#v, want %#v", got, hint)
+		}
+	case <-ctx.Done():
+		t.Fatal("native Overlay Sites hint was not delivered")
+	}
+	if err := clientCarrier.PublishEvent(ctx, announced); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-serverErrors:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("native Overlay Event announcement was not delivered")
+	}
+
+	var known []Event
+	for {
+		request, needed, err := NextFetch(head, known)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !needed {
+			break
+		}
+		fetched, unavailable, err := clientCarrier.Fetch(ctx, request)
+		if err != nil || len(unavailable) != 0 {
+			t.Fatalf("native RLDP fetch: unavailable=%v err=%v", unavailable, err)
+		}
+		known, err = MergeFetchedEvents(known, fetched)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := VerifySyncedHistory(head, profile, known, authority, delegations, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func reserveNativeUDPAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.LocalAddr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return address
+}

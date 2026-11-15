@@ -1,0 +1,89 @@
+{
+  "schema": "tos.messaging.daemon-config.v10",
+
+  "state_dir": "/var/lib/tos-messengerd",
+  "socket_path": "/run/tos-messengerd/runtime.sock",
+  "owner_socket_path": "/run/tos-messengerd/owner.sock",
+
+  "network_id": "tos-local",
+  "genesis_root_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "genesis_file_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+
+  "registries": [
+    {
+      "code_hash": "tvm-cell-sha256:c42a36d160f60ec70926f63cb06d7429306e332b2e3752b275971ad628c0c9f1",
+      "code_boc": "te6cckEBAQEABwAACk1FU0cB2RT7gA==",
+      "workchain": 0
+    }
+  ],
+  "min_finalized_checkpoint": 0,
+
+  "chain_endpoints": [
+    "https://rpc-a.example.net",
+    "https://rpc-b.example.net",
+    "https://rpc-c.example.net"
+  ],
+  "chain_quorum": 2,
+  "native_registry_code_hash": "tvm-cell-sha256:c42a36d160f60ec70926f63cb06d7429306e332b2e3752b275971ad628c0c9f1",
+  "chain_checkpoint_path": "/var/lib/tos-messengerd/chain.checkpoint",
+  "delegation_path": "/etc/tos-messengerd/delegation.json",
+
+  "discovery": {
+    "mode": "tos-dht-https",
+    "dht_global_config_path": "/etc/tos-messengerd/tos-global.config.json",
+    "peers": [
+      {
+        "agent_id": "agent_5555555555555555555555555555555555555555555555555555555555555555",
+        "delegation_path": "/etc/tos-messengerd/peers/agent-5555.json",
+        "descriptor_policy_path": "/etc/tos-messengerd/peers/agent-5555-policy.json"
+      }
+    ],
+    "refresh_interval_seconds": 300,
+    "refresh_lead_seconds": 300,
+    "https_request_timeout_seconds": 10,
+    "https_connect_timeout_seconds": 5
+  },
+
+  "contact_dns": {
+    "base_url": "https://native.example.net",
+    "bearer_token_file": "/etc/tos-messengerd/native-dns.token",
+    "timeout_seconds": 30
+  },
+
+  "publication": {
+    "mode": "none"
+  },
+
+  "agent_id": "agent_2222222222222222222222222222222222222222222222222222222222222222",
+  "endpoint_id": "mep_3333333333333333333333333333333333333333333333333333333333333333",
+  "device_id": "dev_4444444444444444444444444444444444444444444444444444444444444444",
+
+  "owner_public_key": "d8ba1b8b57cd5c9d5aa63c56e4ba0fa14d0fbbc9d3f5e0e9c11d0af9b4f4c2b7",
+
+  "admission": {
+    "rule": "allow-list",
+    "unknown": "invite-or-hold",
+    "known_agent_ids": [],
+    "blocked_agent_ids": [],
+    "max_content_bytes": 65536,
+    "max_clock_skew_seconds": 300
+  },
+
+  "firewall": {
+    "unattended_ceiling": "message",
+    "own_initiative_ceiling": "tool-call"
+  },
+
+  "transport": "none",
+
+  "agent_packet_receiver_socket": "/run/openfox/tos-service-provider.sock",
+  "mldsa44_verifier": {
+    "binary": "/usr/local/libexec/tos-service/tosctl",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "agent_packet_receiver_timeout_seconds": 30,
+
+
+  "sweep_interval_seconds": 5,
+  "maintenance_interval_seconds": 3600
+}
