@@ -1,0 +1,671 @@
+# Agent Packet Relay V1
+
+Agent Packet Relay V1 is a cross-host Carrier for [Agent Packet V1](AGENT_PACKET_V1.md):
+an end-to-end-encrypted store-and-forward mailbox. A sender seals one exact
+signed Agent Packet V1 JSON to an encryption key the recipient Agent
+published, deposits the sealed envelope at a relay the recipient chose, and
+the recipient fetches, opens, verifies, stores and then acknowledges it.
+
+**Status: ⬜ Design and frozen vectors only.** This document, the reference
+codec `protocol/pkg/agentpacketseal` and the corpus
+`spec/test-vectors/agent-packet-relay-v1.json` exist. No relay program, no
+OpenFox client and no cross-host evidence exist yet; section 12 lists what
+those must show.
+
+The key words MUST, MUST NOT, SHOULD and MAY are normative.
+
+## 1. Authority
+
+The relay has no authority of any kind. It is a bounded byte store keyed by
+recipient Agent ID.
+
+- Finalized TOS state remains the only authority: the inner packet is accepted
+  only after `agentpacket.DecodeJSON` and `agentpacket.Verify` (or the
+  receiver's equivalent finalized-state check) pass, exactly as for every other
+  Carrier.
+- The relay never decrypts, never holds a key, never signs, never needs chain
+  RPC and never sees the packet, the sender Agent, the Capability, the Quote
+  commitment or the payload.
+- Encryption adds confidentiality only. Sender authentication is the inner
+  ML-DSA-44 signature by a finalized controller of the sender Agent; the HPKE
+  layer authenticates nobody.
+- A relay URL is a non-authoritative hint chosen by the recipient Agent in its
+  signed key card. A relay, its operator or its database disappearing changes
+  availability, never protocol facts.
+- Delivery is at least once and unordered. Execution stays at most once through
+  the receiver's durable inbox and the Native Execution Gate claim, which no
+  Carrier can bypass.
+
+The relay is a separate program. The Gateway stays stateless and does not host
+mailboxes. The relay is not part of the Native Connect contract.
+
+## 2. Why these encodings are not protobuf messages
+
+`spec/proto/tos/service/v1/native.proto` is the Native Connect contract between
+callers and the Native service. Agent Packet V1, Contact Cards and OpenFox rail
+frames are off-chain Carrier encodings with their own strict codecs and are not
+proto messages. The relay envelope, the plaintext wrapper and the key card body
+follow that precedent: they are fixed-layout binary encodings, frozen by
+vectors, that never cross the Native service boundary, never enter a signed
+Native action and add no chain field. A proto definition would add a second,
+non-canonical encoding of the same bytes. No proto change is therefore made.
+
+## 3. Suite
+
+V1 has exactly one suite, RFC 9180 HPKE in base mode (`mode_base`, 0x00):
+
+| Component | Algorithm | IANA ID |
+|---|---|---|
+| KEM | MLKEM768-X25519 (X-Wing) | `0x647a` |
+| KDF | HKDF-SHA256 | `0x0001` |
+| AEAD | AES-256-GCM | `0x0002` |
+
+Sizes: public key 1,216 bytes (ML-KEM-768 encapsulation key followed by the
+X25519 public key); private key 32 bytes (the seed, as `SerializePrivateKey`
+outputs it); encapsulated key 1,120 bytes; AEAD tag 16 bytes. The reference
+codec uses the Go 1.26 standard library `crypto/hpke`
+(`MLKEM768X25519`, `HKDFSHA256`, `AES256GCM`). Any other suite identifier is
+rejected; a new suite needs a new version of this document.
+
+Each envelope is one HPKE context used for exactly one `Seal`, so no AEAD nonce
+is ever reused.
+
+## 4. Common rules
+
+- Integers are unsigned big-endian.
+- `D(x)` is the ASCII domain string `x` followed by one zero byte.
+- `suite` is the six bytes `0x647a 0x0001 0x0002`.
+- `agent_digest(id)` is the 32 bytes the strict text form
+  `agent_<64 lowercase hex>` names; any other spelling is rejected. The
+  all-zero digest is reserved (section 6.1) and is never a recipient.
+- `KeyIDText(id)` is `hpke:<64 lowercase hex>`; the all-zero key ID is invalid.
+- Every decoder rejects unknown versions, unknown suites, wrong lengths and
+  trailing bytes. A decoder never ignores input it does not understand.
+
+## 5. Encryption key ID
+
+```text
+key_id = SHA-256( D("tos.service.agent-packet-relay.key-id.v1") || suite || public_key )
+```
+
+`public_key` is exactly 1,216 bytes. Including the suite means a key ID never
+names the same bytes under another suite.
+
+## 6. Encryption Key Card
+
+### 6.1 Carrying packet
+
+A key card is an ordinary Agent Packet V1, signed with `agentpacket.Sign` under
+context `TOS-AGENT-PACKET-V1` by a controller of the card's Agent. It needs no
+new signature use and no `tosctl` change. Its fields are fixed:
+
+| Packet field | Value |
+|---|---|
+| `sender_agent_id` | the Agent whose key this is |
+| `recipient_agent_id` | `agent_` followed by 64 `0` (the key card audience) |
+| `capability_id` | `cap_` followed by 64 `0` |
+| `quote_commitment` | empty |
+| `sequence` | strictly positive; not interpreted |
+| `nonce`, `created_at_unix`, `sender_key_id`, `signature` | as for any packet |
+| `payload` | the key card body (6.2) |
+
+Agent Packet V1 forbids `sender == recipient`, so a self-addressed card cannot
+be signed or decoded. The fixed all-zero audience replaces it. Agent and
+Capability IDs are SHA-256 outputs of identity cells, so no finalized Agent or
+Capability has the all-zero digest; consequently:
+
+- `agentpacket.Verify` rejects every key card ("recipient Agent is not
+  finalized"), so no Agent Packet receiver can ever take a key card as a
+  delivered packet;
+- OpenFox's receiver additionally rejects it because the recipient is not the
+  local Agent, and the payload does not begin with the rail frame magic
+  `OFR1`;
+- the Messenger `agent.packet` bridge rejects it because the recipient is not a
+  finalized, live installation;
+- the body begins with its own domain string, which no rail frame, Messenger
+  event or other payload starts with.
+
+A card is verified with `agentpacketseal.VerifyKeyCard`, which requires the
+fixed audience, Capability and empty Quote commitment, decodes the body, checks
+the validity window, and calls `agentpacket.VerifySender`: shape, finalized
+live sender Agent, and a signature by a controller of its finalized policy.
+`VerifySender` resolves no recipient and claims no replay key; it authorizes no
+delivery. A packet to any other recipient is never a key card, whatever its
+payload.
+
+The Agent ID is network-bound (it hashes the network domain), and the card
+verifies only against finalized state of the verifier's network, so the card
+carries no separate network tuple.
+
+### 6.2 Body
+
+```text
+key_card_body =
+  D("tos.service.agent-packet-relay.key-card.v1")   43 bytes
+  suite                                             6
+  public_key                                        1216
+  key_id                                            32   (must equal section 5)
+  not_before_unix                                   u64
+  not_after_unix                                    u64
+  relay_count                                       u8   (1..4)
+  relay_count × ( url_length u16 (1..256) || url )
+```
+
+Rules:
+
+- `key_id` MUST equal the section 5 derivation of `public_key`, and the KEM
+  MUST accept `public_key`.
+- `0 < not_before_unix < not_after_unix` and
+  `not_after_unix - not_before_unix <= 2,592,000` (30 days).
+- Relay URLs are in strictly ascending byte order (so no duplicates), each a
+  canonical base URL: printable ASCII; `https`, or `http` only to the hosts
+  `127.0.0.1`, `localhost` or `::1`; non-empty lowercase host; optional port;
+  no user information, query (not even an empty `?`), fragment, opaque part,
+  percent-escaped path, or trailing slash; path empty or beginning with `/`;
+  re-serializing the parsed URL yields the same string.
+- The body is at most 2,346 bytes; the end of the last URL is the end of the
+  body.
+
+### 6.3 Validity and use
+
+A sender MAY seal to a card only when, at sealing time,
+`not_before_unix <= now + 300` and `now < not_after_unix`, and only after
+`VerifyKeyCard` succeeded against finalized state no more than 10 minutes
+earlier. Re-verification at use is what revokes a card early: removing the
+signing controller from the Agent's finalized policy, or tombstoning the Agent,
+makes every card that controller signed unusable.
+
+When several valid cards of one Agent are known, the sender seals to the one
+with the greatest `not_before_unix`, ties broken by the greatest key ID in byte
+order. A sender MUST NOT seal to a card whose Agent differs from the packet's
+`recipient_agent_id`.
+
+The card's Agent:
+
+- SHOULD issue cards of at most 7 days and MUST NOT exceed 30 days;
+- SHOULD publish a successor card at least 24 hours before the current
+  `not_after_unix`;
+- MUST keep each private key until `not_after_unix + 86,400 + 300` (the
+  longest an envelope sealed before expiry can wait at a relay), and MUST
+  destroy it after that;
+- MUST poll every relay named by any card whose private key it still holds.
+
+### 6.4 Distribution
+
+- **Provider.** The provider's current card travels in its offer file next to
+  the manifest (an OpenFox offer file version bump, since that decoder rejects
+  unknown fields). The offer file stays unsigned and non-authoritative: the
+  buyer verifies the card itself, and requires the card's Agent to equal the
+  Capability's finalized owner, never the offer file's word.
+- **Buyer.** The buyer's current card travels inside its task message, which is
+  itself signed and, over this Carrier, encrypted. The provider requires the
+  card's Agent to equal the task packet's sender and seals results and
+  redeliveries to it. The buyer SHOULD send a card whose `not_after_unix`
+  covers the request's response deadline plus the provider's redelivery
+  horizon; a provider holding only expired buyer cards cannot deliver and the
+  request ends through the existing timeout refund.
+- **Relay directory: none in V1.** A relay without chain access cannot tell a
+  genuine card from junk under the same Agent ID, so any card directory it kept
+  could be filled or evicted by anyone. Cards therefore travel only inside
+  objects the counterparty already verifies.
+
+### 6.5 Unknown or expired key IDs
+
+A recipient that fetches an envelope naming a key ID it does not hold (never
+issued, or already destroyed) cannot open it and cannot delete it. It MUST NOT
+retry opening it, SHOULD remember its envelope ID until the listed expiry so it
+is not downloaded again, and leaves it to expire at the relay. A recipient MAY
+open an envelope under any key it still holds, including one whose card has
+passed `not_after_unix`.
+
+## 7. Plaintext wrapper
+
+The HPKE plaintext is:
+
+```text
+plaintext =
+  D("tos.service.agent-packet-relay.plaintext.v1")  44 bytes
+  ack_secret                                        32 bytes, not all zero
+  packet_json_length                                u32
+  packet_json                                       1..260,771 bytes
+```
+
+`packet_json` is the exact signed Agent Packet V1 JSON the sender's transport
+was handed (`OutboundPacket.JSON`), byte for byte; it is never re-encoded. The
+plaintext header is 80 bytes; `packet_json_length` MUST equal the remaining
+length. The wrapper carries nothing else: the packet itself names the sender,
+recipient, Capability and Quote commitment under its signature.
+
+`ack_secret` is drawn uniformly at random by the sender for each envelope and is
+used for nothing else.
+
+## 8. Envelope
+
+### 8.1 Layout
+
+```text
+header (157 bytes, the HPKE additional authenticated data) =
+  D("tos.service.agent-packet-relay.envelope.v1")  43 bytes
+  suite                                            6
+  recipient_agent_digest                           32
+  recipient_key_id                                 32
+  envelope_id                                      32
+  expires_at_unix                                  u64
+  ciphertext_length                                u32
+envelope = header || enc (1,120 bytes) || aead_ciphertext (plaintext length + 16)
+```
+
+`ciphertext_length` is the length of `enc || aead_ciphertext` and MUST equal
+the remaining length. The envelope is at most 262,144 bytes (256 KiB), which
+fixes the largest `packet_json` at
+`262,144 - 157 - 1,120 - 16 - 80 = 260,771` bytes.
+
+### 8.2 Acknowledgement hash
+
+```text
+envelope_id = SHA-256( D("tos.service.agent-packet-relay.ack.v1") || ack_secret )
+```
+
+The envelope ID is the relay's storage key and the only deletion credential
+check: whoever presents a 32-byte value hashing to the envelope ID may delete
+the envelope. The value exists in clear only inside the ciphertext and at the
+sender. The domain prefix keeps the hash unrelated to any other SHA-256 use.
+
+### 8.3 HPKE binding
+
+```text
+info = D("tos.service.agent-packet-relay.hpke-info.v1") || suite
+       || recipient_agent_digest || recipient_key_id
+enc, ctx = SetupBaseS(pkR, info)
+aead_ciphertext = ctx.Seal(aad = header, plaintext)
+```
+
+- `info` enters the key schedule, so an envelope sealed for one recipient Agent
+  or key ID cannot be opened under another binding even with the right private
+  key (a different Agent that happens to hold the same key seed included).
+- The whole header is the AAD, so a relay can read the recipient, key ID,
+  envelope ID and expiry but cannot change any of them undetected.
+- The relay URL is deliberately not bound. The same envelope bytes MAY be
+  deposited at every relay the recipient names, and one acknowledgement secret
+  deletes every copy. Binding the relay would give no confidentiality or
+  integrity gain (a copied envelope yields the same packet, which the inner
+  replay checks absorb) and would break multi-relay deposit and relay
+  renaming.
+- A network domain is not bound separately: the recipient Agent ID already is
+  network-specific.
+
+### 8.4 Sender rules
+
+1. Verify the recipient's card (6.3) and take its key.
+2. Draw `ack_secret`; compute the plaintext, header and envelope.
+3. `expires_at_unix` MUST NOT exceed the packet's own deliverable expiry
+   (`OutboundPacket.ExpiresAtUnix`) nor `deposit_time + 86,400`.
+4. Journal the envelope bytes durably **before** the first deposit. Sealing is
+   randomized; a retry of an ambiguous deposit MUST resend the journaled bytes,
+   never a fresh seal, so the relay can recognize it as the same envelope.
+
+### 8.5 Recipient rules
+
+In this order, stopping at the first failure:
+
+1. Parse the header (`ParseEnvelope`); require the recipient to be this Agent
+   and the key ID one it holds.
+2. HPKE-open with the section 8.3 `info` and the header as AAD.
+3. Decode the plaintext wrapper; require `envelope_id` to equal the section 8.2
+   hash of the recovered `ack_secret` (constant-time comparison).
+4. `agentpacket.DecodeJSON(packet_json)`; require the packet's
+   `recipient_agent_id` to equal this Agent and the envelope's recipient.
+5. Verify against finalized state exactly as the existing receiver does
+   (`agentpacket.Verify`) and apply the receiver's own bounds (OpenFox: packet
+   JSON at most 128 KiB, rail frame decode).
+6. Store durably (OpenFox: `Inbox.Put`). A duplicate is success.
+7. Only then acknowledge (section 9.5) at every relay the envelope was fetched
+   from.
+
+Failure handling:
+
+- Steps 1–3 failing: the envelope is not this key's or is corrupt. Do not
+  acknowledge (step 3 failing means the secret cannot be trusted); remember the
+  envelope ID until its expiry; let it expire.
+- Steps 4–5 failing permanently (malformed packet, foreign recipient, bad
+  signature, sender not finalized or tombstoned): acknowledge, since the
+  recovered secret matches the ID, so junk sealed to this key does not hold
+  quota for 24 hours. Record the refusal in local telemetry without packet
+  contents.
+- Step 5 failing transiently (finalized state unavailable) or step 6 failing:
+  do not acknowledge; retry on a later poll.
+
+## 9. Relay HTTP API
+
+### 9.1 Transport
+
+- HTTPS is required. Plain HTTP is allowed only on a loopback address, for
+  development, matching Agent Packet V1 `Post`.
+- The relay never redirects, and clients never follow redirects.
+- No request carries a query string; the relay rejects any request with one
+  (`400`). No secret is ever placed in a URL. Acknowledgement secrets travel
+  only in request bodies, and the relay MUST NOT log bodies.
+- No cookies, sessions, accounts or bearer tokens are used or required. A relay
+  operator MAY add transport authentication for its own resource policy; it
+  never becomes authority over envelopes.
+- Every response body is at most 64 KiB except a downloaded envelope.
+
+All paths are below the base URL `B` named in a key card.
+`{agent}` is the strict `agent_<64 hex>` form, `{id}` is the envelope ID as 64
+lowercase hex; any other spelling, the all-zero agent, or the all-zero ID is
+`404` and never normalized.
+
+### 9.2 Deposit
+
+`PUT B/v1/mailboxes/{agent}/envelopes/{id}`, `Content-Type:
+application/octet-stream`, body = the envelope.
+
+The relay, without decrypting:
+
+1. Checks the rate limit (`429` with `Retry-After`) and `Content-Length`
+   present and at most 262,144 (`413`) **before** reading the body; reads at
+   most 262,145 bytes.
+2. Requires `Content-Type: application/octet-stream`, then `ParseEnvelope`:
+   domain, suite, non-zero fields, exact length (`400`).
+3. Requires the header recipient and envelope ID to equal the path (`400`).
+4. Requires `now < expires_at_unix <= now + 86,400 + 300` (`422`), and stores
+   the effective expiry `min(expires_at_unix, now + 86,400)`.
+5. If the ID is already stored: identical bytes → `200`; different bytes →
+   `409`. If the ID was acknowledged and its tombstone is still held → `410`.
+6. Checks quotas (`507`): per recipient, per (client, recipient), global.
+7. Writes the envelope durably (data and directory synced) and only then
+   answers `201`.
+
+`200`, `201` and `410` are durable acceptance: the envelope is stored, or was
+stored and already acknowledged by its recipient. A transport `Send` returns
+nil only on one of these. Every other status, a timeout or a connection error is
+a failure the sender retries with the same journaled bytes.
+
+### 9.3 List
+
+`GET B/v1/mailboxes/{agent}/envelopes` →
+`200`, `application/json`:
+
+```json
+{
+  "schema": "tos.service.agent-packet-relay.mailbox.v1",
+  "agent_id": "agent_…",
+  "envelopes": [
+    {"envelope_id": "<64 hex>", "recipient_key_id": "hpke:<64 hex>",
+     "size": 6804, "received_at_unix": 1767225600, "expires_at_unix": 1767312000}
+  ]
+}
+```
+
+At most 256 entries (the per-recipient count quota), ordered by
+`received_at_unix` then `envelope_id` ascending; never an acknowledged or
+expired envelope. An empty mailbox is `200` with an empty list. Clients decode
+the list strictly (unknown fields rejected) and treat every value as an
+unauthenticated hint; `received_at_unix` is the relay's word only.
+
+### 9.4 Download
+
+`GET B/v1/mailboxes/{agent}/envelopes/{id}` → `200`,
+`application/octet-stream`, the exact deposited bytes; `404` when absent or
+expired. Clients read at most 262,144 bytes.
+
+### 9.5 Acknowledge
+
+`POST B/v1/mailboxes/{agent}/envelopes/{id}/ack`,
+`Content-Type: application/octet-stream`, body = exactly the 32-byte
+`ack_secret`.
+
+- Hash matches a stored envelope: delete it durably, keep a tombstone of the ID
+  until its effective expiry, answer `204`.
+- Hash matches a held tombstone: `204` (idempotent).
+- Body not exactly 32 bytes: `400`. Hash does not match the path ID: `403`.
+  Unknown or expired ID: `404`.
+
+The relay compares in constant time. Without the secret nobody can delete an
+envelope: not another recipient, not a party that downloaded the ciphertext.
+The sender knows the secret and can withdraw its own envelope; it gains nothing
+it could not by not depositing.
+
+### 9.6 Relay description
+
+`GET B/v1/relay` → `200`, JSON
+`{"schema": "tos.service.agent-packet-relay.relay.v1", "max_envelope_bytes": 262144,
+"max_ttl_seconds": 86400, "per_recipient_max_envelopes": n, "per_recipient_max_bytes": n}`.
+It is advisory and grants nothing.
+
+### 9.7 Errors
+
+Error responses are `application/json`
+`{"schema": "tos.service.agent-packet-relay.error.v1", "code": "<code>"}` with one fixed
+code per status: `invalid_request` (400), `forbidden` (403), `not_found` (404),
+`conflict` (409), `gone` (410), `too_large` (413), `expiry_out_of_bounds`
+(422), `rate_limited` (429), `quota_exhausted` (507), `unavailable` (503). No
+response repeats request bytes.
+
+### 9.8 Bounds
+
+| Bound | V1 value |
+|---|---|
+| Envelope | ≤ 262,144 bytes |
+| Retention | ≤ 86,400 s from receipt, and ≤ the envelope's `expires_at_unix` |
+| Per recipient | ≤ 256 envelopes and ≤ 16 MiB (operator MAY lower) |
+| Per (client address, recipient) | ≤ 64 envelopes (operator MAY lower) |
+| Global | operator-configured byte and count limit; required, no default unlimited |
+| Tombstones | one per acknowledged ID until its effective expiry; counted in the global count |
+| Deposit rate | per client address; default 60/min, burst 32 |
+| List/download/ack rate | per client address; default 600/min |
+| Request body read | ≤ 262,145 bytes (deposit), exactly 32 bytes (ack) |
+
+Client address means the IP address, with IPv6 aggregated to its /64. A full
+mailbox rejects new deposits (`507`); a relay never evicts a stored envelope to
+admit another, because eviction would let anyone delete genuine envelopes.
+
+**Why 256 KiB.** OpenFox frames carry at most 60 KiB of data; as base64 inside a
+signed packet JSON (2,420-byte signature in hex plus fields) each packet stays
+under the 128 KiB receiver bound. The plaintext header, HPKE encapsulation and
+tag add 1,216 bytes and the envelope header 157 bytes, so every OpenFox packet
+fits with two-fold headroom for other Agent Packet users, while one request
+still needs at most 256 KiB of relay memory and the 16 MiB per-recipient quota
+still holds at least 64 maximal envelopes (one complete 32-frame rail message
+fits several times). Agent Packet V1's 1 MiB payload is not reachable through
+this Carrier in one envelope; larger content is chunked by the application,
+as OpenFox frames already are.
+
+## 10. OpenFox client behaviour
+
+The client is a `PacketTransport` plus a poller; neither changes packet
+signing, frames, the courier journal or the receiver.
+
+**Send** (`Send(ctx, OutboundPacket) error`):
+
+1. Resolve the recipient's current verified card (provider card from the offer
+   file, buyer card from the task). No card → a fixed `no route` error; the
+   courier keeps the packet journaled.
+2. Seal once per `IdempotencyKey`, with `expires_at_unix =
+   min(OutboundPacket.ExpiresAtUnix, now + 86,400)`, and journal the envelope
+   next to the courier record before the first deposit.
+3. Deposit the journaled bytes to every relay in the card, in card order, each
+   with a bounded timeout (default 30 s). Return nil once at least one relay
+   answered `200`, `201` or `410`; keep trying the remaining relays in the
+   background for redundancy. All failed → error; the courier retries.
+
+A nil return therefore means one relay durably holds the envelope, which is the
+contract the courier relies on. The existing redelivery (buyer task every 10
+minutes while pending; provider result from 1 minute backing off to 1 hour)
+creates new packet generations, hence new envelopes; the receiver's inbox
+deduplicates them.
+
+**Poll:**
+
+- List each relay of each held key every 15 seconds while the node runs
+  (minimum 5 seconds; add up to 20 % random jitter). On error or `429` back off
+  exponentially to at most 5 minutes, honouring `Retry-After`.
+- Download envelopes not seen before, one at a time, and process them with the
+  section 8.5 rules; the decrypted packet enters the same accept path as a
+  Messenger or direct delivery (decode → recipient check → `agentpacket.Verify`
+  → durable `Inbox.Put`).
+- Acknowledge only after the durable inbox write, at every relay that listed
+  the same envelope ID.
+- A relay outage delays delivery only; nothing is lost while any one relay of
+  the card holds the envelope and its TTL has not passed.
+
+## 11. Threat model
+
+**Relay or network can:** drop, delay, reorder, duplicate or replay
+envelopes; refuse service; serve stale lists; lie about status codes
+(including a false `201`, which the sender's redelivery bounds); and fake an
+outage. Replays and duplicates are harmless: the same packet opens again, the
+durable inbox deduplicates the frame and the Native Execution Gate keeps
+execution at most once. A relay can also replay an envelope after its
+acknowledgement; a held tombstone (`410`) refuses honest re-deposit of the same
+ID, and the receiver's duplicate handling covers a malicious relay.
+
+**Relay or network cannot:** read a packet (HPKE with a hybrid post-quantum
+KEM); forge or alter one (the inner ML-DSA-44 signature verified against
+finalized state, plus AEAD over the header and plaintext); re-address an
+envelope to another recipient or key (info and AAD binding, and the signed
+packet recipient); delete an envelope without its secret; or create any
+authority.
+
+**Metadata the relay learns:** recipient Agent ID and key ID; envelope sizes
+and counts; deposit, fetch and acknowledgement times; client IP addresses of
+senders and recipient. Because listing and download are open (9.3, 9.4), anyone
+who knows an Agent ID can also learn its pending envelope count, sizes, key IDs
+and times, and can download ciphertext. It never learns the sender Agent, the
+Capability, the Quote or any content. Sizes are not padded in V1; frames are
+mostly at their fixed chunk size anyway. Senders that need to hide their IP
+address use their own network-layer measures.
+
+**Open fetch trade-off.** Proving recipient identity to a relay needs either
+chain access (to check an ML-DSA signature against the finalized policy) or a
+registration the relay cannot authenticate, which a squatter could claim
+first; a key-possession challenge would add a relay-side KEM operation and
+challenge state per poll. With end-to-end encryption, open fetch leaks
+only the metadata listed above, which the relay operator learns in any case.
+V1 therefore chooses open listing and download and keeps deletion strictly
+secret-bound. A later version MAY add a key-possession challenge for listing.
+
+**Spam and denial of service.** Anyone can deposit for any Agent ID. Junk is
+bounded by the envelope size, the per-recipient and per-(client, recipient)
+quotas, the deposit rate limit, the global limit and the 24-hour TTL. Junk sealed
+to the recipient's real key is acknowledged and removed on the next poll
+(8.5); junk naming an unknown key ID or failing decryption cannot be removed and
+holds quota until it expires. Residual risk: a distributed flood can keep a
+recipient's mailbox full at one relay, so honest deposits get `507` and the
+sender falls back to the recipient's other relays and its redelivery
+schedule; that is an availability attack only. Admission fees, proof-of-work or
+operator allow-lists are possible later admission policies and remain Carrier
+policy, never authority.
+
+**Sign-then-encrypt pitfalls.** The plaintext is a packet whose signed preimage
+already names the recipient Agent, so a recipient cannot re-encrypt a received
+packet to a third party and have it accepted (the third party's recipient
+check fails). A packet sealed to a different Agent's key is refused at step 4.
+
+**Why HPKE base mode is sufficient.** Authenticated HPKE modes would add a
+second, KEM-key-based sender identity that finalized state does not hold. The
+sender's identity is already proven, post-quantum, by the ML-DSA-44 signature
+over the exact packet, verified against the finalized controller policy after
+decryption. An attacker who can only seal to the public key gains nothing:
+its envelope decrypts to bytes that must still carry a valid finalized-controller
+signature naming this recipient.
+
+**Key compromise.**
+
+- Recipient HPKE private key: past and pending envelopes to that key (as far
+  as anyone harvested them; open download makes harvesting easy) become
+  readable, but nothing can be forged. Exposure is bounded by the card lifetime
+  (at most 30 days, 7 recommended), the 24-hour envelope TTL and prompt
+  acknowledgement. Recovery: publish a new card; remove the compromised key's
+  card controller from the policy if the controller is also suspect. V1 offers
+  no forward secrecy within one key's lifetime.
+- Sender's ack secret: lets its holder delete one envelope; it is single-use
+  and per envelope.
+- Controller ML-DSA-44 key: the attacker can sign cards for its own HPKE key
+  and so receive future traffic sealed from that point on, as well as sign
+  packets. This is total identity compromise and is recovered on chain by
+  policy rotation, which also invalidates cards the removed controller signed
+  (6.3).
+- Relay compromise: equals a malicious relay above.
+
+**Post-quantum stance.** Confidentiality uses the hybrid MLKEM768-X25519 KEM,
+secure while either ML-KEM-768 or X25519 holds, which protects recorded
+ciphertext against a future quantum adversary. Authentication is ML-DSA-44.
+HKDF-SHA256 and AES-256-GCM keep adequate margins. The KEM is specified in the
+HPKE post-quantum draft; V1 pins the IANA identifier `0x647a` and the frozen
+vectors, so any interoperable implementation must reproduce them.
+
+## 12. Acceptance plan
+
+The later implementation pull requests (relay program, OpenFox client) MUST
+show, with commands and commits recorded:
+
+1. **Two hosts.** Buyer and provider OpenFox nodes in two isolated network
+   namespaces with no shared filesystem or Unix socket, reachable only through
+   a relay in a third namespace; one complete paid task → result → result-ack
+   lifecycle on a local chain, with execution exactly once.
+2. **Relay outage and recovery.** Relay stopped mid-transfer (deposits failing,
+   courier retrying), restarted from its durable store; and a second relay in
+   the card carrying traffic while the first is down. No packet lost, no
+   duplicate execution.
+3. **Crash windows.** Recipient killed between inbox write and
+   acknowledgement (envelope redelivered, deduplicated), and sender killed
+   between journaling and deposit (identical bytes resent, `200`).
+4. **Adversarial envelopes.** Every negative in the frozen corpus refused by
+   the relay or the client as specified; a tampered header, ciphertext and tag;
+   an envelope re-addressed to another Agent; an envelope replayed after
+   acknowledgement (`410` or deduplicated); a foreign envelope sealed to the
+   recipient's real key carrying a packet signed by a non-controller or naming
+   another recipient (refused, acknowledged, no execution); deletion attempts
+   with wrong secrets (`403`), from other clients, and by URL (impossible).
+5. **Quota exhaustion.** Per-recipient, per-(client, recipient) and global
+   quotas reached by a flood from one and from several client addresses; honest
+   deposits receive `507`, use the other relay, and succeed after expiry or
+   acknowledgement frees space; the relay never evicts.
+6. **Key expiry and rotation.** Card expiry with a successor card published;
+   envelopes sealed to the old key still opened until its destruction time; a
+   card refused after its signing controller is removed from the finalized
+   policy; envelopes to a destroyed key left to expire.
+7. **Bounds and hygiene.** Oversized bodies refused before reading; no
+   redirects followed; query strings refused; no secrets or plaintext in relay
+   or client logs; the relay process has no chain RPC configuration and no key
+   material.
+8. **Corpus.** The relay's parser and the client's opener run against
+   `spec/test-vectors/agent-packet-relay-v1.json`; a second independent
+   implementation reproducing the open direction is required before this
+   profile claims cross-implementation conformance.
+
+This evidence is Carrier evidence for root Gate O ("at least two independent
+Carrier paths", "recover … after a Carrier outage") only when it is produced
+against independent deployments as that gate requires. Until then this
+profile is an incubation design (ROADMAP section 8.1) and supplies no gate
+evidence.
+
+## 13. Reference implementation and vectors
+
+- `protocol/pkg/agentpacketseal` — the codec: key ID, key card body and
+  carrying packet, plaintext wrapper, envelope header parse, seal and open,
+  acknowledgement hash. It is deliberately small and holds no relay, storage,
+  HTTP or OpenFox logic.
+- `agentpacket.VerifySender` — the sender-signature half of
+  `agentpacket.Verify`, used for key cards; `Verify` now calls it and is
+  otherwise unchanged.
+- `spec/test-vectors/agent-packet-relay-v1.json` — generated by the
+  `TestRelayVectors` test of `agentpacketseal`. It contains two fixed key
+  seeds with their public keys and key IDs, acknowledgement hashes, key card
+  bodies and 19 rejected mutations, an example key card packet, plaintext
+  wrappers and 7 rejected mutations, two sealed envelopes with their `info`,
+  AAD and plaintext, and 22 rejected envelope mutations, each with its
+  rejection class.
+
+The standard library offers no deterministic sealing interface, so the
+generator runs as a Go test under `testing/cryptotest.SetGlobalRandom`. The test
+rebuilds the corpus and requires the committed file to match byte for byte
+(it regenerates only when `AGENTPACKETSEAL_WRITE_VECTORS=1` is set, never on
+mismatch), then checks the committed file in the open direction only. The
+open-direction checks are normative and toolchain-independent; byte-identical
+re-sealing holds only for the generator toolchain `go1.26.11`. The inner packets
+in the corpus carry signatures from the in-process test stand-in, not
+ML-DSA-44: the seal layer treats `packet_json` as opaque bytes, and real
+ML-DSA-44 packet signatures are covered by the Agent Packet tests through the
+pinned `tosctl`.

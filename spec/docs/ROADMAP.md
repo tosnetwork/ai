@@ -543,6 +543,18 @@ gate item.
   expansion gate, reorder Gate D--F work, or establish product acceptance.
   Mailbox Relay and attachment storage service profiles remain expansion work
   under this gate and inherit the lock above.
+- [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) defines an
+  end-to-end-encrypted store-and-forward Carrier for exact signed Agent
+  Packets: HPKE (MLKEM768-X25519, HKDF-SHA256, AES-256-GCM) to a recipient key
+  published in a signed Encryption Key Card, deposited at a relay the recipient
+  names, deleted only with an acknowledgement secret carried inside the
+  ciphertext. The relay has no keys, no chain access and no authority; inner
+  packets are verified against finalized state exactly as on every other
+  Carrier. **Status: ⬜ Design, reference codec and frozen vectors only.** The
+  relay program, the OpenFox client, a second independent implementation of
+  the corpus, and the two-host, outage, adversarial and quota evidence of its
+  section 12 do not exist. It supplies no gate evidence until that evidence
+  exists against independent deployments.
 - [Agent Intent Exchange V1](AGENT_INTENT_EXCHANGE_V1.md) defines a generic
   signed bulletin and Agent-to-Agent negotiation layer. A small signed
   Discovery Card exposes coarse category, keyword, approximate value, time,

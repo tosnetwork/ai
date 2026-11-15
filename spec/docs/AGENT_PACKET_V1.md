@@ -14,6 +14,9 @@ sender controller key and proves that the sender and recipient Agents exist and
 are live. A Gateway, relay, or transport connection cannot create identity or
 authorization. The packet may travel over any authenticated channel, including
 direct provider endpoints, A2A, MCP, or a Gateway used only as a router.
+[Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) specifies an
+end-to-end-encrypted store-and-forward relay that carries the exact packet JSON
+without gaining any authority.
 
 ## Signed discovery
 

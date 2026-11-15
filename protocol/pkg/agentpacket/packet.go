@@ -225,6 +225,29 @@ func Verify(ctx context.Context, verifier mldsa44.Verifier, resolver AgentResolv
 	if ctx == nil || verifier == nil || resolver == nil || guard == nil || now.IsZero() {
 		return errors.New("invalid packet verification context")
 	}
+	if err := VerifySender(ctx, verifier, resolver, packet); err != nil {
+		return err
+	}
+	if _, found, err := resolver.ResolveAgent(packet.RecipientAgentID); err != nil {
+		return err
+	} else if !found {
+		return errors.New("recipient Agent is not finalized")
+	}
+	if err := guard.claim(packetKey(packet), now); err != nil {
+		return err
+	}
+	return nil
+}
+
+// VerifySender checks the packet shape and that a controller of the
+// finalized, live sender Agent signed it. It does not resolve the recipient
+// and claims no replay key, so it authorizes no delivery: it is for signed
+// statements addressed to no live recipient, such as an encryption key card.
+// A delivered packet must pass Verify.
+func VerifySender(ctx context.Context, verifier mldsa44.Verifier, resolver AgentResolver, packet Packet) error {
+	if ctx == nil || verifier == nil || resolver == nil {
+		return errors.New("invalid packet verification context")
+	}
 	if err := validate(packet, true); err != nil {
 		return err
 	}
@@ -237,14 +260,6 @@ func Verify(ctx context.Context, verifier mldsa44.Verifier, resolver AgentResolv
 	}
 	if err := verifyAs(ctx, verifier, state.Policy, mldsa44.UseAgentPacket, packet.SenderKeyID, signingBytes(packet), packet.Signature); err != nil {
 		return fmt.Errorf("packet signer is not authorized: %w", err)
-	}
-	if _, found, err := resolver.ResolveAgent(packet.RecipientAgentID); err != nil {
-		return err
-	} else if !found {
-		return errors.New("recipient Agent is not finalized")
-	}
-	if err := guard.claim(packetKey(packet), now); err != nil {
-		return err
 	}
 	return nil
 }
