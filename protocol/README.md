@@ -33,6 +33,10 @@ The normative product and protocol design lives in
   `autonomous-decentralized`); a deployment certification is not a wire-level
   prerequisite, while network binding, idempotency, spend caps, and ambiguous
   write handling remain mandatory at every level.
+- `pkg/agentpacketrelay` and `cmd/tos-service-packet-relay` — the Agent
+  Packet Relay V1 mailbox service and its Go client: a bounded, durable store
+  of end-to-end-encrypted envelopes that holds no key, never decrypts and
+  needs no chain access. See [`deploy/packet-relay`](deploy/packet-relay/).
 - `pkg/servicerpc` and `cmd/tos-service-rpc` — private authenticated Connect service
   used by the public TOS Service Gateway.
 
