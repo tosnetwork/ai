@@ -36,7 +36,11 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$script_dir/.." && pwd)
 cd "$repo"
 
-dirty=$(git status --porcelain --untracked-files=all -- . ':(exclude).claude/**')
+# The binaries compile against the whole repository (protocol/, the root
+# go.mod and go.sum), so the clean-tree check covers the whole worktree, not
+# only this directory.
+toplevel=$(git rev-parse --show-toplevel)
+dirty=$(git -C "$toplevel" status --porcelain --untracked-files=all -- . ':(exclude).claude/**')
 if [ -n "$dirty" ]; then
   echo "evidence must be built from a clean checkout" >&2
   echo "$dirty" >&2
