@@ -289,7 +289,7 @@ local test network.
 
 | Record | What it proves | Script commit | Result |
 |---|---|---|---|
-| [`openfox-relay-multi-host-buyer-a-20261115.json`](../deployments/openfox-relay-multi-host-buyer-a-20261115.json) (sha256 `00887a6239be4a5ca8df2eba2380860b4d3f14dd79aee3612019cfab70df31dd`, copied byte for byte) | `openfox` `scripts/service-relay-multi-host-e2e.sh`, 2026-11-15 22:26 to 22:31 UTC, buyer on a first VPS | `openfox` `b97f3340` (tosnetwork/openfox#46 on `main` `a743eaff`; clean tree) | ALL PASS, 68 of 68; `qualifies_as_public_acceptance: false` |
+| [`openfox-relay-multi-host-buyer-a-20261115.json`](../deployments/openfox-relay-multi-host-buyer-a-20261115.json) (sha256 `00887a6239be4a5ca8df2eba2380860b4d3f14dd79aee3612019cfab70df31dd`, copied byte for byte) | `openfox` `scripts/service-relay-multi-host-e2e.sh`, 2026-11-15 22:26 to 22:31 UTC, buyer on a first VPS | `openfox` `b97f3340` (head of tosnetwork/openfox#46, branched from `main` `a743eaff` and merged with a merge commit as `56cb3a28`, so it is reachable from `main`; clean tree) | ALL PASS, 68 of 68; `qualifies_as_public_acceptance: false` |
 | [`openfox-relay-multi-host-buyer-b-20261115.json`](../deployments/openfox-relay-multi-host-buyer-b-20261115.json) (sha256 `1742b1c2cfb8fafcf0419efeab5c73c2166522471a122e58a2e3add1145c072f`, copied byte for byte) | The same script and commits, 2026-11-15 22:32 to 22:37 UTC, buyer on a second VPS | `openfox` `b97f3340` | ALL PASS, 68 of 68; `qualifies_as_public_acceptance: false` |
 
 Both runs use `tos` `5af405dcb` (tosctl sha256 `6de21cb2…`). The relay
@@ -299,6 +299,12 @@ openfox binary (`d45902d3…`) and tosctl hash the same on the provider host
 and on the buyer host. Public addresses, SSH targets and key paths are
 replaced by labels in the records. The relay is identified by its TLS
 public-key hash, `b916f34e…`.
+
+The buyer's serve log in both records holds two kinds of notice that did not
+affect the sale and are kept as recorded: handling a duplicate rail message
+failed because the ML-DSA-44 helper could not open the vault while another
+command held it, and, in the first run, a refund read was cancelled when
+the run ended. Both runs still completed the sale and every check.
 
 Proven by these records:
 
