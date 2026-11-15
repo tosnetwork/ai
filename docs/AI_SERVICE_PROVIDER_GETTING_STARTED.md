@@ -578,7 +578,8 @@ with separate state for the same actor can each admit and execute the same
 request.
 
 For each task `serve` asks the executor service whether it can run the job
-(a task it cannot run waits, unadmitted, for at most one hour), admits the
+(a task it cannot run waits, unadmitted, for at most one hour, or less when
+the inbox's held-task bound is reached), admits the
 request once through finalized state, sends the job to the service and
 verifies the outcome and its bytes, builds the Receipt, has it checked against the attestor
 policy, re-checks that the request is still pending, and sends `respond`.
@@ -1188,7 +1189,7 @@ OpenFox front door:
 | `preflight`: `executor.service` says the service refuses this user | the service admits one uid, and it is another | set `TOS_EXECUTOR_ALLOWED_UID` to this user's uid and restart the service (section 4.1) |
 | `preflight`: `executor.service` says the socket is not served by root | another process listens at that path | point `--executor-socket` (or `executor_socket`) at the root-run executor service's socket |
 | `preflight`: `executor.service` or `executor.image` reports the service not ready | the private runtime is down, or the pinned image is not imported and unpacked in it | start the runtime and import and tag the image (section 4.1); a job sent now is refused with nothing claimed |
-| `serve` logs `executor not ready` every round | the executor service cannot run work now | nothing was admitted or spent; fix the service. A task waits at most one hour, then is retired with a logged reason |
+| `serve` logs `executor not ready` every round | the executor service cannot run work now | nothing was admitted or spent; fix the service. A task waits at most one hour (less if the inbox's held-task bound is reached), then is retired with a logged reason |
 | `preflight`: `process.user` fails | the node runs as root with the executor service | run the node as the ordinary user the service allows |
 | `preflight`: `containerd.socket` fails as a non-root user although the daemon runs (legacy mode) | a socket in a root-only directory reads as missing to any other user | use the executor service (section 3.8) |
 | `preflight`: `process.user` is `warn` (legacy mode) | the node runs as root | expected in the legacy mode with a root-only runtime; use the executor service |
