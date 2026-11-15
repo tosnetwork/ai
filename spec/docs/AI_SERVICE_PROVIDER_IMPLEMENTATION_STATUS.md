@@ -255,8 +255,8 @@ The relay spec's section 12.1 marks the acceptance items these records cover.
 
 Not covered by these records:
 
-- two physical machines, an internet path, or a relay operated by anyone but
-  the run itself;
+- two physical machines or an internet path (covered by the multi-host
+  records below), or a relay operated by anyone but the core team;
 - a second relay in the card carrying traffic while the first is down;
 - live adversarial cases: tampered, forged, foreign and replayed envelopes,
   quota pressure, and the section 8.6 public-ID race. No live adversarial run
@@ -266,8 +266,9 @@ Not covered by these records:
 - key expiry and rotation, covered by unit tests only (listed by name in the
   record);
 - crash windows of the nodes (relay spec section 12 item 3);
-- a per-relay certificate authority option in OpenFox: a relay with a private
-  authority currently needs the system trust store or `SSL_CERT_FILE`.
+- a per-relay certificate authority option in OpenFox. It has since been
+  added (`init --relay-ca-file`, tosnetwork/openfox#43) and is used by the
+  multi-host records below.
 
 A run of the two-host script at the same commit, before the recorded one,
 failed `buy` with `Quote Capability is not available from finalized state`.
@@ -279,6 +280,91 @@ the second registry read at the pinned checkpoint is refused as a regression.
 available", so the cause is not visible. This is an open follow-up for both
 repositories, not fixed by these changes.
 
+## Agent Packet Relay — sale between two physical machines through a public relay on a third
+
+Live evidence over the public internet, operated entirely by the core team.
+It does not qualify as public or independent acceptance and is not Gate O
+evidence (relay spec section 12): the relay is ours, and the chain is a
+local test network.
+
+| Record | What it proves | Script commit | Result |
+|---|---|---|---|
+| [`openfox-relay-multi-host-buyer-a-20261115.json`](../deployments/openfox-relay-multi-host-buyer-a-20261115.json) (sha256 `00887a6239be4a5ca8df2eba2380860b4d3f14dd79aee3612019cfab70df31dd`, copied byte for byte) | `openfox` `scripts/service-relay-multi-host-e2e.sh`, 2026-11-15 22:26 to 22:31 UTC, buyer on a first VPS | `openfox` `b97f3340` (head of tosnetwork/openfox#46, branched from `main` `a743eaff` and merged with a merge commit as `56cb3a28`, so it is reachable from `main`; clean tree) | ALL PASS, 68 of 68; `qualifies_as_public_acceptance: false` |
+| [`openfox-relay-multi-host-buyer-b-20261115.json`](../deployments/openfox-relay-multi-host-buyer-b-20261115.json) (sha256 `1742b1c2cfb8fafcf0419efeab5c73c2166522471a122e58a2e3add1145c072f`, copied byte for byte) | The same script and commits, 2026-11-15 22:32 to 22:37 UTC, buyer on a second VPS | `openfox` `b97f3340` | ALL PASS, 68 of 68; `qualifies_as_public_acceptance: false` |
+
+Both runs use `tos` `5af405dcb` (tosctl sha256 `6de21cb2…`). The relay
+daemon is built from `ai` `4a5f1506` (`CGO_ENABLED=0`, `-trimpath`, sha256
+`f8ff662f…`), and the binary on the relay host is byte-identical. The
+openfox binary (`d45902d3…`) and tosctl hash the same on the provider host
+and on the buyer host. Public addresses, SSH targets and key paths are
+replaced by labels in the records. The relay is identified by its TLS
+public-key hash, `b916f34e…`.
+
+The buyer's serve log in both records holds two kinds of notice that did not
+affect the sale and are kept as recorded: handling a duplicate rail message
+failed because the ML-DSA-44 helper could not open the vault while another
+command held it, and, in the first run, a refund read was cancelled when
+the run ended. Both runs still completed the sale and every check.
+
+Proven by these records:
+
+- **Two physical machines over the public internet.** The provider and the
+  local chain run on one host, and the buyer runs on a separate VPS. The
+  relay runs on a third VPS. Each record shows three distinct machine ids,
+  and the two records use two different buyer VPSs.
+- **No direct path.** The provider host is behind NAT: its public address
+  is on no local interface. From the buyer host, TCP connections to that
+  address time out on every probed port. Neither node listens on any TCP or
+  UDP port, so the provider has no inbound port.
+- **Relay-only carriage.** Both nodes name only the relay's public `https`
+  URL: no direct peer and no Messenger socket. Every task and result packet
+  travels sealed end to end through that relay, which is the only
+  transport.
+- **TLS with a pinned private CA.** Both nodes pin the run's private P-256
+  CA with `init --relay-ca-file`. The CA and the relay certificate are each
+  valid for 120 days, so no expiry warning applies, and preflight's
+  `relay.trust` is `pass`: "the pinned CA file only". Neither node's
+  environment names `SSL_CERT_FILE` or `SSL_CERT_DIR`. The system trust
+  store refuses the relay on both node hosts. The live relay presents the
+  key of the certificate file on the relay host.
+- **One relay outage recovered.** The provider is paused and stopped. The
+  buyer pays, and the relay holds the task. The provider then starts and
+  takes the task. The relay daemon is stopped by SIGTERM while the result is
+  pending. During the outage the provider executes and responds on chain,
+  and its result deposits fail and stay journaled. The relay restarts on the
+  same state directory, the courier deposits the result, and the sale
+  completes.
+- **The sale.** Exactly one execution. The chain response hash equals the
+  Receipt hash on both nodes, and the artifact digest is inside the
+  Receipt. `withdraw --all` pays out exactly the credited 0.55 TOS. The
+  front-door re-run, tampered-offer and paused-purchase checks also pass.
+- **No plaintext at the relay.** The relay's state directory was copied
+  three times: while it held the task, while it held the result, and after
+  the run. None of the copies, nor the relay's journal, contains the source
+  archive, the artifact, the buyer wallet address or the Quote package. A
+  control file proves the search finds each of them. The journal names no
+  Agent and no client address.
+- The relay daemon runs as a dedicated unprivileged user in a transient
+  systemd unit, with its TLS key as a systemd credential and no chain RPC.
+
+Not proven by these records:
+
+- **The relay is operated by us**, not by a third party, and there is a
+  single relay: no second relay in the card.
+- **The chain is a local test network.** Its three validators run on the
+  provider's host, and the buyer reaches their JSON-RPC only through an SSH
+  reverse tunnel to its loopback. This is not a public chain.
+- **The provider runs on our host**, not on a host we do not operate.
+- **The buyer ran as uid 0 on the VPS.** The buyer node needs no root.
+  Running it as an ordinary user on a VPS was not exercised in these
+  records.
+- **No public CA.** The relay certificate comes from a private CA that
+  both nodes pin.
+- **No live adversarial run.** The adversarial envelopes, quota pressure,
+  the public-ID race, key expiry and rotation, and node crash windows are
+  covered by unit tests only, or not at all, as listed for the namespace
+  record above.
+
 ## Not delivered by these changes
 
 - WP-07 independent commercial acceptance: a provider and buyer outside the
@@ -286,8 +372,9 @@ repositories, not fixed by these changes.
 - WP-08 inference profile and adapters: locked until the expansion gate opens.
 - A paid run on an independent provider host (the M1 and front-door runs each
   use one host for everything).
-- Agent Packet carriage between two physical hosts, run end to end. The relay
-  record above separates the nodes by network namespaces on one host.
+- Agent Packet carriage between two physical hosts through a relay operated
+  by a third party, on a public chain. The multi-host relay records above use
+  a relay operated by the core team and a local test chain.
 - A `buy` preview step; keeping `--confirm-above` when `init` is re-run with
   `--allow-provider`; a command that closes a purchase whose call never
   landed.

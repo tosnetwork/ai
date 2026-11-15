@@ -905,19 +905,27 @@ show, with commands and commits recorded:
 ### 12.1 Evidence recorded so far
 
 Live evidence:
-[`local-openfox-relay-two-host-20261115.json`](../deployments/local-openfox-relay-two-host-20261115.json),
-a run on one host using network namespaces. It is described in
-`AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`.
+
+- [`local-openfox-relay-two-host-20261115.json`](../deployments/local-openfox-relay-two-host-20261115.json),
+  a run on one host using network namespaces;
+- [`openfox-relay-multi-host-buyer-a-20261115.json`](../deployments/openfox-relay-multi-host-buyer-a-20261115.json)
+  and
+  [`openfox-relay-multi-host-buyer-b-20261115.json`](../deployments/openfox-relay-multi-host-buyer-b-20261115.json),
+  runs across three physical machines over the public internet. The relay
+  is operated by the core team and has a pinned private CA, and the chain
+  is a local test network.
+
+They are described in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`.
 
 | Item | Status |
 |---|---|
-| 1. Two hosts | **Covered on one host.** The buyer, the provider and the relay daemon each run in their own network namespace. Buyer-to-provider traffic is dropped in both directions, and a probe in the run shows it reached the other side before the rules and fails after them. Each node runs with the other node's directories hidden, and the nodes share no Unix socket. One paid task → result → result-ack lifecycle runs on a local chain, with exactly one execution. Not two physical machines. |
-| 2. Relay outage and recovery | **First half covered.** The relay is stopped while it holds the task and restarted from its durable store. It is stopped again while the result is pending: the result deposits fail and stay journaled, and the courier's retry delivers it after the restart. No packet is lost and nothing is executed twice. Not covered: a second relay in the card carrying traffic while the first is down. |
+| 1. Two hosts | **Covered on two physical machines, with a relay operated by the core team.** The provider (behind NAT, no inbound port) and the buyer (on a separate VPS; two runs with two different VPSs) complete one paid task → result → result-ack lifecycle with exactly one execution. Carriage is only through a relay on a third machine over the public internet, with TLS against a CA both nodes pin. From the buyer host, no TCP connection to the provider host opens. The chain is a local test network, reached by the buyer only through an SSH tunnel. The namespace run additionally shows buyer-to-provider traffic dropped in both directions on one host. Not covered: a relay or provider host operated by anyone else, or a public chain. |
+| 2. Relay outage and recovery | **First half covered.** The relay is stopped while it holds the task and restarted from its durable store (namespace run). It is stopped while the result is pending, both in the namespace run and on the public relay host in the multi-host runs: the result deposits fail and stay journaled, and the courier's retry delivers it after the restart. No packet is lost and nothing is executed twice. Not covered: a second relay in the card carrying traffic while the first is down. |
 | 3. Crash windows | Not covered by live evidence. |
 | 4. Adversarial envelopes | Unit tests only (listed by name in the record); no live adversarial run. |
 | 5. Quota exhaustion | Unit tests only (listed by name in the record); no live run. |
 | 6. Key expiry and rotation | Unit tests only (listed by name in the record). |
-| 7. Bounds and hygiene | **Partly covered.** No source archive, artifact, buyer wallet address or Quote package appears in any file the relay wrote, including copies of its state taken while it held the task and while it held the result. The relay log names no Agent and no client address. The relay runs with no chain RPC configuration and holds only its TLS key, and its namespace cannot reach the chain. The body, redirect and query bounds are covered by unit tests only. |
+| 7. Bounds and hygiene | **Partly covered.** No source archive, artifact, buyer wallet address or Quote package appears in any file the relay wrote, including copies of its state taken while it held the task and while it held the result (namespace run, and the public relay host in the multi-host runs). The relay log names no Agent and no client address. The relay runs with no chain RPC configuration and holds only its TLS key, and its namespace cannot reach the chain. The body, redirect and query bounds are covered by unit tests only. |
 | 8. Corpus | Unit tests only (`TestRelayVectors`, `TestCorpusEnvelopes`); no second implementation. |
 
 This evidence is Carrier evidence for root Gate O ("at least two independent
