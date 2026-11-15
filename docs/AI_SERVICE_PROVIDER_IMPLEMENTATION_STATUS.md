@@ -33,7 +33,8 @@ at those merges. The containerd upgrade has not been run against a live daemon.
 | WP-04 public interfaces | `tos-service-gateway` #24, `1a85d36`, merged `1327c3e` | Public Native, DNS alias and discovery Connect services capped at the advertised 1 MiB (raw and decoded), 10 s body read deadline, one shared limiter for global and per-client concurrency and rate, clients keyed by the loopback TLS terminator's header (right-most `X-Forwarded-For` by default), IPv6 by /64, overflow bucket instead of refusal, bounded configuration | `make verify`; 30 mutations killed | Approved with nits after two rounds (round one blocking: every caller shared one bucket behind the terminator) | Eviction is linear in the client table while it is full (bounded); Intent Carrier still has body caps only |
 | PRV-01/05/06 operator experience | `openfox` #33, `a9aae30`, merged `d8749bf` | `openfox earning service preflight`: 26 side-effect-free checks with a versioned JSON report (pins, permissions, endpoints and genesis, registry/actor/attestor state, clock skew, signer probe that cannot sign); `status` with per-request operator states derived only from finalized evidence (anything uncertain is `outcome_unknown`) and credited revenue labeled apart from wallet receipt; durable `pause`/`resume` of new admission with a separate bound for held tasks | `go test -race` of both touched packages (re-run independently); 36 mutations killed | Approved with nits after one round of fixes (1 medium, 7 low) | Withdrawal submission and finalization are tracked since `openfox` #35 (below); wallet credit is still not verified; pausing stops local admission only, so funded calls during a pause fall to refund unless the owner changes the actor policy |
 | WP-06 buyer budgets | no change needed | PAY-01's budgets are met by existing `buyersdk` reservation with one combined amount cap: a per-call maximum, plus one total over a rolling window (24 h for a daily budget) that also counts every outstanding call whatever its age | Code reading of `pkg/buyersdk/service_actor_journal.go` (`reservation`, `fitsBudget`), confirmed by the non-author review of this record | Reviewed in spec #74 | A separately configurable outstanding-amount cap (today outstanding and window spend share one total; OpenFox's open-purchase cap bounds a count); one purchase identity across more than the Agent Packet transport |
-| OpenFox front door (one entry point for provider and buyer) | `openfox` #35, `122de0e7`, merged `512d3f5d` | `openfox earning service` as the one entry point for selling and buying: `init` (tosctl pin, derived and cross-checked network domain and registry code hash, packet controller, Agent registration, rail configuration), `offer` (attestor controller, Service Actor deployment, manifest, Capability registration, `update-policy`, verification with the preflight's chain checks, offer file), `withdraw` (`--amount`, `--all`, recorded before sending, resolved from the finalized transaction with its query id; `--acknowledge` closes an undecidable record on the owner's word), `buy --offer` (Quote Proposal package built locally from finalized state and the offer file, no Gateway), and a same-host, same-user direct packet transport (`init --direct-peer`). Every signature and send goes through one sealed, pinned tosctl runner; `init`, `offer` and `withdraw` create, sign or send nothing without a preview and `--yes`; `buy` pays without confirmation unless `--confirm-above` is set; one journal makes `init` and `offer` restartable without a second Agent, actor or Capability; one run at a time per state directory; only V3R2, V4R2 and V5R1 wallets send | `go test -race -tags goolm,stdjson` of `pkg/servicebridge` and `cmd/openfox` at `122de0e7`, including tests against the real tosctl; SIGKILL at every chain step of `init`, `offer` and `withdraw`; 87 mutations killed in the first round (3 not killed, each explained in the pull request) and 47 of 47 for the review and live-run fixes, per the pull request; CI green (Linter, Security Check, Tests, Integration Tests); live local two-node run (below) | Approved after three non-author rounds (`16b4005` approve with nits, eight findings fixed; `a6eaac1e` approve; `122de0e7` approve); GitHub Codex P1 (concurrent setup runs) and P2 (preflight peer status) fixed | With a root-only container runtime the whole provider node, tosctl and vault included, runs as root, and on the direct transport the buyer does too: a privilege boundary between node and executor is not built; Messenger carriage between hosts has not been run between two nodes; no command exports the bought artifact; re-running `init` must restate every flag; several `init` inputs could be derived from the offer file or the tosctl configuration; wallet credit after a withdrawal is not verified; no command closes a purchase whose call never landed (it holds its budget and open-purchase slot indefinitely); re-running `init` with `--allow-provider` drops a previously set `--confirm-above` unless restated (code follow-up: preserve the existing policy on re-run); `buy` has no preview step, unlike `init`, `offer` and `withdraw` |
+| OpenFox front door (one entry point for provider and buyer) | `openfox` #35, `122de0e7`, merged `512d3f5d` | `openfox earning service` as the one entry point for selling and buying: `init` (tosctl pin, derived and cross-checked network domain and registry code hash, packet controller, Agent registration, rail configuration), `offer` (attestor controller, Service Actor deployment, manifest, Capability registration, `update-policy`, verification with the preflight's chain checks, offer file), `withdraw` (`--amount`, `--all`, recorded before sending, resolved from the finalized transaction with its query id; `--acknowledge` closes an undecidable record on the owner's word), `buy --offer` (Quote Proposal package built locally from finalized state and the offer file, no Gateway), and a same-host, same-user direct packet transport (`init --direct-peer`). Every signature and send goes through one sealed, pinned tosctl runner; `init`, `offer` and `withdraw` create, sign or send nothing without a preview and `--yes`; `buy` pays without confirmation unless `--confirm-above` is set; one journal makes `init` and `offer` restartable without a second Agent, actor or Capability; one run at a time per state directory; only V3R2, V4R2 and V5R1 wallets send | `go test -race -tags goolm,stdjson` of `pkg/servicebridge` and `cmd/openfox` at `122de0e7`, including tests against the real tosctl; SIGKILL at every chain step of `init`, `offer` and `withdraw`; 87 mutations killed in the first round (3 not killed, each explained in the pull request) and 47 of 47 for the review and live-run fixes, per the pull request; CI green (Linter, Security Check, Tests, Integration Tests); live local two-node run (below) | Approved after three non-author rounds (`16b4005` approve with nits, eight findings fixed; `a6eaac1e` approve; `122de0e7` approve); GitHub Codex P1 (concurrent setup runs) and P2 (preflight peer status) fixed | Closed: with a root-only container runtime the whole provider node, tosctl and vault included, ran as root; it now runs as an ordinary user (provider privilege boundary, next row). Still open: Messenger carriage between hosts has not been run between two nodes; no command exports the bought artifact; re-running `init` must restate every flag; several `init` inputs could be derived from the offer file or the tosctl configuration; wallet credit after a withdrawal is not verified; no command closes a purchase whose call never landed (it holds its budget and open-purchase slot indefinitely); re-running `init` with `--allow-provider` drops a previously set `--confirm-above` unless restated (code follow-up: preserve the existing policy on re-run); `buy` has no preview step, unlike `init`, `offer` and `withdraw` |
+| Provider privilege boundary (the provider node runs as an ordinary user) | `tos-ai` #16 (executor service), head `d4647191`, merged `619084c`; `tos-ai` #17 (`Gate.Reconcile`), head `1930f7db`, merged `274e7ee`; `openfox` #36, head `3c5ac8be`, merged `c71a334c` (tree identical to the head) | `software-work-executord`: a root-run service, the only process that opens the private containerd socket, offering exactly one allowed uid (`TOS_EXECUTOR_ALLOWED_UID`) one operation over `/run/tos-service-executor/executor.sock` (`root:<group> 0660` in a `0750` directory). A request carries the source archive, four digests and limits that may only tighten the frozen preset, and no path, image, command, mount, network, device or user. The service is idempotent per execution id and never reruns; a run outlives its caller; its journal binds an id to its limits. `tos-service-executor-gc.timer` sweeps the service's store hourly. `Gate.Reconcile` completes a slot left ambiguous by a restart from a freshly verified request and the recorded outcome's response hash, so the gate keeps "an ambiguous slot is never attested". OpenFox: `provider.executor_socket` (exactly one of it and the earlier `executor_binary` group), `offer --executor-socket`, defaulting to the service socket and failing closed before anything is signed unless root serves it, it is ready and it runs the manifest's image and limits; a socket runner that verifies every outcome and its object bytes itself and keeps its own copy for delivery and retention; requests recorded `executing` and re-asked with identical limits; after a restart the outcome goes through `Gate.Reconcile` before `respond`; a task the service cannot run before admission waits without using handling attempts (at most one hour, or less when the inbox's shared held-task bound is reached); `preflight` checks `executor.service`, `executor.image`, `executor.limits`, and fails `process.user` for a root node that uses the socket | OpenFox: `go test -race` of `pkg/servicebridge` and `cmd/openfox`, the new tests also `-count=5`, `pkg/earning` with and without `-race`, golangci-lint on the diff, 74 of 75 mutations killed (the survivor is a redundant offer check), per the pull request; SIGKILL of the provider node during a run, recovered through `Gate.Reconcile`; live local run in socket mode (below) | Non-author agent reviews delivered in-session, not GitHub approvals. `tos-ai` #16: security review round 1 at `c2a2d5b` requested changes (11 findings, no privilege escalation); round 2 at `4533786` approved (all 11 closed); a live install under the real unit then found every job failing at container creation (a client-side snapshot mount forbidden by `CapabilityBoundingSet` and `SystemCallFilter`), fixed in `f1aab3c` without relaxing the sandbox, round 3 approved; `d464719` (collection `--limit 128`, deploy text and one pinned test value) checked by the coordinator; GitHub Codex P2 (retention-slot reservation) fixed in `c57a678` with a reply. `tos-ai` #17: approved at `ce86fd8`; `1930f7d` is a comment-only correction that review requested. `openfox` #36: two reviews approved (`6a2cc0f7`, then `6a2cc0f7..3c5ac8be`); GitHub Codex P2 (an executor outage before admission used up a task's handling attempts) fixed in `578808bf` | see [Open follow-ups of the privilege boundary](#open-follow-ups-of-the-privilege-boundary) |
 
 ## M1 — local settlement lifecycle
 
@@ -70,8 +71,9 @@ on containerd v2.0.13.
 ## OpenFox front door — local two-node sale
 
 Local integration evidence only. One host runs every validator, every
-endpoint and both nodes, and both nodes run as root, so it does not qualify as
-public or independent acceptance.
+endpoint and both nodes, and both nodes run as root (the legacy single-user
+mode, before the privilege boundary below), so it does not qualify as public
+or independent acceptance.
 
 | Record | What it proves | Script commit | Result |
 |---|---|---|---|
@@ -94,7 +96,62 @@ Not covered by this record:
 - `buy` without `--yes` and the `--confirm-above` prompt (the run always
   passed `--yes`);
 - V4R2 and V5R1 wallets;
-- a provider node that does not run as root.
+- a provider node that does not run as root (covered by the next record).
+
+## OpenFox provider node as an ordinary user — local two-node sale
+
+Local integration evidence only. One host runs every validator, every endpoint
+and both nodes, so it does not qualify as public or independent acceptance.
+
+| Record | What it proves | Script commit | Result |
+|---|---|---|---|
+| [`local-openfox-unprivileged-provider-20261115.json`](../deployments/local-openfox-unprivileged-provider-20261115.json) (sha256 `2429756a590b8993c517713fc8bf08f35d229203ea0fa86a83f6e7654b4a1771`, copied byte for byte) | `openfox` `scripts/service-front-door-e2e.sh` with `E2E_EXECUTOR_SOCKET`, 2026-11-15 03:55 to 03:58 UTC, on a fresh three-validator ML-DSA-44 network (`tos` `5af405dcb`, tosctl sha256 `6de21cb2…`, Service Actor release code hash `…d63e09428e42aa0c`), `executor_mode` `executor service socket`. Both nodes run as the same ordinary, non-root user and the run uses no root command (`ran_as_root` is empty); the provider executes through the installed executor service and reads none of its files. The same sale as the front-door record: `init` and `offer` without `--yes` send nothing; provider `init`, `offer` (with `--executor-socket`), `preflight`, `serve`; buyer `init --allow-provider --direct-peer`, `serve`, `buy --offer`; exactly one request on chain, called by the buyer wallet and responded by the provider wallet with the Receipt hash both nodes report; the received artifact hashes to the artifact digest in the Receipt; the provider holds the verified objects of exactly one execution, the purchase's; `withdraw --all` finalized with exactly the amount; `init` and `offer` run again change nothing on chain; a tampered offer file is refused before payment; a paused provider holds a second purchase and serves it after `resume`. Ownership in the record is numeric, and the run fails if the invoking user's login name or home path appears in it or in its transcripts and logs | `3c5ac8beecdbb19035628f184a290a516f7e3577` (clean tree: `openfox_tree_dirty` false; its tree is the tree of merge `c71a334c`) | ALL PASS, 37 of 37; `qualifies_as_public_acceptance: false` |
+
+The provider's `preflight` passed with only `rpc.independence` and
+`signer.wallet` not at `pass` (both `unknown` by design,
+`preflight_not_passing`); `process.user` passed. Neither `serve` logged a line
+other than pause notices. The executor service on that host was installed by
+the operator from `tos-ai` `619084c` following `deploy/provider/README.md`;
+the record does not bind the service's binaries (their digests are
+operator-asserted). `tos-ai` `main` has since moved to `274e7ee`, which
+changes only `pkg/railgate`. The installed daemon does not link it; the
+collection command `software-work-execute` does, but its `artifacts-gc` path
+does not use it.
+
+Not covered by this record:
+
+- a restart of the provider node during a run, and an executor outage before
+  admission (unit tests only, against the service's own server on a fake
+  container runtime);
+- more than one job at a time, load, or a long soak of the executor service;
+- the Messenger transport, nodes on different hosts, and a refund.
+
+### Open follow-ups of the privilege boundary
+
+- When admission is paused and the executor service is down at the same time,
+  the inbox's held marker keeps the first cause (review note, deferred).
+- A duplicate task that arrives while the executor service still cannot run
+  it is only logged, not held; the buyer's next delivery tries again (review
+  note, deferred).
+- A crash between the rail gate's admission and the provider's own record
+  still loses the request to the buyer's refund path.
+- An object stored for an execution but not yet given its retention deadline
+  when the request is abandoned is never swept from the node's store.
+- The production client's check that root serves the socket has been
+  exercised only in this live run; the unit tests serve the socket as the
+  test user.
+- The executor service has not been run under load or with
+  `--max-executions` above 1.
+- Retention of the service's copy: the `tos-ai` runbook says a provider
+  runtime should ask the service to keep its copy until the end of the
+  response window plus the manifest's `retention_seconds`, while OpenFox asks
+  only until the response deadline and serves results from its own copy.
+  Both are safe; one of the two should be aligned with the other.
+- Carried over from the front door, unchanged: Agent Packet carriage between
+  hosts through the Messenger, a `buy` preview step, keeping `--confirm-above`
+  when `init` is re-run with `--allow-provider`, and a command that closes a
+  purchase whose call never landed (see
+  [Not delivered by these changes](#not-delivered-by-these-changes)).
 
 ## Not delivered by these changes
 
@@ -103,9 +160,10 @@ Not covered by this record:
 - WP-08 inference profile and adapters: locked until the expansion gate opens.
 - A paid run on an independent provider host (the M1 and front-door runs each
   use one host for everything).
-- A privilege boundary between the provider node and the executor: with a
-  root-only container runtime the node, tosctl and the vault run as root.
 - Agent Packet carriage between two hosts (a Messenger daemon per Agent), run
   end to end.
+- A `buy` preview step; keeping `--confirm-above` when `init` is re-run with
+  `--allow-provider`; a command that closes a purchase whose call never
+  landed.
 - A command that exports a bought artifact from the buyer's state directory.
 - Gate F/G operation, independent operators, and production controls.
