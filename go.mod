@@ -4,7 +4,7 @@ go 1.26.11
 
 require (
 	connectrpc.com/connect v1.19.1
-	github.com/tosnetwork/ai v0.0.0-20261115061752-ba76780bb181
+	github.com/tosnetwork/ai v0.0.0-20261115172956-4bb4c679f69c
 	github.com/tosnetwork/tosutils-go v1.18.2-0.20260820143526-4d1a10d94bef
 	golang.org/x/sys v0.49.0
 	google.golang.org/protobuf v1.36.11
