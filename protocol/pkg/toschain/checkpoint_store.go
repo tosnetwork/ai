@@ -31,7 +31,43 @@ func newCheckpointStore(path string) (*checkpointStore, error) {
 	return &checkpointStore{path: path}, nil
 }
 
+// checkpointBehind is a finalized observation below a recorded high-water:
+// a rollback when it persists, or, between processes sharing the record, an
+// observation another process overtook while it was being made.
+type checkpointBehind struct{ recorded, observed uint64 }
+
+func (e checkpointBehind) Error() string {
+	return fmt.Sprintf("Native finalized checkpoint regressed from %d to %d", e.recorded, e.observed)
+}
+
+// isCheckpointBehind reports whether err refused an observation below a
+// recorded high-water.
+func isCheckpointBehind(err error) bool {
+	var behind checkpointBehind
+	return errors.As(err, &behind)
+}
+
+// checkAndAdvance refuses a value below the recorded checkpoint and
+// otherwise records it.
 func (s *checkpointStore) checkAndAdvance(value uint64) error {
+	return s.apply(value, true, true)
+}
+
+// check refuses a value below the recorded checkpoint and records nothing.
+func (s *checkpointStore) check(value uint64) error {
+	return s.apply(value, true, false)
+}
+
+// raise records value when it is above the recorded checkpoint and leaves a
+// higher record unchanged; the record never decreases.
+func (s *checkpointStore) raise(value uint64) error {
+	return s.apply(value, false, true)
+}
+
+// apply reads the recorded checkpoint under the cross-process lock. A value
+// below it is refused when refuseLower is set and ignored otherwise; a
+// higher value is written and synced only when record is set.
+func (s *checkpointStore) apply(value uint64, refuseLower, record bool) error {
 	return osguard.WithExclusiveFileLock(s.path, 0o600, func() error {
 		file, err := os.OpenFile(s.path, os.O_RDWR|os.O_CREATE, 0o600)
 		if err != nil {
@@ -56,10 +92,16 @@ func (s *checkpointStore) checkAndAdvance(value uint64) error {
 				return errors.New("Native checkpoint file is corrupt")
 			}
 		}
-		if value == 0 || value < previous {
-			return fmt.Errorf("Native finalized checkpoint regressed from %d to %d", previous, value)
+		if value == 0 {
+			return errors.New("Native finalized checkpoint is zero")
 		}
-		if value == previous {
+		if value < previous {
+			if refuseLower {
+				return checkpointBehind{recorded: previous, observed: value}
+			}
+			return nil
+		}
+		if value == previous || !record {
 			return nil
 		}
 		if err := file.Truncate(0); err != nil {

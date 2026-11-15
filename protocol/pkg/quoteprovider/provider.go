@@ -116,11 +116,15 @@ func (p *Provider) RequestQuoteProposal(ctx context.Context, request *nativev1.R
 	defer cancel()
 	session, err := p.config.Sessions.BeginSession(call)
 	if err != nil {
-		return nil, errors.New("finalized state is unavailable")
+		return nil, readError("finalized state is unavailable", err)
 	}
 	state, found, err := session.ResolveRegistry(call, request.CapabilityId)
-	if err != nil || !found || state == nil {
-		return nil, errors.New("Quote Capability is not available from finalized state")
+	switch {
+	case err != nil:
+		return nil, readError("Quote Capability is not available from finalized state", err)
+	case !found || state == nil:
+		return nil, readError("Quote Capability is not available from finalized state",
+			errors.New("the Capability is not in the finalized registry"))
 	}
 	capability := state.GetCapability()
 	if !proto.Equal(state.Network, p.config.Network) || state.Reference == nil || state.Reference.FinalizedCheckpoint != session.Checkpoint() ||
@@ -139,8 +143,11 @@ func (p *Provider) RequestQuoteProposal(ctx context.Context, request *nativev1.R
 	}
 	actor := "0:" + hex.EncodeToString(p.settlement.ActorAccountID)
 	account, found, err := session.ReadActor(call, actor)
-	if err != nil || !found || account.Data == nil || !account.Data.Active {
-		return nil, errors.New("Quote Service Actor is not active in finalized state")
+	switch {
+	case err != nil:
+		return nil, readError("Quote Service Actor is not active in finalized state", err)
+	case !found || account.Data == nil || !account.Data.Active:
+		return nil, readError("Quote Service Actor is not active in finalized state", nil)
 	}
 	policy := account.Data.Policy
 	attestor, err := mldsa44.ParseKeyIDText(p.settlement.AttestorKey)

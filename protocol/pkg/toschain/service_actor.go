@@ -101,6 +101,11 @@ func hexDigest(value, prefix string) ([32]byte, error) {
 // session is taken at its sequence number, and every account read must report
 // the same masterchain block identity, so a result composed from a session
 // comes from one checkpoint.
+//
+// A session is request-scoped: open it for one logical result and drop it.
+// Its checkpoint is checked against the fences only when it opens, and reads
+// at it are not refused once the fences have moved past it, so a session
+// kept or reused across requests would keep serving an old checkpoint.
 type ServiceActorSession struct {
 	reader    *ServiceActorReader
 	seqno     uint64
@@ -111,20 +116,52 @@ type ServiceActorSession struct {
 	file      string
 }
 
+// beginAttempts bounds the fresh finalized observations Begin makes when
+// one is refused for being behind a recorded checkpoint.
+const beginAttempts = 3
+
 // Begin opens a session at a fresh finalized checkpoint, refusing a
-// checkpoint older than one already served.
+// checkpoint older than one already served: older than the Service Actor
+// fence or the registry fence, which other processes sharing the state
+// directory advance too. Reads inside the session are then taken at that
+// checkpoint and are not refused when the fences move on.
+//
+// Another process can record a newer checkpoint while this one is being
+// observed; that observation is refused and a fresh one is made, at most
+// beginAttempts in all. Each must pass the same check, so endpoints serving
+// an older chain are refused every time.
 func (r *ServiceActorReader) Begin(ctx context.Context) (*ServiceActorSession, error) {
 	if r == nil || ctx == nil {
 		return nil, errors.New("Service Actor reader is not configured")
 	}
+	for attempt := 1; ; attempt++ {
+		session, err := r.begin(ctx)
+		if err == nil || attempt == beginAttempts || !isCheckpointBehind(err) || ctx.Err() != nil {
+			return session, err
+		}
+	}
+}
+
+func (r *ServiceActorReader) begin(ctx context.Context) (*ServiceActorSession, error) {
 	observation, nodes, err := r.chain.consensus(ctx)
 	if err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if observation.seqno == 0 || observation.seqno < r.highWater {
-		return nil, nativecore.NewProtocolError(nativecore.ErrBadSequence, "Service Actor finalized checkpoint regressed", nil)
+	if observation.seqno == 0 {
+		return nil, nativecore.NewProtocolError(nativecore.ErrBadSequence, "Service Actor finalized checkpoint is zero", nil)
+	}
+	if observation.seqno < r.highWater {
+		return nil, nativecore.NewProtocolError(nativecore.ErrBadSequence, "Service Actor finalized checkpoint regressed",
+			checkpointBehind{recorded: r.highWater, observed: observation.seqno})
+	}
+	// The session's registry reads are taken at this checkpoint and are not
+	// refused when the registry fences move on later, so the checkpoint is
+	// checked against them here: a session never opens below what any
+	// process sharing them recorded.
+	if err := r.registry.admitCheckpoint(observation.seqno); err != nil {
+		return nil, err
 	}
 	if err := r.checkpoint.checkAndAdvance(observation.seqno); err != nil {
 		return nil, nativecore.NewProtocolError(nativecore.ErrBadSequence, "Service Actor durable checkpoint rejected observation", err)
@@ -205,7 +242,10 @@ func (s *ServiceActorSession) ResolveRegistry(ctx context.Context, objectID stri
 	if err != nil {
 		return nil, false, err
 	}
-	state, found, err := registry.ResolveNativeAtCheckpoint(ctx, identity.Address, &nativev1.DNSCheckpointV1{Workchain: -1,
+	// The checkpoint was checked against the registry fences when the
+	// session opened; a fence that moved on since then does not make a read
+	// at it a regression. The validated read raises the fences to it.
+	state, found, err := registry.resolveNativeAtAdmittedCheckpoint(ctx, identity.Address, &nativev1.DNSCheckpointV1{Workchain: -1,
 		Sequence: s.seqno, RootHash: root[:], FileHash: file[:]})
 	if err != nil || !found {
 		return state, found, err

@@ -180,6 +180,13 @@ idempotency or authorization fallback.
   treated as an independent fee budget.
 - Persist finalized checkpoint high-water state per network and genesis; commit
   it only after the complete account observation and typed state validate.
+- A reader that composes one result from several reads at one pinned
+  finalized checkpoint (a session) refuses to pin a checkpoint below the
+  high-water when the session opens. Reads inside the session are then taken
+  at the pinned checkpoint and are not refused when the high-water moves past
+  it afterwards, because another process sharing the durable checkpoint or a
+  later session observed a newer checkpoint. Each validated read raises the
+  high-water to the pinned checkpoint when it is lower and never lowers it.
 - Make the durable checkpoint a mandatory resolver dependency and fsync both
   its owner-private file and containing directory before serving advanced
   state; no process-local-only fallback is permitted.

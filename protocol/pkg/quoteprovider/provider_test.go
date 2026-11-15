@@ -27,10 +27,16 @@ type actors struct {
 	actor      string
 	sessions   int
 	stateDrift bool
+	beginErr   error
+	resolveErr error
+	absent     bool
 }
 
 func (a *actors) BeginSession(context.Context) (serviceactor.Session, error) {
 	a.sessions++
+	if a.beginErr != nil {
+		return nil, a.beginErr
+	}
 	return session{a}, nil
 }
 
@@ -39,6 +45,12 @@ type session struct{ a *actors }
 func (s session) Checkpoint() uint64   { return 10 }
 func (s session) ChainTime() time.Time { return time.Unix(2_000_000_000, 0) }
 func (s session) ResolveRegistry(context.Context, string) (*nativev1.NativeStateV1, bool, error) {
+	if s.a.resolveErr != nil {
+		return nil, false, s.a.resolveErr
+	}
+	if s.a.absent {
+		return nil, false, nil
+	}
 	state := proto.Clone(s.a.state).(*nativev1.NativeStateV1)
 	if s.a.stateDrift {
 		state.Reference.FinalizedCheckpoint = 9
@@ -140,5 +152,43 @@ func TestProviderRefusesMisboundActorsAndWrongCapabilities(t *testing.T) {
 		if _, err := provider.RequestQuoteProposal(context.Background(), request); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+// A read failure keeps its fixed class and carries its cause, so a buyer
+// building its own Quote learns why; PublicError leaves the class alone, for
+// a caller that answers remote parties.
+func TestReadFailuresCarryTheirCauseAndThePublicFormDropsIt(t *testing.T) {
+	cause := errors.New("NATIVE_BAD_SEQUENCE: execute JSON-RPC request: Post \"https://rpc.example/secret-token\"")
+	for name, test := range map[string]struct {
+		edit  func(*actors)
+		class string
+		cause error
+	}{
+		"session":  {func(a *actors) { a.beginErr = cause }, "finalized state is unavailable", cause},
+		"registry": {func(a *actors) { a.resolveErr = cause }, "Quote Capability is not available from finalized state", cause},
+		"absent":   {func(a *actors) { a.absent = true }, "Quote Capability is not available from finalized state", nil},
+		"actor":    {func(a *actors) { a.err = cause }, "Quote Service Actor is not active in finalized state", cause},
+	} {
+		provider, source, request, _, _ := setup(t)
+		test.edit(source)
+		_, err := provider.RequestQuoteProposal(context.Background(), request)
+		var quoteErr *Error
+		if !errors.As(err, &quoteErr) || quoteErr.Class() != test.class || !strings.HasPrefix(err.Error(), test.class) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if test.cause != nil && (!errors.Is(err, test.cause) || !strings.Contains(err.Error(), test.cause.Error())) {
+			t.Fatalf("%s: the cause is not carried: %v", name, err)
+		}
+		if name == "absent" && !strings.Contains(err.Error(), "not in the finalized registry") {
+			t.Fatalf("absent: %v", err)
+		}
+		public := PublicError(err)
+		if public.Error() != test.class || errors.Is(public, cause) {
+			t.Fatalf("%s: the public form is %q", name, public)
+		}
+	}
+	if other := errors.New("other"); PublicError(other) != other {
+		t.Fatal("PublicError changed an error that is not a read failure")
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/capabilitycatalog"
 	"github.com/tosnetwork/ai/protocol/pkg/publicerrors"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
+	"github.com/tosnetwork/ai/protocol/pkg/quoteprovider"
 )
 
 type Backend interface {
@@ -208,7 +209,9 @@ func (s *Server) RequestQuoteProposal(ctx context.Context, request *connect.Requ
 	}
 	proposal, err := s.QuoteSource.RequestQuoteProposal(ctx, request.Msg)
 	if err != nil {
-		return nil, discoveryError(err, publicerrors.DependencyUnavailable)
+		// A read failure's cause can name the configured endpoints; a
+		// remote caller is told only its fixed class.
+		return nil, discoveryError(quoteprovider.PublicError(err), publicerrors.DependencyUnavailable)
 	}
 	if _, err := quoteexchange.Validate(s.Network, request.Msg, proposal, time.Now()); err != nil {
 		return nil, publicerrors.New(publicerrors.Conflict, errors.New("Quote Proposal source returned conflicting preimages"), 0)
