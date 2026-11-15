@@ -49,6 +49,7 @@ type options struct {
 	maxSiteDeposits   int
 	sweepInterval     time.Duration
 	trustedProxies    []netip.Prefix
+	metricsListen     string
 }
 
 type prefixList struct{ values *[]netip.Prefix }
@@ -112,6 +113,8 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 		"deposit bodies all clients in one IPv6 /48 hold at once; past it 429")
 	flags.DurationVar(&opts.sweepInterval, "sweep-interval", time.Minute, "expiry sweep interval")
 	flags.Var(prefixList{&opts.trustedProxies}, "trusted-proxy", "address or CIDR of a TLS-terminating proxy whose X-Forwarded-For is believed (repeatable; default none)")
+	flags.StringVar(&opts.metricsListen, "metrics-listen", "",
+		"loopback address (127.0.0.1, ::1 or localhost, with port) serving GET /metrics over plain HTTP (default: off)")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -138,6 +141,11 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	}
 	if opts.globalEntries <= 0 || opts.globalBytes <= 0 {
 		return options{}, errors.New("-global-max-entries and -global-max-bytes are required")
+	}
+	if opts.metricsListen != "" {
+		if err := checkMetricsListen(opts.metricsListen); err != nil {
+			return options{}, err
+		}
 	}
 	if opts.maxConnections <= 0 || opts.maxDeposits <= 0 || opts.sweepInterval < time.Second || opts.maxRateClients <= 0 {
 		return options{}, errors.New("-max-connections, -max-concurrent-deposits and -max-rate-clients must be positive " +
@@ -176,7 +184,65 @@ func buildServerTLS(listen, certFile, keyFile string) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}}, nil
 }
 
+// isLoopbackHost accepts localhost or a loopback IP literal.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
+}
+
+// checkMetricsListen restricts the metrics listener to a loopback address
+// with a port: the counters are for the operator on the host (or through
+// an SSH tunnel), never for the network.
+func checkMetricsListen(listen string) error {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Errorf("invalid -metrics-listen address: %w", err)
+	}
+	if port == "" || !isLoopbackHost(host) {
+		return fmt.Errorf("-metrics-listen %q: the metrics listener is restricted to a loopback address "+
+			"(127.0.0.1, ::1 or localhost) with a port", listen)
+	}
+	return nil
+}
+
+// Bounds of the metrics listener: one scraper at a time is expected.
+const (
+	metricsMaxConnections = 4
+	metricsTimeout        = 5 * time.Second
+)
+
+// listenMetrics opens the metrics listener and checks the address it bound
+// is loopback, whatever localhost resolved to.
+func listenMetrics(listen string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", listen)
+	if err != nil {
+		return nil, fmt.Errorf("metrics listen: %w", err)
+	}
+	bound, ok := listener.Addr().(*net.TCPAddr)
+	if !ok || !bound.IP.IsLoopback() {
+		_ = listener.Close()
+		return nil, fmt.Errorf("-metrics-listen %q bound a non-loopback address", listen)
+	}
+	limited, err := agentpacketrelay.NewLimitListener(listener, agentpacketrelay.ListenerLimits{
+		MaxConnections: metricsMaxConnections, MaxConnectionsPerClient: metricsMaxConnections,
+		MaxConnectionsPer48: metricsMaxConnections})
+	if err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	return limited, nil
+}
+
 func run(ctx context.Context, args []string, output io.Writer, ready func(net.Addr)) error {
+	return runWithMetrics(ctx, args, output, ready, nil)
+}
+
+// runWithMetrics is run; metricsReady, when not nil, receives the metrics
+// listener's address once it serves.
+func runWithMetrics(ctx context.Context, args []string, output io.Writer, ready, metricsReady func(net.Addr)) error {
 	opts, err := parseOptions(args, output)
 	if err != nil {
 		return err
@@ -191,12 +257,16 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 		return fmt.Errorf("open relay store: %w", err)
 	}
 	defer store.Close()
+	var metrics *agentpacketrelay.Metrics
+	if opts.metricsListen != "" {
+		metrics = agentpacketrelay.NewMetrics()
+	}
 	handler, err := agentpacketrelay.NewServer(agentpacketrelay.ServerConfig{Store: store, BasePath: opts.basePath,
 		DepositRate:    agentpacketrelay.RateLimit{PerMinute: opts.depositRate, Burst: opts.depositBurst},
 		ReadRate:       agentpacketrelay.RateLimit{PerMinute: opts.readRate, Burst: opts.readBurst},
 		MaxRateClients: opts.maxRateClients, MaxConcurrentDeposits: opts.maxDeposits,
 		MaxConcurrentDepositsPerClient: opts.maxClientDeposits, MaxConcurrentDepositsPer48: opts.maxSiteDeposits,
-		TrustedProxies: opts.trustedProxies, Logger: logger})
+		TrustedProxies: opts.trustedProxies, Logger: logger, Metrics: metrics})
 	if err != nil {
 		return err
 	}
@@ -209,9 +279,21 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 	// shutdown and other clients are never blocked behind a full table.
 	listener, err = agentpacketrelay.NewLimitListener(listener, agentpacketrelay.ListenerLimits{
 		MaxConnections: opts.maxConnections, MaxConnectionsPerClient: opts.maxPerClientConns,
-		MaxConnectionsPer48: opts.maxSiteConns, TrustedProxies: opts.trustedProxies})
+		MaxConnectionsPer48: opts.maxSiteConns, TrustedProxies: opts.trustedProxies, Metrics: metrics})
 	if err != nil {
 		return err
+	}
+	var metricsServer *http.Server
+	var metricsListener net.Listener
+	if metrics != nil {
+		metricsListener, err = listenMetrics(opts.metricsListen)
+		if err != nil {
+			_ = listener.Close()
+			return err
+		}
+		metricsServer = &http.Server{Handler: metrics.Handler(store), ReadHeaderTimeout: metricsTimeout,
+			ReadTimeout: metricsTimeout, WriteTimeout: metricsTimeout, IdleTimeout: metricsTimeout,
+			MaxHeaderBytes: 4 << 10, ErrorLog: log.New(io.Discard, "", 0)}
 	}
 	// IdleTimeout lets a poller keep its connection between 15-second polls
 	// (plus jitter) and frees an idle one soon after.
@@ -224,8 +306,11 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 	defer stopSweep()
 	go store.RunSweeper(sweepCtx, opts.sweepInterval, time.Now, func(err error) {
 		logger.Error("expiry sweep", "error", err)
+		if metrics != nil {
+			metrics.RecordSweepFailure()
+		}
 	})
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() {
 		if tlsConfig != nil {
 			// ServeTLS negotiates HTTP/2 as well as HTTP/1.1.
@@ -234,6 +319,13 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 		}
 		errCh <- server.Serve(listener)
 	}()
+	if metricsServer != nil {
+		go func() { errCh <- metricsServer.Serve(metricsListener) }()
+		logger.Info("agent packet relay metrics listening", "address", metricsListener.Addr().String())
+		if metricsReady != nil {
+			metricsReady(metricsListener.Addr())
+		}
+	}
 	logger.Info("agent packet relay listening", "address", listener.Addr().String(), "tls", tlsConfig != nil,
 		"usage", store.Usage())
 	if ready != nil {
@@ -248,6 +340,11 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("metrics shutdown: %w", err)
+		}
+	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}

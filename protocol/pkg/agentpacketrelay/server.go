@@ -65,6 +65,9 @@ type ServerConfig struct {
 	// Logger receives persistence failures only; nil discards them. Request
 	// bodies, paths and client addresses are never logged.
 	Logger *slog.Logger
+	// Metrics, when not nil, counts every answer by route class and status
+	// code, accepted deposit bytes and store failures. Nil counts nothing.
+	Metrics *Metrics
 }
 
 // Deposit body bounds.
@@ -107,6 +110,7 @@ type Server struct {
 	trusted       []netip.Prefix
 	now           func() time.Time
 	logger        *slog.Logger
+	metrics       *Metrics
 }
 
 // NewServer checks the configuration and returns the handler.
@@ -177,7 +181,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 	return &Server{store: config.Store, bodies: make(chan struct{}, bodies), inflight: map[netip.Addr]int{},
 		inflightSites: map[netip.Addr]int{}, perClient: perClient, per48Bodies: per48Bodies, readBase: readBase, minRate: minRate, base: config.BasePath,
 		deposits: newRateLimiter(deposit, maxClients, per48), reads: newRateLimiter(read, maxClients, per48), trusted: append([]netip.Prefix(nil), config.TrustedProxies...),
-		now: now, logger: logger}, nil
+		now: now, logger: logger, metrics: config.Metrics}, nil
 }
 
 type route int
@@ -228,6 +232,23 @@ func (s *Server) parseRoute(escapedPath string) (route, agentDigest, string, [32
 // ServeHTTP answers one request. Order: client address, rate limit (429),
 // query string (400), path (404), method (405), then the operation.
 func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	if s.metrics == nil {
+		s.serve(w, request, nil)
+		return
+	}
+	counted := statusWriter{ResponseWriter: w}
+	s.serve(&counted, request, &counted)
+	class := counted.class
+	if !counted.classified {
+		// Refused before the route was matched: classify it now, so the
+		// order of checks and their cost are unchanged.
+		kind, _, _, _ := s.parseRoute(request.URL.EscapedPath())
+		class = classify(kind, request.Method)
+	}
+	s.metrics.observe(class, counted.status)
+}
+
+func (s *Server) serve(w http.ResponseWriter, request *http.Request, counted *statusWriter) {
 	now := s.now()
 	client, ok := clientAddress(request, s.trusted)
 	if !ok {
@@ -247,6 +268,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	kind, agent, agentText, id := s.parseRoute(request.URL.EscapedPath())
+	if counted != nil {
+		counted.class, counted.classified = classify(kind, request.Method), true
+	}
 	allow := ""
 	switch kind {
 	case routeRelay, routeList:
@@ -345,7 +369,7 @@ func (s *Server) deposit(w http.ResponseWriter, request *http.Request, agentText
 		s.unavailable(w, "set deposit read deadline", err)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(http.MaxBytesReader(w, request.Body, MaxEnvelopeBytes+1), MaxEnvelopeBytes+1))
+	body, err := io.ReadAll(io.LimitReader(http.MaxBytesReader(connWriter(w), request.Body, MaxEnvelopeBytes+1), MaxEnvelopeBytes+1))
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		// Slow, not malformed: the sender may retry the same bytes, here or
 		// at another relay. The connection cannot be read further.
@@ -376,6 +400,9 @@ func (s *Server) deposit(w http.ResponseWriter, request *http.Request, agentText
 	}
 	switch status {
 	case depositCreated:
+		if s.metrics != nil {
+			s.metrics.depositBytes.Add(uint64(len(body)))
+		}
 		s.empty(w, http.StatusCreated)
 	case depositDuplicate:
 		s.empty(w, http.StatusOK)
@@ -396,7 +423,7 @@ func (s *Server) ack(w http.ResponseWriter, request *http.Request, agent agentDi
 		s.fail(w, http.StatusBadRequest, 0)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(http.MaxBytesReader(w, request.Body, agentpacketseal.AckSecretSize+1),
+	body, err := io.ReadAll(io.LimitReader(http.MaxBytesReader(connWriter(w), request.Body, agentpacketseal.AckSecretSize+1),
 		agentpacketseal.AckSecretSize+1))
 	if err != nil || len(body) != agentpacketseal.AckSecretSize {
 		s.fail(w, http.StatusBadRequest, 0)
@@ -501,6 +528,9 @@ func (s *Server) fail(w http.ResponseWriter, status int, retryAfter time.Duratio
 func (s *Server) unavailable(w http.ResponseWriter, operation string, err error) {
 	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		s.logger.Error("relay store failure", "operation", operation, "error", err)
+		if s.metrics != nil {
+			s.metrics.storeFailures.Add(1)
+		}
 	}
 	s.json(w, http.StatusServiceUnavailable, wireError{Schema: SchemaError, Code: CodeUnavailable})
 }

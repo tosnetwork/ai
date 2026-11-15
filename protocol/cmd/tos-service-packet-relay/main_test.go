@@ -308,8 +308,11 @@ func TestDaemonPerClientConnections(t *testing.T) {
 func TestDaemonTLS(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile, pool := selfSigned(t, dir)
+	// Counting is on, so HTTP/1.1 and HTTP/2 deposits also pass through the
+	// counting writer.
 	d := startDaemon(t, "-listen", "127.0.0.1:0", "-tls-cert", certFile, "-tls-key", keyFile,
-		"-state-dir", filepath.Join(dir, "state"), "-global-max-entries", "100", "-global-max-bytes", "67108864")
+		"-state-dir", filepath.Join(dir, "state"), "-global-max-entries", "100", "-global-max-bytes", "67108864",
+		"-metrics-listen", "127.0.0.1:0")
 	defer d.stop(t)
 	_, port, err := net.SplitHostPort(d.addr.String())
 	if err != nil {
