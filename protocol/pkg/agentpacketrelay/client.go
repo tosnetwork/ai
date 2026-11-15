@@ -173,7 +173,10 @@ type Client struct {
 
 // NewClient checks the configuration and returns a client.
 func NewClient(config ClientConfig) (*Client, error) {
-	if err := agentpacketseal.CheckRelayURL(config.BaseURL); err != nil {
+	// V1 forbids any percent-escape in a relay URL path; the "%" check also
+	// covers escapes that decode to characters needing no escape, which
+	// leave the parsed URL without a raw path.
+	if err := agentpacketseal.CheckRelayURL(config.BaseURL); err != nil || strings.Contains(config.BaseURL, "%") {
 		return nil, fmt.Errorf("%w: relay base URL is not a canonical HTTPS or loopback HTTP base URL", ErrInvalidArgument)
 	}
 	if config.Timeout < 0 || (config.Proxy != nil && config.Transport != nil) {

@@ -6,11 +6,12 @@ signed Agent Packet V1 JSON to an encryption key the recipient Agent
 published, deposits the sealed envelope at a relay the recipient chose, and
 the recipient fetches, opens, verifies, stores and then acknowledges it.
 
-**Status: ⬜ Design and frozen vectors only.** This document, the reference
-codec `protocol/pkg/agentpacketseal` and the corpus
-`spec/test-vectors/agent-packet-relay-v1.json` exist. No relay program, no
-OpenFox client and no cross-host evidence exist yet; section 12 lists what
-those must show.
+**Status: ⬜ Design, frozen vectors, relay program and client library.** This
+document, the reference codec `protocol/pkg/agentpacketseal`, the corpus
+`spec/test-vectors/agent-packet-relay-v1.json`, the relay service and Go
+client `protocol/pkg/agentpacketrelay` and the daemon
+`protocol/cmd/tos-service-packet-relay` exist. No OpenFox client and no
+cross-host evidence exist yet; section 12 lists what those must show.
 
 The key words MUST, MUST NOT, SHOULD and MAY are normative.
 
@@ -393,7 +394,26 @@ the next packet generation.
 All paths are below the base URL `B` named in a key card.
 `{agent}` is the strict `agent_<64 hex>` form, `{id}` is the envelope ID as 64
 lowercase hex; any other spelling, the all-zero agent, or the all-zero ID is
-`404` and never normalized.
+`404` and never normalized. The relay matches the escaped request path
+exactly: a percent-escape, an empty segment or a trailing slash anywhere is
+`404`.
+
+A relay evaluates every request in this order, answering at the first
+failure:
+
+1. client address (section 9.8); a peer address that does not parse is `400`;
+2. the rate limit of the request's class (`429` with `Retry-After` in whole
+   seconds, at least 1): `PUT` is the deposit class, every other method the
+   list/download/ack class; every request takes a token, including ones
+   later refused;
+3. a query string, even an empty `?` (`400`);
+4. the path (`404`);
+5. the method: a path that exists with another method is `405`
+   (`method_not_allowed`) with an `Allow` header; `HEAD` is not supported;
+6. the operation's own checks below.
+
+Successful `200`/`201` deposit answers and `204` acknowledgement answers
+carry no body.
 
 ### 9.2 Deposit
 
@@ -415,6 +435,26 @@ The relay, without decrypting:
 6. Checks quotas (`507`): per recipient, per (client, recipient), global.
 7. Writes the envelope durably (data and directory synced) and only then
    answers `201`.
+
+Details of these steps:
+
+- A request with no `Content-Length` (a chunked body) is `413` like an
+  oversized one, since its size cannot be checked before reading. A body that
+  ends before its `Content-Length` is `400`.
+- `Content-Type` must be exactly `application/octet-stream`, without
+  parameters.
+- Envelope IDs are unique across the whole relay, not per mailbox: an ID
+  stored or tombstoned under one recipient answers `409` or `410` for a
+  deposit under any recipient.
+- A held tombstone answers `410` whatever bytes are deposited under its ID:
+  the relay keeps no copy to compare, and a tombstone can only exist because
+  someone presented the secret.
+- Step 4 precedes step 5, so an identical retry whose `expires_at_unix` has
+  passed is `422`, not `200`. Quotas apply only to a new ID: an identical
+  retry of a stored envelope is `200` even when the mailbox is full.
+- An envelope whose effective expiry has passed is gone for every purpose
+  before the expiry sweep removes its file; a deposit of the same ID is then
+  judged as new.
 
 `200`, `201` and `410` are durable acceptance: the envelope is stored, or was
 stored and already acknowledged by its recipient. A transport `Send` returns
@@ -440,9 +480,14 @@ failure the sender retries with the same journaled bytes.
 
 At most 256 entries (the per-recipient count quota), ordered by
 `received_at_unix` then `envelope_id` ascending; never an acknowledged or
-expired envelope. An empty mailbox is `200` with an empty list. Clients decode
-the list strictly (unknown fields rejected) and treat every value as an
-unauthenticated hint; `received_at_unix` is the relay's word only.
+expired envelope. An empty mailbox is `200` with an empty list (`[]`, never
+`null`). `expires_at_unix` is the effective expiry, the earlier of the
+envelope's own expiry and receipt plus the relay's retention. Clients decode
+the list strictly (unknown fields, a missing or `null` list, more than 256
+entries, non-canonical IDs, sizes outside the envelope bounds,
+`expires_at_unix <= received_at_unix`, and entries not strictly in the order
+above are rejected) and treat every value as an unauthenticated hint;
+`received_at_unix` is the relay's word only.
 
 ### 9.4 Download
 
@@ -459,8 +504,12 @@ expired. Clients read at most 262,144 bytes.
 - Hash matches a stored envelope: delete it durably, keep a tombstone of the ID
   until its effective expiry, answer `204`.
 - Hash matches a held tombstone: `204` (idempotent).
-- Body not exactly 32 bytes: `400`. Hash does not match the path ID: `403`.
-  Unknown or expired ID: `404`.
+- Body not exactly 32 bytes, or `Content-Type` not exactly
+  `application/octet-stream`: `400`. Hash does not match the path ID: `403`.
+  Unknown or expired ID, or an ID held under another recipient: `404`.
+- These are checked in that order: `400`, then `403` (which needs no lookup,
+  so a wrong secret never reveals whether an ID exists), then `404` or
+  `204`.
 
 The relay compares in constant time. Without the secret nobody can delete an
 envelope: not another recipient, not a party that downloaded the ciphertext.
@@ -472,16 +521,20 @@ it could not by not depositing.
 `GET B/v1/relay` → `200`, JSON
 `{"schema": "tos.service.agent-packet-relay.relay.v1", "max_envelope_bytes": 262144,
 "max_ttl_seconds": 86400, "per_recipient_max_envelopes": n, "per_recipient_max_bytes": n}`.
-It is advisory and grants nothing.
+It is advisory and grants nothing. `max_ttl_seconds` and the per-recipient
+values report the operator's configured bounds, which MAY be lower than the
+V1 ceilings.
 
 ### 9.7 Errors
 
 Error responses are `application/json`
 `{"schema": "tos.service.agent-packet-relay.error.v1", "code": "<code>"}` with one fixed
 code per status: `invalid_request` (400), `forbidden` (403), `not_found` (404),
-`conflict` (409), `gone` (410), `too_large` (413), `expiry_out_of_bounds`
-(422), `rate_limited` (429), `quota_exhausted` (507), `unavailable` (503). No
-response repeats request bytes.
+`method_not_allowed` (405), `conflict` (409), `gone` (410), `too_large` (413),
+`expiry_out_of_bounds` (422), `rate_limited` (429), `quota_exhausted` (507),
+`unavailable` (503). No response repeats request bytes. `503` is a
+persistence failure or a relay shutting down; it is retryable. A client
+believes a code only when it is the fixed code of the response's status.
 
 ### 9.8 Bounds
 
@@ -500,6 +553,23 @@ response repeats request bytes.
 Client address means the IP address, with IPv6 aggregated to its /64. A full
 mailbox rejects new deposits (`507`); a relay never evicts a stored envelope to
 admit another, because eviction would let anyone delete genuine envelopes.
+
+Where the table above leaves a choice, the reference relay makes these:
+
+- The client address is the TCP peer. `X-Forwarded-For` is believed only from
+  peers the operator lists as trusted proxies; it is then walked from the
+  right and the first address that is not a trusted proxy is the client.
+- The list/download/ack burst defaults to 100. Rate limits are token buckets
+  in a table of bounded size; when it is full and every bucket is still
+  draining, a new client is answered `429` rather than evicting a client that
+  is being limited.
+- The global byte limit counts envelope bytes; the global count limit counts
+  envelopes plus tombstones; neither has a default. Retention defaults to the
+  24-hour ceiling and the operator MAY lower it.
+- The relay keeps the depositing client address with each stored envelope so
+  that the per-(client, recipient) quota survives a restart.
+- A record that fails its checksum, an unknown file or an unknown layout
+  makes the relay refuse to start rather than guess.
 
 **Why 256 KiB.** OpenFox frames carry at most 60 KiB of data; as base64 inside a
 signed packet JSON (2,420-byte signature in hex plus fields) each packet stays
@@ -711,6 +781,15 @@ evidence.
   carrying packet, plaintext wrapper, envelope header parse, seal and open,
   acknowledgement hash. It is deliberately small and holds no relay, storage,
   HTTP or OpenFox logic.
+- `protocol/pkg/agentpacketrelay` — the relay HTTP API of section 9 over a
+  durable on-disk store (atomic, checksummed records; expiry sweep;
+  tombstones), and the Go client a sender or recipient uses: deposit with a
+  typed outcome (accepted `200`/`201`/`410`, `409` conflict, refused bytes,
+  retryable), strict list decoding, checked download and acknowledgement;
+  HTTPS or loopback HTTP only, no redirects, an explicit proxy only. It holds
+  no key and runs no packet verification.
+- `protocol/cmd/tos-service-packet-relay` — the relay daemon, with a systemd
+  unit and operator notes in `protocol/deploy/packet-relay/`.
 - `agentpacket.VerifySender` — the sender-signature half of
   `agentpacket.Verify`, used for key cards; `Verify` now calls it and is
   otherwise unchanged.

@@ -550,10 +550,12 @@ gate item.
   names, deleted only with an acknowledgement secret carried inside the
   ciphertext. The relay has no keys, no chain access and no authority; inner
   packets are verified against finalized state exactly as on every other
-  Carrier. **Status: ⬜ Design, reference codec and frozen vectors only.** The
-  relay program, the OpenFox client, a second independent implementation of
-  the corpus, and the two-host, outage, adversarial and quota evidence of its
-  section 12 do not exist. It supplies no gate evidence until that evidence
+  Carrier. **Status: ⬜ Design, reference codec, frozen vectors, relay program
+  and Go client library.** The relay daemon (`tos-service-packet-relay`) and
+  client (`protocol/pkg/agentpacketrelay`) exist with single-host tests. The
+  OpenFox client, a second independent implementation of the corpus, and the
+  two-host, outage, adversarial and quota evidence of its section 12 do not
+  exist. It supplies no gate evidence until that evidence
   exists against independent deployments.
 - [Agent Intent Exchange V1](AGENT_INTENT_EXCHANGE_V1.md) defines a generic
   signed bulletin and Agent-to-Agent negotiation layer. A small signed
