@@ -239,6 +239,20 @@ The card's Agent:
   after `VerifyKeyCard` against finalized state; of the valid cards it holds
   it seals to the one 6.3 selects. Where OpenFox carries it is specified in the
   OpenFox Service Actor rail guide.
+- **Buyer, after the respond.** Once the respond is final the buyer has nothing
+  to send until the result arrives, so neither a task redelivery nor an
+  acknowledgement refreshes its card; a buyer away for longer than the card the
+  provider holds would then never get a result it paid for. A buyer that sees
+  a finalized respond and holds no accepted result SHOULD therefore send its
+  current card in band, in a packet that only asks for the result again: when
+  it first sees that state, and then at a bounded rate (OpenFox: at most every
+  6 hours) until the result arrives or its retention ends. The provider MUST
+  take it only from the request's buyer and only for a request it responded to
+  and still retains, MUST verify the card as above, and MAY then deliver the
+  result early, at a bounded rate. Such a packet never admits, executes or
+  responds. For the same reason the card a provider publishes in its offer
+  file SHOULD be long-lived (OpenFox: the 30-day maximum, republished once it
+  runs under 15 days), so a returning buyer can still reach the provider.
 - **Relay directory: none in V1.** A relay without chain access cannot tell a
   genuine card from junk under the same Agent ID, so any card directory it kept
   could be filled or evicted by anyone. Cards therefore travel only inside
