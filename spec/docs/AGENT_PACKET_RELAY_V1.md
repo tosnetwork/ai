@@ -229,7 +229,16 @@ The card's Agent:
   redeliveries to it. The buyer SHOULD send a card whose `not_after_unix`
   covers the request's response deadline plus the provider's redelivery
   horizon; a provider holding only expired buyer cards cannot deliver and the
-  request ends through the existing timeout refund.
+  request ends through the existing timeout refund. Because a card lives at
+  most 30 days, the buyer SHOULD also carry its current card in each task
+  redelivery and in each result acknowledgement, so a card that would expire
+  before that horizon is refreshed in band. The provider MUST take such a card
+  only from a packet it ties to that purchase (a task the admission gate
+  matched to the request, or an acknowledgement from the request's buyer for
+  its result), only when the card's Agent is the packet's sender, and only
+  after `VerifyKeyCard` against finalized state; of the valid cards it holds
+  it seals to the one 6.3 selects. Where OpenFox carries it is specified in the
+  OpenFox Service Actor rail guide.
 - **Relay directory: none in V1.** A relay without chain access cannot tell a
   genuine card from junk under the same Agent ID, so any card directory it kept
   could be filled or evicted by anyone. Cards therefore travel only inside
@@ -352,6 +361,11 @@ aead_ciphertext = ctx.Seal(aad = header, plaintext)
    is unknown past the 10-minute window. Step 4 still holds: a fresh seal
    happens only because the old card cannot be used, never to retry an
    ambiguous deposit to a usable card.
+6. When a recipient card is revoked after relays accepted envelopes sealed to
+   it, a sender that kept those envelopes' acknowledgement secrets MAY
+   withdraw them (9.5) to shorten their exposure to a possibly compromised
+   key. A sender is not required to keep the secrets; without them the
+   envelopes stay until they expire.
 
 ### 8.5 Recipient rules
 
@@ -684,7 +698,10 @@ packet payload; the relay supplies only the authenticated-encryption transport.
   until its `not_after_unix`, up to 30 days; publishing a successor helps only
   senders who see it. Once the private key is compromised, the only way to
   stop senders sealing to it before `not_after_unix` is to remove the
-  controller that signed its card from the finalized policy (6.3). That is why
+  controller that signed its card from the finalized policy (6.3). Envelopes
+  relays already hold for that key stay readable to whoever has the key until
+  they expire (at most 24 hours) unless their senders withdraw them with their
+  acknowledgement secrets, which 8.4 step 6 permits. That is why
   cards SHOULD come from a dedicated card-signing controller; with the first
   OpenFox implementation's packet controller, revocation also stops the node's
   packets until a new controller is registered.
