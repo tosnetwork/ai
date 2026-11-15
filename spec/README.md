@@ -1,0 +1,288 @@
+# TOS Service Protocol Specification
+
+TOS Service Protocol specifies the operation and authority substrate for **The
+Open System for the Agentic Internet**. It lets humans and autonomous Agents
+establish portable identity, exchange signed messages and publications, form
+groups, discover one another, transfer value, and optionally enter verifiable
+commercial commitments without making one Gateway or marketplace database the
+source of truth.
+
+The current implemented protocol identifier is exactly `tos_service_v1`.
+The common Agent Operation Envelope and opcode profiles described by the root
+architecture remain to be frozen; this repository does not claim that they are
+already implemented.
+
+## Authority
+
+Finalized TOS state is the sole canonical authority for identity, delegation,
+custody, and any deliberately selected on-chain commitment or settlement. A
+valid signed off-chain operation proves only what its profile and signer are
+authorized to assert. A Carrier or Gateway can relay, store, index, rank,
+moderate, construct a proposal, and serve derived views. It cannot create or
+override protocol facts.
+
+The canonical registry representation is typed TVM account state. Agent and
+Capability accounts are deterministic from the network domain, object ID,
+registry code, and workchain. Off-chain databases and interchange encodings
+are caches or projections only.
+
+## Target core layers and objects
+
+- **Agent** — a deterministic identity controlled by a weighted ML-DSA-44 policy.
+- **Capability** — a deterministic object owned by one Agent, with immutable
+  version commitments and explicit revocation.
+- **Agent Operation** — a bounded signed envelope selecting an opcode profile,
+  audience, replay identity, scoped order, payload commitment, and authority.
+- **Carrier** — a replaceable direct, Messenger, group, relay, storage,
+  Gateway, or index path with local admission policy and no semantic authority.
+- **Publication, Message, Mail, Group, and Gift profiles** — reusable Agentic
+  Internet operations whose payloads do not hard-code business categories.
+- **Quote Proposal** — temporary gateway output with no protocol authority.
+- **Accepted Quote** — exact commercial and execution terms committed in a
+  finalized TOS transaction when parties choose this optional commerce profile.
+- **Receipt** — a result commitment signed by the execution authority selected
+  by the Accepted Quote and committed according to its terms.
+
+The Registry objects, relay/resolve service, commerce primitives, and bounded
+provider execution are implemented and tested. The rename to `tos_service_v1`
+is a breaking pre-launch domain reset, so earlier local-chain evidence is
+archived and a fresh current-domain Gate C deployment is required before Gate D
+or later live acceptance. See `docs/ROADMAP.md` for evidence-backed status,
+implementation order, and acceptance gates.
+
+## System boundaries
+
+- TOS contracts validate registry transitions and store canonical state.
+- Agent Operation profiles define signed off-chain authorization, replay,
+  ordering, payload, and resource semantics.
+- `tos-service-protocol` builds canonical cells and operation encodings,
+  verifies signatures, relays messages, and resolves finalized state through
+  independent endpoints.
+- `tos-service-gateway` authenticates transport clients and exposes the Native service.
+- Carriers and Gateways provide delivery, discovery, indexing, moderation, and
+  orchestration without semantic authority.
+- OpenFox and other runtimes interpret content and invoke skills under
+  deterministic owner-controlled policy.
+- Providers and workers execute jobs without authority to rewrite registry or
+  commercial facts.
+
+## Required reading order
+
+Read these documents completely and in this order:
+
+1. [`docs/README.md`](docs/README.md)
+2. [`docs/TOS_AGENTIC_INTERNET_OPERATION_ARCHITECTURE_V1.md`](docs/TOS_AGENTIC_INTERNET_OPERATION_ARCHITECTURE_V1.md)
+3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+4. [`docs/PRODUCT_STRATEGY.md`](docs/PRODUCT_STRATEGY.md)
+5. [`docs/NATIVE_REGISTRY_STATE_MACHINES.md`](docs/NATIVE_REGISTRY_STATE_MACHINES.md)
+6. [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+The root operation architecture controls the protocol mission and layer
+boundaries. Strategy selects product priority and an initial commercial wedge
+but cannot narrow that mission or weaken safety. The system architecture
+controls authority. The state-machine document controls current Agent and
+Capability transitions. The roadmap controls implementation order and
+acceptance evidence. Focused profiles may refine these rules but cannot
+contradict them.
+
+## Product and use cases
+
+- [FreeCity Application Profile V1](docs/FREECITY_APPLICATION_V1.md) defines
+  FreeCity as the first society-scale TOS Network application: a human-and-Agent
+  city built on the existing Agent, Capability, Quote, escrow, Receipt, and
+  settlement lifecycle without creating parallel protocol facts.
+- [Decentralized Agent-to-Agent Use Cases](docs/A2A_USE_CASES.md) explains the
+  interaction lifecycle, suitable paid-agent applications, the roles of TOS
+  and TOS-network stablecoins, and when to batch many off-chain messages into one
+  settlement.
+- [Product and Commercial Strategy](docs/PRODUCT_STRATEGY.md) defines market
+  positioning, the initial software-work wedge, revenue paths, development
+  priorities, risks, and evidence required to establish a viable business.
+- [Gate D External Pilot](docs/GATE_D_EXTERNAL_PILOT.md) defines the independent
+  buyer, provider, and verifier procedure required to accept the first
+  commercial lifecycle.
+- [Gate D Pilot Readiness Packet](docs/GATE_D_PILOT_READINESS.md) assembles the
+  fixed inputs, role checklists, verifier command, and acceptance record for
+  those independent operators.
+- [Gate E Provider Onboarding](docs/GATE_E_PROVIDER_ONBOARDING.md) defines the
+  first SDK and deployment-template workflow without gateway-owned facts.
+- [Gate E Buyer Onboarding](docs/GATE_E_BUYER_ONBOARDING.md) defines canonical
+  Quote review, funding, and crash-safe buyer recovery (its stablecoin
+  funding path describes the retired escrow rail).
+- [A2A Software-Work Adapter V1](docs/A2A_ADAPTER_V1.md) maps official A2A
+  Tasks and results into the same finalized Native commercial lifecycle.
+- [MCP Software-Work Tool Adapter V1](docs/MCP_ADAPTER_V1.md) exposes that
+  lifecycle as one authority-gated, purchase-bound MCP tool.
+- [x402 Adapter Decision](docs/X402_ADAPTER_DECISION.md) explains why x402 is
+  deferred and constrains any future integration to negotiation over the
+  existing canonical TOS escrow lifecycle.
+- [Gateway Discovery V1](docs/GATEWAY_DISCOVERY_V1.md) defines the minimal
+  authority-neutral `/.well-known/tos-service.json` transport locator.
+- [Gateway Federation V1](docs/GATEWAY_FEDERATION_V1.md) defines client-side
+  multi-Gateway search and content-addressed manifest failover without shared
+  semantic authority.
+- [Public Errors V1](docs/PUBLIC_ERRORS_V1.md) freezes typed Connect error and
+  retry dispositions, including mandatory resolution after ambiguous mutation
+  outcomes.
+- [TOS DNS Alias Boundary V1](docs/DNS_ALIAS_V1.md) maps `.tos` Agent,
+  Capability, and Messenger aliases into freshly verified Native object IDs
+  without creating name-based authority.
+- [Native Execution Gate V1](docs/NATIVE_EXECUTION_GATE_V1.md) defines the
+  shared finalized-chain and atomic cross-transport admission boundary.
+- [Production Readiness Runbook V1](docs/PRODUCTION_READINESS_RUNBOOK_V1.md)
+  defines custody, monitoring, incident, accounting, release, and emergency
+  controls for Gate G.
+- [Agent Packet V1](docs/AGENT_PACKET_V1.md) defines chain-authenticated
+  off-chain Agent-to-Agent packets with replay protection.
+- [Decentralized Agent-Native Messenger V1](docs/AGENT_NATIVE_MESSENGER_V1.md)
+  is an incubation architecture for identity-bound encrypted Agent sessions,
+  measured route selection, offline Mailbox Relays, rooms, and OpenFox
+  integration. It is not a frozen `tos_service_v1` surface, does not reorder
+  roadmap gates, and cannot be cited as gate acceptance evidence.
+- [OpenFox Economic Bridge V1](docs/OPENFOX_ECONOMIC_BRIDGE_V1.md) defines the
+  autonomous runtime's buyer/provider integration with the Native lifecycle.
+- [Agent Intent Exchange V1](docs/AGENT_INTENT_EXCHANGE_V1.md) defines the
+  generic signed bulletin, low-cost categorized Discovery Card, progressive
+  detail retrieval, AI-local interpretation, authenticated negotiation,
+  Agreement, and optional Gift/direct/TOS-escrow/external settlement model for
+  open-ended Agent commerce.
+- [Agent Paid Demand Discovery V1](docs/AGENT_PAID_DEMAND_DISCOVERY_V1.md)
+  defines the optional fixed-price machine-checkable paid-work profile for
+  parties that choose the TOS escrow rail.
+- [Decentralized Agent Gas Sponsorship and Transaction Relay V1](docs/AGENT_GAS_SPONSORSHIP_AND_TRANSACTION_RELAY_V1.md)
+  defines an optional open Provider service for bounded native-TOS top-up and
+  byte-exact submission of an already authorized client transaction, with no
+  privileged relayer or new chain opcode. Its three service modes are
+  orthogonal to `trusted-local`, `authorized-single-provider`, and
+  `autonomous-decentralized` assurance levels. Relay terminal evidence selects
+  `validator_finality` or lower `provider_corroborated` independently from
+  sponsorship's `validator_finality` or lower `client_corroborated`. The
+  currently released direct path may enable immediately when the exact
+  network, transaction-profile URI/digest, `payment.direct` action kind, mode,
+  assurance, component class/profile, sponsorship release profile, and owner
+  policy all pass current capability checks. Production deployment, campaign,
+  or certification history is never an enablement input; missing or stale
+  current dependencies fail that exact tuple closed. The current TOS RPC
+  source supports only a scoped lower-assurance claim and never an
+  `autonomous-decentralized` claim.
+- [Paid-Demand Binding to the Existing Accepted Quote Rail V1](docs/PAID_DEMAND_ACCEPTED_QUOTE_BINDING_V1.md)
+  defines that optional profile's minimal versioned handoff from one selected
+  Provider Offer into the existing Quote, escrow, execution, Receipt, and
+  settlement lifecycle.
+- [TOS Edge CDN Architecture V1](docs/EDGE_CDN_ARCHITECTURE_V1.md) defines an
+  incubation architecture for standard HTTP content delivery over an open
+  market of verified Provider and Worker Agents. It keeps high-frequency
+  traffic off-chain, uses separate Customer→Provider and Provider→Worker
+  purchases, and does not open or reorder the expansion gate.
+- [OpenFox Direct Signed Agent Gifts V1](docs/OPENFOX_AGENT_GIFTS_V1.md) defines
+  the native-TOS-only authenticated address exchange and recipient-broadcast
+  signed BOC Gift flow.
+- [Agent Economy Metrics V1](docs/AGENT_ECONOMY_METRICS_V1.md) defines
+  finalized-state-derived Agent GDP, settled receipts, job, wallet,
+  reliability, and
+  availability exports. Its implementation status is currently pending.
+- [Naming Migration](docs/NAMING_MIGRATION.md) freezes repository, wire,
+  protobuf, schema, command, environment, and deployment-evidence naming.
+
+## Normative contract
+
+- Protobuf: [`proto/tos/service/v1/native.proto`](proto/tos/service/v1/native.proto)
+- Identifiers: [`docs/NATIVE_IDENTIFIERS_V1.md`](docs/NATIVE_IDENTIFIERS_V1.md)
+- Identity policy: [`docs/NATIVE_IDENTITY_V1.md`](docs/NATIVE_IDENTITY_V1.md)
+- TVM representation: [`docs/NATIVE_REGISTRY_TVM_V1.md`](docs/NATIVE_REGISTRY_TVM_V1.md)
+- Submission and resolution: [`docs/NATIVE_REGISTRY_RPC_V1.md`](docs/NATIVE_REGISTRY_RPC_V1.md)
+- Security review: [`docs/NATIVE_REGISTRY_SECURITY_REVIEW.md`](docs/NATIVE_REGISTRY_SECURITY_REVIEW.md)
+- Public testnet gate: [`docs/NATIVE_REGISTRY_PUBLIC_TESTNET_GATE.md`](docs/NATIVE_REGISTRY_PUBLIC_TESTNET_GATE.md)
+- Quotes and settlement: [`docs/SETTLEMENT.md`](docs/SETTLEMENT.md)
+- Software-work manifest: [`docs/SOFTWARE_WORK_MANIFEST_V1.md`](docs/SOFTWARE_WORK_MANIFEST_V1.md)
+- Accepted Quote TVM cell: [`docs/ACCEPTED_QUOTE_TVM_V1.md`](docs/ACCEPTED_QUOTE_TVM_V1.md)
+- Service Actor TVM contract: [`docs/SERVICE_ACTOR_TVM_V1.md`](docs/SERVICE_ACTOR_TVM_V1.md)
+- Service Actor settlement binding: [`docs/SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](docs/SERVICE_ACTOR_SETTLEMENT_DESIGN.md)
+- Retired stablecoin escrow (historical): [`docs/STABLECOIN_ESCROW_TVM_V2.md`](docs/STABLECOIN_ESCROW_TVM_V2.md)
+- Software-work Receipt TVM cell: [`docs/SOFTWARE_WORK_RECEIPT_TVM_V1.md`](docs/SOFTWARE_WORK_RECEIPT_TVM_V1.md)
+- Software-work execution and artifacts: [`docs/SOFTWARE_WORK_EXECUTION_V1.md`](docs/SOFTWARE_WORK_EXECUTION_V1.md)
+- Agent gas sponsorship and exact transaction relay: [`docs/AGENT_GAS_SPONSORSHIP_AND_TRANSACTION_RELAY_V1.md`](docs/AGENT_GAS_SPONSORSHIP_AND_TRANSACTION_RELAY_V1.md)
+- Prediction market contract and accounting: [`docs/PREDICTION_MARKET_V1.md`](docs/PREDICTION_MARKET_V1.md)
+- Prediction order authorization: [`docs/PREDICTION_ORDER_AUTHORIZATION_V1.md`](docs/PREDICTION_ORDER_AUTHORIZATION_V1.md)
+- Prediction resolution statement: [`docs/PREDICTION_RESOLUTION_STATEMENT_V1.md`](docs/PREDICTION_RESOLUTION_STATEMENT_V1.md)
+- Prediction evidence and challenge evidence: [`docs/PREDICTION_CHALLENGE_EVIDENCE_V1.md`](docs/PREDICTION_CHALLENGE_EVIDENCE_V1.md)
+- Prediction custody effect authorization: [`docs/PREDICTION_CUSTODY_EFFECT_AUTHORIZATION_V1.md`](docs/PREDICTION_CUSTODY_EFFECT_AUTHORIZATION_V1.md)
+- Gateway authentication: [`docs/AUTH.md`](docs/AUTH.md)
+- Public service semantics: [`docs/API.md`](docs/API.md)
+
+## Non-negotiable invariants
+
+1. Network identity includes the TOS network ID and both genesis hashes.
+2. Object IDs and contract addresses are deterministic and independently
+   reproducible.
+3. Every mutation is authorized against current finalized object state.
+4. A Capability transfer changes ownership atomically.
+5. A relayer acknowledgement is not evidence of a canonical transition.
+6. A canonical result requires finalized state containing the expected action.
+7. Gateway-local data is never a consensus input.
+8. Bulk request and result bytes remain off-chain; immutable digests bind them.
+9. Implementations fail closed on network, code-hash, state-hash, signature,
+   sequence, predecessor, quorum, or finality mismatch.
+10. Signature validity never implies Carrier admission, delivery, indexing,
+    ranking, trust, or execution authority.
+11. A new business category is content or an application profile unless it
+    introduces a genuinely new authority, ordering, propagation, privacy,
+    admission, or side-effect class.
+12. Conversation and AI interpretation cannot substitute for explicit owner,
+    execution, custody, Agreement, or contract authorization.
+
+## Asset model
+
+Native TOS pays TOS Network fees and protocol execution costs and, in the
+current protocol domain, the commercial service itself: software work settles
+in native TOS on the Service Actor contract
+([`docs/SERVICE_ACTOR_TVM_V1.md`](docs/SERVICE_ACTOR_TVM_V1.md)). Stablecoins
+issued on TOS Network are a deferred extension that waits for an integration
+reporting payout outcomes on chain. External-chain tokens, bridged claims on
+another network, custodial balances, and gateway ledger entries are outside the
+protocol.
+
+An Accepted Quote identifies the exact Service Actor, its terms, and the
+nanoTOS price and non-refundable storage fee; a ticker symbol is display
+metadata and is never sufficient asset identity.
+
+## Repository ownership
+
+| Repository | Responsibility |
+|---|---|
+| `tos-service-spec` | Normative schema, rules, and frozen vectors |
+| `tos` | TVM contract and consensus execution |
+| `tos-service-protocol` | Canonical encoding, relaying, resolution, and verification |
+| `tos-service-gateway` | Reference Native gateway and transport authentication |
+| `tos-ai` | Execution workers and result production |
+
+## Repository layout
+
+```text
+docs/                                      Native architecture and protocol rules
+deployments/                               public-network deployment evidence
+proto/tos/service/v1/native.proto          sole normative wire schema
+test-vectors/tos-service-v1-registry.json   frozen Agent and Capability vectors,
+                                           addresses, and negative mutations
+test-vectors/tos-service-test-identities-v1.json   plaintext test-only TOS mnemonics, Ed25519 keys,
+                                           TVM addresses, and identity proof signatures
+```
+
+`test-vectors/tos-service-v1-registry.json` is generated by executing the
+ML-DSA-44 release code (tos `native_registry_sandbox`, `protocol_vectors`, with
+`NATIVE_REGISTRY_PROTOCOL_VECTORS_OUT`; tos branch
+`feat/native-registry-pq-helper` at `0760e7a9d`): code hash `d3bb66d0…`, the
+deterministic ML-DSA-44 controller, both registrations' identities, action
+hashes and BOCs, deterministic signatures and submission body hashes, and the
+18 negative client checks. `test-vectors/tos-service-test-identities-v1.json`
+and `test-vectors/mobile-buyer-contact-card-v1.json` still describe Ed25519
+keys; they are regenerated with the ML-DSA-44 Agent packet and contact card
+implementation and must not be used as current conformance evidence until
+then.
+
+Do not add a second object schema beside the Native protobuf contract. New
+canonical encodings belong in the Native schema and must include reproducible
+vectors. Product-specific discovery views remain derived interfaces.
+
+This repository describes a greenfield protocol. There is no deployed earlier
+TOS service protocol whose behavior must be preserved.
