@@ -22,10 +22,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/tos-messenger/internal/securefile"
 	"github.com/tosnetwork/tos-messenger/pkg/economicaction"
 	"github.com/tosnetwork/tos-messenger/pkg/intentcarrier"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
 )
 
 // pinsFlag collects repeated --authority values; ParseAuthorityPins reads

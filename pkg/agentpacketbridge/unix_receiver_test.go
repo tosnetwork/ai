@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentpacket"
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 )
 
 func TestUnixReceiverDeliversCanonicalPacketToPrivateSocket(t *testing.T) {

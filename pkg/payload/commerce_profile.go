@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	protocolcodec "github.com/tosnetwork/tos-service-protocol/pkg/codec"
 )
 
 // CommerceProfileEvent carries one exact, profile-qualified economic object

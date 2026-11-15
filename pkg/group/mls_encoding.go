@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/internal/ids"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 const (

@@ -8,11 +8,11 @@ import (
 	"io"
 	"regexp"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/internal/ids"
 	"github.com/tosnetwork/tos-messenger/pkg/identity"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 const (

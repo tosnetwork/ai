@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/pkg/attachmentapi"
 	"github.com/tosnetwork/tos-messenger/pkg/attachments"
 	"github.com/tosnetwork/tos-messenger/pkg/envelope"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 type chunkCaller struct {

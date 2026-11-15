@@ -16,6 +16,9 @@ import (
 	"testing"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
 	"github.com/tosnetwork/tos-messenger/pkg/contact"
 	"github.com/tosnetwork/tos-messenger/pkg/directory"
 	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
@@ -26,9 +29,6 @@ import (
 	"github.com/tosnetwork/tos-messenger/pkg/firewall"
 	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	protocolcodec "github.com/tosnetwork/tos-service-protocol/pkg/codec"
 )
 
 const (

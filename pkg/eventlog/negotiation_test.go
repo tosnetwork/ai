@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 func testNetwork() *nativev1.NetworkDomain {

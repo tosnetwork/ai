@@ -8,13 +8,13 @@ import (
 	"errors"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/pkg/envelope"
 	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
 	"github.com/tosnetwork/tos-messenger/pkg/fault"
 	"github.com/tosnetwork/tos-messenger/pkg/identity"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 // RecordSchema is the strict schema of a decision record.

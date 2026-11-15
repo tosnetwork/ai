@@ -3,9 +3,9 @@ package dispatch
 import (
 	"errors"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
 	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 // SessionBindings derives outbound AEAD authority solely from the durable

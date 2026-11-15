@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/pkg/admission"
 	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
 	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
@@ -13,7 +14,6 @@ import (
 	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
 	"github.com/tosnetwork/tos-messenger/pkg/fault"
 	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 type ReceiveResult struct {

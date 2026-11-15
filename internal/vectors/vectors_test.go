@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/pkg/attachments"
 	"github.com/tosnetwork/tos-messenger/pkg/conformance"
@@ -35,7 +36,6 @@ import (
 	"github.com/tosnetwork/tos-messenger/pkg/mailbox"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
 	"github.com/tosnetwork/tos-messenger/pkg/reachability"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 var update = flag.Bool("update", false, "rewrite the committed vectors")

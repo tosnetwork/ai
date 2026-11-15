@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 // Network is the identity of one TOS network: the id and both genesis hashes,

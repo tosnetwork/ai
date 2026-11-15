@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/internal/ids"
 	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
@@ -27,7 +28,6 @@ import (
 	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
 	"github.com/tosnetwork/tos-messenger/pkg/fault"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 // Message is one sealed event handed to a transport.

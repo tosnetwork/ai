@@ -23,13 +23,13 @@ import (
 	"io"
 	"regexp"
 
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/internal/localwire"
 	"github.com/tosnetwork/tos-messenger/pkg/fault"
 	"github.com/tosnetwork/tos-messenger/pkg/firewall"
 	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
 )
 
 const (

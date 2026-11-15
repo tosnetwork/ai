@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
 	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 func prekeyFixture(t *testing.T) (identity.Delegation, ed25519.PrivateKey) {

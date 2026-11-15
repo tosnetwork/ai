@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/pkg/attachments"
 	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	protocolcodec "github.com/tosnetwork/tos-service-protocol/pkg/codec"
 )
 
 // sample is a valid body for every kind, so the round trip is exercised over

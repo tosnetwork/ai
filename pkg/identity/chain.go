@@ -4,7 +4,7 @@ import (
 	"errors"
 	"regexp"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
 
 // MaxRegistryCodeHashes bounds a predeclared registry code set.
