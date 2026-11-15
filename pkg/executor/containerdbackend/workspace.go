@@ -12,15 +12,24 @@ import (
 	"strings"
 )
 
-const maxWorkspaceEntries = 100_000
+// maxWorkspaceNodes bounds the files and directories one workspace creates,
+// directories implied by a nested path included. A tar entry occupies at
+// least one 512-byte block, so this is also the most entries an archive at
+// the hard input bound can hold.
+const maxWorkspaceNodes = MaxInputBytesHard / 512
 const workspaceRootName = "workspaces"
 
 // prepareWorkspace extracts a deliberately small tar subset into a new,
 // runtime-owned directory. Links, devices, sparse files, duplicate paths and
 // path traversal are rejected so a workload can never select a host path.
+// The whole archive is checked before the directory exists, so a refused
+// archive writes nothing.
 func prepareWorkspace(root, identity string, archive []byte, maximum uint64) (string, func() error, error) {
 	if !runtimeIdentifier.MatchString(identity) || maximum == 0 || uint64(len(archive)) > maximum {
 		return "", nil, errors.New("invalid containerd workspace archive")
+	}
+	if err := walkWorkspaceTar("", archive, maximum); err != nil {
+		return "", nil, err
 	}
 	workspaceRoot := filepath.Join(root, workspaceRootName)
 	if err := ensurePrivateDirectory(workspaceRoot); err != nil {
@@ -31,7 +40,7 @@ func prepareWorkspace(root, identity string, archive []byte, maximum uint64) (st
 		return "", nil, errors.New("create containerd workspace")
 	}
 	cleanup := func() error { return removeWorkspace(directory) }
-	if err := extractWorkspaceTar(directory, archive, maximum); err != nil {
+	if err := walkWorkspaceTar(directory, archive, maximum); err != nil {
 		_ = cleanup()
 		return "", nil, err
 	}
@@ -52,14 +61,20 @@ func removeWorkspace(directory string) error {
 	return os.RemoveAll(directory)
 }
 
-func extractWorkspaceTar(root string, archive []byte, maximum uint64) error {
+// walkWorkspaceTar checks every entry of archive and, when root is not
+// empty, extracts it there. An uncompressed archive cannot hold more file
+// bytes than its own length, so an entry set that claims more (a sparse map
+// expands a few bytes into gigabytes of zeros) is refused, as is any entry
+// that carries sparse metadata at all.
+func walkWorkspaceTar(root string, archive []byte, maximum uint64) error {
+	if uint64(len(archive)) < maximum {
+		maximum = uint64(len(archive))
+	}
 	reader := tar.NewReader(bytes.NewReader(archive))
 	seen := make(map[string]struct{})
+	nodes := make(map[string]struct{})
 	var total uint64
-	for entries := 0; ; entries++ {
-		if entries >= maxWorkspaceEntries {
-			return errors.New("containerd workspace has too many entries")
-		}
+	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -75,9 +90,28 @@ func extractWorkspaceTar(root string, archive []byte, maximum uint64) error {
 			return errors.New("duplicate containerd workspace path")
 		}
 		seen[name] = struct{}{}
+		for record := range header.PAXRecords {
+			if strings.HasPrefix(record, "GNU.sparse.") {
+				return errors.New("containerd workspace contains a sparse entry")
+			}
+		}
+		// Every path component is a node the extraction creates.
+		// A known node's parents are known, so the walk stops there.
+		for end := len(name); end > 0; end = strings.LastIndexByte(name[:end], '/') {
+			if _, known := nodes[name[:end]]; known {
+				break
+			}
+			nodes[name[:end]] = struct{}{}
+		}
+		if len(nodes) > maxWorkspaceNodes {
+			return errors.New("containerd workspace has too many entries")
+		}
 		target := filepath.Join(root, filepath.FromSlash(name))
 		switch header.Typeflag {
 		case tar.TypeDir:
+			if root == "" {
+				continue
+			}
 			if err := os.MkdirAll(target, 0o700); err != nil {
 				return errors.New("create containerd workspace directory")
 			}
@@ -86,6 +120,9 @@ func extractWorkspaceTar(root string, archive []byte, maximum uint64) error {
 				return errors.New("containerd workspace exceeds disk limit")
 			}
 			total += uint64(header.Size)
+			if root == "" {
+				continue
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return errors.New("create containerd workspace parent")
 			}

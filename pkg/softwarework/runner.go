@@ -62,20 +62,52 @@ type Outcome struct {
 	CompletedAtUnix uint64                   `json:"completed_at_unix"`
 }
 
+// ErrAmbiguous reports an execution identity that was claimed without a
+// recorded outcome: a run may have happened, so it is never run again.
+var ErrAmbiguous = errors.New("software-work execution outcome is ambiguous")
+
+// ErrRequestMismatch reports a request whose fields are malformed or do not
+// match the commitments it carries; nothing was claimed for it.
+var ErrRequestMismatch = errors.New("software-work request does not match its commitments")
+
+// ErrConflict reports an execution identity already bound to a request with
+// other commitments.
+var ErrConflict = errors.New("execution identity conflicts with another request")
+
 type Runner struct {
 	executor executor.Executor
 	store    *artifactstore.Store
 	journal  *Journal
 	contract Contract
 	now      func() time.Time
+	// bindLimits makes the limits part of the request fingerprint.
+	bindLimits bool
 }
 
-func NewRunner(boundExecutor executor.Executor, store *artifactstore.Store, journal *Journal, contract Contract) (*Runner, error) {
+// RunnerOption adjusts a Runner built by NewRunner.
+type RunnerOption func(*Runner)
+
+// BindLimits makes the contract's limits part of what an execution identity
+// is bound to: a repeated request under other limits is a conflict instead
+// of an answer from the journal. A caller whose limits are fixed by the
+// manifest digest does not need it; one that takes limits per request does.
+func BindLimits() RunnerOption {
+	return func(r *Runner) { r.bindLimits = true }
+}
+
+func NewRunner(boundExecutor executor.Executor, store *artifactstore.Store, journal *Journal, contract Contract, options ...RunnerOption) (*Runner, error) {
 	if boundExecutor == nil || store == nil || journal == nil || validateContract(contract) != nil {
 		return nil, errors.New("invalid software-work runner configuration")
 	}
 	contract.Arguments = append([]string(nil), contract.Arguments...)
-	return &Runner{executor: boundExecutor, store: store, journal: journal, contract: contract, now: time.Now}, nil
+	runner := &Runner{executor: boundExecutor, store: store, journal: journal, contract: contract, now: time.Now}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("invalid software-work runner configuration")
+		}
+		option(runner)
+	}
+	return runner, nil
 }
 
 func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) {
@@ -85,7 +117,7 @@ func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) 
 	if err := validateRequest(r.contract, request); err != nil {
 		return Outcome{}, err
 	}
-	fingerprint := requestFingerprint(r.contract, request)
+	fingerprint := r.fingerprint(request)
 	lease, record, err := r.journal.Claim(request.ExecutionID, fingerprint)
 	if err != nil {
 		return Outcome{}, err
@@ -94,7 +126,7 @@ func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) 
 		if record.State == "complete" {
 			return record.Outcome, nil
 		}
-		return Outcome{}, errors.New("software-work execution outcome is ambiguous")
+		return Outcome{}, ErrAmbiguous
 	}
 	spec := executor.Spec{
 		ImageDigest: r.contract.ToolchainDigest, Entrypoint: append([]string{r.contract.Executable}, r.contract.Arguments...),
@@ -153,6 +185,29 @@ func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) 
 	return outcome, nil
 }
 
+// Recorded reports what the journal already holds for request without
+// claiming it, so a long-running caller can answer a repeated request while
+// its execution slots are busy. It returns the recorded outcome and true for
+// a completed execution, false when the identity was never claimed,
+// ErrAmbiguous for a claim without an outcome and ErrConflict for an identity
+// bound to other commitments.
+func (r *Runner) Recorded(request Request) (Outcome, bool, error) {
+	if r == nil || r.journal == nil {
+		return Outcome{}, false, errors.New("invalid software-work execution request")
+	}
+	if err := validateRequest(r.contract, request); err != nil {
+		return Outcome{}, false, err
+	}
+	record, found, err := r.journal.lookup(request.ExecutionID, r.fingerprint(request))
+	if err != nil || !found {
+		return Outcome{}, false, err
+	}
+	if record.State != "complete" {
+		return Outcome{}, false, ErrAmbiguous
+	}
+	return record.Outcome, true, nil
+}
+
 func validateContract(value Contract) error {
 	if !executionIDPattern.MatchString(value.ManifestDigest) || !executionIDPattern.MatchString(value.ToolchainDigest) ||
 		value.SandboxDigest != value.ManifestDigest || value.Executable == "" || len(value.Arguments) == 0 ||
@@ -183,19 +238,32 @@ func validateRequest(contract Contract, value Request) error {
 	if !quoteCommitmentPattern.MatchString(value.QuoteCommitment) || !executionIDPattern.MatchString(value.ExecutionID) ||
 		!executionIDPattern.MatchString(value.InputDigest) || !executionIDPattern.MatchString(value.SourceDigest) ||
 		digest(value.SourceArchive) != value.SourceDigest || uint64(len(value.SourceArchive)) > contract.Limits.DiskBytes {
-		return errors.New("software-work request does not match its commitments")
+		return ErrRequestMismatch
 	}
 	return nil
 }
 
-func requestFingerprint(contract Contract, request Request) string {
+func (r *Runner) fingerprint(request Request) string {
+	return requestFingerprint(r.contract, request, r.bindLimits)
+}
+
+// requestFingerprint is what an execution identity is bound to. Without
+// bound limits its encoding has no limits field at all, so identities
+// journaled before the option existed keep their fingerprint.
+func requestFingerprint(contract Contract, request Request, bindLimits bool) string {
+	var limits *[6]uint64
+	if bindLimits {
+		limits = &[6]uint64{contract.Limits.CPUMillis, contract.Limits.MemoryBytes, contract.Limits.DiskBytes,
+			uint64(contract.Limits.PIDs), uint64(contract.Limits.ExecutionTime), contract.Limits.OutputBytes}
+	}
 	encoded, _ := json.Marshal(struct {
-		Manifest  string `json:"manifest"`
-		Quote     string `json:"quote"`
-		Execution string `json:"execution"`
-		Input     string `json:"input"`
-		Source    string `json:"source"`
-	}{contract.ManifestDigest, request.QuoteCommitment, request.ExecutionID, request.InputDigest, request.SourceDigest})
+		Manifest  string     `json:"manifest"`
+		Quote     string     `json:"quote"`
+		Execution string     `json:"execution"`
+		Input     string     `json:"input"`
+		Source    string     `json:"source"`
+		Limits    *[6]uint64 `json:"limits,omitempty"`
+	}{contract.ManifestDigest, request.QuoteCommitment, request.ExecutionID, request.InputDigest, request.SourceDigest, limits})
 	return digest(encoded)
 }
 

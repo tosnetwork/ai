@@ -404,30 +404,17 @@ func manifestContract(manifestDigest string, limits nativecore.SoftwareWorkLimit
 	if manifestDigest == "" {
 		return softwarework.Contract{}, errors.New("a paid contract needs the published manifest digest")
 	}
-	frozen := contract.Limits
-	frozenWallClockMillis := uint64(frozen.ExecutionTime / time.Millisecond)
-	for _, limit := range []struct {
-		name            string
-		manifest, upper uint64
-	}{
-		{"cpu_millis", limits.CPUMillis, frozen.CPUMillis},
-		{"memory_bytes", limits.MemoryBytes, frozen.MemoryBytes},
-		{"scratch_bytes", limits.ScratchBytes, frozen.DiskBytes},
-		{"output_bytes", limits.OutputBytes, frozen.OutputBytes},
-		{"wall_clock_millis", limits.WallClockMillis, frozenWallClockMillis},
-	} {
-		if limit.manifest == 0 || limit.manifest > limit.upper {
-			return softwarework.Contract{}, fmt.Errorf("the manifest's %s (%d) is outside what the executor enforces (1-%d)",
-				limit.name, limit.manifest, limit.upper)
-		}
+	contract, err = softwarework.ManifestContract(manifestDigest, softwarework.ManifestLimits{
+		CPUMillis: limits.CPUMillis, MemoryBytes: limits.MemoryBytes, ScratchBytes: limits.ScratchBytes,
+		OutputBytes: limits.OutputBytes, WallClockMillis: limits.WallClockMillis})
+	var outside *softwarework.LimitError
+	if errors.As(err, &outside) {
+		return softwarework.Contract{}, fmt.Errorf("the manifest's %s (%d) is outside what the executor enforces (1-%d)",
+			outside.Name, outside.Value, outside.Upper)
 	}
-	contract.Limits.CPUMillis = limits.CPUMillis
-	contract.Limits.MemoryBytes = limits.MemoryBytes
-	contract.Limits.DiskBytes = limits.ScratchBytes
-	contract.Limits.OutputBytes = limits.OutputBytes
-	// Bounded by the frozen wall clock above, so the conversion cannot
-	// overflow.
-	contract.Limits.ExecutionTime = time.Duration(limits.WallClockMillis) * time.Millisecond
+	if err != nil {
+		return softwarework.Contract{}, err
+	}
 	return contract, nil
 }
 

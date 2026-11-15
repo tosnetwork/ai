@@ -80,6 +80,14 @@ source files. The containerd socket and FIFO tree remain owner-private. Receipt
 signing stays in the separate `tosctl` custody boundary; no mnemonic or private
 key belongs in executor state.
 
+A provider runtime that should not run as root reaches the same executor
+through `software-work-executord`: a root-run service that alone opens the
+private containerd socket and serves the frozen job to exactly one
+explicitly allowed uid over a Unix socket (`pkg/executorservice` holds the server and the
+client). A request carries digests, limits that can only tighten the preset,
+and the source bytes; never a path, image or command. See
+[the provider runbook](deploy/provider/README.md#executor-service-an-unprivileged-provider-node).
+
 ## Repository layout
 
 ```text
@@ -88,6 +96,7 @@ pkg/executor/containerdbackend/ containerd implementation
 pkg/executor/backendtest/       reusable lifecycle conformance suite
 executor/gpuisolation/          exclusive operator-named GPU leases
 pkg/softwarework/               bound jobs and at-most-once outcome journal
+pkg/executorservice/            root-run executor service and its client for unprivileged callers
 pkg/railgate/                   finalized pending-request admission for paid Service Actor work
 pkg/artifactstore/              immutable content-addressed output storage with bounded retention
 pkg/commercegate/               Action Authority gated local execution admission

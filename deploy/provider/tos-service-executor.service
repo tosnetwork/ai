@@ -1,0 +1,96 @@
+[Unit]
+Description=TOS Service Protocol software-work executor service
+Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+# The executor is useless without its private containerd and must never
+# outlive it: a stop or failure of the daemon stops this service too.
+Requires=tos-service-containerd.service
+After=tos-service-containerd.service
+# A start that keeps failing (for example a namespace left unclean by a
+# crash, which the executor refuses to adopt) ends in the failed state
+# instead of retrying forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+# TOS_EXECUTOR_ALLOWED_UID and TOS_EXECUTOR_SOCKET_GID. Both are required:
+# an unset variable expands to an empty argument, which the executor refuses.
+EnvironmentFile=/etc/tos-service/executor.env
+ExecStart=/usr/local/libexec/tos-service/software-work-executord \
+  --socket /run/tos-service-executor/executor.sock \
+  --socket-gid ${TOS_EXECUTOR_SOCKET_GID} \
+  --allow-uid ${TOS_EXECUTOR_ALLOWED_UID} \
+  --containerd-socket /run/tos-service-containerd/containerd.sock \
+  --fifo-dir /run/tos-service-executor-private/fifos \
+  --state-dir /var/lib/tos-service-executor
+Restart=on-failure
+RestartSec=5s
+# On stop the executor waits up to its --stop-grace (200 s, past the frozen
+# 180 s wall clock) for a running job to record its outcome, then cancels it
+# and waits for the container to be cleaned up. Past this limit systemd
+# kills it, which leaves that execution ambiguous and may leave a container
+# and a staged workspace for the operator to remove (see the runbook).
+TimeoutStopSec=270s
+OOMScoreAdjust=-500
+
+# Both runtime directories are created root:root 0700. The executor itself
+# opens the first to 0750 root:<socket gid> once its socket is 0660
+# root:<socket gid>; the second holds only the container stdio FIFOs and
+# stays 0700. Both are removed when the service stops. Nothing a caller
+# sends is unpacked here: sources are staged on disk under the state
+# directory.
+RuntimeDirectory=tos-service-executor tos-service-executor-private
+RuntimeDirectoryMode=0700
+# The at-most-once journal, the artifact store and the staged workspaces.
+# Never delete it: it is the record of which executions already ran.
+StateDirectory=tos-service-executor
+StateDirectoryMode=0700
+UMask=0077
+
+# The service holds at most 256 MiB of request and response payloads for all
+# connections (its in-flight byte bound), and per running job a few copies
+# of one source (16 MiB) and one output (16 MiB) while it stages, hashes and
+# stores them: about 130 MiB at --max-executions 1. GOMEMLIMIT keeps the
+# collector under the cap; reaching MemoryMax kills the service mid-run and
+# leaves that execution ambiguous, so raise both by about 128M for every
+# additional execution before raising --max-executions.
+Environment=GOMEMLIMIT=768MiB
+MemoryMax=1G
+MemorySwapMax=0
+# The service starts no process. Its threads are the Go runtime's: one per
+# CPU plus one per blocking file or socket call, of which the connection
+# bound (8) and --max-executions allow a few dozen at once.
+TasksMax=512
+
+# The executor talks only to two Unix sockets and its own directories.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Root's only use of privilege here is giving the socket and its directory
+# to the callers' group. Everything else it touches it owns.
+CapabilityBoundingSet=CAP_CHOWN
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

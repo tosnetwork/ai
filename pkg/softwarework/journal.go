@@ -86,9 +86,30 @@ func (j *Journal) Claim(executionID, fingerprint string) (bool, journalRecord, e
 		return false, journalRecord{}, err
 	}
 	if existing.Fingerprint != fingerprint {
-		return false, journalRecord{}, errors.New("execution identity conflicts with another request")
+		return false, journalRecord{}, ErrConflict
 	}
 	return false, existing, nil
+}
+
+// lookup reads the record of executionID without creating one.
+func (j *Journal) lookup(executionID, fingerprint string) (journalRecord, bool, error) {
+	if j == nil || j.lock == nil || !executionIDPattern.MatchString(executionID) || !executionIDPattern.MatchString(fingerprint) {
+		return journalRecord{}, false, errors.New("invalid software-work journal lookup")
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	path := j.path(executionID)
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return journalRecord{}, false, nil
+	}
+	existing, err := readJournalRecord(path)
+	if err != nil {
+		return journalRecord{}, false, err
+	}
+	if existing.Fingerprint != fingerprint {
+		return journalRecord{}, false, ErrConflict
+	}
+	return existing, true, nil
 }
 
 func (j *Journal) Complete(executionID, fingerprint string, outcome Outcome) error {
