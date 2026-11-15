@@ -213,8 +213,12 @@ func (r *SimplifiedNativeResolver) admitCheckpoint(value uint64) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if value == 0 || value < r.highWater {
-		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native finalized checkpoint regressed", nil)
+	if value == 0 {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native finalized checkpoint is zero", nil)
+	}
+	if value < r.highWater {
+		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native finalized checkpoint regressed",
+			checkpointBehind{recorded: r.highWater, observed: value})
 	}
 	if r.checkpoint == nil {
 		return nativecore.NewProtocolError(nativecore.ErrBadSequence, "simplified Native durable checkpoint is unavailable", nil)

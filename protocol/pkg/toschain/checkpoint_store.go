@@ -31,6 +31,22 @@ func newCheckpointStore(path string) (*checkpointStore, error) {
 	return &checkpointStore{path: path}, nil
 }
 
+// checkpointBehind is a finalized observation below a recorded high-water:
+// a rollback when it persists, or, between processes sharing the record, an
+// observation another process overtook while it was being made.
+type checkpointBehind struct{ recorded, observed uint64 }
+
+func (e checkpointBehind) Error() string {
+	return fmt.Sprintf("Native finalized checkpoint regressed from %d to %d", e.recorded, e.observed)
+}
+
+// isCheckpointBehind reports whether err refused an observation below a
+// recorded high-water.
+func isCheckpointBehind(err error) bool {
+	var behind checkpointBehind
+	return errors.As(err, &behind)
+}
+
 // checkAndAdvance refuses a value below the recorded checkpoint and
 // otherwise records it.
 func (s *checkpointStore) checkAndAdvance(value uint64) error {
@@ -81,7 +97,7 @@ func (s *checkpointStore) apply(value uint64, refuseLower, record bool) error {
 		}
 		if value < previous {
 			if refuseLower {
-				return fmt.Errorf("Native finalized checkpoint regressed from %d to %d", previous, value)
+				return checkpointBehind{recorded: previous, observed: value}
 			}
 			return nil
 		}

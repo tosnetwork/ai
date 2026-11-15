@@ -26,6 +26,12 @@ import (
 type fenceChain struct {
 	head atomic.Uint64
 	urls []string
+	// stale is the number of consensus answers still to be given as
+	// staleHead instead of the head; staleForever answers every one so.
+	stale        atomic.Int64
+	staleHead    uint64
+	staleForever bool
+	consensus    atomic.Int64
 }
 
 func newFenceChain(t *testing.T, locator *nativecore.Locator, head uint64) *fenceChain {
@@ -61,6 +67,10 @@ func newFenceChain(t *testing.T, locator *nativecore.Locator, head uint64) *fenc
 		var result any
 		switch call.Method {
 		case "getConsensusBlock":
+			chain.consensus.Add(1)
+			if chain.staleForever || chain.stale.Add(-1) >= 0 {
+				head = chain.staleHead
+			}
 			result = map[string]any{"@type": "ext.blocks.consensusBlock", "consensus_block": head, "timestamp": now,
 				"last_block_utime": now}
 		case "getMasterchainInfo":
@@ -304,6 +314,52 @@ func TestASessionIsNeverOpenedBelowEitherFence(t *testing.T) {
 		chain.head.Store(499)
 		if _, _, err := registry.ResolveState(ctx, registryOtherCap, ""); !isBadSequence(err) {
 			t.Fatalf("a fresh read below the fence was served: %v", err)
+		}
+	})
+}
+
+// An observation that another process overtook while it was being made is
+// replaced by a fresh one; an endpoint set that keeps serving a checkpoint
+// below the record is refused after beginAttempts observations.
+func TestBeginRetriesAnOvertakenObservationAndRefusesAPersistentlyOldChain(t *testing.T) {
+	locator := registryLocator(t)
+	ctx := context.Background()
+
+	t.Run("overtaken once", func(t *testing.T) {
+		chain := newFenceChain(t, locator, 700)
+		directory := fenceDirectory(t)
+		first, _ := fenceReader(t, chain, locator, directory)
+		if _, err := first.Begin(ctx); err != nil {
+			t.Fatal(err)
+		}
+		chain.head.Store(705)
+		chain.staleHead = 690
+		chain.stale.Store(3) // one quorum read of the three endpoints
+		second, _ := fenceReader(t, chain, locator, directory)
+		session, err := second.Begin(ctx)
+		if err != nil || session.Checkpoint() != 705 {
+			t.Fatalf("an overtaken observation was not replaced by a fresh one: %v", err)
+		}
+	})
+
+	t.Run("persistently old", func(t *testing.T) {
+		chain := newFenceChain(t, locator, 800)
+		directory := fenceDirectory(t)
+		first, _ := fenceReader(t, chain, locator, directory)
+		if _, err := first.Begin(ctx); err != nil {
+			t.Fatal(err)
+		}
+		chain.staleHead, chain.staleForever = 790, true
+		chain.consensus.Store(0)
+		second, _ := fenceReader(t, chain, locator, directory)
+		if _, err := second.Begin(ctx); !isBadSequence(err) {
+			t.Fatalf("a chain below the record was served: %v", err)
+		}
+		if calls := chain.consensus.Load(); calls != 3*beginAttempts {
+			t.Fatalf("consensus was asked %d times, want %d", calls, 3*beginAttempts)
+		}
+		if got := fenceValue(t, filepath.Join(directory, "service-actor.checkpoint")); got != "800" {
+			t.Fatalf("the refused observations moved the fence to %s", got)
 		}
 	})
 }
