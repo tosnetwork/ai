@@ -568,6 +568,13 @@ Where the table above leaves a choice, the reference relay makes these:
 - The client address is the TCP peer. `X-Forwarded-For` is believed only from
   peers the operator lists as trusted proxies; it is then walked from the
   right and the first address that is not a trusted proxy is the client.
+- Connections are bounded when accepted, when only the TCP peer is known: at
+  most 1,024 in total and 16 per peer address (IPv6 per /64) by default. A
+  connection past either bound is closed at once, never queued, so a full
+  table cannot block other clients or shutdown. Trusted proxies count only
+  against the total; a terminating proxy bounds its own clients. Idle
+  keep-alive connections close after 30 seconds, long enough to span one
+  15-second poll interval with its jitter.
 - The list/download/ack burst defaults to 100. Rate limits are token buckets
   in a table of bounded size; when it is full and every bucket is still
   draining, a new client is answered `429` rather than evicting a client that

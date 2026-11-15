@@ -27,7 +27,11 @@ The relay base URL that recipients publish in their key cards must be
   relay believes that proxy's `X-Forwarded-For`: the header is walked from
   the right and the first address that is not a trusted proxy is the client.
   Without `-trusted-proxy` the header is ignored, so behind a proxy every
-  request would count as the proxy's own address. The proxy must not buffer
+  request would count as the proxy's own address. Connection bounds are
+  applied when a connection is accepted, when only the TCP peer is known:
+  a trusted proxy's connections count only against `-max-connections`, so
+  the proxy must bound each of its own clients' connections and keep-alive
+  time itself. The proxy must not buffer
   unbounded bodies, must pass status codes and `Retry-After` through
   unchanged, must not follow or add redirects, and must not log request
   bodies.
@@ -48,7 +52,8 @@ A base path is supported with `-base-path /relay` (the key card then names
 | `-deposit-rate-per-minute`, `-deposit-burst` | 60, 32 | per client address |
 | `-read-rate-per-minute`, `-read-burst` | 600, 100 | list, download, ack per client address |
 | `-max-rate-clients` | 65536 | addresses tracked per rate table |
-| `-max-connections` | 1024 | concurrent connections |
+| `-max-connections` | 1024 | concurrent connections; past it a new connection is closed at once |
+| `-max-connections-per-client` | 16 | concurrent connections per TCP peer address (IPv6 per /64); trusted proxies exempt |
 | `-max-concurrent-deposits` | 256 | deposit bodies in memory at once; past it `503` |
 | `-sweep-interval` | 1m | expiry sweep |
 

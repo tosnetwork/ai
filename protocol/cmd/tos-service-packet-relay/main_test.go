@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -10,6 +11,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -182,6 +184,95 @@ func TestDaemonServesAndSurvivesRestart(t *testing.T) {
 	if err := run(context.Background(), append([]string(nil), args...), io.Discard, nil); err == nil {
 		t.Fatal("a second daemon opened a held state directory")
 	}
+}
+
+// keepAliveGet completes one request over a raw connection and leaves it
+// open and idle, as a keep-alive client does between polls.
+func keepAliveGet(t *testing.T, conn net.Conn, path string) {
+	t.Helper()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.WriteString(conn, "GET "+path+" HTTP/1.1\r\nHost: relay\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("keep-alive request: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("keep-alive request = %d", response.StatusCode)
+	}
+	_ = conn.SetDeadline(time.Time{})
+}
+
+// TestDaemonShutdownWithFullConnectionTable: every connection slot is held
+// by an idle keep-alive connection; shutdown still completes promptly and
+// cleanly instead of waiting on a blocked Accept.
+func TestDaemonShutdownWithFullConnectionTable(t *testing.T) {
+	d := startDaemon(t, "-listen", "127.0.0.1:0", "-state-dir", t.TempDir(), "-global-max-entries", "100",
+		"-global-max-bytes", "67108864", "-max-connections", "1")
+	conn, err := net.Dial("tcp", d.addr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	keepAliveGet(t, conn, "/v1/relay")
+	// A second connection past the bound is closed, not queued.
+	extra, err := net.Dial("tcp", d.addr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer extra.Close()
+	_ = extra.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := extra.Read(make([]byte, 1)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("a connection past the bound was queued: %v", err)
+	}
+	start := time.Now()
+	d.cancel()
+	select {
+	case err := <-d.done:
+		if err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown blocked behind a full connection table")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("shutdown took %s", elapsed)
+	}
+}
+
+// TestDaemonPerClientConnections: one address holding its share of idle
+// connections cannot lock out another address.
+func TestDaemonPerClientConnections(t *testing.T) {
+	d := startDaemon(t, "-listen", "127.0.0.1:0", "-state-dir", t.TempDir(), "-global-max-entries", "100",
+		"-global-max-bytes", "67108864", "-max-connections", "8", "-max-connections-per-client", "2")
+	defer d.stop(t)
+	for range 2 {
+		conn, err := net.Dial("tcp", d.addr.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		keepAliveGet(t, conn, "/v1/relay")
+	}
+	third, err := net.Dial("tcp", d.addr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third.Close()
+	_ = third.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := third.Read(make([]byte, 1)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("a third connection from one address was served or queued: %v", err)
+	}
+	dialer := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP("127.0.0.2")}}
+	other, err := dialer.Dial("tcp", d.addr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	keepAliveGet(t, other, "/v1/relay")
 }
 
 // TestDaemonTLS serves HTTPS with a certificate and reaches it through a

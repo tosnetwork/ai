@@ -18,7 +18,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -26,26 +25,27 @@ import (
 )
 
 type options struct {
-	listen         string
-	tlsCert        string
-	tlsKey         string
-	stateDir       string
-	basePath       string
-	ttl            time.Duration
-	recipientCount int
-	recipientBytes int64
-	clientCount    int
-	globalEntries  int
-	globalBytes    int64
-	depositRate    int
-	depositBurst   int
-	readRate       int
-	readBurst      int
-	maxRateClients int
-	maxConnections int
-	maxDeposits    int
-	sweepInterval  time.Duration
-	trustedProxies []netip.Prefix
+	listen            string
+	tlsCert           string
+	tlsKey            string
+	stateDir          string
+	basePath          string
+	ttl               time.Duration
+	recipientCount    int
+	recipientBytes    int64
+	clientCount       int
+	globalEntries     int
+	globalBytes       int64
+	depositRate       int
+	depositBurst      int
+	readRate          int
+	readBurst         int
+	maxRateClients    int
+	maxConnections    int
+	maxPerClientConns int
+	maxDeposits       int
+	sweepInterval     time.Duration
+	trustedProxies    []netip.Prefix
 }
 
 type prefixList struct{ values *[]netip.Prefix }
@@ -97,12 +97,20 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	flags.IntVar(&opts.readRate, "read-rate-per-minute", agentpacketrelay.DefaultReadRate.PerMinute, "list, download and acknowledge requests per client address per minute")
 	flags.IntVar(&opts.readBurst, "read-burst", agentpacketrelay.DefaultReadRate.Burst, "list, download and acknowledge burst per client address")
 	flags.IntVar(&opts.maxRateClients, "max-rate-clients", agentpacketrelay.DefaultMaxRateClients, "client addresses tracked per rate-limiter table")
-	flags.IntVar(&opts.maxConnections, "max-connections", 1024, "concurrent connections")
+	flags.IntVar(&opts.maxConnections, "max-connections", agentpacketrelay.DefaultMaxConnections, "concurrent connections; more are closed at accept")
+	flags.IntVar(&opts.maxPerClientConns, "max-connections-per-client", agentpacketrelay.DefaultMaxConnectionsPerClient,
+		"concurrent connections per TCP peer address (IPv6 per /64); trusted proxies are exempt")
 	flags.IntVar(&opts.maxDeposits, "max-concurrent-deposits", agentpacketrelay.DefaultMaxConcurrentDeposits, "deposit bodies held in memory at once (256 KiB each)")
 	flags.DurationVar(&opts.sweepInterval, "sweep-interval", time.Minute, "expiry sweep interval")
 	flags.Var(prefixList{&opts.trustedProxies}, "trusted-proxy", "address or CIDR of a TLS-terminating proxy whose X-Forwarded-For is believed (repeatable; default none)")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
+	}
+	perClientSet := false
+	flags.Visit(func(f *flag.Flag) { perClientSet = perClientSet || f.Name == "max-connections-per-client" })
+	if !perClientSet && opts.maxPerClientConns > opts.maxConnections {
+		// The default per-client share never exceeds a smaller total.
+		opts.maxPerClientConns = opts.maxConnections
 	}
 	if flags.NArg() != 0 {
 		return options{}, errors.New("unexpected positional arguments")
@@ -113,8 +121,10 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	if opts.globalEntries <= 0 || opts.globalBytes <= 0 {
 		return options{}, errors.New("-global-max-entries and -global-max-bytes are required")
 	}
-	if opts.maxConnections <= 0 || opts.maxDeposits <= 0 || opts.sweepInterval < time.Second || opts.maxRateClients <= 0 {
-		return options{}, errors.New("-max-connections, -max-concurrent-deposits, -max-rate-clients must be positive and -sweep-interval at least 1s")
+	if opts.maxConnections <= 0 || opts.maxPerClientConns <= 0 || opts.maxPerClientConns > opts.maxConnections ||
+		opts.maxDeposits <= 0 || opts.sweepInterval < time.Second || opts.maxRateClients <= 0 {
+		return options{}, errors.New("-max-connections, -max-connections-per-client (at most -max-connections), " +
+			"-max-concurrent-deposits and -max-rate-clients must be positive and -sweep-interval at least 1s")
 	}
 	return opts, nil
 }
@@ -149,35 +159,6 @@ func buildServerTLS(listen, certFile, keyFile string) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}}, nil
 }
 
-// limitListener bounds concurrent connections; an accept past the bound
-// waits for a connection to close.
-type limitListener struct {
-	net.Listener
-	slots chan struct{}
-}
-
-func (l *limitListener) Accept() (net.Conn, error) {
-	l.slots <- struct{}{}
-	conn, err := l.Listener.Accept()
-	if err != nil {
-		<-l.slots
-		return nil, err
-	}
-	return &limitConn{Conn: conn, release: func() { <-l.slots }}, nil
-}
-
-type limitConn struct {
-	net.Conn
-	once    sync.Once
-	release func()
-}
-
-func (c *limitConn) Close() error {
-	err := c.Conn.Close()
-	c.once.Do(c.release)
-	return err
-}
-
 func run(ctx context.Context, args []string, output io.Writer, ready func(net.Addr)) error {
 	opts, err := parseOptions(args, output)
 	if err != nil {
@@ -205,9 +186,19 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	listener = &limitListener{Listener: listener, slots: make(chan struct{}, opts.maxConnections)}
+	// The TCP peer is the only address known at accept time. A connection
+	// past either bound is closed at once instead of waiting for a slot, so
+	// shutdown and other clients are never blocked behind a full table.
+	listener, err = agentpacketrelay.NewLimitListener(listener, agentpacketrelay.ListenerLimits{
+		MaxConnections: opts.maxConnections, MaxConnectionsPerClient: opts.maxPerClientConns,
+		TrustedProxies: opts.trustedProxies})
+	if err != nil {
+		return err
+	}
+	// IdleTimeout lets a poller keep its connection between 15-second polls
+	// (plus jitter) and frees an idle one soon after.
 	server := &http.Server{Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
-		WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
+		WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
 		// Connection-level errors name client addresses; they are dropped
 		// rather than logged.
 		ErrorLog: log.New(io.Discard, "", 0)}
