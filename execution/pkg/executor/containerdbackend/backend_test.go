@@ -1,0 +1,513 @@
+package containerdbackend
+
+import (
+	"context"
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/tosnetwork/tos-ai/pkg/executor"
+)
+
+type fakeEngine struct {
+	mutex        sync.Mutex
+	readyErr     error
+	residueErr   error
+	runErr       error
+	block        bool
+	panicRun     bool
+	panicReady   bool
+	panicResidue bool
+	closed       bool
+	started      chan struct{}
+	lastID       string
+	lastRequest  executor.ContainerRequest
+	lastInput    []byte
+	lastDevices  []string
+	active       int
+	maximumAlive int
+}
+
+func newFakeEngine() *fakeEngine {
+	return &fakeEngine{started: make(chan struct{}, 32)}
+}
+
+func (e *fakeEngine) CheckReady(context.Context) error {
+	if e.panicReady {
+		panic("readiness detail")
+	}
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	return e.readyErr
+}
+
+func (e *fakeEngine) CheckResidue(context.Context) error {
+	if e.panicResidue {
+		panic("residue detail")
+	}
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	return e.residueErr
+}
+
+func (e *fakeEngine) Run(
+	ctx context.Context,
+	id string,
+	request executor.ContainerRequest,
+	input []byte,
+	devices []string,
+) (executor.Result, error) {
+	if e.panicRun {
+		panic("runtime detail")
+	}
+	e.mutex.Lock()
+	e.lastID = id
+	e.lastRequest = request
+	e.lastInput = input
+	e.lastDevices = append([]string(nil), devices...)
+	e.active++
+	if e.active > e.maximumAlive {
+		e.maximumAlive = e.active
+	}
+	e.mutex.Unlock()
+	defer func() {
+		e.mutex.Lock()
+		e.active--
+		e.mutex.Unlock()
+	}()
+	select {
+	case e.started <- struct{}{}:
+	default:
+	}
+	if e.block {
+		<-ctx.Done()
+		return executor.Result{}, ctx.Err()
+	}
+	if e.runErr != nil {
+		return executor.Result{}, e.runErr
+	}
+	return executor.Result{Output: []byte("ok")}, nil
+}
+
+func (e *fakeEngine) Close() error {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	e.closed = true
+	return nil
+}
+
+func validRequest(t *testing.T, name string) executor.ContainerRequest {
+	t.Helper()
+	digest, err := executor.ExecutionDigest(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := executor.ExecutionDigest("image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return executor.ContainerRequest{
+		ExecutionDigest: digest, ImageDigest: image,
+		Entrypoint:  []string{"/bin/infer", "--json"},
+		Environment: map[string]string{"MODEL": "fixed"},
+		UserID:      1000, GroupID: 1000, ReadOnlyRoot: true,
+		NoNewPrivileges: true, Network: executor.NetworkNone,
+		Limits: executor.Limits{
+			CPUMillis: 1000, MemoryBytes: 64 << 20,
+			DiskBytes: 12 << 20, PIDs: 32,
+			ExecutionTime: time.Second, OutputBytes: 1 << 20,
+		},
+	}
+}
+
+func TestBackendUsesDigestOnlyAndDefensiveCopies(t *testing.T) {
+	engine := newFakeEngine()
+	backend, err := newBackend(context.Background(), engine, nil, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := validRequest(t, "task")
+	input := []byte("input")
+	result, err := backend.RunIsolated(context.Background(), request, input)
+	if err != nil || string(result.Output) != "ok" {
+		t.Fatalf("run result=%q err=%v", result.Output, err)
+	}
+	request.Entrypoint[0] = "changed"
+	request.Environment["MODEL"] = "changed"
+	input[0] = 'X'
+	engine.mutex.Lock()
+	defer engine.mutex.Unlock()
+	if engine.lastID != runtimeID(engine.lastRequest.ExecutionDigest) ||
+		engine.lastRequest.Entrypoint[0] != "/bin/infer" ||
+		engine.lastRequest.Environment["MODEL"] != "fixed" ||
+		string(engine.lastInput) != "input" {
+		t.Fatal("runtime received mutable or externally correlated state")
+	}
+}
+
+func TestBackendMapsOnlyFixedGPUAliasesToCDIDevices(t *testing.T) {
+	engine := newFakeEngine()
+	devices := map[string]string{
+		"gpu-a": "nvidia.com/gpu=0",
+		"gpu-b": "nvidia.com/gpu=1",
+	}
+	backend, err := newBackendWithDevices(
+		context.Background(), engine, nil, 2, devices,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devices["gpu-a"] = "attacker.example/gpu=changed"
+	request := validRequest(t, "gpu-task")
+	request.AllowGPU = true
+	request.Limits.GPUDeviceCount = 1
+	if _, err := backend.RunIsolatedOnDevices(
+		context.Background(), request, nil, []string{"gpu-a"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	engine.mutex.Lock()
+	received := append([]string(nil), engine.lastDevices...)
+	engine.mutex.Unlock()
+	if len(received) != 1 || received[0] != "nvidia.com/gpu=0" {
+		t.Fatalf("CDI assignment=%v", received)
+	}
+	for _, aliases := range [][]string{
+		{"missing"}, {"gpu-a", "gpu-a"}, nil,
+	} {
+		if _, err := backend.RunIsolatedOnDevices(
+			context.Background(), request, nil, aliases,
+		); err == nil {
+			t.Fatalf("unsafe GPU aliases accepted: %v", aliases)
+		}
+	}
+	if _, err := backend.RunIsolated(
+		context.Background(), request, nil,
+	); err == nil {
+		t.Fatal("GPU request without assigned devices accepted")
+	}
+}
+
+func TestBackendBoundsCapacityAndCloseCancelsActiveRuns(t *testing.T) {
+	engine := newFakeEngine()
+	engine.block = true
+	backend, err := newBackend(context.Background(), engine, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := validRequest(t, "first")
+	done := make(chan error, 1)
+	go func() {
+		_, err := backend.RunIsolated(context.Background(), request, nil)
+		done <- err
+	}()
+	<-engine.started
+	if _, err := backend.RunIsolated(
+		context.Background(), request, nil,
+	); err == nil {
+		t.Fatal("duplicate execution was accepted")
+	}
+	second := validRequest(t, "second")
+	if _, err := backend.RunIsolated(
+		context.Background(), second, nil,
+	); err == nil {
+		t.Fatal("execution above fixed capacity was accepted")
+	}
+	if err := backend.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("shutdown did not cancel active execution")
+	}
+	engine.mutex.Lock()
+	closed, maximumAlive := engine.closed, engine.maximumAlive
+	engine.mutex.Unlock()
+	if !closed || maximumAlive != 1 {
+		t.Fatalf("closed=%v maximumAlive=%d", closed, maximumAlive)
+	}
+	if _, err := backend.RunIsolated(
+		context.Background(), second, nil,
+	); err == nil {
+		t.Fatal("closed backend accepted work")
+	}
+}
+
+func TestBackendFailsClosedOnReadinessResidueAndPanic(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		configure func(*fakeEngine)
+	}{
+		{"readiness", func(engine *fakeEngine) { engine.readyErr = errors.New("secret") }},
+		{"residue", func(engine *fakeEngine) { engine.residueErr = errors.New("secret") }},
+		{"readiness panic", func(engine *fakeEngine) { engine.panicReady = true }},
+		{"residue panic", func(engine *fakeEngine) { engine.panicResidue = true }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			engine := newFakeEngine()
+			test.configure(engine)
+			if backend, err := newBackend(
+				context.Background(), engine, nil, 1,
+			); err == nil || backend != nil {
+				t.Fatal("unsafe runtime state was accepted")
+			}
+		})
+	}
+	var typedNil *fakeEngine
+	if backend, err := newBackend(context.Background(), typedNil, nil, 1); err == nil || backend != nil {
+		t.Fatal("typed-nil containerd engine accepted")
+	}
+	engine := newFakeEngine()
+	engine.panicRun = true
+	backend, err := newBackend(context.Background(), engine, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.RunIsolated(
+		context.Background(), validRequest(t, "panic"), nil,
+	); err == nil || err.Error() != "containerd execution failed" {
+		t.Fatalf("panic detail crossed backend boundary: %v", err)
+	}
+}
+
+func TestFixedIsolationSpecEnforcesCPUOnlySandbox(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("OCI Linux isolation specification requires Linux")
+	}
+	request := validRequest(t, "spec")
+	ctx := namespaces.WithNamespace(context.Background(), "tos-ai-test")
+	spec, err := oci.GenerateSpec(
+		ctx, nil, &containers.Container{ID: runtimeID(request.ExecutionDigest)},
+		fixedIsolationSpec(request),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !spec.Root.Readonly || !spec.Process.NoNewPrivileges ||
+		spec.Process.User.UID != 1000 || spec.Process.User.GID != 1000 ||
+		len(spec.Process.Capabilities.Bounding) != 0 ||
+		spec.Linux.Resources.Memory == nil ||
+		*spec.Linux.Resources.Memory.Limit != int64(request.Limits.MemoryBytes) ||
+		spec.Linux.Resources.Pids == nil ||
+		spec.Linux.Resources.Pids.Limit != int64(request.Limits.PIDs) ||
+		spec.Linux.Seccomp == nil ||
+		spec.Linux.Seccomp.DefaultAction != specs.ActErrno ||
+		len(spec.Linux.Seccomp.Syscalls) == 0 ||
+		!hasPrivateNetworkNamespace(spec.Linux.Namespaces) {
+		t.Fatal("generated OCI specification lost an isolation invariant")
+	}
+	for _, mount := range spec.Mounts {
+		if mount.Type == "tmpfs" &&
+			(mount.Destination == "/dev" || mount.Destination == "/dev/shm" ||
+				mount.Destination == "/run") {
+			if !contains(mount.Options, "noexec") {
+				t.Fatalf("tmpfs %q remained executable", mount.Destination)
+			}
+		}
+	}
+}
+
+func TestFixedIsolationSpecBindsOnlyRuntimeSelectedWorkspace(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("OCI Linux isolation specification requires Linux")
+	}
+	request := validRequest(t, "workspace-spec")
+	request.WorkspaceArchive = true
+	request.WorkingDirectory = "/workspace/source"
+	ctx := namespaces.WithNamespace(context.Background(), "tos-ai-test")
+	spec, err := oci.GenerateSpec(
+		ctx, nil, &containers.Container{ID: runtimeID(request.ExecutionDigest)},
+		fixedIsolationSpec(request, "/private/runtime/workspace"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Process.Cwd != "/workspace/source" {
+		t.Fatalf("working directory = %q", spec.Process.Cwd)
+	}
+	var workspace, source *specs.Mount
+	for index := range spec.Mounts {
+		mount := &spec.Mounts[index]
+		switch mount.Destination {
+		case "/workspace":
+			workspace = mount
+		case "/workspace/source":
+			source = mount
+		}
+	}
+	if workspace == nil || workspace.Type != "tmpfs" || contains(workspace.Options, "noexec") ||
+		source == nil || source.Type != "bind" || source.Source != "/private/runtime/workspace" ||
+		!contains(source.Options, "ro") || !contains(source.Options, "noexec") {
+		t.Fatalf("workspace mounts are not hardened: workspace=%#v source=%#v", workspace, source)
+	}
+}
+
+func TestRequestRejectsNetworkGPUAndUnsafeBounds(t *testing.T) {
+	base := validRequest(t, "invalid")
+	cases := []executor.ContainerRequest{
+		func() executor.ContainerRequest {
+			value := base
+			value.Network = executor.NetworkAllowlist
+			value.AllowedHosts = []string{"example.com"}
+			return value
+		}(),
+		func() executor.ContainerRequest {
+			value := base
+			value.AllowGPU = true
+			value.Limits.GPUDeviceCount = 1
+			return value
+		}(),
+		func() executor.ContainerRequest { value := base; value.ReadOnlyRoot = false; return value }(),
+		func() executor.ContainerRequest { value := base; value.UserID = 0; return value }(),
+		func() executor.ContainerRequest {
+			value := base
+			value.Limits.DiskBytes = minimumTmpfsBytes - 1
+			return value
+		}(),
+	}
+	for _, request := range cases {
+		if err := validateRequest(request, nil, 0); err == nil {
+			t.Fatal("unsafe container request was accepted")
+		}
+	}
+}
+
+func TestGPUDeviceMapRejectsAmbiguousOrUnsafeBindings(t *testing.T) {
+	valid := map[string]string{"gpu-a": "nvidia.com/gpu=0"}
+	if err := validateGPUDeviceMap(valid, true, 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, devices := range []map[string]string{
+		nil,
+		{"GPU-A": "nvidia.com/gpu=0"},
+		{"gpu-a": "not-qualified"},
+		{"gpu-a": "nvidia.com/gpu=all"},
+		{"gpu-a": "nvidia.com/gpu=0", "gpu-b": "nvidia.com/gpu=0"},
+	} {
+		if err := validateGPUDeviceMap(devices, true, 1); err == nil {
+			t.Fatalf("unsafe GPU map accepted: %#v", devices)
+		}
+	}
+	if err := validateGPUDeviceMap(valid, false, 0); err == nil {
+		t.Fatal("GPU map accepted without permission")
+	}
+}
+
+func TestPrivateSocketAndFIFODirectoryValidation(t *testing.T) {
+	directory, err := os.MkdirTemp("/tmp", "cb-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(directory, "containerd.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePrivateSocket(socketPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(socketPath, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePrivateSocket(socketPath); err == nil {
+		t.Fatal("group-accessible containerd socket was accepted")
+	}
+	fifoDir := filepath.Join(directory, "fifo")
+	if err := ensurePrivateDirectory(fifoDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fifoDir, "residue"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateFIFODir(fifoDir); err == nil {
+		t.Fatal("containerd FIFO residue was accepted")
+	}
+}
+
+func TestBoundedOutputNeverRetainsPastLimit(t *testing.T) {
+	output := newBoundedOutput(4)
+	if count, err := output.Write([]byte("abcdef")); err != nil || count != 6 {
+		t.Fatalf("write count=%d err=%v", count, err)
+	}
+	if string(output.Bytes()) != "abcd" || !output.Exceeded() {
+		t.Fatal("output limit was not enforced")
+	}
+}
+
+func TestBackendReportsTheCauseOfAFailureToTheOperatorOnly(t *testing.T) {
+	type report struct {
+		operation string
+		cause     error
+	}
+	var reports []report
+	sink := func(operation string, cause error) { reports = append(reports, report{operation, cause}) }
+	cause := errors.New("shim: open /run/x/fifo: permission denied")
+
+	engine := newFakeEngine()
+	backend, err := newBackendWithDevices(context.Background(), engine, nil, 1, nil, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.RunIsolated(context.Background(), validRequest(t, "ok"), nil); err != nil || len(reports) != 0 {
+		t.Fatalf("a successful run: err=%v reports=%v", err, reports)
+	}
+	engine.runErr = cause
+	_, err = backend.RunIsolated(context.Background(), validRequest(t, "failing"), nil)
+	// The caller gets the fixed text and nothing of the cause.
+	if err == nil || err.Error() != "containerd execution failed" || errors.Is(err, cause) {
+		t.Fatalf("caller error = %v", err)
+	}
+	if len(reports) != 1 || reports[0].operation != "run" || !errors.Is(reports[0].cause, cause) {
+		t.Fatalf("run reports = %+v", reports)
+	}
+	engine.mutex.Lock()
+	engine.readyErr = cause
+	engine.mutex.Unlock()
+	if err := backend.CheckReady(context.Background()); err == nil || err.Error() != "containerd backend is unavailable" {
+		t.Fatalf("readiness error = %v", err)
+	}
+	if len(reports) != 2 || reports[1].operation != "readiness" || !errors.Is(reports[1].cause, cause) {
+		t.Fatalf("readiness reports = %+v", reports)
+	}
+	// A backend that cannot open says why as well.
+	reports = nil
+	unready := newFakeEngine()
+	unready.readyErr = cause
+	if _, err := newBackendWithDevices(context.Background(), unready, nil, 1, nil, sink); err == nil {
+		t.Fatal("opened an unready backend")
+	}
+	unclean := newFakeEngine()
+	unclean.residueErr = cause
+	if _, err := newBackendWithDevices(context.Background(), unclean, nil, 1, nil, sink); err == nil {
+		t.Fatal("opened an unclean backend")
+	}
+	if len(reports) != 2 || reports[0].operation != "readiness" || reports[1].operation != "residue" ||
+		!errors.Is(reports[1].cause, cause) {
+		t.Fatalf("open reports = %+v", reports)
+	}
+	// Without a sink nothing changes.
+	silent, err := newBackend(context.Background(), newFakeEngine(), nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	silent.engine.(*fakeEngine).runErr = cause
+	if _, err := silent.RunIsolated(context.Background(), validRequest(t, "silent"), nil); err == nil {
+		t.Fatal("the failing run succeeded")
+	}
+}

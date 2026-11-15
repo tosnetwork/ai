@@ -1,0 +1,374 @@
+package commercegate
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tosnetwork/tos-ai/internal/actionauthoritytest"
+	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+)
+
+// authorityKey names an Action Authority controller in custody and the
+// verifier that checks its signatures.
+type authorityKey struct {
+	signer     mldsa44.Signer
+	verifier   mldsa44.Verifier
+	controller string
+	keyID      string
+	publicKey  []byte
+}
+
+// fakeKey is the deterministic in-process stand-in used by pure-logic tests.
+func fakeKey() authorityKey {
+	fake := &mldsa44test.Fake{}
+	return authorityKey{signer: fake, verifier: fake, controller: actionauthoritytest.Controller,
+		keyID: fake.KeyID(actionauthoritytest.Controller), publicKey: fake.PublicKey(actionauthoritytest.Controller)}
+}
+
+// custodyKey is a real ML-DSA-44 controller in a private tosctl vault.
+func custodyKey(t *testing.T, custody *actionauthoritytest.Custody, controller string) authorityKey {
+	t.Helper()
+	return authorityKey{signer: custody.Signer, verifier: custody.Signer, controller: controller,
+		keyID: custody.KeyID(t, controller), publicKey: custody.PublicKeys[controller]}
+}
+
+type testWriterAuthority struct {
+	actionauthoritytest.Resolver
+	generation uint64
+	lease      string
+}
+
+func newTestWriterAuthority(key authorityKey, generation uint64, lease string) *testWriterAuthority {
+	return &testWriterAuthority{Resolver: actionauthoritytest.Resolver{Verifier: key.verifier,
+		Keys: map[string][][]byte{"authority": {key.publicKey}}}, generation: generation, lease: lease}
+}
+
+func (authority *testWriterAuthority) ConfirmCurrentWriterFence(fence commerce.WriterFence, _ time.Time) error {
+	if fence.Body.WriterGeneration != authority.generation || fence.Body.LeaseID != authority.lease {
+		return errors.New("stale writer")
+	}
+	return nil
+}
+
+func TestGateStartsExactImmutableResourcesOnce(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0).UTC()
+	key := fakeKey()
+	fence := signedFence(t, key, now, 1, "lease:one")
+	authority := newTestWriterAuthority(key, 1, "lease:one")
+	directory := filepath.Join(t.TempDir(), "gate")
+	gate, err := Open(directory, authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Close()
+	gate.now = func() time.Time { return now }
+	inputPath := filepath.Join(t.TempDir(), "input.txt")
+	original := []byte("immutable input")
+	if err := os.WriteFile(inputPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := testPlan(inputPath, original, "work:one")
+	prepared, prepareAction := authorizedPrepare(t, plan, fence, key, now)
+	ticket, err := gate.Prepare(context.Background(), plan, fence, time.Minute, prepareAction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry, err := gate.Prepare(context.Background(), plan, fence, time.Minute, prepareAction); err != nil || retry != ticket {
+		t.Fatalf("prepare retry=%+v err=%v", retry, err)
+	}
+	if err := os.WriteFile(inputPath, []byte("tampered input!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	startAction := authorizedStart(t, prepared, ticket, fence, key, now)
+	if _, err := gate.Start(context.Background(), ticket, fence, startAction); err == nil {
+		t.Fatal("mutated input started")
+	}
+	if err := os.WriteFile(inputPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launch, err := gate.Start(context.Background(), ticket, fence, startAction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeFiles(launch.Files)
+	if err := os.Rename(inputPath, inputPath+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputPath, []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(launch.Files[0])
+	if err != nil || string(raw) != string(original) {
+		t.Fatalf("launched handle=%q err=%v", raw, err)
+	}
+	if err := gate.MarkRunning(launch); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate.Complete(launch, StateSucceeded, digest([]byte("outcome"))); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := gate.ExportOutcomeEvidence(launch.ExecutionID, "issuer:pseudonym", "execution:pseudonym", "local_private",
+		digest([]byte("audience")), digest([]byte("retention")), digest([]byte("retrieval")), digest([]byte("authority-time")),
+		digest([]byte("qualification")), 128, 128, now)
+	if err != nil || len(exported.CanonicalEvidence) == 0 || exported.EvidenceItem.EvidenceRole != "authoritative_resolution" {
+		t.Fatalf("outcome evidence=%+v err=%v", exported, err)
+	}
+	authorityTime := commerce.AuthorityTimeProofV1{ProfileURI: "tos.authority.clock.v1", AuthorityOrCheckpointID: "checkpoint:gate",
+		IntervalStartUnix: uint64(now.Add(-time.Second).Unix()), IntervalEndUnix: uint64(now.Unix()), FinalizedHighWater: 1,
+		FinalizedRootDigest: digest([]byte("root")), ProofDigest: digest([]byte("proof"))}
+	authorityTimeBytes, _ := codec.Marshal(authorityTime)
+	authorityMaterial := commerce.OutcomeAuthorityProofMaterialV1{ProofProfileURI: commerce.OutcomeAuthorityTimeProofProfileV1,
+		CanonicalObject: authorityTimeBytes}
+	authorityMaterialDigest, _ := commerce.OutcomeAuthorityProofObjectDigestV1(authorityMaterial)
+	subjectScope, _ := commerce.OutcomeSubjectScopeDigestV1(launch.ExecutionID)
+	qualification := commerce.IssuerQualificationProofV1{RootAuthorityID: "authority:root", IssuerAgentID: "agent:executor",
+		IssuerKeyDigest: digest([]byte("issuer-key")), OrderedDelegationChainDigest: digest([]byte("delegation")),
+		ScopeProfileURI: ExecutionOutcomeEvidenceProfileV1, SubjectScopeDigest: subjectScope,
+		ValidFromUnix: uint64(now.Add(-time.Hour).Unix()), ValidUntilUnix: uint64(now.Add(time.Hour).Unix()),
+		RevocationHandleSetDigest: digest([]byte("revocations")), AuthorityTimeProofDigest: authorityMaterialDigest,
+		RevocationHighWater: 1, RevocationRootDigest: digest([]byte("revocation-root"))}
+	qualificationBytes, _ := codec.Marshal(qualification)
+	qualificationMaterial := commerce.OutcomeAuthorityProofMaterialV1{ProofProfileURI: commerce.OutcomeIssuerQualificationProofProfileV1,
+		CanonicalObject: qualificationBytes}
+	event, bundle, err := gate.BuildOperationOutcomeArtifacts(launch.ExecutionID, "agent:executor", "local_private",
+		digest([]byte("audience")), digest([]byte("retention")), digest([]byte("retrieval")), digest([]byte("gate-policy")),
+		[]commerce.OutcomeAuthorityProofMaterialV1{authorityMaterial, qualificationMaterial}, now)
+	if err != nil || commerce.VerifyOperationOutcomeArtifactBundleV1(event, bundle) != nil {
+		t.Fatalf("Gate outcome event is not self-contained: event=%+v err=%v", event, err)
+	}
+	if _, err := gate.Start(context.Background(), ticket, fence, startAction); err == nil {
+		t.Fatal("terminal execution started twice")
+	}
+}
+
+func TestGateRejectsStaleTakeoverAndRecoversStartingAsAmbiguous(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0).UTC()
+	key := fakeKey()
+	fence1 := signedFence(t, key, now, 1, "lease:one")
+	authority := newTestWriterAuthority(key, 1, "lease:one")
+	directory := filepath.Join(t.TempDir(), "gate")
+	gate, _ := Open(directory, authority)
+	gate.now = func() time.Time { return now }
+	inputPath := filepath.Join(t.TempDir(), "input.txt")
+	raw := []byte("input")
+	_ = os.WriteFile(inputPath, raw, 0o600)
+	plan := testPlan(inputPath, raw, "work:ambiguous")
+	prepared, prepareAction := authorizedPrepare(t, plan, fence1, key, now)
+	ticket, err := gate.Prepare(context.Background(), plan, fence1, time.Minute, prepareAction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority.generation, authority.lease = 2, "lease:two"
+	startAction := authorizedStart(t, prepared, ticket, fence1, key, now)
+	if _, err := gate.Start(context.Background(), ticket, fence1, startAction); err == nil {
+		t.Fatal("stale writer started after takeover")
+	}
+	fence2 := signedFence(t, key, now, 2, "lease:two")
+	if _, err := gate.Start(context.Background(), ticket, fence2, startAction); err == nil {
+		t.Fatal("new writer substituted itself into old prepared slot")
+	}
+	// No takeover: start reaches the durable STARTING point and then the process
+	// disappears before MarkRunning. Recovery must report ambiguity, not retry.
+	authority.generation, authority.lease = 1, "lease:one"
+	launch, err := gate.Start(context.Background(), ticket, fence1, startAction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeFiles(launch.Files)
+	if err := gate.Close(); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := Open(directory, authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	recovered.now = func() time.Time { return now }
+	state, _, err := recovered.Resolve(ticket.ExecutionID)
+	if err != nil || state != StateAmbiguousStart {
+		t.Fatalf("recovered state=%s err=%v", state, err)
+	}
+	if _, err := recovered.Start(context.Background(), ticket, fence1, startAction); err == nil {
+		t.Fatal("ambiguous STARTING slot was launched again")
+	}
+	_ = fence2
+}
+
+func TestExecutionIdentitySurvivesWriterTakeoverButBoundPlanDoesNot(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0).UTC()
+	key := fakeKey()
+	fence1 := signedFence(t, key, now, 1, "lease:one")
+	fence2 := signedFence(t, key, now, 2, "lease:two")
+	path := filepath.Join(t.TempDir(), "input")
+	raw := []byte("input")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := testPlan(path, raw, "work:stable-takeover")
+	first, _, _, err := PrepareAuthorizationMaterial(plan, fence1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, _, err := PrepareAuthorizationMaterial(plan, fence2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ExecutionID != second.ExecutionID || first.CanonicalPlanDigest != second.CanonicalPlanDigest {
+		t.Fatalf("takeover changed semantic execution identity: first=%+v second=%+v", first, second)
+	}
+	firstBound, firstDigest, _ := preparePlan(first, fence1)
+	secondBound, secondDigest, _ := preparePlan(second, fence2)
+	if firstBound.WriterGeneration == secondBound.WriterGeneration || firstDigest == secondDigest {
+		t.Fatal("writer-bound plan did not retain the fencing generation")
+	}
+}
+
+func TestGateRejectsPrivateOrRedirectableNetworkCapabilities(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0).UTC()
+	key := fakeKey()
+	fence := signedFence(t, key, now, 1, "lease:network")
+	authority := newTestWriterAuthority(key, 1, "lease:network")
+	gate, err := Open(filepath.Join(t.TempDir(), "gate"), authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Close()
+	gate.now = func() time.Time { return now }
+	path := filepath.Join(t.TempDir(), "input")
+	raw := []byte("input")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := testPlan(path, raw, "work:network")
+	plan.NetworkBindings = []NetworkBinding{{BindingID: "source", Scheme: "https", Host: "example.com", Port: 443,
+		ResolvedIPs: []string{"127.0.0.1"}, TLSServerName: "example.com", MaxRequestBytes: 1024, MaxResponseBytes: 1024}}
+	_, action := authorizedPrepare(t, plan, fence, key, now)
+	if _, err := gate.Prepare(context.Background(), plan, fence, time.Minute, action); err == nil {
+		t.Fatal("private target entered execution plan")
+	}
+	plan.NetworkBindings[0].ResolvedIPs = []string{"1.1.1.1"}
+	plan.NetworkBindings[0].AllowRedirects = true
+	_, action = authorizedPrepare(t, plan, fence, key, now)
+	if _, err := gate.Prepare(context.Background(), plan, fence, time.Minute, action); err == nil {
+		t.Fatal("redirectable target entered execution plan")
+	}
+	plan.NetworkBindings[0].AllowRedirects = false
+	_, action = authorizedPrepare(t, plan, fence, key, now)
+	if _, err := gate.Prepare(context.Background(), plan, fence, time.Minute, action); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGateRecoversRunningExecutionAsAmbiguousWithoutRestart(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0).UTC()
+	key := fakeKey()
+	fence := signedFence(t, key, now, 1, "lease:running")
+	authority := newTestWriterAuthority(key, 1, "lease:running")
+	directory := filepath.Join(t.TempDir(), "gate")
+	gate, err := Open(directory, authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate.now = func() time.Time { return now }
+	path := filepath.Join(t.TempDir(), "input")
+	raw := []byte("input")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := testPlan(path, raw, "work:running")
+	prepared, prepareAction := authorizedPrepare(t, plan, fence, key, now)
+	ticket, err := gate.Prepare(context.Background(), plan, fence, time.Minute, prepareAction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch, err := gate.Start(context.Background(), ticket, fence, authorizedStart(t, prepared, ticket, fence, key, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeFiles(launch.Files)
+	if err := gate.MarkRunning(launch); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate.Close(); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := Open(directory, authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	state, _, err := recovered.Resolve(ticket.ExecutionID)
+	if err != nil || state != StateAmbiguousRun {
+		t.Fatalf("recovered state=%s err=%v", state, err)
+	}
+}
+
+func testPlan(path string, raw []byte, obligation string) Plan {
+	return Plan{OwnerID: "owner", AgentID: "agent", AgreementBodyDigest: digest([]byte("agreement")), ExecutionObligationID: obligation,
+		AcceptedInputManifestDigest: digest([]byte("manifest")), AttemptIndex: 0,
+		PredecessorTerminalResolutionDigest: "sha256:" + strings.Repeat("0", 64), ReservationID: digest([]byte(obligation)),
+		PolicyRevision: 1, LeaseLossPolicy: LeaseLossKill, Files: []FileBinding{{Path: path, Digest: digest(raw), Size: uint64(len(raw))}}}
+}
+
+func signedFence(t *testing.T, key authorityKey, now time.Time, generation uint64, lease string) commerce.WriterFence {
+	t.Helper()
+	fence, err := commerce.SignWriterFence(context.Background(), commerce.WriterFenceBody{SchemaVersion: 1, OwnerID: "owner", AgentID: "agent", InstanceID: "runtime",
+		LeaseID: lease, WriterGeneration: generation, IssuedAtUnix: uint64(now.Unix()), ExpiresAtUnix: uint64(now.Add(time.Hour).Unix()),
+		AuthorityID: "authority", Scope: []string{"execution.prepare", "execution.start"}}, key.signer, key.controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fence
+}
+
+func authorizedPrepare(t *testing.T, plan Plan, fence commerce.WriterFence, key authorityKey, now time.Time) (Plan, commerce.AuthorizedAction) {
+	t.Helper()
+	prepared, request, fields, err := PrepareAuthorizationMaterial(plan, fence)
+	if err != nil {
+		return Plan{}, commerce.AuthorizedAction{}
+	}
+	action, err := commerce.BuildAuthorizedAction(plan.OwnerID, plan.AgentID, "execution.prepare", fields, request, fence, plan.PolicyRevision,
+		digest([]byte("mandate")), "", "absent", uint64(now.Add(30*time.Minute).Unix()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err = commerce.SignAuthorizedAction(context.Background(), action, key.keyID, key.signer, key.controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prepared, action
+}
+
+func authorizedStart(t *testing.T, plan Plan, ticket Ticket, fence commerce.WriterFence, key authorityKey, now time.Time) commerce.AuthorizedAction {
+	t.Helper()
+	request, fields, err := StartAuthorizationMaterial(plan, ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err := commerce.BuildAuthorizedAction(plan.OwnerID, plan.AgentID, "execution.start", fields, request, fence, plan.PolicyRevision,
+		digest([]byte("mandate")), "", "prepared", uint64(now.Add(30*time.Minute).Unix()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err = commerce.SignAuthorizedAction(context.Background(), action, key.keyID, key.signer, key.controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return action
+}
+
+func digest(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}

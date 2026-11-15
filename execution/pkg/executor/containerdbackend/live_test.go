@@ -1,0 +1,404 @@
+package containerdbackend_test
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/errdefs"
+	"github.com/tosnetwork/tos-ai/executor/gpuisolation"
+	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/tos-ai/pkg/executor/backendtest"
+	"github.com/tosnetwork/tos-ai/pkg/executor/containerdbackend"
+)
+
+func TestContainerdBackendLiveWorkspace(t *testing.T) {
+	configuration, enabled := liveTestConfiguration(t)
+	if !enabled {
+		t.Skip("private containerd live-test environment is not configured")
+	}
+	limits := executor.Limits{
+		CPUMillis: 30_000, MemoryBytes: 512 << 20, DiskBytes: 1 << 30,
+		PIDs: 64, ExecutionTime: 30 * time.Second, OutputBytes: 1 << 20,
+	}
+	backend, err := containerdbackend.Open(context.Background(), containerdbackend.Config{
+		SocketPath: configuration.socket, Namespace: configuration.namespace,
+		Snapshotter: "overlayfs", Runtime: "io.containerd.runc.v2",
+		FIFODir: configuration.fifoDir, MaxActive: 1, PolicyLimits: limits,
+		ImageReference: configuration.imageReference, ImageDigest: configuration.imageDigest,
+		ImagePlatform: "linux/amd64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	digest, err := executor.ExecutionDigest("containerd-live-workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := executor.ContainerRequest{
+		ExecutionDigest: digest, ImageDigest: configuration.imageDigest,
+		Entrypoint:       []string{"/usr/local/bin/go", "test", "./...", "-count=1"},
+		WorkingDirectory: "/workspace/source", WorkspaceArchive: true,
+		Environment: map[string]string{"GOROOT": "/usr/local/go", "HOME": "/workspace", "GOCACHE": "/workspace/go-cache", "GOTMPDIR": "/workspace", "TMPDIR": "/workspace", "CGO_ENABLED": "0", "GOMAXPROCS": "2"},
+		UserID:      65532, GroupID: 65532, ReadOnlyRoot: true, NoNewPrivileges: true,
+		Network: executor.NetworkNone, Limits: limits,
+	}
+	result, err := backend.RunIsolated(context.Background(), request, liveWorkspaceArchive(t))
+	if err != nil || result.ExitCode != 0 || !bytes.Contains(result.Output, []byte("ok")) {
+		t.Fatalf("workspace result exit=%d output=%q err=%v", result.ExitCode, result.Output, err)
+	}
+}
+
+// TestContainerdBackendLiveReadinessRequiresTheImage opens the backend for
+// an image the daemon does not hold. Readiness must fail then, because a
+// run would fail only after its caller had committed to it.
+func TestContainerdBackendLiveReadinessRequiresTheImage(t *testing.T) {
+	configuration, enabled := liveTestConfiguration(t)
+	if !enabled {
+		t.Skip("private containerd live-test environment is not configured")
+	}
+	limits := executor.Limits{
+		CPUMillis: 30_000, MemoryBytes: 512 << 20, DiskBytes: 1 << 30,
+		PIDs: 64, ExecutionTime: 30 * time.Second, OutputBytes: 1 << 20,
+	}
+	open := func(reference, digest string) (*containerdbackend.Backend, error) {
+		return containerdbackend.Open(context.Background(), containerdbackend.Config{
+			SocketPath: configuration.socket, Namespace: configuration.namespace,
+			Snapshotter: "overlayfs", Runtime: "io.containerd.runc.v2",
+			FIFODir: configuration.fifoDir, MaxActive: 1, PolicyLimits: limits,
+			ImageReference: reference, ImageDigest: digest, ImagePlatform: "linux/amd64",
+		})
+	}
+	// The same daemon with the image it does hold is ready.
+	present, err := open(configuration.imageReference, configuration.imageDigest)
+	if err != nil {
+		t.Fatalf("the provisioned image: %v", err)
+	}
+	if err := present.CheckReady(context.Background()); err != nil {
+		t.Fatalf("readiness with the provisioned image: %v", err)
+	}
+	if err := present.Close(); err != nil {
+		t.Fatal(err)
+	}
+	absent := "sha256:" + strings.Repeat("0", 63) + "1"
+	missing, err := open("example.invalid/absent/image:none@"+absent, absent)
+	if err == nil {
+		_ = missing.Close()
+		t.Fatal("a backend whose image is absent reported ready")
+	}
+}
+
+func liveWorkspaceArchive(t *testing.T) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	files := []struct{ name, body string }{
+		{"go.mod", "module example.test/live\n\ngo 1.26.5\n"},
+		{"live_test.go", "package live\nimport \"testing\"\nfunc TestLive(t *testing.T) {}\n"},
+	}
+	for _, file := range files {
+		header := &tar.Header{Name: file.name, Mode: 0o444, Size: int64(len(file.body)), Format: tar.FormatUSTAR}
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(file.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+const (
+	liveSocketEnv     = "TOS_AI_CONTAINERD_TEST_SOCKET"
+	liveNamespaceEnv  = "TOS_AI_CONTAINERD_TEST_NAMESPACE"
+	liveFIFOEnv       = "TOS_AI_CONTAINERD_TEST_FIFO_DIR"
+	liveImageRefEnv   = "TOS_AI_CONTAINERD_TEST_IMAGE_REFERENCE"
+	liveImageEnv      = "TOS_AI_CONTAINERD_TEST_IMAGE_DIGEST"
+	liveCDISpecDirEnv = "TOS_AI_CONTAINERD_TEST_CDI_SPEC_DIR"
+	liveNVIDIACDIEnv  = "TOS_AI_CONTAINERD_TEST_NVIDIA_CDI_DEVICE"
+)
+
+var liveManagedID = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+type liveConfiguration struct {
+	socket, namespace, fifoDir, imageReference, imageDigest string
+	cdiSpecDir, nvidiaCDIDevice                             string
+}
+
+func TestContainerdBackendLiveMockCDIConformance(t *testing.T) {
+	configuration, enabled := liveTestConfiguration(t)
+	if !enabled || configuration.cdiSpecDir == "" {
+		t.Skip("private containerd MOCK CDI live-test environment is not configured")
+	}
+	limits := executor.Limits{
+		CPUMillis: 10_000, MemoryBytes: 128 << 20,
+		DiskBytes: 12 << 20, PIDs: 32, GPUDeviceCount: 1,
+		ExecutionTime: 10 * time.Second, OutputBytes: 1024,
+	}
+	backend, err := containerdbackend.Open(
+		context.Background(), containerdbackend.Config{
+			SocketPath: configuration.socket, Namespace: configuration.namespace,
+			Snapshotter: "overlayfs", Runtime: "io.containerd.runc.v2",
+			FIFODir: configuration.fifoDir, MaxActive: 2,
+			PermitGPU: true, GPUDevices: map[string]string{
+				"gpu-mock": "tos.test/gpu=mock0",
+			},
+			CDISpecDirs:  []string{configuration.cdiSpecDir},
+			PolicyLimits: limits, ImageReference: configuration.imageReference,
+			ImageDigest: configuration.imageDigest, ImagePlatform: "linux/amd64",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	client, err := gpuisolation.New([]string{"gpu-mock"}, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := executor.ExecutionDigest("containerd-live-mock-cdi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := executor.ContainerRequest{
+		ExecutionDigest: digest, ImageDigest: configuration.imageDigest,
+		Entrypoint: []string{
+			"/bin/sh", "-c",
+			`test "$TOS_MOCK_GPU" = injected && test -c /dev/null && printf mock-cdi-ok`,
+		},
+		UserID: 65532, GroupID: 65532, ReadOnlyRoot: true,
+		NoNewPrivileges: true, Network: executor.NetworkNone,
+		AllowGPU: true, Limits: limits,
+	}
+	result, err := client.RunIsolated(context.Background(), request, nil)
+	if err != nil || string(result.Output) != "mock-cdi-ok" {
+		t.Fatalf("MOCK CDI result=%q err=%v", result.Output, err)
+	}
+	if client.Available() != 1 {
+		t.Fatal("MOCK CDI device lease was not released")
+	}
+}
+
+func TestContainerdBackendLiveNVIDIAConformance(t *testing.T) {
+	configuration, enabled := liveTestConfiguration(t)
+	if !enabled || configuration.nvidiaCDIDevice == "" {
+		t.Skip("private containerd NVIDIA live-test environment is not configured")
+	}
+	limits := executor.Limits{
+		CPUMillis: 30_000, MemoryBytes: 512 << 20,
+		DiskBytes: 24 << 20, PIDs: 64, GPUDeviceCount: 1,
+		ExecutionTime: 30 * time.Second, OutputBytes: 4096,
+	}
+	config := containerdbackend.Config{
+		SocketPath: configuration.socket, Namespace: configuration.namespace,
+		Snapshotter: "overlayfs", Runtime: "io.containerd.runc.v2",
+		FIFODir: configuration.fifoDir, MaxActive: 1,
+		PermitGPU: true, GPUDevices: map[string]string{
+			"gpu-certified": configuration.nvidiaCDIDevice,
+		},
+		PolicyLimits: limits, ImageReference: configuration.imageReference,
+		ImageDigest: configuration.imageDigest, ImagePlatform: "linux/amd64",
+	}
+	if configuration.cdiSpecDir != "" {
+		config.CDISpecDirs = []string{configuration.cdiSpecDir}
+	}
+	backend, err := containerdbackend.Open(context.Background(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	client, err := gpuisolation.New([]string{"gpu-certified"}, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := executor.ExecutionDigest("containerd-live-nvidia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := executor.ContainerRequest{
+		ExecutionDigest: digest, ImageDigest: configuration.imageDigest,
+		Entrypoint: []string{
+			"/bin/sh", "-c",
+			`set -eu; count=$(nvidia-smi --query-gpu=index --format=csv,noheader,nounits | wc -l); test "$count" -eq 1; printf nvidia-cdi-ok`,
+		},
+		UserID: 65532, GroupID: 65532, ReadOnlyRoot: true,
+		NoNewPrivileges: true, Network: executor.NetworkNone,
+		AllowGPU: true, Limits: limits,
+	}
+	result, err := client.RunIsolated(context.Background(), request, nil)
+	if err != nil || string(result.Output) != "nvidia-cdi-ok" {
+		t.Fatalf(
+			"NVIDIA CDI conformance failed: output=%q err=%v",
+			result.Output, err,
+		)
+	}
+	if client.Available() != 1 {
+		t.Fatal("NVIDIA CDI device lease was not released")
+	}
+}
+
+type liveBackend struct {
+	*containerdbackend.Backend
+	admin *client.Client
+}
+
+func (b *liveBackend) Close() error {
+	if b == nil {
+		return nil
+	}
+	var backendErr error
+	if b.Backend != nil {
+		backendErr = b.Backend.Close()
+	}
+	var adminErr error
+	if b.admin != nil {
+		adminErr = b.admin.Close()
+	}
+	return errors.Join(backendErr, adminErr)
+}
+
+type liveInspector struct {
+	admin     *client.Client
+	namespace string
+	store     snapshots.Snapshotter
+}
+
+func (i *liveInspector) Snapshot(
+	ctx context.Context,
+) (backendtest.Snapshot, error) {
+	ctx = namespaces.WithNamespace(ctx, i.namespace)
+	containers, err := i.admin.Containers(ctx)
+	if err != nil {
+		return backendtest.Snapshot{}, err
+	}
+	result := backendtest.Snapshot{Containers: len(containers)}
+	for _, container := range containers {
+		task, err := container.Task(ctx, nil)
+		if errdefs.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return backendtest.Snapshot{}, err
+		}
+		result.Tasks++
+		status, err := task.Status(ctx)
+		if err != nil {
+			return backendtest.Snapshot{}, err
+		}
+		if status.Status == client.Running || status.Status == client.Paused ||
+			status.Status == client.Pausing {
+			result.ActiveWorkloads++
+		}
+	}
+	err = i.store.Walk(ctx, func(_ context.Context, info snapshots.Info) error {
+		if liveManagedID.MatchString(info.Name) {
+			result.Snapshots++
+		}
+		return nil
+	})
+	return result, err
+}
+
+func TestContainerdBackendLiveConformance(t *testing.T) {
+	configuration, enabled := liveTestConfiguration(t)
+	if !enabled {
+		t.Skip("private containerd live-test environment is not configured")
+	}
+	limits := executor.Limits{
+		CPUMillis: 10_000, MemoryBytes: 128 << 20,
+		DiskBytes: 12 << 20, PIDs: 32,
+		ExecutionTime: 10 * time.Second, OutputBytes: 1024,
+	}
+	successDigest, err := executor.ExecutionDigest("containerd-live-success")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancellationDigest, err := executor.ExecutionDigest("containerd-live-cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(digest string, entrypoint []string) executor.ContainerRequest {
+		return executor.ContainerRequest{
+			ExecutionDigest: digest, ImageDigest: configuration.imageDigest,
+			Entrypoint: entrypoint, UserID: 65532, GroupID: 65532,
+			ReadOnlyRoot: true, NoNewPrivileges: true,
+			Network: executor.NetworkNone, Limits: limits,
+		}
+	}
+	backendtest.Run(t, backendtest.Suite{
+		New: func(ctx context.Context) (
+			backendtest.Backend, backendtest.Inspector, error,
+		) {
+			admin, err := client.New(configuration.socket)
+			if err != nil {
+				return nil, nil, err
+			}
+			backend, err := containerdbackend.Open(ctx, containerdbackend.Config{
+				SocketPath: configuration.socket, Namespace: configuration.namespace,
+				Snapshotter: "overlayfs", Runtime: "io.containerd.runc.v2",
+				FIFODir: configuration.fifoDir, MaxActive: 4,
+				PolicyLimits: limits, ImageReference: configuration.imageReference,
+				ImageDigest: configuration.imageDigest, ImagePlatform: "linux/amd64",
+			})
+			if err != nil {
+				_ = admin.Close()
+				return nil, nil, err
+			}
+			wrapped := &liveBackend{Backend: backend, admin: admin}
+			return wrapped, &liveInspector{
+				admin: admin, namespace: configuration.namespace,
+				store: admin.SnapshotService("overlayfs"),
+			}, nil
+		},
+		SuccessRequest: request(successDigest, []string{
+			"/bin/sh", "-c", `read value; printf 'ok:%s' "$value"`,
+		}),
+		SuccessInput: []byte("fixture\n"), ExpectedOutput: []byte("ok:fixture"),
+		CancellationRequest: request(cancellationDigest, []string{
+			"/bin/sh", "-c", `while :; do sleep 1; done`,
+		}),
+		StartTimeout: 5 * time.Second, ReturnTimeout: 15 * time.Second,
+		InspectTimeout: 5 * time.Second, Concurrency: 4,
+	})
+}
+
+func liveTestConfiguration(t *testing.T) (liveConfiguration, bool) {
+	t.Helper()
+	configuration := liveConfiguration{
+		socket: os.Getenv(liveSocketEnv), namespace: os.Getenv(liveNamespaceEnv),
+		fifoDir: os.Getenv(liveFIFOEnv), imageReference: os.Getenv(liveImageRefEnv),
+		imageDigest:     os.Getenv(liveImageEnv),
+		cdiSpecDir:      os.Getenv(liveCDISpecDirEnv),
+		nvidiaCDIDevice: os.Getenv(liveNVIDIACDIEnv),
+	}
+	values := []string{
+		configuration.socket, configuration.namespace, configuration.fifoDir,
+		configuration.imageReference, configuration.imageDigest,
+	}
+	configured := 0
+	for _, value := range values {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured == 0 {
+		return liveConfiguration{}, false
+	}
+	if configured != len(values) {
+		t.Fatal("partial private containerd live-test environment")
+	}
+	return configuration, true
+}

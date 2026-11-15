@@ -1,0 +1,111 @@
+package main
+
+import (
+	"github.com/tosnetwork/tos-ai/pkg/softwarework"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestReadPrivateSource(t *testing.T) {
+	directory := resolvedTempDir(t)
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "source.tar")
+	if err := os.WriteFile(path, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readPrivateSource(path)
+	if err != nil || string(got) != "archive" {
+		t.Fatalf("readPrivateSource() = %q, %v", got, err)
+	}
+}
+
+func TestReadPrivateSourceRejectsUnsafePaths(t *testing.T) {
+	directory := resolvedTempDir(t)
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(directory, "private")
+	if err := os.WriteFile(private, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	public := filepath.Join(directory, "public")
+	if err := os.WriteFile(public, []byte("archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "link")
+	if err := os.Symlink(private, link); err != nil {
+		t.Fatal(err)
+	}
+	large := filepath.Join(directory, "large")
+	file, err := os.OpenFile(large, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxSourceBytes + 1); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, path := range map[string]string{
+		"relative": "source.tar", "public": public, "symlink": link, "large": large,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := readPrivateSource(path); err == nil {
+				t.Fatal("unsafe source archive accepted")
+			}
+		})
+	}
+}
+
+func TestRequirePrivateOwnedDirectory(t *testing.T) {
+	directory := resolvedTempDir(t)
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := requirePrivateOwnedDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := requirePrivateOwnedDirectory(directory); err == nil {
+		t.Fatal("group-accessible directory accepted")
+	}
+}
+
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func TestPublishedContractBindsTheManifestAndOnlyTightensOutput(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("ab", 32)
+	contract, err := publishedContract(digest, 1<<20)
+	if err != nil || contract.ManifestDigest != digest || contract.SandboxDigest != digest || contract.Limits.OutputBytes != 1<<20 {
+		t.Fatalf("contract = %+v %v", contract, err)
+	}
+	frozen, err := publishedContract("", 0)
+	if err != nil || frozen.ManifestDigest != softwarework.FrozenV1ManifestDigest {
+		t.Fatalf("default contract = %+v %v", frozen, err)
+	}
+	for _, bad := range []struct {
+		digest string
+		output uint64
+	}{{"sha256:" + strings.Repeat("AB", 32), 0}, {"sha256:" + strings.Repeat("gg", 32), 0}, {"sha256:abc", 0}, {"tvm-cell-sha256:" + strings.Repeat("ab", 32), 0},
+		{"", softwarework.FrozenV1Limits().OutputBytes + 1}} {
+		if _, err := publishedContract(bad.digest, bad.output); err == nil {
+			t.Errorf("accepted %q %d", bad.digest, bad.output)
+		}
+	}
+}
