@@ -1,6 +1,6 @@
 [Unit]
 Description=TOS Service Protocol executor artifact collection
-Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+Documentation=https://github.com/tosnetwork/ai/tree/main/execution/deploy/provider
 # Nothing to collect before the executor has created its store.
 ConditionPathIsDirectory=/var/lib/tos-service-executor/artifacts
 

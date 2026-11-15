@@ -1,6 +1,6 @@
 [Unit]
 Description=TOS Service Protocol private software-work containerd
-Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+Documentation=https://github.com/tosnetwork/ai/tree/main/execution/deploy/provider
 After=local-fs.target
 Wants=local-fs.target
 
