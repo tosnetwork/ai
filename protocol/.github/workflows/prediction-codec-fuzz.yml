@@ -24,10 +24,13 @@ jobs:
           cache: true
       # The regular suite runs the fixed seeds. This bounded native fuzz run
       # additionally mutates untrusted BOCs and must find neither a panic nor
-      # an invariant violation in the strict PredictionMarket decoders.
+      # an invariant violation in the strict PredictionMarket decoders. The run
+      # is bounded by an execution count, not a duration: a duration-bounded
+      # run can fail spuriously with "context deadline exceeded" at its end.
       - name: Fuzz strict PredictionMarket decoders
+        timeout-minutes: 5
         run: >-
           go test ./pkg/predictionmarket
           -run '^$'
           -fuzz '^FuzzPredictionDecoders$'
-          -fuzztime=30s
+          -fuzztime=1000000x

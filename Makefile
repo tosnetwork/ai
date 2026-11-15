@@ -40,9 +40,15 @@ spec-check:
 	python3 spec/scripts/verify-prediction-market-compatibility.py
 
 # Bounded native fuzzing of the strict PredictionMarket decoders; the regular
-# suite runs the fixed seeds.
+# suite runs the fixed seeds. The budget is an execution count, not a
+# duration: a duration-bounded run can end with a spurious "context deadline
+# exceeded" failure when the fuzz coordinator observes its deadline before the
+# worker context derived from it is canceled. A count-bounded run stops on the
+# count with no deadline involved. One million executions is roughly the
+# thirty-second budget on a four-core CI runner.
+FUZZ_EXECUTIONS ?= 1000000
 fuzz:
-	GOWORK=off go test ./protocol/pkg/predictionmarket -run '^$$' -fuzz '^FuzzPredictionDecoders$$' -fuzztime=30s
+	GOWORK=off go test ./protocol/pkg/predictionmarket -run '^$$' -fuzz '^FuzzPredictionDecoders$$' -fuzztime=$(FUZZ_EXECUTIONS)x
 
 # The executor service's privileged suite: needs passwordless sudo and the
 # private containerd. Opt-in; not part of verify.

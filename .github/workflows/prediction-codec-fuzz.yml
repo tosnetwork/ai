@@ -24,6 +24,9 @@ jobs:
           cache: true
       # The regular suite runs the fixed seeds. This bounded native fuzz run
       # additionally mutates untrusted BOCs and must find neither a panic nor
-      # an invariant violation in the strict PredictionMarket decoders.
+      # an invariant violation in the strict PredictionMarket decoders. The
+      # Makefile bounds the run by an execution count; this step's timeout
+      # bounds its wall time.
       - name: Fuzz strict PredictionMarket decoders
+        timeout-minutes: 5
         run: make fuzz
