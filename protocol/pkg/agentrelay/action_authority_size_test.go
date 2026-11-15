@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 // The Action Authority size budget (SEMANTIC_ACTION_IDENTITY_V1 section 9.4),

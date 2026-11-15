@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
-	"github.com/tosnetwork/tos-service-protocol/pkg/toschain"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	tosaddress "github.com/tosnetwork/tosutils-go/address"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )

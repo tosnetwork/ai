@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/executor"
-	"github.com/tosnetwork/tos-ai/pkg/executor/backendtest"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/executor/backendtest"
 )
 
 type supervisedTestDriver struct {

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/nilcheck"
+	"github.com/tosnetwork/ai/execution/internal/nilcheck"
 )
 
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)

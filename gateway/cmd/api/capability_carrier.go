@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tosnetwork/tos-service-gateway/internal/config"
-	"github.com/tosnetwork/tos-service-gateway/internal/trustedcapabilitycarrier"
+	"github.com/tosnetwork/ai/gateway/internal/config"
+	"github.com/tosnetwork/ai/gateway/internal/trustedcapabilitycarrier"
 )
 
 func loadCapabilityCarrierSigningKey(path string) (ed25519.PrivateKey, error) {

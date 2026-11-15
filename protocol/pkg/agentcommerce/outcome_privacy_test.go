@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 func TestOutcomeEncryptedEvidenceAuthenticatesMetadataAndCiphertext(t *testing.T) {

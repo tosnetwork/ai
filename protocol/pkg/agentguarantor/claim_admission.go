@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 func validateEligibilityProofSetAgainstV1(set AuthorityAdmissionEligibilityProofSetV1, actionDigest,

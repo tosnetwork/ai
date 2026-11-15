@@ -1,4 +1,4 @@
-module github.com/tosnetwork/tos-service-protocol
+module github.com/tosnetwork/ai/protocol
 
 go 1.26.11
 

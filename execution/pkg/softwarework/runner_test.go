@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/artifactstore"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/artifactstore"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
 )
 
 type fakeExecutor struct {

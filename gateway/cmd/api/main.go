@@ -13,17 +13,17 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/tosnetwork/tos-service-gateway/internal/adapters/serviceprotocol"
-	"github.com/tosnetwork/tos-service-gateway/internal/config"
-	"github.com/tosnetwork/tos-service-gateway/internal/ingress"
-	"github.com/tosnetwork/tos-service-gateway/internal/intentcarrier"
-	"github.com/tosnetwork/tos-service-gateway/internal/nativegateway"
-	"github.com/tosnetwork/tos-service-gateway/internal/quotesource"
-	"github.com/tosnetwork/tos-service-gateway/internal/trustedcapabilitycarrier"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1/tosservicev1connect"
-	"github.com/tosnetwork/tos-service-protocol/pkg/capabilitycatalog"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/gateway/internal/adapters/serviceprotocol"
+	"github.com/tosnetwork/ai/gateway/internal/config"
+	"github.com/tosnetwork/ai/gateway/internal/ingress"
+	"github.com/tosnetwork/ai/gateway/internal/intentcarrier"
+	"github.com/tosnetwork/ai/gateway/internal/nativegateway"
+	"github.com/tosnetwork/ai/gateway/internal/quotesource"
+	"github.com/tosnetwork/ai/gateway/internal/trustedcapabilitycarrier"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/gen/tos/service/v1/tosservicev1connect"
+	"github.com/tosnetwork/ai/protocol/pkg/capabilitycatalog"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 func main() {

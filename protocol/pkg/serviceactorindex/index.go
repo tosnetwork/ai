@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
-	"github.com/tosnetwork/tos-service-protocol/pkg/serviceactor"
-	"github.com/tosnetwork/tos-service-protocol/pkg/toschain"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 const (

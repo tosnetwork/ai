@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 const NonActivationExposureReleaseDomainV1 = "tos.service.agent-guarantor-non-activation-exposure-release-envelope.v1"

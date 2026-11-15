@@ -8,7 +8,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const ExternalPaymentEvidenceProfileV1 = "tos.payment.external-attested.v1"

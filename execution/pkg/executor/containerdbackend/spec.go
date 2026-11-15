@@ -13,7 +13,7 @@ import (
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
 	"tags.cncf.io/container-device-interface/pkg/parser"
 )
 

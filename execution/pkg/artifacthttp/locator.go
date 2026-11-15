@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tosnetwork/tos-ai/pkg/artifactstore"
+	"github.com/tosnetwork/ai/execution/pkg/artifactstore"
 )
 
 const (

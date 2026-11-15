@@ -14,7 +14,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
 )
 
 const managedLabel = "tos.ai.execution"

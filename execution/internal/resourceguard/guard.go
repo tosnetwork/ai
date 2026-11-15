@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/probe"
+	"github.com/tosnetwork/ai/execution/pkg/probe"
 )
 
 const (

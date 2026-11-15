@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/actionauthoritytest"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/execution/internal/actionauthoritytest"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 )
 
 // authorityKey names an Action Authority controller in custody and the

@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const (

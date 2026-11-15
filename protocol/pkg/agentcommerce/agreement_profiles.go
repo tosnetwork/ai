@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 // AgreementAuthorityKeyResolver resolves a purpose-limited key for the exact

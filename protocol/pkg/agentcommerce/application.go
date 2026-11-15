@@ -5,7 +5,7 @@ import (
 	"errors"
 	"unicode/utf8"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const IntentApplicationContentType = "application/vnd.tos.intent-application.v1+cbor"

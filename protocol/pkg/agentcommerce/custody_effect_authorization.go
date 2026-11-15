@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 var custodyCellDigestPattern = regexp.MustCompile(`^tvm-cell-sha256:[0-9a-f]{64}$`)

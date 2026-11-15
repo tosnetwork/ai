@@ -11,10 +11,10 @@ import (
 	"regexp"
 	"strings"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
-	"github.com/tosnetwork/tos-service-protocol/pkg/quoteexchange"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 	"google.golang.org/protobuf/proto"
 )

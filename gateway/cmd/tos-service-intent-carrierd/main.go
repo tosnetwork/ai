@@ -21,8 +21,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tosnetwork/tos-service-gateway/internal/intentcarrier"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/gateway/internal/intentcarrier"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 // pinsFlag collects repeated --authority values; ParseAuthorityPins reads

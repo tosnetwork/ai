@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 )
 
 const custodyE2EAuthority, custodyE2EOwner, custodyE2EAgent = "authority:custody-e2e", "owner:e2e", "agent:e2e"

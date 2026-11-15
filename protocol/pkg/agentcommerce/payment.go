@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 type AgreementPaymentRequest struct {

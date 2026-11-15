@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/internal/jsonstrict"
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
-	"github.com/tosnetwork/tos-service-protocol/pkg/chain"
-	"github.com/tosnetwork/tos-service-protocol/pkg/toschain"
+	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/pkg/chain"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 

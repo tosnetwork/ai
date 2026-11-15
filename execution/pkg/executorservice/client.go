@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/softwarework"
+	"github.com/tosnetwork/ai/execution/pkg/softwarework"
 )
 
 // StatusError is a request the service answered with a status other than

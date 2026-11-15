@@ -3,7 +3,7 @@ package agentguarantor
 import (
 	"errors"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 const GuarantorAdmissionLogRootDomainV1 = "tos.service.agent-guarantor-admission-log-root.v1"

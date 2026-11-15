@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-gateway/internal/actionauthoritytest"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	protocolcodec "github.com/tosnetwork/tos-service-protocol/pkg/codec"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/gateway/internal/actionauthoritytest"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 )
 
 func TestCarrierPublishesSearchesAndSurvivesRestart(t *testing.T) {

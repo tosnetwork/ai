@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-service-gateway/internal/ingress"
+	"github.com/tosnetwork/ai/gateway/internal/ingress"
 )
 
 func clearIngressEnv(t *testing.T) {

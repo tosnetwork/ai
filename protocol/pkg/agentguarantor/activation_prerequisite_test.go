@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 // prerequisiteStore resolves content-addressed prerequisites by digest and

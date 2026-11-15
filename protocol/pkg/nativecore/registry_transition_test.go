@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/internal/referencecodec"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/referencecodec"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 

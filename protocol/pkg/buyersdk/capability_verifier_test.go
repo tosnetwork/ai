@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"google.golang.org/protobuf/proto"
 )
 

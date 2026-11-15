@@ -9,8 +9,8 @@ import (
 	"errors"
 	"strconv"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentgift"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/agentgift"
 	"github.com/tosnetwork/tosutils-go/tlb"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 	"google.golang.org/protobuf/proto"

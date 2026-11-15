@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 type catalogEntry struct {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/buyersdk"
-	"github.com/tosnetwork/tos-service-protocol/pkg/serviceactorindex"
+	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
+	"github.com/tosnetwork/ai/protocol/pkg/serviceactorindex"
 )
 
 func TestCommandRefusesIncompleteConfiguration(t *testing.T) {

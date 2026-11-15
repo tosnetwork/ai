@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
 )
 
 const maxTOSRelayObservationBytes = 64 << 10

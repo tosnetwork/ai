@@ -23,11 +23,11 @@ import (
 	"strings"
 	"time"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/internal/servicefixture"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
-	"github.com/tosnetwork/tos-service-protocol/pkg/quoteprovider"
-	"github.com/tosnetwork/tos-service-protocol/pkg/toschain"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/servicefixture"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/quoteprovider"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 	"google.golang.org/protobuf/encoding/protojson"
 )

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/artifactstore"
+	"github.com/tosnetwork/ai/execution/pkg/artifactstore"
 )
 
 // runArtifactsGC deletes, in one bounded call, artifacts whose every

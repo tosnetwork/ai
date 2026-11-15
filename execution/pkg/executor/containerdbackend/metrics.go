@@ -7,7 +7,7 @@ import (
 	cgroup2 "github.com/containerd/cgroups/v3/cgroup2/stats"
 	containerdtypes "github.com/containerd/containerd/api/types"
 	"github.com/containerd/typeurl/v2"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
 )
 
 const maxMetricIODevices = 4096

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-gateway/internal/ingress"
-	"github.com/tosnetwork/tos-service-gateway/internal/intentcarrier"
+	"github.com/tosnetwork/ai/gateway/internal/ingress"
+	"github.com/tosnetwork/ai/gateway/internal/intentcarrier"
 )
 
 type TOSRPCConfig struct {

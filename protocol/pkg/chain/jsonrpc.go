@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/internal/jsonstrict"
+	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
 )
 
 type RPCError struct {

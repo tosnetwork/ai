@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-ai/pkg/artifactstore"
+	"github.com/tosnetwork/ai/execution/pkg/artifactstore"
 )
 
 func TestLocatorServesVerifiedObjectOverHTTPS(t *testing.T) {

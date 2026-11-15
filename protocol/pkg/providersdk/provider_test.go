@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/internal/servicefixture"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/servicefixture"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"google.golang.org/protobuf/proto"
 )
 

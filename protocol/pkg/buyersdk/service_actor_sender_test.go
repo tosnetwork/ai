@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 type vetter struct {

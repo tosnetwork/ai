@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-gateway/internal/intentcarrier"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/gateway/internal/intentcarrier"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 func validConfig() Config {

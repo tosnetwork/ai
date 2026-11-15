@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/tosnetwork/tos-service-gateway/internal/nativegateway"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
-	"github.com/tosnetwork/tos-service-protocol/pkg/quoteexchange"
+	"github.com/tosnetwork/ai/gateway/internal/nativegateway"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"google.golang.org/protobuf/proto"
 )
 

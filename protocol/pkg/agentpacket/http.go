@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 const maxWireBytes = 2 << 20

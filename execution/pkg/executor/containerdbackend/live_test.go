@@ -15,10 +15,10 @@ import (
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
-	"github.com/tosnetwork/tos-ai/executor/gpuisolation"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
-	"github.com/tosnetwork/tos-ai/pkg/executor/backendtest"
-	"github.com/tosnetwork/tos-ai/pkg/executor/containerdbackend"
+	"github.com/tosnetwork/ai/execution/executor/gpuisolation"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/executor/backendtest"
+	"github.com/tosnetwork/ai/execution/pkg/executor/containerdbackend"
 )
 
 func TestContainerdBackendLiveWorkspace(t *testing.T) {

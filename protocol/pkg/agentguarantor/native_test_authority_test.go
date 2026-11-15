@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 )
 
 // nativeTestAuthority is the native authority of the pure-logic tests: keys

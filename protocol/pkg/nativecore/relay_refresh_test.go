@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 // refreshFixture is a Capability publication whose owner Agent's policy can
