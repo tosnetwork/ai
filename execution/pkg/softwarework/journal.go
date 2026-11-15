@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/tosnetwork/tos-ai/internal/dirlock"
+	"github.com/tosnetwork/ai/execution/internal/dirlock"
 )
 
 var executionIDPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)

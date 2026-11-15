@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
 )
 
 // CallPhase is a Service Actor call's position in the buyer journal.

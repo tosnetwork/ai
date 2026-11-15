@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const ExecutionOutcomeEvidenceProfileV1 = "tos.ai.execution-gate-evidence.v1"

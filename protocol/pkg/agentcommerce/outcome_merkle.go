@@ -7,7 +7,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const MaxOutcomeCohortMembers = uint64(1<<32 - 1)

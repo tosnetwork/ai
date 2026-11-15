@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/dirlock"
+	"github.com/tosnetwork/ai/execution/internal/dirlock"
 )
 
 // Retention binds stored objects to the job that produced them until a

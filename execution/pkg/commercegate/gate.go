@@ -23,9 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/dirlock"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/execution/internal/dirlock"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const (

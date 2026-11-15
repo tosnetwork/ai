@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 // DecodeRegisteredObjectV1 is the released byte-level dispatcher for section

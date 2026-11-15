@@ -5,7 +5,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 func RequestedCoverageTermsDigest(terms RequestedCoverageTermsV1) (string, error) {

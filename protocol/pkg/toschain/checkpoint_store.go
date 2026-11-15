@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
 )
 
 // checkpointStore is a process-independent monotonic finality fence.

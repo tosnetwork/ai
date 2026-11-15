@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
 )
 
 const maxRelayCheckpointFenceBytes = 8 << 10

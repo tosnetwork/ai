@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/pkg/capabilitycatalog"
-	"github.com/tosnetwork/tos-service-protocol/pkg/publicerrors"
-	"github.com/tosnetwork/tos-service-protocol/pkg/quoteexchange"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/capabilitycatalog"
+	"github.com/tosnetwork/ai/protocol/pkg/publicerrors"
+	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 )
 
 type Backend interface {

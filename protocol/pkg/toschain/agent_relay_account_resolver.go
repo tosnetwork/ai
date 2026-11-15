@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentgift"
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentrelay"
+	"github.com/tosnetwork/ai/protocol/pkg/agentgift"
+	"github.com/tosnetwork/ai/protocol/pkg/agentrelay"
 	"github.com/tosnetwork/tosutils-go/address"
 )
 

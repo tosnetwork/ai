@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 // ErrEd25519ActionAuthority reports an Ed25519 Action Authority key or

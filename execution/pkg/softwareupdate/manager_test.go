@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/update"
+	"github.com/tosnetwork/ai/execution/pkg/update"
 )
 
 type updateFixture struct {

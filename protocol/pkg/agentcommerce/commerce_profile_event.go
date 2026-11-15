@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const CommerceProfileEventContentType = "application/vnd.tos.service.commerce-profile-event.v1+cbor"

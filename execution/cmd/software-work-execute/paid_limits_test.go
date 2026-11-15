@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/artifactstore"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
-	"github.com/tosnetwork/tos-ai/pkg/softwarework"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/execution/pkg/artifactstore"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/softwarework"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 func tightLimits() nativecore.SoftwareWorkLimitsV1 {

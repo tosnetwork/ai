@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/nilcheck"
+	"github.com/tosnetwork/ai/execution/internal/nilcheck"
 )
 
 const MaxOperationTimeout = 2 * time.Minute

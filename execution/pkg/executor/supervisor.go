@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/tosnetwork/tos-ai/internal/nilcheck"
+	"github.com/tosnetwork/ai/execution/internal/nilcheck"
 )
 
 const MaxSupervisedActiveHard = 256

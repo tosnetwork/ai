@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )

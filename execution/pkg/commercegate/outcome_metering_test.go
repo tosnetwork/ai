@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/executor"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 func TestBuildExecutionResourceMeterEvidenceDoesNotClaimMonetaryCost(t *testing.T) {

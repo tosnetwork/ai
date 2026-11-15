@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentrelay"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentrelay"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 

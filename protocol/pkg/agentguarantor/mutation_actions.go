@@ -1,6 +1,6 @@
 package agentguarantor
 
-import "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+import "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 
 type CoverageAcceptanceAdmissionActionBodyV1 struct {
 	SchemaVersion                    uint16                                `json:"schema_version"`

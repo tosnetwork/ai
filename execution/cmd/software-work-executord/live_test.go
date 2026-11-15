@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/executorservice"
-	"github.com/tosnetwork/tos-ai/pkg/softwarework"
+	"github.com/tosnetwork/ai/execution/pkg/executorservice"
+	"github.com/tosnetwork/ai/execution/pkg/softwarework"
 )
 
 const (

@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	guarantor "github.com/tosnetwork/tos-service-protocol/pkg/agentguarantor"
+	guarantor "github.com/tosnetwork/ai/protocol/pkg/agentguarantor"
 )
 
 type schema map[string]any

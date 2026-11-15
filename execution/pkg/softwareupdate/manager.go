@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/dirlock"
-	"github.com/tosnetwork/tos-ai/internal/osguard"
-	"github.com/tosnetwork/tos-ai/pkg/update"
+	"github.com/tosnetwork/ai/execution/internal/dirlock"
+	"github.com/tosnetwork/ai/execution/internal/osguard"
+	"github.com/tosnetwork/ai/execution/pkg/update"
 )
 
 const (

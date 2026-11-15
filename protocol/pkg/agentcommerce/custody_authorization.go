@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 // CustodyActionAuthorization is the small, language-neutral admission proof

@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
-	"github.com/tosnetwork/tos-service-protocol/pkg/chainactionpublisher"
-	"github.com/tosnetwork/tos-service-protocol/pkg/dnsalias"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
-	"github.com/tosnetwork/tos-service-protocol/pkg/toschain"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
+	"github.com/tosnetwork/ai/protocol/pkg/chainactionpublisher"
+	"github.com/tosnetwork/ai/protocol/pkg/dnsalias"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 type nativeV1GatewayConfig struct {

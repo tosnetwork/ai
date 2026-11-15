@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-gateway/internal/config"
+	"github.com/tosnetwork/ai/gateway/internal/config"
 )
 
 type readinessStub struct{ err error }

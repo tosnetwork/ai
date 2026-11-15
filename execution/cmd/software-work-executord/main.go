@@ -26,12 +26,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/osguard"
-	"github.com/tosnetwork/tos-ai/pkg/artifactstore"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
-	"github.com/tosnetwork/tos-ai/pkg/executor/containerdbackend"
-	"github.com/tosnetwork/tos-ai/pkg/executorservice"
-	"github.com/tosnetwork/tos-ai/pkg/softwarework"
+	"github.com/tosnetwork/ai/execution/internal/osguard"
+	"github.com/tosnetwork/ai/execution/pkg/artifactstore"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/executor/containerdbackend"
+	"github.com/tosnetwork/ai/execution/pkg/executorservice"
+	"github.com/tosnetwork/ai/execution/pkg/softwarework"
 	"golang.org/x/sys/unix"
 )
 

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"unicode/utf8"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 // MessengerEffectRequestV1 is the exact request a Messenger side-effect sink

@@ -3,13 +3,13 @@ package buyersdk
 import (
 	"context"
 	"encoding/json"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 

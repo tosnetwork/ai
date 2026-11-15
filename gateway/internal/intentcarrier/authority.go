@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 // authorityKeyFileBytes is the exact size of a pinned key file: the 1,312-byte

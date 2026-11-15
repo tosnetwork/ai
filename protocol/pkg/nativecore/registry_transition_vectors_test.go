@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/internal/referencecodec"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/referencecodec"
 )
 
 // TestRevocationsMatchContractExecution pins the revocation codec to the

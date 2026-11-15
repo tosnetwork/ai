@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/tosnetwork/tos-ai/pkg/softwarework"
+	"github.com/tosnetwork/ai/execution/pkg/softwarework"
 )
 
 // unitFileEnv names the shipped unit file. Setting it, together with the

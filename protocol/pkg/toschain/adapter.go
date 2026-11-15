@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/chain"
+	"github.com/tosnetwork/ai/protocol/pkg/chain"
 	"github.com/tosnetwork/tosutils-go/address"
 )
 

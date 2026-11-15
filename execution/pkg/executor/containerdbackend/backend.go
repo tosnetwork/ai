@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/dirlock"
-	"github.com/tosnetwork/tos-ai/internal/nilcheck"
-	"github.com/tosnetwork/tos-ai/internal/osguard"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/ai/execution/internal/dirlock"
+	"github.com/tosnetwork/ai/execution/internal/nilcheck"
+	"github.com/tosnetwork/ai/execution/internal/osguard"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
 )
 
 const (

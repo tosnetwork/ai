@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentrelay"
+	"github.com/tosnetwork/ai/protocol/pkg/agentrelay"
 )
 
 // TestTOSRelayThreeNodeReadOnlyIntegration is deliberately opt-in and performs

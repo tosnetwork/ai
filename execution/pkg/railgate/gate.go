@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/internal/dirlock"
+	"github.com/tosnetwork/ai/execution/internal/dirlock"
 )
 
 const slotSchema = "tos.ai.railgate-slot.v1"

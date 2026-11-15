@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 const SoftwareWorkManifestProtocolV1 = "tos.service.software-work-manifest.v1"

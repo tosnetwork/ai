@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 func TriggeredObligationSetDigestV1(value TriggeredObligationSetV1) (string, error) {

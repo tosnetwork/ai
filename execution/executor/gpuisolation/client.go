@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tosnetwork/tos-ai/internal/nilcheck"
-	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/ai/execution/internal/nilcheck"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
 )
 
 const MaxDevices = 64

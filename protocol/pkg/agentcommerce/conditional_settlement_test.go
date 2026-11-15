@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 func fixtureConditionalTemplate(t *testing.T) ConditionalSettlementTemplateV1 {

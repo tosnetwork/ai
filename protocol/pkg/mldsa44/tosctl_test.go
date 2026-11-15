@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 

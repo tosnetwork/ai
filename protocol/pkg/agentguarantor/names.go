@@ -1,6 +1,6 @@
 package agentguarantor
 
-import "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+import "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 
 // The public specification uses the Guarantor prefix on profile-level types.
 // These aliases keep the Go API concise without making the canonical type

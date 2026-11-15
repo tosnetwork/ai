@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/internal/osguard"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 // WalletActionIntent is a fully materialized, reviewable TOS wallet effect.

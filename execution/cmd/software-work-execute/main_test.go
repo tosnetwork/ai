@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/tosnetwork/tos-ai/pkg/softwarework"
+	"github.com/tosnetwork/ai/execution/pkg/softwarework"
 	"os"
 	"path/filepath"
 	"strings"

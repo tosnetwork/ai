@@ -4,9 +4,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/executor"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 const ExecutionResourceMeterEvidenceProfileV1 = "tos.ai.execution-resource-meter.v1"

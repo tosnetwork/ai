@@ -1,4 +1,4 @@
-module github.com/tosnetwork/tos-ai
+module github.com/tosnetwork/ai/execution
 
 go 1.26.11
 
@@ -11,7 +11,7 @@ require (
 	github.com/containerd/platforms v1.0.0-rc.1
 	github.com/containerd/typeurl/v2 v2.2.3
 	github.com/opencontainers/runtime-spec v1.2.0
-	github.com/tosnetwork/tos-service-protocol v0.0.0-20261108125119-62f5b740bc77
+	github.com/tosnetwork/ai/protocol v0.0.0-20261108125119-62f5b740bc77
 	github.com/tosnetwork/tosutils-go v1.18.2-0.20260820143526-4d1a10d94bef
 	golang.org/x/sys v0.49.0
 	google.golang.org/protobuf v1.36.11

@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 // PinnedOutcomeEvidenceAuthorityV1 is the smallest production verifier for

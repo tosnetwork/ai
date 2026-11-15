@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tosnetwork/tos-ai/internal/nilcheck"
+	"github.com/tosnetwork/ai/execution/internal/nilcheck"
 )
 
 const (

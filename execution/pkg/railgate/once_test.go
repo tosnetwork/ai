@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/toschain"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 // sessionHook runs before the n-th session (1-based) is opened, so a test

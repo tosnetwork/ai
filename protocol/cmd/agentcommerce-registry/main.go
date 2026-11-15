@@ -8,7 +8,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 func main() {

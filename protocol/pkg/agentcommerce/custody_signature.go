@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 // ErrEd25519CustodyAuthorization reports an Ed25519 custody authorization key

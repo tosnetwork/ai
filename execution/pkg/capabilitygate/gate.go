@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 
-	trusted "github.com/tosnetwork/tos-service-protocol/pkg/trustedcapability"
+	trusted "github.com/tosnetwork/ai/protocol/pkg/trustedcapability"
 )
 
 type AuthorityHeads struct {

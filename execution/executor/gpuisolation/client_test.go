@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/executor"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
 )
 
 type mockBackend struct {

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1/tosservicev1connect"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/gen/tos/service/v1/tosservicev1connect"
 )
 
 type Relayer interface {

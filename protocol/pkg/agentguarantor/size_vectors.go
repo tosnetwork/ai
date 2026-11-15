@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/codec"
 )
 
 // SizeVectorDomainV1 separates the digests of the size conformance vectors.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
 
 func testPolicy(t *testing.T) (*nativev1.ControllerPolicyV1, string) {

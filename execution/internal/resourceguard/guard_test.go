@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/probe"
+	"github.com/tosnetwork/ai/execution/pkg/probe"
 )
 
 func healthyReport(vram uint64) probe.Report {

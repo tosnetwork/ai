@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1/tosservicev1connect"
-	"github.com/tosnetwork/tos-service-protocol/pkg/capabilitycatalog"
-	"github.com/tosnetwork/tos-service-protocol/pkg/publicerrors"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/gen/tos/service/v1/tosservicev1connect"
+	"github.com/tosnetwork/ai/protocol/pkg/capabilitycatalog"
+	"github.com/tosnetwork/ai/protocol/pkg/publicerrors"
 )
 
 type backendStub struct{ submissions, resolutions, dnsResolutions int }

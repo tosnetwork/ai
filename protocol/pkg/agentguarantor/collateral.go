@@ -1,7 +1,7 @@
 package agentguarantor
 
 import (
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 type CollateralTermsV1 struct {

@@ -12,7 +12,7 @@ import (
 	"os"
 	"strings"
 
-	pm "github.com/tosnetwork/tos-service-protocol/pkg/predictionmarket"
+	pm "github.com/tosnetwork/ai/protocol/pkg/predictionmarket"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 

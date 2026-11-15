@@ -6,8 +6,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
-	"github.com/tosnetwork/tos-service-protocol/pkg/toschain"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 // RequestState is a request's position in the contract lifecycle.

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-ai/pkg/executorservice"
+	"github.com/tosnetwork/ai/execution/pkg/executorservice"
 )
 
 func validArguments() []string {
