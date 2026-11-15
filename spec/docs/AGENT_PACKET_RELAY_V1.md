@@ -188,15 +188,25 @@ The card's Agent:
 - MUST keep each private key until `not_after_unix + 86,400 + 300` (the
   longest an envelope sealed before expiry can wait at a relay), and MUST
   destroy it after that;
-- MUST poll every relay named by any card whose private key it still holds.
+- MUST poll every relay named by any card whose private key it still holds;
+- SHOULD sign its cards with a dedicated card-signing controller, used for
+  nothing else, so that revoking a card (by removing that controller from the
+  finalized policy) does not stop its packets or require a full identity
+  rotation. The first OpenFox implementation signs cards with its packet
+  controller; revoking a card there means removing the packet controller,
+  which also stops every packet the node sends until a new controller is
+  registered on chain.
 
 ### 6.4 Distribution
 
 - **Provider.** The provider's current card travels in its offer file next to
   the manifest (an OpenFox offer file version bump, since that decoder rejects
   unknown fields). The offer file stays unsigned and non-authoritative: the
-  buyer verifies the card itself, and requires the card's Agent to equal the
-  Capability's finalized owner, never the offer file's word.
+  buyer verifies the card itself. The buyer MUST check that the card's Agent
+  equals the Capability's finalized owner, read from finalized state and never
+  taken from the offer file, before sealing to it. `VerifyKeyCard` proves only
+  that the card's own Agent signed it; it cannot know which Capability the
+  card is used for, so this owner check is the client's.
 - **Buyer.** The buyer's current card travels inside its task message, which is
   itself signed and, over this Carrier, encrypted. The provider requires the
   card's Agent to equal the task packet's sender and seals results and
@@ -213,8 +223,9 @@ The card's Agent:
 
 A recipient that fetches an envelope naming a key ID it does not hold (never
 issued, or already destroyed) cannot open it and cannot delete it. It MUST NOT
-retry opening it, SHOULD remember its envelope ID until the listed expiry so it
-is not downloaded again, and leaves it to expire at the relay. A recipient MAY
+retry opening the same bytes, SHOULD remember them until the listed expiry so
+they are not downloaded again from that relay, and leaves them to expire at the
+relay. The memory follows the not-again rules of section 8.6. A recipient MAY
 open an envelope under any key it still holds, including one whose card has
 passed `not_after_unix`.
 
@@ -325,8 +336,8 @@ In this order, stopping at the first failure:
 Failure handling:
 
 - Steps 1–3 failing: the envelope is not this key's or is corrupt. Do not
-  acknowledge (step 3 failing means the secret cannot be trusted); remember the
-  envelope ID until its expiry; let it expire.
+  acknowledge (step 3 failing means the secret cannot be trusted); remember it
+  under section 8.6 until its expiry; let it expire.
 - Steps 4–5 failing permanently (malformed packet, foreign recipient, bad
   signature, sender not finalized or tombstoned): acknowledge, since the
   recovered secret matches the ID, so junk sealed to this key does not hold
@@ -334,6 +345,35 @@ Failure handling:
   contents.
 - Step 5 failing transiently (finalized state unavailable) or step 6 failing:
   do not acknowledge; retry on a later poll.
+
+### 8.6 Envelope IDs are public
+
+Listing is open (9.3), so anyone who watches one relay learns envelope IDs and
+can deposit different bytes under the same ID at another relay before the
+honest sender does. That copy is junk the recipient cannot open, and it makes
+the honest deposit at that relay fail with `409`. So that it cannot suppress
+the genuine copy elsewhere:
+
+- A recipient's record of envelopes it failed to open, or refused, is keyed by
+  `(relay base URL, envelope_id)` or by SHA-256 of the downloaded bytes, never
+  by the envelope ID alone.
+- A failed open at one relay never suppresses listing, downloading or opening
+  the same envelope ID at another relay. Only a successful open followed by
+  the durable inbox write (8.5 step 6) settles an ID, and the acknowledgement
+  then goes to every relay that listed it.
+- A sender that receives `409` from a relay treats that relay as unusable for
+  this envelope: it stops depositing this envelope there and does not count it
+  as acceptance. `Send` still succeeds once any other relay accepted (9.2), and
+  the redundancy loop terminates. If no relay accepted and at least one
+  answered `409`, the sender replaces the journaled envelope with a fresh seal
+  of the same packet JSON under a fresh acknowledgement secret (a new ID),
+  journaled before its first deposit, and `Send` fails so the courier retries
+  with it. Re-sealing one packet is safe: the recipient's inbox deduplicates
+  the packet whichever envelope delivers it.
+
+The attack costs the recipient at most that relay's copy; it delays delivery
+only when the attacker pre-empts every relay in the card, and then only until
+the next packet generation.
 
 ## 9. Relay HTTP API
 
@@ -378,8 +418,9 @@ The relay, without decrypting:
 
 `200`, `201` and `410` are durable acceptance: the envelope is stored, or was
 stored and already acknowledged by its recipient. A transport `Send` returns
-nil only on one of these. Every other status, a timeout or a connection error is
-a failure the sender retries with the same journaled bytes.
+nil only on one of these. `409` is never acceptance and is never retried at
+that relay (8.6). Every other status, a timeout or a connection error is a
+failure the sender retries with the same journaled bytes.
 
 ### 9.3 List
 
@@ -487,7 +528,8 @@ signing, frames, the courier journal or the receiver.
 3. Deposit the journaled bytes to every relay in the card, in card order, each
    with a bounded timeout (default 30 s). Return nil once at least one relay
    answered `200`, `201` or `410`; keep trying the remaining relays in the
-   background for redundancy. All failed → error; the courier retries.
+   background for redundancy, except a relay that answered `409`, which is
+   abandoned for this envelope (8.6). All failed → error; the courier retries.
 
 A nil return therefore means one relay durably holds the envelope, which is the
 contract the courier relies on. The existing redelivery (buyer task every 10
@@ -570,15 +612,33 @@ decryption. An attacker who can only seal to the public key gains nothing:
 its envelope decrypts to bytes that must still carry a valid finalized-controller
 signature naming this recipient.
 
+**Sender proof of possession.** The inner ML-DSA-44 signature by a controller of
+the finalized sender Agent policy, over the exact packet, is the sender's proof
+of possession. There is no separate challenge: the relay grants nothing a
+challenge could protect, and the recipient checks the signature against
+finalized state after opening and before acting. This relay is a Carrier, not
+the private content handoff profile of
+[OpenFox Autonomous Earning Roadmap §6.11](OPENFOX_AUTONOMOUS_EARNING_ROADMAP.md#611-private-content-handoff).
+A §6.11 handoff adapter built on top of it MUST still bind its own Agreement,
+obligation, direction, purpose, digest and expiry fields inside the signed
+packet payload; the relay supplies only the authenticated-encryption transport.
+
 **Key compromise.**
 
 - Recipient HPKE private key: past and pending envelopes to that key (as far
   as anyone harvested them; open download makes harvesting easy) become
   readable, but nothing can be forged. Exposure is bounded by the card lifetime
   (at most 30 days, 7 recommended), the 24-hour envelope TTL and prompt
-  acknowledgement. Recovery: publish a new card; remove the compromised key's
-  card controller from the policy if the controller is also suspect. V1 offers
-  no forward secrecy within one key's lifetime.
+  acknowledgement. V1 offers no forward secrecy within one key's lifetime.
+  **A new card does not revoke the old key.** A stale or tampered offer file
+  (it is unsigned) can keep handing senders the old, still validly signed card
+  until its `not_after_unix`, up to 30 days; publishing a successor helps only
+  senders who see it. Once the private key is compromised, the only way to
+  stop senders sealing to it before `not_after_unix` is to remove the
+  controller that signed its card from the finalized policy (6.3). That is why
+  cards SHOULD come from a dedicated card-signing controller; with the first
+  OpenFox implementation's packet controller, revocation also stops the node's
+  packets until a new controller is registered.
 - Sender's ack secret: lets its holder delete one envelope; it is single-use
   and per envelope.
 - Controller ML-DSA-44 key: the attacker can sign cards for its own HPKE key
@@ -617,7 +677,11 @@ show, with commands and commits recorded:
    acknowledgement (`410` or deduplicated); a foreign envelope sealed to the
    recipient's real key carrying a packet signed by a non-controller or naming
    another recipient (refused, acknowledged, no execution); deletion attempts
-   with wrong secrets (`403`), from other clients, and by URL (impossible).
+   with wrong secrets (`403`), from other clients, and by URL (impossible); and
+   the public-ID race of section 8.6: an observer of relay A pre-deposits junk
+   under the same envelope ID at relay B, the honest deposit at B gets `409` and
+   is abandoned there while `Send` succeeds through A, and the recipient
+   polling B first still opens the genuine copy from A in the same poll cycle.
 5. **Quota exhaustion.** Per-recipient, per-(client, recipient) and global
    quotas reached by a flood from one and from several client addresses; honest
    deposits receive `507`, use the other relay, and succeed after expiry or
