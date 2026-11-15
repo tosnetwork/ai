@@ -38,7 +38,9 @@ jobs:
   # Makefile's MESSENGER_FUZZ_EXECUTIONS), not a duration.
   fuzz:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The slowest package (pkg/attachments, about 3,500 executions per second
+    # for FuzzDecodeAttachmentGrant) needs roughly a quarter of an hour.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

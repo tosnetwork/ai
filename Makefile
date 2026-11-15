@@ -97,10 +97,14 @@ messenger-cross-build:
 	GOWORK=off scripts/messenger-cross-build.sh $(MESSENGER_CROSS_TARGETS)
 
 # Native fuzzing of every Fuzz target in these packages. The budget is an
-# execution count per target, not a duration (see FUZZ_EXECUTIONS above).
+# execution count per target, not a duration (see FUZZ_EXECUTIONS above). Two
+# million executions is above what every target reached in the former
+# repository's 60-second runs (at most 1.83 million). A target that stalls now
+# runs into the CI job timeout and fails, where a duration budget let it pass
+# after a handful of executions.
 MESSENGER_FUZZ_PACKAGES ?= ./messenger/pkg/identity ./messenger/pkg/directory ./messenger/pkg/envelope \
 	./messenger/pkg/probe ./messenger/pkg/fault ./messenger/pkg/attachments ./messenger/pkg/attachmentapi \
 	./messenger/pkg/attachmentops
-MESSENGER_FUZZ_EXECUTIONS ?= 50000
+MESSENGER_FUZZ_EXECUTIONS ?= 2000000
 messenger-fuzz:
 	GOWORK=off scripts/messenger-fuzz.sh $(MESSENGER_FUZZ_EXECUTIONS) $(MESSENGER_FUZZ_PACKAGES)
