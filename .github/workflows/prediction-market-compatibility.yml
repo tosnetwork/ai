@@ -1,0 +1,29 @@
+name: PredictionMarket compatibility
+
+on:
+  pull_request:
+    paths:
+      - "spec/manifests/prediction-market-v1-compatibility.json"
+      - "spec/scripts/verify-prediction-market-compatibility.py"
+      - "spec/test-vectors/prediction-market-v1.json"
+      - "spec/test-vectors/agent-commerce-semantic-action-v1.json"
+      - ".github/workflows/prediction-market-compatibility.yml"
+  push:
+    branches: [main]
+    paths:
+      - "spec/manifests/prediction-market-v1-compatibility.json"
+      - "spec/scripts/verify-prediction-market-compatibility.py"
+      - "spec/test-vectors/prediction-market-v1.json"
+      - "spec/test-vectors/agent-commerce-semantic-action-v1.json"
+      - ".github/workflows/prediction-market-compatibility.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify closed release manifest
+        run: make spec-check
