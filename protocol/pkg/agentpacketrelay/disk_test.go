@@ -169,6 +169,17 @@ func TestDiskRefusesCorruptOrForeignState(t *testing.T) {
 				flip(filepath.Join(dir, dirTombstones, entries[0].Name()), 12)(t)
 			}
 		},
+		// A flipped expiry byte changes no name and no ID: only the
+		// tombstone's checksum can catch it.
+		"tombstone expiry byte": func(dir string, env sealed) func(*testing.T) {
+			return func(t *testing.T) {
+				entries, err := os.ReadDir(filepath.Join(dir, dirTombstones))
+				if err != nil || len(entries) != 1 {
+					t.Fatal(err)
+				}
+				flip(filepath.Join(dir, dirTombstones, entries[0].Name()), tombstoneSize-33)(t)
+			}
+		},
 		"truncated record": func(dir string, env sealed) func(*testing.T) {
 			return func(t *testing.T) {
 				path := filepath.Join(dir, dirEnvelopes, keyFileName(env.key(t)))
