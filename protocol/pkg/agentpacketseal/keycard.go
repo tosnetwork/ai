@@ -156,13 +156,16 @@ func checkKeyCard(card KeyCard) error {
 
 // CheckRelayURL accepts only a canonical relay base URL: HTTPS, or HTTP to
 // a loopback host; a lowercase host; no user information, query, fragment
-// or trailing slash; printable ASCII; at most MaxRelayURLBytes.
+// or trailing slash; no percent-escape anywhere; printable ASCII; at most
+// MaxRelayURLBytes.
 func CheckRelayURL(relay string) error {
 	if len(relay) == 0 || len(relay) > MaxRelayURLBytes {
 		return ErrKeyCard
 	}
 	for index := 0; index < len(relay); index++ {
-		if relay[index] <= 0x20 || relay[index] >= 0x7f {
+		// The parser keeps an escape such as %20 with no raw path, so the
+		// re-serialization check below cannot see it; '%' is refused here.
+		if relay[index] <= 0x20 || relay[index] >= 0x7f || relay[index] == '%' {
 			return ErrKeyCard
 		}
 	}
