@@ -226,11 +226,11 @@ func checkAccounting(t *testing.T, s *Store) {
 	var total int64
 	perRecipient := map[agentDigest]int{}
 	perClient := map[agentDigest]map[netipAddr]int{}
-	for id, rec := range s.envelopes {
-		if !rec.committed || rec.id != id {
+	for key, rec := range s.envelopes {
+		if !rec.committed || rec.key() != key {
 			t.Fatal("uncommitted or misfiled record")
 		}
-		if _, ok := s.tombstones[id]; ok {
+		if _, ok := s.tombstones[key]; ok {
 			t.Fatal("an ID is both stored and tombstoned")
 		}
 		total += rec.size
@@ -250,7 +250,7 @@ func checkAccounting(t *testing.T, s *Store) {
 		}
 		var bytesUsed int64
 		for id := range usage.ids {
-			bytesUsed += s.envelopes[id].size
+			bytesUsed += s.envelopes[entryKey{agent: agent, id: id}].size
 		}
 		if usage.bytes != bytesUsed || usage.bytes > s.limits.PerRecipientMaxBytes {
 			t.Fatalf("recipient bytes %d, recount %d", usage.bytes, bytesUsed)

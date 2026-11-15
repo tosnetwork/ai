@@ -278,9 +278,9 @@ fixes the largest `packet_json` at
 envelope_id = SHA-256( D("tos.service.agent-packet-relay.ack.v1") || ack_secret )
 ```
 
-The envelope ID is the relay's storage key and the only deletion credential
-check: whoever presents a 32-byte value hashing to the envelope ID may delete
-the envelope. The value exists in clear only inside the ciphertext and at the
+The pair (recipient Agent, envelope ID) is the relay's storage key, and the
+envelope ID is the only deletion credential check: whoever presents a 32-byte
+value hashing to the envelope ID may delete the envelope under that mailbox. The value exists in clear only inside the ciphertext and at the
 sender. The domain prefix keeps the hash unrelated to any other SHA-256 use.
 
 ### 8.3 HPKE binding
@@ -443,18 +443,27 @@ Details of these steps:
   ends before its `Content-Length` is `400`.
 - `Content-Type` must be exactly `application/octet-stream`, without
   parameters.
-- Envelope IDs are unique across the whole relay, not per mailbox: an ID
-  stored or tombstoned under one recipient answers `409` or `410` for a
-  deposit under any recipient.
-- A held tombstone answers `410` whatever bytes are deposited under its ID:
+- Envelopes and tombstones are keyed by (recipient, envelope ID), never by
+  the ID alone. A deposit under one mailbox can never answer `409` or `410`
+  for, hide, or be charged to another mailbox: junk under mailbox Y carrying
+  X's envelope ID is stored for Y, counted against Y's quotas, and leaves
+  X's deposit, listing, download and acknowledgement untouched. Within one
+  mailbox the section 8.6 race still applies, and the genuine
+  acknowledgement deletes a same-mailbox squat because the secret hashes to
+  its ID.
+- A held tombstone answers `410` whatever bytes are deposited under its key:
   the relay keeps no copy to compare, and a tombstone can only exist because
   someone presented the secret.
 - Step 4 precedes step 5, so an identical retry whose `expires_at_unix` has
-  passed is `422`, not `200`. Quotas apply only to a new ID: an identical
-  retry of a stored envelope is `200` even when the mailbox is full.
+  passed is `422`, not `200`. `422` is terminal for those exact bytes: an
+  expiry already past never becomes acceptable, and an expiry beyond the
+  bound breaks section 8.4. The sender does not retry them, and seals the
+  packet again (a new envelope) if it still needs delivery. Quotas apply only to a new key: an identical retry
+  of a stored envelope is `200` even when the mailbox is full.
 - An envelope whose effective expiry has passed is gone for every purpose
-  before the expiry sweep removes its file; a deposit of the same ID is then
-  judged as new.
+  before the expiry sweep removes its file; a deposit under the same key is
+  then judged as new, and the expired file is removed whether or not the new
+  deposit is admitted.
 
 `200`, `201` and `410` are durable acceptance: the envelope is stored, or was
 stored and already acknowledged by its recipient. A transport `Send` returns

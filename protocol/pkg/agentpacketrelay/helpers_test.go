@@ -254,3 +254,23 @@ func mustPrefix(t testing.TB, value string) netip.Prefix {
 	}
 	return prefix
 }
+
+// key returns the store key of a sealed envelope: its recipient mailbox and
+// envelope ID.
+func (s sealed) key(t testing.TB) entryKey {
+	t.Helper()
+	header, err := agentpacketseal.ParseEnvelope(s.envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keyFor(t, header.RecipientAgentID, s.id)
+}
+
+func keyFor(t testing.TB, agentID string, id [32]byte) entryKey {
+	t.Helper()
+	digest, err := agentpacketseal.AgentDigest(agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entryKey{agent: digest, id: id}
+}

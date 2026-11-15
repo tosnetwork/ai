@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
@@ -18,17 +19,17 @@ import (
 
 // On-disk layout of a state directory:
 //
-//	FORMAT              the layout marker, exactly diskFormat
-//	LOCK                held with an exclusive advisory lock while open
-//	envelopes/<id hex>  one envelope record per stored envelope
-//	tombstones/<id hex> one tombstone record per acknowledged ID
-//	tmp/                partial writes; emptied on open
+//	FORMAT                         the layout marker, exactly diskFormat
+//	LOCK                           held with an exclusive advisory lock while open
+//	envelopes/<agent hex>-<id hex>  one envelope record per stored envelope
+//	tombstones/<agent hex>-<id hex> one tombstone record per acknowledged envelope
+//	tmp/                           partial writes; emptied on open
 //
 // Every record is written to tmp/, synced, renamed into place, and the
 // target directory is synced, so a record name never refers to a partial
-// write. Every record carries a SHA-256 over its contents; a record that
-// fails it, any unknown file, or a wrong FORMAT makes OpenDiskStore refuse
-// the directory rather than guess.
+// write. Every record carries a SHA-256 over its contents and must agree
+// with its file name; a record that does not, any unknown file, or a wrong
+// FORMAT makes OpenDiskStore refuse the directory rather than guess.
 const (
 	diskFormat       = "tos.service.agent-packet-relay.store.v1\n"
 	envelopeMagic    = "APRSENV1"
@@ -101,37 +102,37 @@ func (d *diskBackend) load(limits Limits, now uint64) (*Store, error) {
 		return nil, fmt.Errorf("agentpacketrelay: read tombstones: %w", err)
 	}
 	for _, entry := range stones {
-		id, ok := fileID(entry)
+		key, ok := fileKey(entry)
 		if !ok {
 			return nil, fmt.Errorf("%w: unexpected entry tombstones/%s", errStoreCorrupt, entry.Name())
 		}
-		stone, err := d.readTombstone(id)
+		stone, err := d.readTombstone(key)
 		if err != nil {
 			return nil, err
 		}
 		if stone.expires <= now {
-			if err := d.deleteTombstone(id); err != nil {
+			if err := d.deleteTombstone(key); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		store.addTombstone(id, stone)
+		store.addTombstone(key, stone)
 	}
 	envelopes, err := os.ReadDir(filepath.Join(d.root, dirEnvelopes))
 	if err != nil {
 		return nil, fmt.Errorf("agentpacketrelay: read envelopes: %w", err)
 	}
 	for _, entry := range envelopes {
-		id, ok := fileID(entry)
+		key, ok := fileKey(entry)
 		if !ok {
 			return nil, fmt.Errorf("%w: unexpected entry envelopes/%s", errStoreCorrupt, entry.Name())
 		}
-		rec, err := d.readRecord(id)
+		rec, err := d.readRecord(key)
 		if err != nil {
 			return nil, err
 		}
-		if _, acknowledged := store.tombstones[id]; acknowledged || rec.expires <= now {
-			if err := d.deleteEnvelope(id); err != nil {
+		if _, acknowledged := store.tombstones[key]; acknowledged || rec.expires <= now {
+			if err := d.deleteEnvelope(key); err != nil {
 				return nil, err
 			}
 			continue
@@ -183,20 +184,36 @@ func (d *diskBackend) clearTemp() error {
 	return syncDir(dir)
 }
 
-// fileID accepts only a regular file named by a canonical non-zero ID.
-func fileID(entry fs.DirEntry) ([32]byte, bool) {
+// keyFileName is the file name of a key: the Agent digest and the envelope
+// ID, each as 64 lowercase hex, joined by a dash.
+func keyFileName(key entryKey) string {
+	return hex.EncodeToString(key.agent[:]) + "-" + hex.EncodeToString(key.id[:])
+}
+
+// fileKey accepts only a regular file named by keyFileName of a non-zero
+// Agent digest and a non-zero envelope ID.
+func fileKey(entry fs.DirEntry) (entryKey, bool) {
 	if !entry.Type().IsRegular() {
-		return [32]byte{}, false
+		return entryKey{}, false
 	}
-	return parseEnvelopeIDText(entry.Name())
+	agentHex, idHex, ok := strings.Cut(entry.Name(), "-")
+	if !ok {
+		return entryKey{}, false
+	}
+	agent, agentOK := parseEnvelopeIDText(agentHex)
+	id, idOK := parseEnvelopeIDText(idHex)
+	if !agentOK || !idOK {
+		return entryKey{}, false
+	}
+	return entryKey{agent: agent, id: id}, true
 }
 
-func (d *diskBackend) envelopePath(id [32]byte) string {
-	return filepath.Join(d.root, dirEnvelopes, hex.EncodeToString(id[:]))
+func (d *diskBackend) envelopePath(key entryKey) string {
+	return filepath.Join(d.root, dirEnvelopes, keyFileName(key))
 }
 
-func (d *diskBackend) tombstonePath(id [32]byte) string {
-	return filepath.Join(d.root, dirTombstones, hex.EncodeToString(id[:]))
+func (d *diskBackend) tombstonePath(key entryKey) string {
+	return filepath.Join(d.root, dirTombstones, keyFileName(key))
 }
 
 // writeAtomic writes data to dir/name through tmp/: write, sync, rename,
@@ -251,8 +268,7 @@ func encodeEnvelopeRecord(rec record, envelope []byte) []byte {
 }
 
 func (d *diskBackend) putEnvelope(rec record, envelope []byte) error {
-	return d.writeAtomic(filepath.Join(d.root, dirEnvelopes), hex.EncodeToString(rec.id[:]),
-		encodeEnvelopeRecord(rec, envelope))
+	return d.writeAtomic(filepath.Join(d.root, dirEnvelopes), keyFileName(rec.key()), encodeEnvelopeRecord(rec, envelope))
 }
 
 // readFileBounded reads at most limit bytes and fails on more.
@@ -272,9 +288,9 @@ func readFileBounded(path string, limit int) ([]byte, error) {
 	return raw, nil
 }
 
-// decodeEnvelopeRecord checks a record and returns its index entry and the
-// envelope bytes.
-func decodeEnvelopeRecord(id [32]byte, raw []byte) (record, []byte, error) {
+// decodeEnvelopeRecord checks a record against the key its file name gives
+// and returns its index entry and the envelope bytes.
+func decodeEnvelopeRecord(key entryKey, raw []byte) (record, []byte, error) {
 	if len(raw) < envelopeMetaSize || string(raw[:len(envelopeMagic)]) != envelopeMagic {
 		return record{}, nil, errStoreCorrupt
 	}
@@ -301,72 +317,76 @@ func decodeEnvelopeRecord(id [32]byte, raw []byte) (record, []byte, error) {
 		return record{}, nil, errStoreCorrupt
 	}
 	header, err := agentpacketseal.ParseEnvelope(envelope)
-	if err != nil || header.EnvelopeID != id || received == 0 || expires <= received ||
+	if err != nil || header.EnvelopeID != key.id || received == 0 || expires <= received ||
 		expires > header.ExpiresAtUnix {
 		return record{}, nil, errStoreCorrupt
 	}
 	agent, err := agentpacketseal.AgentDigest(header.RecipientAgentID)
-	if err != nil {
+	if err != nil || agent != key.agent {
 		return record{}, nil, errStoreCorrupt
 	}
-	return record{agent: agent, keyID: header.RecipientKeyID, id: id, size: int64(len(envelope)), received: received,
+	return record{agent: agent, keyID: header.RecipientKeyID, id: key.id, size: int64(len(envelope)), received: received,
 		expires: expires, client: client, sum: sha256.Sum256(envelope)}, envelope, nil
 }
 
-func (d *diskBackend) readRecord(id [32]byte) (record, error) {
-	raw, err := readFileBounded(d.envelopePath(id), envelopeMetaSize+MaxEnvelopeBytes)
+func (d *diskBackend) readRecord(key entryKey) (record, error) {
+	raw, err := readFileBounded(d.envelopePath(key), envelopeMetaSize+MaxEnvelopeBytes)
 	if err != nil {
-		return record{}, fmt.Errorf("%w: envelopes/%x: %v", errStoreCorrupt, id, err)
+		return record{}, fmt.Errorf("%w: envelopes/%s: %v", errStoreCorrupt, keyFileName(key), err)
 	}
-	rec, _, err := decodeEnvelopeRecord(id, raw)
+	rec, _, err := decodeEnvelopeRecord(key, raw)
 	if err != nil {
-		return record{}, fmt.Errorf("%w: envelopes/%x", errStoreCorrupt, id)
+		return record{}, fmt.Errorf("%w: envelopes/%s", errStoreCorrupt, keyFileName(key))
 	}
 	return rec, nil
 }
 
-func (d *diskBackend) getEnvelope(id [32]byte) ([]byte, error) {
-	raw, err := readFileBounded(d.envelopePath(id), envelopeMetaSize+MaxEnvelopeBytes)
+func (d *diskBackend) getEnvelope(key entryKey) ([]byte, error) {
+	raw, err := readFileBounded(d.envelopePath(key), envelopeMetaSize+MaxEnvelopeBytes)
 	if err != nil {
 		return nil, err
 	}
-	_, envelope, err := decodeEnvelopeRecord(id, raw)
+	_, envelope, err := decodeEnvelopeRecord(key, raw)
 	if err != nil {
 		return nil, err
 	}
 	return envelope, nil
 }
 
-func encodeTombstone(id [32]byte, stone tombstone) []byte {
+func encodeTombstone(key entryKey, stone tombstone) []byte {
 	out := make([]byte, 0, tombstoneSize)
 	out = append(out, tombstoneMagic...)
 	out = append(out, stone.agent[:]...)
-	out = append(out, id[:]...)
+	out = append(out, key.id[:]...)
 	out = binary.BigEndian.AppendUint64(out, stone.expires)
 	sum := sha256.Sum256(out)
 	return append(out, sum[:]...)
 }
 
-func (d *diskBackend) putTombstone(id [32]byte, stone tombstone) error {
-	return d.writeAtomic(filepath.Join(d.root, dirTombstones), hex.EncodeToString(id[:]), encodeTombstone(id, stone))
+func (d *diskBackend) putTombstone(key entryKey, stone tombstone) error {
+	if stone.agent != key.agent {
+		return errors.New("agentpacketrelay: tombstone names another mailbox than its key")
+	}
+	return d.writeAtomic(filepath.Join(d.root, dirTombstones), keyFileName(key), encodeTombstone(key, stone))
 }
 
-func (d *diskBackend) readTombstone(id [32]byte) (tombstone, error) {
-	raw, err := readFileBounded(d.tombstonePath(id), tombstoneSize)
+func (d *diskBackend) readTombstone(key entryKey) (tombstone, error) {
+	name := keyFileName(key)
+	raw, err := readFileBounded(d.tombstonePath(key), tombstoneSize)
 	if err != nil || len(raw) != tombstoneSize || string(raw[:len(tombstoneMagic)]) != tombstoneMagic ||
 		sha256.Sum256(raw[:tombstoneSize-32]) != [32]byte(raw[tombstoneSize-32:]) {
-		return tombstone{}, fmt.Errorf("%w: tombstones/%x", errStoreCorrupt, id)
+		return tombstone{}, fmt.Errorf("%w: tombstones/%s", errStoreCorrupt, name)
 	}
 	offset := len(tombstoneMagic)
 	var stone tombstone
 	copy(stone.agent[:], raw[offset:offset+agentpacketseal.AgentDigestSize])
 	offset += agentpacketseal.AgentDigestSize
-	if [32]byte(raw[offset:offset+32]) != id {
-		return tombstone{}, fmt.Errorf("%w: tombstones/%x names another ID", errStoreCorrupt, id)
+	if stone.agent != key.agent || [32]byte(raw[offset:offset+32]) != key.id {
+		return tombstone{}, fmt.Errorf("%w: tombstones/%s names another key", errStoreCorrupt, name)
 	}
 	stone.expires = binary.BigEndian.Uint64(raw[offset+32:])
-	if stone.agent == (agentDigest{}) || stone.expires == 0 {
-		return tombstone{}, fmt.Errorf("%w: tombstones/%x", errStoreCorrupt, id)
+	if stone.expires == 0 {
+		return tombstone{}, fmt.Errorf("%w: tombstones/%s", errStoreCorrupt, name)
 	}
 	return stone, nil
 }
@@ -378,9 +398,9 @@ func removeSynced(path string) error {
 	return syncDir(filepath.Dir(path))
 }
 
-func (d *diskBackend) deleteEnvelope(id [32]byte) error { return removeSynced(d.envelopePath(id)) }
+func (d *diskBackend) deleteEnvelope(key entryKey) error { return removeSynced(d.envelopePath(key)) }
 
-func (d *diskBackend) deleteTombstone(id [32]byte) error { return removeSynced(d.tombstonePath(id)) }
+func (d *diskBackend) deleteTombstone(key entryKey) error { return removeSynced(d.tombstonePath(key)) }
 
 func (d *diskBackend) close() error { return d.lock.Close() }
 

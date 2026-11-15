@@ -71,7 +71,7 @@ func TestDiskRestartDurability(t *testing.T) {
 	clock.Advance(2 * time.Minute)
 	third := openDisk(t, dir, clock)
 	defer third.Close()
-	if _, err := os.Stat(filepath.Join(dir, dirEnvelopes, hex.EncodeToString(short.id[:]))); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(dir, dirEnvelopes, keyFileName(short.key(t)))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expired envelope file survived reopen: %v", err)
 	}
 	if usage := third.Usage(); usage.Envelopes != 1 || usage.Tombstones != 1 {
@@ -105,7 +105,7 @@ func TestDiskCrashBetweenTombstoneAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := store.backend.(*diskBackend)
-	if err := backend.putTombstone(env.id, tombstone{agent: digest, expires: clock.unix() + 3600}); err != nil {
+	if err := backend.putTombstone(env.key(t), tombstone{agent: digest, expires: clock.unix() + 3600}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -116,7 +116,7 @@ func TestDiskCrashBetweenTombstoneAndDelete(t *testing.T) {
 	if usage := reopened.Usage(); usage.Envelopes != 0 || usage.Tombstones != 1 {
 		t.Fatalf("usage = %+v", usage)
 	}
-	if _, err := os.Stat(backend.envelopePath(env.id)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(backend.envelopePath(env.key(t))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("the acknowledged envelope file survived reopen")
 	}
 }
@@ -155,10 +155,10 @@ func TestDiskRefusesCorruptOrForeignState(t *testing.T) {
 	}
 	cases := map[string]func(dir string, env sealed) func(*testing.T){
 		"envelope record byte": func(dir string, env sealed) func(*testing.T) {
-			return flip(filepath.Join(dir, dirEnvelopes, hex.EncodeToString(env.id[:])), -1)
+			return flip(filepath.Join(dir, dirEnvelopes, keyFileName(env.key(t))), -1)
 		},
 		"envelope record meta": func(dir string, env sealed) func(*testing.T) {
-			return flip(filepath.Join(dir, dirEnvelopes, hex.EncodeToString(env.id[:])), 10)
+			return flip(filepath.Join(dir, dirEnvelopes, keyFileName(env.key(t))), 10)
 		},
 		"tombstone byte": func(dir string, env sealed) func(*testing.T) {
 			return func(t *testing.T) {
@@ -171,7 +171,7 @@ func TestDiskRefusesCorruptOrForeignState(t *testing.T) {
 		},
 		"truncated record": func(dir string, env sealed) func(*testing.T) {
 			return func(t *testing.T) {
-				path := filepath.Join(dir, dirEnvelopes, hex.EncodeToString(env.id[:]))
+				path := filepath.Join(dir, dirEnvelopes, keyFileName(env.key(t)))
 				if err := os.Truncate(path, 500); err != nil {
 					t.Fatal(err)
 				}
@@ -179,10 +179,44 @@ func TestDiskRefusesCorruptOrForeignState(t *testing.T) {
 		},
 		"record under another name": func(dir string, env sealed) func(*testing.T) {
 			return func(t *testing.T) {
-				other := env.id
-				other[0] ^= 1
-				if err := os.Rename(filepath.Join(dir, dirEnvelopes, hex.EncodeToString(env.id[:])),
-					filepath.Join(dir, dirEnvelopes, hex.EncodeToString(other[:]))); err != nil {
+				other := env.key(t)
+				other.id[0] ^= 1
+				if err := os.Rename(filepath.Join(dir, dirEnvelopes, keyFileName(env.key(t))),
+					filepath.Join(dir, dirEnvelopes, keyFileName(other))); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		"record under another mailbox": func(dir string, env sealed) func(*testing.T) {
+			return func(t *testing.T) {
+				other := env.key(t)
+				other.agent[0] ^= 1
+				if err := os.Rename(filepath.Join(dir, dirEnvelopes, keyFileName(env.key(t))),
+					filepath.Join(dir, dirEnvelopes, keyFileName(other))); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		"tombstone under another mailbox": func(dir string, env sealed) func(*testing.T) {
+			return func(t *testing.T) {
+				entries, err := os.ReadDir(filepath.Join(dir, dirTombstones))
+				if err != nil || len(entries) != 1 {
+					t.Fatal(err)
+				}
+				name := entries[0].Name()
+				moved := "0" + name[1:]
+				if name[0] == '0' {
+					moved = "1" + name[1:]
+				}
+				if err := os.Rename(filepath.Join(dir, dirTombstones, name), filepath.Join(dir, dirTombstones, moved)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		"old ID-only file name": func(dir string, env sealed) func(*testing.T) {
+			return func(t *testing.T) {
+				if err := os.Rename(filepath.Join(dir, dirEnvelopes, keyFileName(env.key(t))),
+					filepath.Join(dir, dirEnvelopes, hex.EncodeToString(env.id[:]))); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -271,15 +305,22 @@ func TestDiskRecordEncoding(t *testing.T) {
 		rec := record{agent: digest, keyID: header.RecipientKeyID, id: env.id, size: int64(len(env.envelope)),
 			received: 1_800_000_000, expires: 1_800_003_600, client: netip.MustParseAddr(client)}
 		raw := encodeEnvelopeRecord(rec, env.envelope)
-		got, envelope, err := decodeEnvelopeRecord(env.id, raw)
+		got, envelope, err := decodeEnvelopeRecord(entryKey{agent: digest, id: env.id}, raw)
 		if err != nil || !bytes.Equal(envelope, env.envelope) || got.client != rec.client || got.received != rec.received ||
 			got.expires != rec.expires || got.agent != digest || got.size != rec.size {
 			t.Fatalf("%s: decode = %+v, %v", client, got, err)
 		}
 		// An effective expiry past the envelope's own is corrupt.
 		rec.expires = header.ExpiresAtUnix + 1
-		if _, _, err := decodeEnvelopeRecord(env.id, encodeEnvelopeRecord(rec, env.envelope)); err == nil {
+		if _, _, err := decodeEnvelopeRecord(entryKey{agent: digest, id: env.id}, encodeEnvelopeRecord(rec, env.envelope)); err == nil {
 			t.Fatal("record with an expiry past the envelope's accepted")
+		}
+		// A record read under another mailbox's name is corrupt.
+		rec.expires = header.ExpiresAtUnix
+		otherAgent := digest
+		otherAgent[0] ^= 1
+		if _, _, err := decodeEnvelopeRecord(entryKey{agent: otherAgent, id: env.id}, encodeEnvelopeRecord(rec, env.envelope)); err == nil {
+			t.Fatal("record under another mailbox accepted")
 		}
 	}
 }
@@ -400,13 +441,14 @@ func TestDiskKillDuringWrites(t *testing.T) {
 		for key := range deposited {
 			agentID, idText, _ := strings.Cut(key, "/")
 			id, _ := parseEnvelopeIDText(idText)
+			storeKey := keyFor(t, agentID, id)
 			got := relay.do(http.MethodGet, relay.envelopeURL(agentID, id), "", nil)
 			if acknowledged[key] {
 				if got.status != 404 {
 					t.Fatalf("round %d: acknowledged envelope still downloadable", round)
 				}
 				store.mu.Lock()
-				_, held := store.tombstones[id]
+				_, held := store.tombstones[storeKey]
 				store.mu.Unlock()
 				if !held {
 					t.Fatalf("round %d: acknowledged ID has no tombstone", round)
@@ -417,7 +459,7 @@ func TestDiskKillDuringWrites(t *testing.T) {
 				// The child may have acknowledged it after the last line
 				// this side read; then, and only then, a tombstone holds.
 				store.mu.Lock()
-				_, held := store.tombstones[id]
+				_, held := store.tombstones[storeKey]
 				store.mu.Unlock()
 				if held {
 					continue

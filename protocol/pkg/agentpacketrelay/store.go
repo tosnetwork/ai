@@ -16,6 +16,14 @@ import (
 
 type agentDigest = [agentpacketseal.AgentDigestSize]byte
 
+// entryKey names one stored envelope or tombstone: the recipient mailbox and
+// the envelope ID. Keys are per mailbox, so a deposit under one mailbox can
+// never occupy, shadow or refuse an ID in another.
+type entryKey struct {
+	agent agentDigest
+	id    [32]byte
+}
+
 // Limits are the operator's resource bounds. Every field is required: there
 // is no unlimited default, and no value may exceed the V1 ceiling.
 type Limits struct {
@@ -103,6 +111,8 @@ type record struct {
 	committed bool
 }
 
+func (r *record) key() entryKey { return entryKey{agent: r.agent, id: r.id} }
+
 type tombstone struct {
 	agent   agentDigest
 	expires uint64
@@ -114,14 +124,14 @@ type recipientUsage struct {
 	byClient map[netip.Addr]int
 }
 
-// backend persists records. Every method is called for one ID at a time:
-// the store never runs two operations on the same ID concurrently.
+// backend persists records. Every method is called for one key at a time:
+// the store never runs two operations on the same key concurrently.
 type backend interface {
 	putEnvelope(rec record, envelope []byte) error
-	getEnvelope(id [32]byte) ([]byte, error)
-	putTombstone(id [32]byte, stone tombstone) error
-	deleteEnvelope(id [32]byte) error
-	deleteTombstone(id [32]byte) error
+	getEnvelope(key entryKey) ([]byte, error)
+	putTombstone(key entryKey, stone tombstone) error
+	deleteEnvelope(key entryKey) error
+	deleteTombstone(key entryKey) error
 	close() error
 }
 
@@ -131,14 +141,14 @@ type Store struct {
 	mu         sync.Mutex
 	limits     Limits
 	backend    backend
-	envelopes  map[[32]byte]*record
-	tombstones map[[32]byte]tombstone
+	envelopes  map[entryKey]*record
+	tombstones map[entryKey]tombstone
 	recipients map[agentDigest]*recipientUsage
 	entries    int
 	bytes      int64
-	// busy holds the IDs with a persistence operation in flight; the
+	// busy holds the keys with a persistence operation in flight; the
 	// channel closes when it ends.
-	busy   map[[32]byte]chan struct{}
+	busy   map[entryKey]chan struct{}
 	closed bool
 }
 
@@ -146,8 +156,8 @@ func newStore(limits Limits, b backend) (*Store, error) {
 	if err := limits.Validate(); err != nil {
 		return nil, err
 	}
-	return &Store{limits: limits, backend: b, envelopes: map[[32]byte]*record{}, tombstones: map[[32]byte]tombstone{},
-		recipients: map[agentDigest]*recipientUsage{}, busy: map[[32]byte]chan struct{}{}}, nil
+	return &Store{limits: limits, backend: b, envelopes: map[entryKey]*record{}, tombstones: map[entryKey]tombstone{},
+		recipients: map[agentDigest]*recipientUsage{}, busy: map[entryKey]chan struct{}{}}, nil
 }
 
 // NewMemoryStore returns a store that keeps everything in memory. It is for
@@ -181,16 +191,16 @@ func (s *Store) Close() error {
 	return s.backend.close()
 }
 
-// lockID waits until no operation runs on id and returns with s.mu held, or
-// returns an error without the lock.
-func (s *Store) lockID(ctx context.Context, id [32]byte) error {
+// lockKey waits until no operation runs on key and returns with s.mu held,
+// or returns an error without the lock.
+func (s *Store) lockKey(ctx context.Context, key entryKey) error {
 	s.mu.Lock()
 	for {
 		if s.closed {
 			s.mu.Unlock()
 			return ErrStoreUnavailable
 		}
-		wait, ok := s.busy[id]
+		wait, ok := s.busy[key]
 		if !ok {
 			return nil
 		}
@@ -204,16 +214,16 @@ func (s *Store) lockID(ctx context.Context, id [32]byte) error {
 	}
 }
 
-// markBusy claims id for a persistence operation; s.mu must be held.
-func (s *Store) markBusy(id [32]byte) chan struct{} {
+// markBusy claims key for a persistence operation; s.mu must be held.
+func (s *Store) markBusy(key entryKey) chan struct{} {
 	ch := make(chan struct{})
-	s.busy[id] = ch
+	s.busy[key] = ch
 	return ch
 }
 
 // release ends a persistence operation; s.mu must be held.
-func (s *Store) release(id [32]byte, ch chan struct{}) {
-	delete(s.busy, id)
+func (s *Store) release(key entryKey, ch chan struct{}) {
+	delete(s.busy, key)
 	close(ch)
 }
 
@@ -228,7 +238,7 @@ func (s *Store) usage(agent agentDigest) *recipientUsage {
 
 // addRecord indexes rec and charges its quotas; s.mu must be held.
 func (s *Store) addRecord(rec *record) {
-	s.envelopes[rec.id] = rec
+	s.envelopes[rec.key()] = rec
 	usage := s.usage(rec.agent)
 	usage.ids[rec.id] = struct{}{}
 	usage.bytes += rec.size
@@ -240,7 +250,7 @@ func (s *Store) addRecord(rec *record) {
 // dropRecord removes rec from the index and refunds its quotas; s.mu must be
 // held.
 func (s *Store) dropRecord(rec *record) {
-	delete(s.envelopes, rec.id)
+	delete(s.envelopes, rec.key())
 	if usage := s.recipients[rec.agent]; usage != nil {
 		delete(usage.ids, rec.id)
 		usage.bytes -= rec.size
@@ -255,13 +265,13 @@ func (s *Store) dropRecord(rec *record) {
 	s.bytes -= rec.size
 }
 
-func (s *Store) addTombstone(id [32]byte, stone tombstone) {
-	s.tombstones[id] = stone
+func (s *Store) addTombstone(key entryKey, stone tombstone) {
+	s.tombstones[key] = stone
 	s.entries++
 }
 
-func (s *Store) dropTombstone(id [32]byte) {
-	delete(s.tombstones, id)
+func (s *Store) dropTombstone(key entryKey) {
+	delete(s.tombstones, key)
 	s.entries--
 }
 
@@ -281,32 +291,33 @@ func (s *Store) deposit(ctx context.Context, in depositInput) (depositStatus, er
 	if err != nil {
 		return 0, fmt.Errorf("agentpacketrelay: deposit recipient: %w", err)
 	}
-	id := in.header.EnvelopeID
+	key := entryKey{agent: agent, id: in.header.EnvelopeID}
 	sum := sha256.Sum256(in.envelope)
-	if err := s.lockID(ctx, id); err != nil {
+	if err := s.lockKey(ctx, key); err != nil {
 		return 0, err
 	}
-	// s.mu is held from here until the persistence step.
-	var cleanupTombstone bool
-	if existing, ok := s.envelopes[id]; ok {
+	// s.mu is held from here until the persistence step. An expired entry
+	// the sweep has not reached yet is gone: it leaves the index here, and
+	// its file must go too, whether or not the new envelope is admitted.
+	var staleEnvelope, staleTombstone bool
+	if existing, ok := s.envelopes[key]; ok {
 		if existing.expires > in.now {
 			s.mu.Unlock()
-			if existing.sum == sum && existing.agent == agent {
+			if existing.sum == sum {
 				return depositDuplicate, nil
 			}
 			return depositConflict, nil
 		}
-		// An expired envelope the sweep has not reached yet is gone; the
-		// new write replaces its file.
 		s.dropRecord(existing)
+		staleEnvelope = true
 	}
-	if stone, ok := s.tombstones[id]; ok {
+	if stone, ok := s.tombstones[key]; ok {
 		if stone.expires > in.now {
 			s.mu.Unlock()
 			return depositGone, nil
 		}
-		s.dropTombstone(id)
-		cleanupTombstone = true
+		s.dropTombstone(key)
+		staleTombstone = true
 	}
 	usage := s.recipients[agent]
 	count, used, fromClient := 0, int64(0), 0
@@ -317,46 +328,59 @@ func (s *Store) deposit(ctx context.Context, in depositInput) (depositStatus, er
 	if count+1 > s.limits.PerRecipientMaxEnvelopes || used+size > s.limits.PerRecipientMaxBytes ||
 		fromClient+1 > s.limits.PerClientRecipientMaxEnvelopes ||
 		s.entries+1 > s.limits.GlobalMaxEntries || s.bytes+size > s.limits.GlobalMaxBytes {
-		if cleanupTombstone {
-			// The expired tombstone is already out of the index; its file
-			// must go before any later envelope under this ID is written.
-			ch := s.markBusy(id)
+		if !staleEnvelope && !staleTombstone {
 			s.mu.Unlock()
-			removeErr := s.backend.deleteTombstone(id)
-			s.mu.Lock()
-			s.release(id, ch)
-			s.mu.Unlock()
-			if removeErr != nil {
-				return 0, fmt.Errorf("%w: %v", ErrStoreUnavailable, removeErr)
-			}
 			return depositQuota, nil
 		}
+		ch := s.markBusy(key)
 		s.mu.Unlock()
+		removeErr := s.removeStale(key, staleEnvelope, staleTombstone)
+		s.mu.Lock()
+		s.release(key, ch)
+		s.mu.Unlock()
+		if removeErr != nil {
+			return 0, fmt.Errorf("%w: %v", ErrStoreUnavailable, removeErr)
+		}
 		return depositQuota, nil
 	}
-	rec := &record{agent: agent, keyID: in.header.RecipientKeyID, id: id, size: size, received: in.now,
+	rec := &record{agent: agent, keyID: in.header.RecipientKeyID, id: key.id, size: size, received: in.now,
 		expires: in.expires, client: in.client, sum: sum}
 	s.addRecord(rec)
-	ch := s.markBusy(id)
+	ch := s.markBusy(key)
 	s.mu.Unlock()
 
-	var writeErr error
-	if cleanupTombstone {
-		writeErr = s.backend.deleteTombstone(id)
-	}
+	// The stale envelope file is replaced by the rename of the new one; a
+	// stale tombstone file must go first, or a reopen would let it win.
+	writeErr := s.removeStale(key, false, staleTombstone)
 	if writeErr == nil {
 		writeErr = s.backend.putEnvelope(*rec, in.envelope)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defer s.release(id, ch)
+	defer s.release(key, ch)
 	if writeErr != nil {
 		s.dropRecord(rec)
 		return 0, fmt.Errorf("%w: %v", ErrStoreUnavailable, writeErr)
 	}
 	rec.committed = true
 	return depositCreated, nil
+}
+
+// removeStale deletes the files of expired entries already dropped from the
+// index; key must be marked busy.
+func (s *Store) removeStale(key entryKey, envelope, tombstone bool) error {
+	if envelope {
+		if err := s.backend.deleteEnvelope(key); err != nil {
+			return err
+		}
+	}
+	if tombstone {
+		if err := s.backend.deleteTombstone(key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // list returns a snapshot of one mailbox under one lock, in V1 order.
@@ -369,7 +393,7 @@ func (s *Store) list(agent agentDigest, now uint64) ([]MailboxEntry, error) {
 	out := []MailboxEntry{}
 	if usage := s.recipients[agent]; usage != nil {
 		for id := range usage.ids {
-			rec := s.envelopes[id]
+			rec := s.envelopes[entryKey{agent: agent, id: id}]
 			if rec == nil || !rec.committed || rec.expires <= now {
 				continue
 			}
@@ -395,13 +419,14 @@ var errEnvelopeAbsent = errors.New("agentpacketrelay: envelope absent")
 
 // get returns the stored bytes of one live envelope.
 func (s *Store) get(agent agentDigest, id [32]byte, now uint64) ([]byte, error) {
+	key := entryKey{agent: agent, id: id}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return nil, ErrStoreUnavailable
 	}
-	rec := s.envelopes[id]
-	if rec == nil || !rec.committed || rec.agent != agent || rec.expires <= now {
+	rec := s.envelopes[key]
+	if rec == nil || !rec.committed || rec.expires <= now {
 		s.mu.Unlock()
 		return nil, errEnvelopeAbsent
 	}
@@ -410,13 +435,13 @@ func (s *Store) get(agent agentDigest, id [32]byte, now uint64) ([]byte, error) 
 	// The read runs outside the lock. Files are replaced only by rename, so
 	// it sees one whole version; the checksum decides whether that version
 	// is still the indexed one.
-	raw, err := s.backend.getEnvelope(id)
+	raw, err := s.backend.getEnvelope(key)
 	if err == nil && sha256.Sum256(raw) == sum {
 		return raw, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if current := s.envelopes[id]; current == nil || current.sum != sum || current.expires <= now {
+	if current := s.envelopes[key]; current == nil || current.sum != sum || current.expires <= now {
 		return nil, errEnvelopeAbsent
 	}
 	if err == nil {
@@ -428,41 +453,42 @@ func (s *Store) get(agent agentDigest, id [32]byte, now uint64) ([]byte, error) 
 // ack deletes one envelope whose secret the caller has already checked
 // against id, leaving a tombstone until its effective expiry.
 func (s *Store) ack(ctx context.Context, agent agentDigest, id [32]byte, now uint64) (ackStatus, error) {
-	if err := s.lockID(ctx, id); err != nil {
+	key := entryKey{agent: agent, id: id}
+	if err := s.lockKey(ctx, key); err != nil {
 		return 0, err
 	}
-	if stone, ok := s.tombstones[id]; ok && stone.agent == agent && stone.expires > now {
+	if stone, ok := s.tombstones[key]; ok && stone.expires > now {
 		s.mu.Unlock()
 		return ackTombstone, nil
 	}
-	rec := s.envelopes[id]
-	if rec == nil || !rec.committed || rec.agent != agent || rec.expires <= now {
+	rec := s.envelopes[key]
+	if rec == nil || !rec.committed || rec.expires <= now {
 		s.mu.Unlock()
 		return ackNotFound, nil
 	}
 	stone := tombstone{agent: agent, expires: rec.expires}
-	ch := s.markBusy(id)
+	ch := s.markBusy(key)
 	s.mu.Unlock()
 
 	// The tombstone is durable before the envelope goes: a crash between
 	// the two leaves both on disk, and reopening keeps the tombstone and
 	// removes the envelope.
-	putErr := s.backend.putTombstone(id, stone)
+	putErr := s.backend.putTombstone(key, stone)
 	var deleteErr error
 	if putErr == nil {
-		deleteErr = s.backend.deleteEnvelope(id)
+		deleteErr = s.backend.deleteEnvelope(key)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defer s.release(id, ch)
+	defer s.release(key, ch)
 	if putErr != nil {
 		return 0, fmt.Errorf("%w: write tombstone: %v", ErrStoreUnavailable, putErr)
 	}
 	// With the tombstone durable the envelope is acknowledged whatever the
 	// delete did: reopening removes a leftover envelope file.
 	s.dropRecord(rec)
-	s.addTombstone(id, stone)
+	s.addTombstone(key, stone)
 	if deleteErr != nil {
 		return 0, fmt.Errorf("%w: delete acknowledged envelope: %v", ErrStoreUnavailable, deleteErr)
 	}
@@ -480,39 +506,39 @@ func (s *Store) Sweep(now time.Time) error {
 		return ErrStoreUnavailable
 	}
 	type job struct {
-		id       [32]byte
+		key      entryKey
 		envelope bool
 		ch       chan struct{}
 	}
 	var jobs []job
-	for id, rec := range s.envelopes {
-		if _, busy := s.busy[id]; busy || !rec.committed || rec.expires > unix {
+	for key, rec := range s.envelopes {
+		if _, busy := s.busy[key]; busy || !rec.committed || rec.expires > unix {
 			continue
 		}
 		s.dropRecord(rec)
-		jobs = append(jobs, job{id: id, envelope: true, ch: s.markBusy(id)})
+		jobs = append(jobs, job{key: key, envelope: true, ch: s.markBusy(key)})
 	}
-	for id, stone := range s.tombstones {
-		if _, busy := s.busy[id]; busy || stone.expires > unix {
+	for key, stone := range s.tombstones {
+		if _, busy := s.busy[key]; busy || stone.expires > unix {
 			continue
 		}
-		s.dropTombstone(id)
-		jobs = append(jobs, job{id: id, ch: s.markBusy(id)})
+		s.dropTombstone(key)
+		jobs = append(jobs, job{key: key, ch: s.markBusy(key)})
 	}
 	s.mu.Unlock()
 	var errs []error
 	for _, j := range jobs {
 		var err error
 		if j.envelope {
-			err = s.backend.deleteEnvelope(j.id)
+			err = s.backend.deleteEnvelope(j.key)
 		} else {
-			err = s.backend.deleteTombstone(j.id)
+			err = s.backend.deleteTombstone(j.key)
 		}
 		if err != nil {
 			errs = append(errs, err)
 		}
 		s.mu.Lock()
-		s.release(j.id, j.ch)
+		s.release(j.key, j.ch)
 		s.mu.Unlock()
 	}
 	if len(errs) > 0 {
