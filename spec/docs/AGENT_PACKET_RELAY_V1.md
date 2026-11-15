@@ -509,9 +509,11 @@ Details of these steps:
 - Step 4 precedes step 5, so an identical retry whose `expires_at_unix` has
   passed is `422`, not `200`. `422` is terminal for those exact bytes: an
   expiry already past never becomes acceptable, and an expiry beyond the
-  bound breaks section 8.4. The sender does not retry them, and seals the
-  packet again (a new envelope) if it still needs delivery. Quotas apply only to a new key: an identical retry
-  of a stored envelope is `200` even when the mailbox is full.
+  bound breaks section 8.4. For an honest sender a `422` means the packet
+  is past its deliverable expiry (8.4 step 3) or a clock is wrong; the
+  sender does not retry those bytes and does not re-seal. Quotas apply only
+  to a new key: an identical retry of a stored envelope is `200` even when
+  the mailbox is full.
 - An envelope whose effective expiry has passed is gone for every purpose
   before the expiry sweep removes its file; a deposit under the same key is
   then judged as new, and the expired file is removed whether or not the new
@@ -520,8 +522,10 @@ Details of these steps:
 `200`, `201` and `410` are durable acceptance: the envelope is stored, or was
 stored and already acknowledged by its recipient. A transport `Send` returns
 nil only on one of these. `409` is never acceptance and is never retried at
-that relay (8.6). Every other status, a timeout or a connection error is a
-failure the sender retries with the same journaled bytes.
+that relay (8.6). `422` is terminal for those bytes (above): they are not
+retried and not re-sealed. Every other status, a timeout or a connection
+error is a failure the sender retries with the same journaled bytes, subject
+to the card check of 8.4 step 5 before each resend.
 
 ### 9.3 List
 
