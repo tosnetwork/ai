@@ -4061,7 +4061,7 @@ const file_tos_service_v1_native_proto_rawDesc = "" +
 	"\x12SearchCapabilities\x12).tos.service.v1.SearchCapabilitiesRequest\x1a*.tos.service.v1.SearchCapabilitiesResponse\x12\x86\x01\n" +
 	"\x1bPublishSoftwareWorkManifest\x122.tos.service.v1.PublishSoftwareWorkManifestRequest\x1a3.tos.service.v1.PublishSoftwareWorkManifestResponse\x12z\n" +
 	"\x17GetSoftwareWorkManifest\x12..tos.service.v1.GetSoftwareWorkManifestRequest\x1a/.tos.service.v1.GetSoftwareWorkManifestResponse\x12q\n" +
-	"\x14RequestQuoteProposal\x12+.tos.service.v1.RequestQuoteProposalRequest\x1a,.tos.service.v1.RequestQuoteProposalResponseBLZJgithub.com/tosnetwork/tos-service-protocol/gen/tos/service/v1;tosservicev1b\x06proto3"
+	"\x14RequestQuoteProposal\x12+.tos.service.v1.RequestQuoteProposalRequest\x1a,.tos.service.v1.RequestQuoteProposalResponseBCZAgithub.com/tosnetwork/ai/protocol/gen/tos/service/v1;tosservicev1b\x06proto3"
 
 var (
 	file_tos_service_v1_native_proto_rawDescOnce sync.Once
