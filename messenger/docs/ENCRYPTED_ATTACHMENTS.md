@@ -159,6 +159,11 @@ binary, `/usr/bin/bwrap`, and `/usr/bin/prlimit` is pinned by SHA-256 and copied
 from its validated open file into one private per-admission directory; later
 path replacement cannot change the inode used for that attempt. Writable,
 relative, symlinked, substituted, or oversized executables fail closed.
+Because the copy is not `/usr/bin/bwrap`, a host that restricts unprivileged
+user namespaces to programs with an AppArmor profile (Ubuntu 24.04 and later)
+refuses the sandbox and admission fails closed; see
+[RUNNING.md](RUNNING.md#agent-attachment-content-admission) for the host
+requirement.
 The exact authenticated plaintext is placed in a sealed Linux `memfd` rather
 than a persistent file. Bubblewrap receives that descriptor as read-only
 `/work/input`, unshares user, IPC, PID, network and UTS namespaces, drops all

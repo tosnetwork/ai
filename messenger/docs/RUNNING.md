@@ -312,6 +312,27 @@ or prlimit deliberately stops admission until an operator reviews and updates
 the pin. A hard-isolation deployment additionally pins `systemd-run`. Scanner
 and launcher files must be regular, executable, non-writable and not symlinks.
 
+The host must let the daemon's user create unprivileged user namespaces. The
+scanner runs the pinned bubblewrap from a private per-admission copy, not from
+`/usr/bin/bwrap`, so an AppArmor profile attached to `/usr/bin/bwrap` does not
+cover it. Where AppArmor restricts unprivileged user namespaces to programs
+with a profile (`kernel.apparmor_restrict_unprivileged_userns=1`, the default
+since Ubuntu 24.04; observed on Ubuntu 26.04), bubblewrap fails while it sets
+up the sandbox (for example `loopback: Failed RTM_NEWADDR:
+Operation not permitted`) and every admission fails closed with "attachment
+scanner <id> failed". Check the setting before enabling admission:
+
+```bash
+sysctl kernel.apparmor_restrict_unprivileged_userns
+```
+
+When it prints `1`, either set it to `0` (`sysctl -w
+kernel.apparmor_restrict_unprivileged_userns=0`, and persist it in
+`/etc/sysctl.d/`), which allows unprivileged user namespaces for every program
+on the host, or run the daemon under an AppArmor profile that grants it the
+`userns` permission. The repository's CI lifts the restriction for its test job
+in the same way.
+
 `tos-attachment-text-scanner` is a parser-free reference inspector, not a
 production malware product. It refuses every non-text type. To enable the
 daemon-owned OpenFox path, add the following to daemon config v10 after replacing
