@@ -42,9 +42,11 @@ UMask=0077
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
-# Each connection reads at most one 256 KiB body, so --max-connections 1024
-# bounds request memory near 256 MiB; GOMEMLIMIT keeps the collector below
-# MemoryMax. Raise all three together.
+# At most -max-concurrent-deposits (default 256) deposit bodies of 256 KiB
+# are held at once, whatever the connections or HTTP/2 streams: about
+# 64 MiB, plus the index (about 300 bytes per entry, 30 MiB at the limits
+# above) and connection buffers. GOMEMLIMIT keeps the collector below
+# MemoryMax. Raise them together.
 Environment=GOMEMLIMIT=384MiB
 MemoryMax=512M
 MemorySwapMax=0

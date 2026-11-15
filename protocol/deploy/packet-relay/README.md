@@ -49,6 +49,7 @@ A base path is supported with `-base-path /relay` (the key card then names
 | `-read-rate-per-minute`, `-read-burst` | 600, 100 | list, download, ack per client address |
 | `-max-rate-clients` | 65536 | addresses tracked per rate table |
 | `-max-connections` | 1024 | concurrent connections |
+| `-max-concurrent-deposits` | 256 | deposit bodies in memory at once; past it `503` |
 | `-sweep-interval` | 1m | expiry sweep |
 
 A client address is the IP address, IPv6 aggregated to its /64. A full

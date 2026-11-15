@@ -40,6 +40,10 @@ const (
 	dirTemp          = "tmp"
 )
 
+// beforeRename, when set by a test, runs after a record is written and
+// synced and before it is renamed into place.
+var beforeRename func(target string)
+
 type diskBackend struct {
 	root string
 	lock *os.File
@@ -213,6 +217,9 @@ func (d *diskBackend) writeAtomic(dir, name string, data []byte) error {
 	}
 	if closeErr := file.Close(); writeErr == nil {
 		writeErr = closeErr
+	}
+	if writeErr == nil && beforeRename != nil {
+		beforeRename(filepath.Join(dir, name))
 	}
 	if writeErr == nil {
 		writeErr = os.Rename(tempName, filepath.Join(dir, name))

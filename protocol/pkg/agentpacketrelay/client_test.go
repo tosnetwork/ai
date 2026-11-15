@@ -290,6 +290,21 @@ func TestClientStrictList(t *testing.T) {
 	if _, err := serve(huge, ContentTypeJSON).List(context.Background(), alice.agentID); !errors.Is(err, ErrInvalidResponse) {
 		t.Fatal("oversized listing accepted")
 	}
+	// A valid listing padded with whitespace past 64 KiB and sent without a
+	// Content-Length is still refused: the bound is on bytes, not on what
+	// decodes.
+	padded := good + strings.Repeat(" ", MaxResponseBytes)
+	chunked, _ := fakeRelay(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", ContentTypeJSON)
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, padded)
+	})
+	if _, err := chunked.List(context.Background(), alice.agentID); !errors.Is(err, ErrInvalidResponse) {
+		t.Fatalf("whitespace-padded oversized listing = %v", err)
+	}
+	if _, err := serve(good+strings.Repeat(" ", 1000), ContentTypeJSON).List(context.Background(), alice.agentID); err != nil {
+		t.Fatalf("whitespace-padded listing within the bound refused: %v", err)
+	}
 	if _, err := serve(good, ContentTypeJSON).List(context.Background(), "agent_XYZ"); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatal("invalid Agent ID sent")
 	}

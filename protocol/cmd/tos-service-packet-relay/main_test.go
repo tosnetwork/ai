@@ -69,7 +69,7 @@ func TestOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := (prefixList{&opts.trustedProxies}).String(); got !="127.0.0.1/32,10.0.0.0/8,192.0.2.0/24" {
+	if got := (prefixList{&opts.trustedProxies}).String(); got != "127.0.0.1/32,10.0.0.0/8,192.0.2.0/24" {
 		t.Fatalf("trusted proxies = %s", got)
 	}
 	opts, err = parseOptions(append(append([]string(nil), base...), "-ttl", "25h"), io.Discard)
@@ -204,6 +204,27 @@ func TestDaemonTLS(t *testing.T) {
 	_, envelope := sealFor(t)
 	if outcome, err := client.Deposit(context.Background(), envelope); err != nil || outcome.Result != agentpacketrelay.DepositStored {
 		t.Fatalf("TLS deposit = %+v, %v", outcome, err)
+	}
+	// The same over HTTP/2.
+	h2 := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, ForceAttemptHTTP2: true}
+	h2Client, err := agentpacketrelay.NewClient(agentpacketrelay.ClientConfig{BaseURL: "https://localhost:" + port, Transport: h2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID, second := sealFor(t)
+	if outcome, err := h2Client.Deposit(context.Background(), second); err != nil || outcome.Result != agentpacketrelay.DepositStored {
+		t.Fatalf("HTTP/2 deposit = %+v, %v", outcome, err)
+	}
+	if mailbox, err := h2Client.List(context.Background(), agentID); err != nil || len(mailbox.Envelopes) != 1 {
+		t.Fatalf("HTTP/2 list = %+v, %v", mailbox, err)
+	}
+	probe, err := (&http.Client{Transport: h2}).Get("https://localhost:" + port + "/v1/relay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe.Body.Close()
+	if probe.ProtoMajor != 2 {
+		t.Fatalf("negotiated %s, want HTTP/2", probe.Proto)
 	}
 	// Plain HTTP to the TLS port gets no relay answer.
 	plain, err := agentpacketrelay.NewClient(agentpacketrelay.ClientConfig{BaseURL: "http://127.0.0.1:" + port, Timeout: 2 * time.Second})

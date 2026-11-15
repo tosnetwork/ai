@@ -566,6 +566,10 @@ Where the table above leaves a choice, the reference relay makes these:
 - The global byte limit counts envelope bytes; the global count limit counts
   envelopes plus tombstones; neither has a default. Retention defaults to the
   24-hour ceiling and the operator MAY lower it.
+- At most a configured number of deposit bodies (default 256, so 64 MiB) are
+  read at once, whatever the number of connections or HTTP/2 streams; a
+  deposit past it is answered `503` with `Retry-After` before its body is
+  read.
 - The relay keeps the depositing client address with each stored envelope so
   that the per-(client, recipient) quota survives a restart.
 - A record that fails its checksum, an unknown file or an unknown layout

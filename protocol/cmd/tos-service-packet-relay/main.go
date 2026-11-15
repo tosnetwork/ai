@@ -43,6 +43,7 @@ type options struct {
 	readBurst      int
 	maxRateClients int
 	maxConnections int
+	maxDeposits    int
 	sweepInterval  time.Duration
 	trustedProxies []netip.Prefix
 }
@@ -97,6 +98,7 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	flags.IntVar(&opts.readBurst, "read-burst", agentpacketrelay.DefaultReadRate.Burst, "list, download and acknowledge burst per client address")
 	flags.IntVar(&opts.maxRateClients, "max-rate-clients", agentpacketrelay.DefaultMaxRateClients, "client addresses tracked per rate-limiter table")
 	flags.IntVar(&opts.maxConnections, "max-connections", 1024, "concurrent connections")
+	flags.IntVar(&opts.maxDeposits, "max-concurrent-deposits", agentpacketrelay.DefaultMaxConcurrentDeposits, "deposit bodies held in memory at once (256 KiB each)")
 	flags.DurationVar(&opts.sweepInterval, "sweep-interval", time.Minute, "expiry sweep interval")
 	flags.Var(prefixList{&opts.trustedProxies}, "trusted-proxy", "address or CIDR of a TLS-terminating proxy whose X-Forwarded-For is believed (repeatable; default none)")
 	if err := flags.Parse(args); err != nil {
@@ -111,8 +113,8 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	if opts.globalEntries <= 0 || opts.globalBytes <= 0 {
 		return options{}, errors.New("-global-max-entries and -global-max-bytes are required")
 	}
-	if opts.maxConnections <= 0 || opts.sweepInterval < time.Second || opts.maxRateClients <= 0 {
-		return options{}, errors.New("-max-connections, -max-rate-clients must be positive and -sweep-interval at least 1s")
+	if opts.maxConnections <= 0 || opts.maxDeposits <= 0 || opts.sweepInterval < time.Second || opts.maxRateClients <= 0 {
+		return options{}, errors.New("-max-connections, -max-concurrent-deposits, -max-rate-clients must be positive and -sweep-interval at least 1s")
 	}
 	return opts, nil
 }
@@ -194,7 +196,8 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 	handler, err := agentpacketrelay.NewServer(agentpacketrelay.ServerConfig{Store: store, BasePath: opts.basePath,
 		DepositRate:    agentpacketrelay.RateLimit{PerMinute: opts.depositRate, Burst: opts.depositBurst},
 		ReadRate:       agentpacketrelay.RateLimit{PerMinute: opts.readRate, Burst: opts.readBurst},
-		MaxRateClients: opts.maxRateClients, TrustedProxies: opts.trustedProxies, Logger: logger})
+		MaxRateClients: opts.maxRateClients, MaxConcurrentDeposits: opts.maxDeposits,
+		TrustedProxies: opts.trustedProxies, Logger: logger})
 	if err != nil {
 		return err
 	}
@@ -203,10 +206,7 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 		return fmt.Errorf("listen: %w", err)
 	}
 	listener = &limitListener{Listener: listener, slots: make(chan struct{}, opts.maxConnections)}
-	if tlsConfig != nil {
-		listener = tls.NewListener(listener, tlsConfig)
-	}
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
+	server := &http.Server{Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
 		WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
 		// Connection-level errors name client addresses; they are dropped
 		// rather than logged.
@@ -217,7 +217,14 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 		logger.Error("expiry sweep", "error", err)
 	})
 	errCh := make(chan error, 1)
-	go func() { errCh <- server.Serve(listener) }()
+	go func() {
+		if tlsConfig != nil {
+			// ServeTLS negotiates HTTP/2 as well as HTTP/1.1.
+			errCh <- server.ServeTLS(listener, "", "")
+			return
+		}
+		errCh <- server.Serve(listener)
+	}()
 	logger.Info("agent packet relay listening", "address", listener.Addr().String(), "tls", tlsConfig != nil,
 		"usage", store.Usage())
 	if ready != nil {

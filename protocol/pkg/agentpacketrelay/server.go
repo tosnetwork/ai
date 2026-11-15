@@ -31,6 +31,10 @@ type ServerConfig struct {
 	// MaxRateClients bounds each rate-limiter table; zero takes
 	// DefaultMaxRateClients.
 	MaxRateClients int
+	// MaxConcurrentDeposits bounds the deposit bodies held in memory at
+	// once, whatever the number of connections or HTTP/2 streams; a deposit
+	// past it is answered 503. Zero takes DefaultMaxConcurrentDeposits.
+	MaxConcurrentDeposits int
 	// TrustedProxies are the peers whose X-Forwarded-For is believed. Empty
 	// means the TCP peer is always the client.
 	TrustedProxies []netip.Prefix
@@ -41,9 +45,13 @@ type ServerConfig struct {
 	Logger *slog.Logger
 }
 
+// DefaultMaxConcurrentDeposits holds at most 64 MiB of deposit bodies.
+const DefaultMaxConcurrentDeposits = 256
+
 // Server is the relay HTTP API of Agent Packet Relay V1.
 type Server struct {
 	store    *Store
+	bodies   chan struct{}
 	base     string
 	deposits *rateLimiter
 	reads    *rateLimiter
@@ -81,6 +89,13 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if maxClients < 0 {
 		return nil, errors.New("agentpacketrelay: rate-limiter table bound must be positive")
 	}
+	bodies := config.MaxConcurrentDeposits
+	if bodies == 0 {
+		bodies = DefaultMaxConcurrentDeposits
+	}
+	if bodies < 0 {
+		return nil, errors.New("agentpacketrelay: concurrent deposit bound must be positive")
+	}
 	now := config.Now
 	if now == nil {
 		now = time.Now
@@ -89,7 +104,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	return &Server{store: config.Store, base: config.BasePath, deposits: newRateLimiter(deposit, maxClients),
+	return &Server{store: config.Store, bodies: make(chan struct{}, bodies), base: config.BasePath, deposits: newRateLimiter(deposit, maxClients),
 		reads: newRateLimiter(read, maxClients), trusted: append([]netip.Prefix(nil), config.TrustedProxies...),
 		now: now, logger: logger}, nil
 }
@@ -203,6 +218,14 @@ func (s *Server) deposit(w http.ResponseWriter, request *http.Request, agentText
 	}
 	if request.Header.Get("Content-Type") != ContentTypeEnvelope {
 		s.fail(w, http.StatusBadRequest, 0)
+		return
+	}
+	select {
+	case s.bodies <- struct{}{}:
+		defer func() { <-s.bodies }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		s.json(w, http.StatusServiceUnavailable, wireError{Schema: SchemaError, Code: CodeUnavailable})
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(http.MaxBytesReader(w, request.Body, MaxEnvelopeBytes+1), MaxEnvelopeBytes+1))

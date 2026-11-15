@@ -12,6 +12,9 @@ type memoryBackend struct {
 	envelopes  map[[32]byte][]byte
 	tombstones map[[32]byte]tombstone
 	failWrites bool
+	// putGate, when set, holds every envelope write until it is closed or
+	// receives.
+	putGate chan struct{}
 }
 
 var errInjected = errors.New("agentpacketrelay: injected persistence failure")
@@ -21,6 +24,12 @@ func newMemoryBackend() *memoryBackend {
 }
 
 func (m *memoryBackend) putEnvelope(rec record, envelope []byte) error {
+	m.mu.Lock()
+	gate := m.putGate
+	m.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failWrites {
