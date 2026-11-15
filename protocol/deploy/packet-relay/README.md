@@ -97,7 +97,8 @@ and the recipient's other relays recover them).
 Each stored envelope record keeps the depositing client address (for the
 per-(client, recipient) quota across restarts). Nothing else about a client
 is stored, and the relay logs only start-up and persistence failures:
-no request bodies, paths, Agent IDs or client addresses.
+no request bodies, paths, Agent IDs or client addresses. The optional
+metrics (below) carry none of these either.
 
 ## Install with systemd
 
@@ -125,3 +126,54 @@ curl -fsS https://relay.example/v1/relay
 
 which answers the advisory `tos.service.agent-packet-relay.relay.v1`
 description.
+
+## Metrics
+
+Off by default. `-metrics-listen 127.0.0.1:9095` (or `[::1]:9095`,
+`localhost:9095`) opens a second, plain-HTTP listener that serves only
+`GET /metrics` in the Prometheus text exposition format. The relay refuses
+to start if the address is not loopback or has no port (`0.0.0.0:9095`,
+`:9095` or a public address are refused), and checks again that the address
+it bound is loopback. The listener holds at most 4 connections with 5 s
+timeouts; it is separate from the relay listener, which never serves
+`/metrics`.
+
+**Privacy rule.** No series carries an Agent ID, envelope ID, client
+address, prefix or any other per-request value. The only labels are fixed
+enums: `route` (`deposit`, `list`, `download`, `ack`, `relay` for
+`GET /v1/relay`, `other` for an unknown path or method), `code` (the status
+the relay answered, or `other`), and `bound` (`global`, `client`, `per48`).
+The counters are a fixed set that does not grow with traffic or clients.
+Every series is present, at zero, from the first scrape.
+
+| Series | Type | Meaning |
+|---|---|---|
+| `packet_relay_requests_total{route,code}` | counter | answers by route class and status: `200`, `201`, `204`, `400`, `403`, `404`, `405`, `408`, `409`, `410`, `413`, `422`, `429`, `503`, `507`, `other` |
+| `packet_relay_connections_refused_total{bound}` | counter | connections closed at accept by `-max-connections`, `-max-connections-per-client` or `-max-connections-per-48` |
+| `packet_relay_deposit_bytes_total` | counter | envelope bytes of deposits answered `201` |
+| `packet_relay_store_failures_total` | counter | `503` answers after a logged `relay store failure` |
+| `packet_relay_sweep_failures_total` | counter | failed expiry sweeps (each also logged) |
+| `packet_relay_open_connections` | gauge | connections the relay listener holds |
+| `packet_relay_stored_envelopes`, `_stored_tombstones`, `_stored_entries`, `_stored_bytes` | gauge | the store's own accounting; a scrape never reads the disk |
+| `packet_relay_global_max_entries`, `_global_max_bytes` | gauge | the configured global limits, for usage ratios |
+
+If the metrics listener stops serving with an error, the whole relay stops
+too. This fail-stop is on purpose: systemd restarts the relay rather than
+leaving one running whose refusals nobody can see. On shutdown both
+listeners are drained.
+
+Counters restart from zero when the process restarts. Requests the HTTP
+server rejects before the relay handler sees them (a malformed request
+line, oversized headers) are not counted.
+
+The supplied unit does not enable metrics. To enable them, add
+`-metrics-listen 127.0.0.1:9095` to `ExecStart`; the unit's
+`RestrictAddressFamilies` already allows loopback. Scrape on the host with
+a local agent, or from an operator machine through an SSH tunnel:
+
+```bash
+ssh -N -L 9095:127.0.0.1:9095 relay.example &
+curl -fsS http://127.0.0.1:9095/metrics
+```
+
+Do not expose the port through a proxy or firewall rule.

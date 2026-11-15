@@ -42,6 +42,9 @@ type ListenerLimits struct {
 	// so only the total bound applies to them and the proxy must bound its
 	// own clients.
 	TrustedProxies []netip.Prefix
+	// Metrics, when not nil, counts the connections each bound refuses and
+	// the connections held open.
+	Metrics *Metrics
 }
 
 // limitListener refuses rather than queues: a connection past a bound is
@@ -54,6 +57,7 @@ type limitListener struct {
 	perClient int
 	per48     int
 	trusted   []netip.Prefix
+	metrics   *Metrics
 
 	mu       sync.Mutex
 	open     int
@@ -80,8 +84,8 @@ func NewLimitListener(inner net.Listener, limits ListenerLimits) (net.Listener, 
 		return nil, errors.New("agentpacketrelay: connection bounds must satisfy 0 < per client <= per /48 <= total")
 	}
 	return &limitListener{Listener: inner, max: maxConnections, perClient: perClient, per48: per48,
-		trusted: append([]netip.Prefix(nil), limits.TrustedProxies...), byClient: map[netip.Addr]int{},
-		bySite: map[netip.Addr]int{}}, nil
+		trusted: append([]netip.Prefix(nil), limits.TrustedProxies...), metrics: limits.Metrics,
+		byClient: map[netip.Addr]int{}, bySite: map[netip.Addr]int{}}, nil
 }
 
 func (l *limitListener) Accept() (net.Conn, error) {
@@ -99,12 +103,18 @@ func (l *limitListener) Accept() (net.Conn, error) {
 		site, grouped := site48(peer)
 		grouped = grouped && counted
 		l.mu.Lock()
-		if l.open >= l.max || (counted && l.byClient[key] >= l.perClient) || (grouped && l.bySite[site] >= l.per48) {
+		if bound, full := l.full(key, counted, site, grouped); full {
 			l.mu.Unlock()
+			if l.metrics != nil {
+				l.metrics.refused[bound].Add(1)
+			}
 			_ = conn.Close()
 			continue
 		}
 		l.open++
+		if l.metrics != nil {
+			l.metrics.open.Add(1)
+		}
 		if counted {
 			l.byClient[key]++
 		}
@@ -116,10 +126,28 @@ func (l *limitListener) Accept() (net.Conn, error) {
 	}
 }
 
+// full reports the first bound a new connection would exceed, checked in the
+// order total, client, /48. The caller holds l.mu.
+func (l *limitListener) full(key netip.Addr, counted bool, site netip.Addr, grouped bool) (connectionBound, bool) {
+	switch {
+	case l.open >= l.max:
+		return boundGlobal, true
+	case counted && l.byClient[key] >= l.perClient:
+		return boundClient, true
+	case grouped && l.bySite[site] >= l.per48:
+		return bound48, true
+	default:
+		return 0, false
+	}
+}
+
 func (l *limitListener) release(key netip.Addr, counted bool, site netip.Addr, grouped bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.open--
+	if l.metrics != nil {
+		l.metrics.open.Add(-1)
+	}
 	if counted {
 		if l.byClient[key]--; l.byClient[key] <= 0 {
 			delete(l.byClient, key)
