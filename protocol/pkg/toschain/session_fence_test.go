@@ -342,6 +342,23 @@ func TestBeginRetriesAnOvertakenObservationAndRefusesAPersistentlyOldChain(t *te
 		}
 	})
 
+	t.Run("a refusal that is not behind the record", func(t *testing.T) {
+		chain := newFenceChain(t, locator, 900)
+		directory := fenceDirectory(t)
+		if err := os.WriteFile(filepath.Join(directory, "service-actor.checkpoint"), []byte("corrupt\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		reader, _ := fenceReader(t, chain, locator, directory)
+		if _, err := reader.Begin(ctx); err == nil {
+			t.Fatal("a session was opened over a corrupt fence")
+		}
+		// One quorum read of the three endpoints: only an observation behind
+		// the record is made again.
+		if calls := chain.consensus.Load(); calls != 3 {
+			t.Fatalf("consensus was asked %d times, want 3", calls)
+		}
+	})
+
 	t.Run("persistently old", func(t *testing.T) {
 		chain := newFenceChain(t, locator, 800)
 		directory := fenceDirectory(t)

@@ -80,7 +80,8 @@ func (r *SimplifiedNativeResolver) ResolveNativeAtCheckpoint(ctx context.Context
 // the session opened (another process, or a later session, observed a newer
 // checkpoint) is not a regression of this read and does not refuse it. A
 // validated read raises the fences to the checkpoint when they are below
-// it, and never lowers them.
+// it, and never lowers them. Only a request-scoped session may use it: a
+// session kept across requests would read an old checkpoint unchecked.
 func (r *SimplifiedNativeResolver) resolveNativeAtAdmittedCheckpoint(ctx context.Context, account string, checkpoint *nativev1.DNSCheckpointV1) (*nativev1.NativeStateV1, bool, error) {
 	if r == nil || ctx == nil || checkpoint == nil || checkpoint.Workchain != -1 || checkpoint.Sequence == 0 ||
 		len(checkpoint.RootHash) != 32 || len(checkpoint.FileHash) != 32 {

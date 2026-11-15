@@ -101,6 +101,11 @@ func hexDigest(value, prefix string) ([32]byte, error) {
 // session is taken at its sequence number, and every account read must report
 // the same masterchain block identity, so a result composed from a session
 // comes from one checkpoint.
+//
+// A session is request-scoped: open it for one logical result and drop it.
+// Its checkpoint is checked against the fences only when it opens, and reads
+// at it are not refused once the fences have moved past it, so a session
+// kept or reused across requests would keep serving an old checkpoint.
 type ServiceActorSession struct {
 	reader    *ServiceActorReader
 	seqno     uint64
