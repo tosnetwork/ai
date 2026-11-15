@@ -118,16 +118,16 @@ Friction and fixes discovered during the pilot:
 
 ## 7. Evidence locations
 
-Local pilot root:
+Local pilot root (under the operator's home directory):
 
 ```text
-/home/tomi/.local/share/openfox-autonomous-earning-pilot-20260825
+$HOME/.local/share/openfox-autonomous-earning-pilot-20260825
 ```
 
 Consolidated machine-readable financial report:
 
 ```text
-/home/tomi/.local/share/openfox-autonomous-earning-pilot-20260825/reports/consolidated-financial-report.json
+$HOME/.local/share/openfox-autonomous-earning-pilot-20260825/reports/consolidated-financial-report.json
 ```
 
 The local evidence includes Agent configurations, signed publication journals, two Carrier stores, one-shot Execution Gate journals, content-addressed deliverables, payer custody journals, and the completed evidence-verifier report. Tokens and private keys are owner-only files and are intentionally not copied into this repository.
