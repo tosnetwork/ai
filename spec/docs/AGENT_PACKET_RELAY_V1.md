@@ -539,11 +539,17 @@ V1 ceilings.
 Error responses are `application/json`
 `{"schema": "tos.service.agent-packet-relay.error.v1", "code": "<code>"}` with one fixed
 code per status: `invalid_request` (400), `forbidden` (403), `not_found` (404),
-`method_not_allowed` (405), `conflict` (409), `gone` (410), `too_large` (413),
-`expiry_out_of_bounds` (422), `rate_limited` (429), `quota_exhausted` (507),
-`unavailable` (503). No response repeats request bytes. `503` is a
-persistence failure or a relay shutting down; it is retryable. A client
-believes a code only when it is the fixed code of the response's status.
+`method_not_allowed` (405), `request_timeout` (408), `conflict` (409), `gone`
+(410), `too_large` (413), `expiry_out_of_bounds` (422), `rate_limited` (429),
+`quota_exhausted` (507), `unavailable` (503). No response repeats request
+bytes. `503` is a persistence failure or a relay shutting down; it is
+retryable. `408` is a deposit body that did not arrive within its read
+deadline (section 9.8); it is retryable with the same bytes. It is `408`
+rather than `503` because the cause is the request's own transfer, not the
+relay's state, and rather than `400` because the bytes may be valid: a
+`400` would tell a slow but honest sender to give up on this relay. A
+client believes a code only when it is the fixed code of the response's
+status.
 
 ### 9.8 Bounds
 
@@ -569,10 +575,13 @@ Where the table above leaves a choice, the reference relay makes these:
   peers the operator lists as trusted proxies; it is then walked from the
   right and the first address that is not a trusted proxy is the client.
 - Connections are bounded when accepted, when only the TCP peer is known: at
-  most 1,024 in total and 16 per peer address (IPv6 per /64) by default. A
-  connection past either bound is closed at once, never queued, so a full
-  table cannot block other clients or shutdown. Trusted proxies count only
-  against the total; a terminating proxy bounds its own clients. Idle
+  most 1,024 in total, 16 per peer address (IPv6 per /64) and 64 per IPv6
+  /48 by default. A /48 is the usual assignment to one site, so without
+  the /48 bound one holder would fill the table from 64 of its /64s; with
+  it, filling the table takes 16 distinct /48s or 64 IPv4 addresses (or a
+  mix). A connection past any bound is closed at once, never queued, so a
+  full table cannot block other clients or shutdown. Trusted proxies count
+  only against the total; a terminating proxy bounds its own clients. Idle
   keep-alive connections close after 30 seconds, long enough to span one
   15-second poll interval with its jitter.
 - The list/download/ack burst defaults to 100. Rate limits are token buckets
@@ -589,12 +598,13 @@ Where the table above leaves a choice, the reference relay makes these:
 - At most a configured number of deposit bodies (default 256, so 64 MiB) are
   read at once, whatever the number of connections or HTTP/2 streams; a
   deposit past it is answered `503` with `Retry-After` before its body is
-  read. One client address holds at most 4 of them at once (past that its
-  deposit is `429` with `Retry-After`), so holding every slot takes 64
-  addresses. A body must arrive within 5 s plus its declared length at
+  read. One client address holds at most 4 of them at once and all clients
+  in one IPv6 /48 at most 16 (past either its deposit is `429` with
+  `Retry-After`), so holding every slot takes 16 distinct /48s or 64 IPv4
+  addresses (or a mix); IPv4 addresses are not grouped further. A body must arrive within 5 s plus its declared length at
   32 KiB/s (at most 13 s, well under the 30-second request read timeout);
-  a slower body is cut off with `400`, so a trickling sender holds a slot
-  for seconds, not half a minute.
+  a slower body is cut off with `408` (retryable) and the connection closed,
+  so a trickling sender holds a slot for seconds, not half a minute.
 - The relay keeps the depositing client address with each stored envelope so
   that the per-(client, recipient) quota survives a restart.
 - A record that fails its checksum, an unknown file or an unknown layout

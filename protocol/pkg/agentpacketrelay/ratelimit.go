@@ -88,9 +88,9 @@ func (l *rateLimiter) allow(client netip.Addr, now time.Time) (bool, time.Durati
 	key := rateKey{addr: client}
 	b := l.buckets[key]
 	var group netip.Addr
-	if b == nil && client.Is6() {
-		if prefix, err := client.Prefix(48); err == nil {
-			group = prefix.Addr()
+	if b == nil {
+		if site, ok := site48(client); ok {
+			group = site
 			if l.groups[group] >= l.perGroup {
 				key, group = rateKey{addr: group, shared: true}, netip.Addr{}
 				b = l.buckets[key]
@@ -199,4 +199,18 @@ func aggregate(addr netip.Addr) netip.Addr {
 		return addr
 	}
 	return prefix.Addr()
+}
+
+// site48 returns the IPv6 /48 an address lies in. A /48 is the usual
+// assignment to one site, so it is the unit one holder controls; IPv4
+// addresses have no such group.
+func site48(addr netip.Addr) (netip.Addr, bool) {
+	if !addr.Is6() || addr.Is4In6() {
+		return netip.Addr{}, false
+	}
+	prefix, err := addr.Prefix(48)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return prefix.Addr(), true
 }

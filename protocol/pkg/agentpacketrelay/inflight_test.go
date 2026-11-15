@@ -1,6 +1,7 @@
 package agentpacketrelay
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -269,9 +270,17 @@ func TestDepositBodyDeadline(t *testing.T) {
 		}
 	}()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := conn.Read(make([]byte, 512)); err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+	answer, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatal("a trickled deposit body held its slot past its deadline")
 	}
+	if err != nil {
+		t.Fatalf("no answer to a trickled body: %v", err)
+	}
+	body, _ := io.ReadAll(answer.Body)
+	answer.Body.Close()
+	// Slow is not malformed: 408, which a sender retries, not 400.
+	expectStatus(t, response{status: answer.StatusCode, header: answer.Header, body: body}, http.StatusRequestTimeout)
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
 		t.Fatalf("the trickled body was cut after %s", elapsed)
 	}

@@ -43,8 +43,10 @@ type options struct {
 	maxRateClients    int
 	maxConnections    int
 	maxPerClientConns int
+	maxSiteConns      int
 	maxDeposits       int
 	maxClientDeposits int
+	maxSiteDeposits   int
 	sweepInterval     time.Duration
 	trustedProxies    []netip.Prefix
 }
@@ -103,17 +105,30 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 		"concurrent connections per TCP peer address (IPv6 per /64); trusted proxies are exempt")
 	flags.IntVar(&opts.maxClientDeposits, "max-concurrent-deposits-per-client", agentpacketrelay.DefaultMaxConcurrentDepositsPerClient,
 		"deposit bodies one client address holds at once; past it 429")
+	flags.IntVar(&opts.maxSiteConns, "max-connections-per-48", agentpacketrelay.DefaultMaxConnectionsPer48,
+		"concurrent connections of all peers in one IPv6 /48; trusted proxies are exempt")
 	flags.IntVar(&opts.maxDeposits, "max-concurrent-deposits", agentpacketrelay.DefaultMaxConcurrentDeposits, "deposit bodies held in memory at once (256 KiB each)")
+	flags.IntVar(&opts.maxSiteDeposits, "max-concurrent-deposits-per-48", agentpacketrelay.DefaultMaxConcurrentDepositsPer48,
+		"deposit bodies all clients in one IPv6 /48 hold at once; past it 429")
 	flags.DurationVar(&opts.sweepInterval, "sweep-interval", time.Minute, "expiry sweep interval")
 	flags.Var(prefixList{&opts.trustedProxies}, "trusted-proxy", "address or CIDR of a TLS-terminating proxy whose X-Forwarded-For is believed (repeatable; default none)")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
-	perClientSet := false
-	flags.Visit(func(f *flag.Flag) { perClientSet = perClientSet || f.Name == "max-connections-per-client" })
-	if !perClientSet && opts.maxPerClientConns > opts.maxConnections {
-		// The default per-client share never exceeds a smaller total.
-		opts.maxPerClientConns = opts.maxConnections
+	// A share flag left unset is passed as zero, so the relay takes its
+	// default clamped to the totals; one that is set must be positive, and
+	// the relay checks per client <= per /48 <= total.
+	set := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	for name, value := range map[string]*int{
+		"max-connections-per-client": &opts.maxPerClientConns, "max-connections-per-48": &opts.maxSiteConns,
+		"max-concurrent-deposits-per-client": &opts.maxClientDeposits, "max-concurrent-deposits-per-48": &opts.maxSiteDeposits,
+	} {
+		if !set[name] {
+			*value = 0
+		} else if *value <= 0 {
+			return options{}, fmt.Errorf("-%s must be positive", name)
+		}
 	}
 	if flags.NArg() != 0 {
 		return options{}, errors.New("unexpected positional arguments")
@@ -124,11 +139,9 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	if opts.globalEntries <= 0 || opts.globalBytes <= 0 {
 		return options{}, errors.New("-global-max-entries and -global-max-bytes are required")
 	}
-	if opts.maxConnections <= 0 || opts.maxPerClientConns <= 0 || opts.maxPerClientConns > opts.maxConnections ||
-		opts.maxDeposits <= 0 || opts.maxClientDeposits <= 0 || opts.maxClientDeposits > opts.maxDeposits ||
-		opts.sweepInterval < time.Second || opts.maxRateClients <= 0 {
-		return options{}, errors.New("-max-connections, -max-connections-per-client (at most -max-connections), " +
-			"-max-concurrent-deposits and -max-rate-clients must be positive and -sweep-interval at least 1s")
+	if opts.maxConnections <= 0 || opts.maxDeposits <= 0 || opts.sweepInterval < time.Second || opts.maxRateClients <= 0 {
+		return options{}, errors.New("-max-connections, -max-concurrent-deposits and -max-rate-clients must be positive " +
+			"and -sweep-interval at least 1s")
 	}
 	return opts, nil
 }
@@ -182,8 +195,8 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 		DepositRate:    agentpacketrelay.RateLimit{PerMinute: opts.depositRate, Burst: opts.depositBurst},
 		ReadRate:       agentpacketrelay.RateLimit{PerMinute: opts.readRate, Burst: opts.readBurst},
 		MaxRateClients: opts.maxRateClients, MaxConcurrentDeposits: opts.maxDeposits,
-		MaxConcurrentDepositsPerClient: opts.maxClientDeposits,
-		TrustedProxies:                 opts.trustedProxies, Logger: logger})
+		MaxConcurrentDepositsPerClient: opts.maxClientDeposits, MaxConcurrentDepositsPer48: opts.maxSiteDeposits,
+		TrustedProxies: opts.trustedProxies, Logger: logger})
 	if err != nil {
 		return err
 	}
@@ -196,7 +209,7 @@ func run(ctx context.Context, args []string, output io.Writer, ready func(net.Ad
 	// shutdown and other clients are never blocked behind a full table.
 	listener, err = agentpacketrelay.NewLimitListener(listener, agentpacketrelay.ListenerLimits{
 		MaxConnections: opts.maxConnections, MaxConnectionsPerClient: opts.maxPerClientConns,
-		TrustedProxies: opts.trustedProxies})
+		MaxConnectionsPer48: opts.maxSiteConns, TrustedProxies: opts.trustedProxies})
 	if err != nil {
 		return err
 	}

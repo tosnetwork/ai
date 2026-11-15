@@ -23,7 +23,8 @@ ExecStart=/usr/local/bin/tos-service-packet-relay \
   -global-max-entries 100000 \
   -global-max-bytes 4294967296 \
   -max-connections 1024 \
-  -max-connections-per-client 16
+  -max-connections-per-client 16 \
+  -max-connections-per-48 64
 # The certificate and key are copied into a private credentials directory
 # readable only by the service; rotate them in place and restart.
 LoadCredential=tls-cert:/etc/tos-service/packet-relay/tls-cert.pem

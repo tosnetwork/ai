@@ -88,6 +88,7 @@ func TestDepositOutcomeClassification(t *testing.T) {
 		{302, "", DepositRetryable, ""},
 		{204, "", DepositRetryable, ""},
 		{403, "", DepositRetryable, CodeForbidden},
+		{408, "", DepositRetryable, CodeRequestTimeout},
 	}
 	for _, c := range cases {
 		client, _ := fakeRelay(t, func(w http.ResponseWriter, r *http.Request) {
@@ -356,6 +357,12 @@ func TestClientStrictDownloadAndAck(t *testing.T) {
 	if err := notFound.Ack(ctx, alice.agentID, env.id, env.secret); !errors.As(err, &statusErr) || statusErr.Code != CodeNotFound ||
 		!errors.Is(err, ErrNotFound) || !errors.Is(err, ErrRejected) || errors.Is(err, ErrUnavailable) {
 		t.Fatalf("404 ack = %v", err)
+	}
+	// 408 is retryable: ErrRequestTimeout, never ErrRejected.
+	slow := serve(408, ContentTypeJSON, []byte(`{"schema":"`+SchemaError+`","code":"request_timeout"}`))
+	if err := slow.Ack(ctx, alice.agentID, env.id, env.secret); !errors.As(err, &statusErr) ||
+		statusErr.Code != CodeRequestTimeout || !errors.Is(err, ErrRequestTimeout) || errors.Is(err, ErrRejected) {
+		t.Fatalf("408 ack = %v", err)
 	}
 	forbidden := serve(403, ContentTypeJSON, []byte(`{"schema":"`+SchemaError+`","code":"forbidden"}`))
 	if err := forbidden.Ack(ctx, alice.agentID, env.id, env.secret); !errors.Is(err, ErrForbidden) {

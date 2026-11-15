@@ -13,9 +13,15 @@ const (
 	DefaultMaxConnections = 1024
 	// DefaultMaxConnectionsPerClient bounds the open connections of one
 	// client address (IPv4, or an IPv6 /64). Sixteen covers a client that
-	// polls several mailboxes and deposits in parallel; keeping all 1,024
-	// slots then takes 64 distinct addresses rather than one.
+	// polls several mailboxes and deposits in parallel.
 	DefaultMaxConnectionsPerClient = 16
+	// DefaultMaxConnectionsPer48 bounds the open connections of all /64s in
+	// one IPv6 /48, the usual assignment to one site: four clients' worth,
+	// enough for a few nodes behind one site. Without it one /48 holder
+	// would fill the table from 64 of its 65,536 /64s; with it, filling the
+	// default 1,024 connections takes 16 distinct /48s or 64 IPv4
+	// addresses.
+	DefaultMaxConnectionsPer48 = 64
 )
 
 // ListenerLimits bounds the connections a relay listener accepts.
@@ -25,11 +31,16 @@ type ListenerLimits struct {
 	MaxConnections int
 	// MaxConnectionsPerClient bounds the open connections of one TCP peer
 	// address, aggregated like every client address; zero takes
-	// DefaultMaxConnectionsPerClient.
+	// DefaultMaxConnectionsPerClient (at most MaxConnections).
 	MaxConnectionsPerClient int
-	// TrustedProxies are peers exempt from the per-client bound: every
-	// client behind a terminating proxy shares its address, so only the
-	// total bound applies to them and the proxy must bound its own clients.
+	// MaxConnectionsPer48 bounds the open connections of all peers in one
+	// IPv6 /48; zero takes DefaultMaxConnectionsPer48 (at most
+	// MaxConnections, at least MaxConnectionsPerClient).
+	MaxConnectionsPer48 int
+	// TrustedProxies are peers exempt from the per-client and per-/48
+	// bounds: every client behind a terminating proxy shares its address,
+	// so only the total bound applies to them and the proxy must bound its
+	// own clients.
 	TrustedProxies []netip.Prefix
 }
 
@@ -41,11 +52,13 @@ type limitListener struct {
 	net.Listener
 	max       int
 	perClient int
+	per48     int
 	trusted   []netip.Prefix
 
 	mu       sync.Mutex
 	open     int
 	byClient map[netip.Addr]int
+	bySite   map[netip.Addr]int
 }
 
 // NewLimitListener wraps inner with the connection bounds.
@@ -53,18 +66,22 @@ func NewLimitListener(inner net.Listener, limits ListenerLimits) (net.Listener, 
 	if inner == nil {
 		return nil, errors.New("agentpacketrelay: a listener is required")
 	}
-	maxConnections, perClient := limits.MaxConnections, limits.MaxConnectionsPerClient
+	maxConnections, perClient, per48 := limits.MaxConnections, limits.MaxConnectionsPerClient, limits.MaxConnectionsPer48
 	if maxConnections == 0 {
 		maxConnections = DefaultMaxConnections
 	}
 	if perClient == 0 {
-		perClient = DefaultMaxConnectionsPerClient
+		perClient = min(DefaultMaxConnectionsPerClient, maxConnections)
 	}
-	if maxConnections < 0 || perClient < 0 || perClient > maxConnections {
-		return nil, errors.New("agentpacketrelay: connection bounds must be positive, per client at most the total")
+	if per48 == 0 {
+		per48 = max(min(DefaultMaxConnectionsPer48, maxConnections), perClient)
 	}
-	return &limitListener{Listener: inner, max: maxConnections, perClient: perClient,
-		trusted: append([]netip.Prefix(nil), limits.TrustedProxies...), byClient: map[netip.Addr]int{}}, nil
+	if maxConnections < 0 || perClient <= 0 || per48 < perClient || per48 > maxConnections {
+		return nil, errors.New("agentpacketrelay: connection bounds must satisfy 0 < per client <= per /48 <= total")
+	}
+	return &limitListener{Listener: inner, max: maxConnections, perClient: perClient, per48: per48,
+		trusted: append([]netip.Prefix(nil), limits.TrustedProxies...), byClient: map[netip.Addr]int{},
+		bySite: map[netip.Addr]int{}}, nil
 }
 
 func (l *limitListener) Accept() (net.Conn, error) {
@@ -79,8 +96,10 @@ func (l *limitListener) Accept() (net.Conn, error) {
 			continue
 		}
 		key, counted := aggregate(peer), !isTrusted(peer, l.trusted)
+		site, grouped := site48(peer)
+		grouped = grouped && counted
 		l.mu.Lock()
-		if l.open >= l.max || (counted && l.byClient[key] >= l.perClient) {
+		if l.open >= l.max || (counted && l.byClient[key] >= l.perClient) || (grouped && l.bySite[site] >= l.per48) {
 			l.mu.Unlock()
 			_ = conn.Close()
 			continue
@@ -89,18 +108,26 @@ func (l *limitListener) Accept() (net.Conn, error) {
 		if counted {
 			l.byClient[key]++
 		}
+		if grouped {
+			l.bySite[site]++
+		}
 		l.mu.Unlock()
-		return &limitConn{Conn: conn, release: func() { l.release(key, counted) }}, nil
+		return &limitConn{Conn: conn, release: func() { l.release(key, counted, site, grouped) }}, nil
 	}
 }
 
-func (l *limitListener) release(key netip.Addr, counted bool) {
+func (l *limitListener) release(key netip.Addr, counted bool, site netip.Addr, grouped bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.open--
 	if counted {
 		if l.byClient[key]--; l.byClient[key] <= 0 {
 			delete(l.byClient, key)
+		}
+	}
+	if grouped {
+		if l.bySite[site]--; l.bySite[site] <= 0 {
+			delete(l.bySite, site)
 		}
 	}
 }

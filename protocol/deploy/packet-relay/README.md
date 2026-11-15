@@ -54,13 +54,23 @@ A base path is supported with `-base-path /relay` (the key card then names
 | `-max-rate-clients` | 65536 | addresses tracked per rate table |
 | `-max-connections` | 1024 | concurrent connections; past it a new connection is closed at once |
 | `-max-connections-per-client` | 16 | concurrent connections per TCP peer address (IPv6 per /64); trusted proxies exempt |
+| `-max-connections-per-48` | 64 | concurrent connections of all peers in one IPv6 /48; trusted proxies exempt |
 | `-max-concurrent-deposits` | 256 | deposit bodies in memory at once; past it `503` |
 | `-max-concurrent-deposits-per-client` | 4 | deposit bodies one client address holds at once; past it `429` |
+| `-max-concurrent-deposits-per-48` | 16 | deposit bodies all clients in one IPv6 /48 hold at once; past it `429` |
+| `-sweep-interval` | 1m | expiry sweep |
+
+The shares must satisfy per client ≤ per /48 ≤ total; a share left unset
+takes its default, lowered to the total when the total is smaller.
 
 A deposit body must arrive within 5 s plus its declared length at
-32 KiB/s (13 s for a maximal 256 KiB envelope); a slower body is cut off
-with `400` and frees its slot.
-| `-sweep-interval` | 1m | expiry sweep |
+32 KiB/s (13 s for a maximal 256 KiB envelope); a slower body is answered
+`408` (the sender retries) and frees its slot.
+
+With the defaults, one IPv6 /48 holds at most 64 connections and 16
+deposit bodies. Taking every connection then needs 16 distinct /48s or 64
+IPv4 addresses (or a mix), and taking every deposit body needs 16 /48s or
+64 IPv4 addresses as well. IPv4 addresses are not grouped further.
 
 A client address is the IP address, IPv6 aggregated to its /64. A full
 mailbox or a full relay answers `507`; no envelope is ever evicted. A full

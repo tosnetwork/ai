@@ -54,6 +54,32 @@ func TestOptions(t *testing.T) {
 	if len(opts.trustedProxies) != 0 {
 		t.Fatal("a trusted proxy is configured by default")
 	}
+	// Unset share flags reach the relay as zero, which takes its defaults.
+	if opts.maxPerClientConns != 0 || opts.maxSiteConns != 0 || opts.maxClientDeposits != 0 || opts.maxSiteDeposits != 0 {
+		t.Fatalf("unset share flags = %d %d %d %d", opts.maxPerClientConns, opts.maxSiteConns, opts.maxClientDeposits, opts.maxSiteDeposits)
+	}
+	opts, err = parseOptions(append(append([]string(nil), base...), "-max-connections-per-48", "32",
+		"-max-concurrent-deposits-per-48", "8"), io.Discard)
+	if err != nil || opts.maxSiteConns != 32 || opts.maxSiteDeposits != 8 {
+		t.Fatalf("explicit per-48 flags = %+v, %v", opts, err)
+	}
+	// An inconsistent set of shares is refused when the daemon starts, which
+	// also shows each share reaches the relay.
+	for name, shares := range map[string][]string{
+		"per client above total":   {"-max-connections", "8", "-max-connections-per-client", "20"},
+		"per /48 below per client": {"-max-connections-per-client", "4", "-max-connections-per-48", "2"},
+		"bodies per /48 below per client": {"-max-concurrent-deposits-per-client", "8",
+			"-max-concurrent-deposits-per-48", "4"},
+		"bodies per client above total": {"-max-concurrent-deposits", "4", "-max-concurrent-deposits-per-client", "8"},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		args := append(append([]string(nil), base[2:]...), "-state-dir", t.TempDir(), "-listen", "127.0.0.1:0")
+		err := run(ctx, append(args, shares...), io.Discard, nil)
+		cancel()
+		if err == nil {
+			t.Fatalf("%s: the daemon started", name)
+		}
+	}
 	for name, args := range map[string][]string{
 		"no state dir":     {"-global-max-entries", "1", "-global-max-bytes", "1"},
 		"no global count":  {"-state-dir", "/x", "-global-max-bytes", "1"},
@@ -61,6 +87,8 @@ func TestOptions(t *testing.T) {
 		"positional":       append(append([]string(nil), base...), "extra"),
 		"bad proxy":        append(append([]string(nil), base...), "-trusted-proxy", "example.com"),
 		"zero connections": append(append([]string(nil), base...), "-max-connections", "0"),
+		"zero per-48":      append(append([]string(nil), base...), "-max-connections-per-48", "0"),
+		"zero body share":  append(append([]string(nil), base...), "-max-concurrent-deposits-per-48", "-1"),
 	} {
 		if _, err := parseOptions(args, io.Discard); err == nil {
 			t.Errorf("%s accepted", name)

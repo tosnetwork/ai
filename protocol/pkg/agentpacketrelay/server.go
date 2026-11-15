@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,11 @@ type ServerConfig struct {
 	// a deposit past it is answered 429. Zero takes
 	// DefaultMaxConcurrentDepositsPerClient.
 	MaxConcurrentDepositsPerClient int
+	// MaxConcurrentDepositsPer48 bounds the deposit bodies all client
+	// addresses in one IPv6 /48 hold at once; a deposit past it is answered
+	// 429. Zero takes DefaultMaxConcurrentDepositsPer48 (at most
+	// MaxConcurrentDeposits, at least MaxConcurrentDepositsPerClient).
+	MaxConcurrentDepositsPer48 int
 	// DepositReadBase and DepositMinBytesPerSecond set the deadline for
 	// reading a deposit body: DepositReadBase plus the declared length at
 	// DepositMinBytesPerSecond. Zero takes DefaultDepositReadBase and
@@ -66,8 +72,13 @@ const (
 	// DefaultMaxConcurrentDeposits holds at most 64 MiB of deposit bodies.
 	DefaultMaxConcurrentDeposits = 256
 	// DefaultMaxConcurrentDepositsPerClient lets one address hold 4 of the
-	// 256 slots, so holding them all takes 64 addresses.
+	// 256 slots.
 	DefaultMaxConcurrentDepositsPerClient = 4
+	// DefaultMaxConcurrentDepositsPer48 lets one IPv6 /48, the usual
+	// assignment to one site, hold 16 slots: four clients' worth. Without
+	// it one /48 holder would take all 256 slots from 64 of its /64s; with
+	// it, taking them all needs 16 distinct /48s or 64 IPv4 addresses.
+	DefaultMaxConcurrentDepositsPer48 = 16
 	// DefaultDepositReadBase and DefaultDepositMinBytesPerSecond give a
 	// maximal 256 KiB body 5 s + 8 s = 13 s, well under the 30 s request
 	// read timeout: 32 KiB/s is 256 kbit/s, slower than any link a relay
@@ -81,18 +92,21 @@ const (
 type Server struct {
 	store  *Store
 	bodies chan struct{}
-	// inflight counts the deposit bodies each client address holds.
-	inflightMu sync.Mutex
-	inflight   map[netip.Addr]int
-	perClient  int
-	readBase   time.Duration
-	minRate    int
-	base       string
-	deposits   *rateLimiter
-	reads      *rateLimiter
-	trusted    []netip.Prefix
-	now        func() time.Time
-	logger     *slog.Logger
+	// inflight and inflightSites count the deposit bodies each client
+	// address and each IPv6 /48 hold.
+	inflightMu    sync.Mutex
+	inflight      map[netip.Addr]int
+	inflightSites map[netip.Addr]int
+	perClient     int
+	per48Bodies   int
+	readBase      time.Duration
+	minRate       int
+	base          string
+	deposits      *rateLimiter
+	reads         *rateLimiter
+	trusted       []netip.Prefix
+	now           func() time.Time
+	logger        *slog.Logger
 }
 
 // NewServer checks the configuration and returns the handler.
@@ -145,8 +159,12 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if minRate == 0 {
 		minRate = DefaultDepositMinBytesPerSecond
 	}
-	if perClient < 0 || perClient > bodies || readBase < 0 || minRate < 0 {
-		return nil, errors.New("agentpacketrelay: per-client deposit bound must be positive and at most the total; deposit read bounds must be positive")
+	per48Bodies := config.MaxConcurrentDepositsPer48
+	if per48Bodies == 0 {
+		per48Bodies = max(min(DefaultMaxConcurrentDepositsPer48, bodies), perClient)
+	}
+	if perClient <= 0 || per48Bodies < perClient || per48Bodies > bodies || readBase < 0 || minRate < 0 {
+		return nil, errors.New("agentpacketrelay: deposit bounds must satisfy 0 < per client <= per /48 <= total; deposit read bounds must be positive")
 	}
 	now := config.Now
 	if now == nil {
@@ -157,7 +175,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Server{store: config.Store, bodies: make(chan struct{}, bodies), inflight: map[netip.Addr]int{},
-		perClient: perClient, readBase: readBase, minRate: minRate, base: config.BasePath,
+		inflightSites: map[netip.Addr]int{}, perClient: perClient, per48Bodies: per48Bodies, readBase: readBase, minRate: minRate, base: config.BasePath,
 		deposits: newRateLimiter(deposit, maxClients, per48), reads: newRateLimiter(read, maxClients, per48), trusted: append([]netip.Prefix(nil), config.TrustedProxies...),
 		now: now, logger: logger}, nil
 }
@@ -260,21 +278,33 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 
 func unixNow(now time.Time) uint64 { return uint64(max(now.Unix(), 0)) }
 
+// takeClientSlot claims one deposit body for client within both its own
+// share and its IPv6 /48's share.
 func (s *Server) takeClientSlot(client netip.Addr) bool {
+	site, grouped := site48(client)
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
-	if s.inflight[client] >= s.perClient {
+	if s.inflight[client] >= s.perClient || (grouped && s.inflightSites[site] >= s.per48Bodies) {
 		return false
 	}
 	s.inflight[client]++
+	if grouped {
+		s.inflightSites[site]++
+	}
 	return true
 }
 
 func (s *Server) releaseClientSlot(client netip.Addr) {
+	site, grouped := site48(client)
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	if s.inflight[client]--; s.inflight[client] <= 0 {
 		delete(s.inflight, client)
+	}
+	if grouped {
+		if s.inflightSites[site]--; s.inflightSites[site] <= 0 {
+			delete(s.inflightSites, site)
+		}
 	}
 }
 
@@ -316,6 +346,13 @@ func (s *Server) deposit(w http.ResponseWriter, request *http.Request, agentText
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(http.MaxBytesReader(w, request.Body, MaxEnvelopeBytes+1), MaxEnvelopeBytes+1))
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		// Slow, not malformed: the sender may retry the same bytes, here or
+		// at another relay. The connection cannot be read further.
+		w.Header().Set("Connection", "close")
+		s.fail(w, http.StatusRequestTimeout, 0)
+		return
+	}
 	if err != nil || int64(len(body)) != request.ContentLength {
 		s.fail(w, http.StatusBadRequest, 0)
 		return

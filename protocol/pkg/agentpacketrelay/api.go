@@ -30,6 +30,7 @@ const (
 	CodeForbidden          = "forbidden"
 	CodeNotFound           = "not_found"
 	CodeMethodNotAllowed   = "method_not_allowed"
+	CodeRequestTimeout     = "request_timeout"
 	CodeConflict           = "conflict"
 	CodeGone               = "gone"
 	CodeTooLarge           = "too_large"
@@ -48,6 +49,7 @@ var codeForStatus = map[int]string{
 	403:                    CodeForbidden,
 	404:                    CodeNotFound,
 	405:                    CodeMethodNotAllowed,
+	408:                    CodeRequestTimeout,
 	409:                    CodeConflict,
 	410:                    CodeGone,
 	413:                    CodeTooLarge,

@@ -40,7 +40,10 @@ var (
 	ErrForbidden       = errors.New("agentpacketrelay: relay reports the acknowledgement secret does not match")
 	ErrRateLimited     = errors.New("agentpacketrelay: relay rate limit reached")
 	ErrUnavailable     = errors.New("agentpacketrelay: relay unavailable")
-	ErrRejected        = errors.New("agentpacketrelay: relay rejected the request")
+	// ErrRequestTimeout is 408: the request body arrived too slowly. It is
+	// retryable and is not ErrRejected.
+	ErrRequestTimeout = errors.New("agentpacketrelay: relay timed out reading the request")
+	ErrRejected       = errors.New("agentpacketrelay: relay rejected the request")
 )
 
 // StatusError is a relay error status with its fixed code. RetryAfter is the
@@ -69,8 +72,11 @@ func (e *StatusError) Is(target error) bool {
 		return e.StatusCode == http.StatusTooManyRequests
 	case ErrUnavailable:
 		return e.StatusCode >= 500
+	case ErrRequestTimeout:
+		return e.StatusCode == http.StatusRequestTimeout
 	case ErrRejected:
-		return e.StatusCode >= 400 && e.StatusCode < 500 && e.StatusCode != http.StatusTooManyRequests
+		return e.StatusCode >= 400 && e.StatusCode < 500 && e.StatusCode != http.StatusTooManyRequests &&
+			e.StatusCode != http.StatusRequestTimeout
 	}
 	return false
 }
@@ -99,8 +105,9 @@ const (
 	// envelope ID. Never acceptance and never retried at this relay.
 	DepositConflict
 	// DepositRetryable is every outcome the sender retries later with the
-	// same bytes: a timeout, a connection error, 429, 507, 503, any other
-	// 5xx, a redirect, or any status V1 does not define for a deposit.
+	// same bytes: a timeout, a connection error, 408 (the body arrived too
+	// slowly), 429, 507, 503, any other 5xx, a redirect, or any status V1
+	// does not define for a deposit.
 	DepositRetryable
 	// DepositRejected is 400, 404, 413 or 422: the relay refused these exact
 	// bytes, and resending them unchanged to this relay will be refused
@@ -270,6 +277,9 @@ func (c *Client) Deposit(ctx context.Context, envelope []byte) (DepositOutcome, 
 		outcome.Result = DepositConflict
 	case http.StatusBadRequest, http.StatusNotFound, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
 		outcome.Result = DepositRejected
+	case http.StatusRequestTimeout:
+		// The body arrived too slowly: the same bytes may succeed later.
+		outcome.Result = DepositRetryable
 	default:
 		outcome.Result = DepositRetryable
 	}
