@@ -290,6 +290,10 @@ func TestDiskTempAndLock(t *testing.T) {
 	if _, err := os.Stat(partial); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("a partial write survived reopen")
 	}
+	// Run from a scratch working directory, so that a store which wrongly
+	// accepted the relative path could never write into the source tree.
+	scratch := t.TempDir()
+	t.Chdir(scratch)
 	if _, err := OpenDiskStore("relative/dir", testLimits(), clock.Now()); err == nil {
 		t.Fatal("relative state directory accepted")
 	}
