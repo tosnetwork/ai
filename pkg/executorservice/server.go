@@ -128,8 +128,11 @@ type Server struct {
 	connections int
 	flights     map[string]*flight
 	budgetFree  uint64
-	handlers    sync.WaitGroup
-	runs        sync.WaitGroup
+	// retentionHeld counts retention records promised to admitted jobs
+	// that have not written theirs yet.
+	retentionHeld int
+	handlers      sync.WaitGroup
+	runs          sync.WaitGroup
 
 	// afterAmbiguousRead, set only by tests, runs between a journal read
 	// that found a claim without an outcome and the check whether that
@@ -495,8 +498,23 @@ func (s *Server) execute(runner *softwarework.Runner, request softwarework.Reque
 			return refuse(StatusStorageFull)
 		}
 	}
-	// Every service job is given a deadline, so there must be room for one.
-	if err := s.config.Store.CheckCapacity(s.base, 1); errors.Is(err, artifactstore.ErrRetentionFull) {
+	// Every service job is given a deadline, so there must be room for one,
+	// counting the jobs that were admitted before this one and have not
+	// recorded theirs yet. The slot is held from here until the run has
+	// retained its objects or ended without doing so; without it two jobs
+	// admitted against the last free record would both run and the second
+	// could not be retained.
+	s.mutex.Lock()
+	s.retentionHeld++
+	needed := s.retentionHeld
+	s.mutex.Unlock()
+	admitted := false
+	defer func() {
+		if !admitted {
+			s.releaseRetention()
+		}
+	}()
+	if err := s.config.Store.CheckCapacity(s.base, needed); errors.Is(err, artifactstore.ErrRetentionFull) {
 		return refuse(StatusRetentionFull)
 	} else if err != nil {
 		return refuse(StatusUnavailable)
@@ -514,6 +532,7 @@ func (s *Server) execute(runner *softwarework.Runner, request softwarework.Reque
 		s.mutex.Unlock()
 		return refuse(StatusBusy)
 	}
+	admitted = true
 	current := &flight{done: make(chan struct{})}
 	s.flights[request.ExecutionID] = current
 	s.runs.Add(1)
@@ -524,6 +543,9 @@ func (s *Server) execute(runner *softwarework.Runner, request softwarework.Reque
 	go func() {
 		defer s.runs.Done()
 		current.status, current.outcome, current.retained = s.run(runner, request, requested)
+		// The job's record is in the store now, or the job will never
+		// have one: either way its held slot is no longer needed.
+		s.releaseRetention()
 		s.release(uint64(len(request.SourceArchive)))
 		s.mutex.Lock()
 		delete(s.flights, request.ExecutionID)
@@ -532,6 +554,14 @@ func (s *Server) execute(runner *softwarework.Runner, request softwarework.Reque
 	}()
 	<-current.done
 	return current.status, current.outcome, current.retained, true
+}
+
+func (s *Server) releaseRetention() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.retentionHeld > 0 {
+		s.retentionHeld--
+	}
 }
 
 func (s *Server) flying(executionID string) bool {

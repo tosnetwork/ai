@@ -692,6 +692,143 @@ func TestNewRunIsRefusedBeforeItsIdentityIsClaimed(t *testing.T) {
 	}
 }
 
+// TestRetentionRecordIsReservedAtAdmission runs two jobs at once against a
+// store with room for one more retained job. The second must be refused
+// before it runs: admitted, it would run and then have nowhere to record
+// its retention.
+func TestRetentionRecordIsReservedAtAdmission(t *testing.T) {
+	backend := &fakeBackend{started: make(chan struct{}, 4), gate: make(chan struct{})}
+	service := startService(t, backend, func(config *Config) { config.MaxExecutions = 2 }, artifactstore.WithRecordBound(1))
+	held := func() int {
+		service.server.mutex.Lock()
+		defer service.server.mutex.Unlock()
+		return service.server.retentionHeld
+	}
+	first := make(chan error, 1)
+	go func() {
+		_, err := service.client.Execute(background(t), job("reserved-first"))
+		first <- err
+	}()
+	waitStarted(t, backend)
+	// An execution slot is free; the only retention record is spoken for.
+	if _, err := service.client.Execute(background(t), job("reserved-second")); !errors.Is(err, ErrRetentionFull) {
+		t.Fatalf("second job against the reserved record: err = %v", err)
+	}
+	if backend.runs() != 1 || held() != 1 {
+		t.Fatalf("runs=%d held=%d", backend.runs(), held())
+	}
+	close(backend.gate)
+	if err := <-first; err != nil {
+		t.Fatalf("the first job: %v", err)
+	}
+	// The reservation ends with the run; the record itself now counts.
+	if held() != 0 {
+		t.Fatalf("held after the run = %d", held())
+	}
+	if _, err := service.client.Execute(background(t), job("reserved-second")); !errors.Is(err, ErrRetentionFull) || backend.runs() != 1 {
+		t.Fatalf("second job at the bound: err=%v runs=%d", err, backend.runs())
+	}
+	// Once the first job's retention ended and was swept, the refused
+	// identity runs: nothing was claimed for it.
+	if _, err := service.store.Sweep(context.Background(), time.Now().Add(DefaultMaxRetention+time.Hour), 8); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.client.Execute(background(t), job("reserved-second")); err != nil || backend.runs() != 2 || held() != 0 {
+		t.Fatalf("after the sweep: err=%v runs=%d held=%d", err, backend.runs(), held())
+	}
+}
+
+// TestRefusedAdmissionsReleaseTheirRetentionSlot checks that a job refused
+// after its slot was held gives the slot back, and that a failed run does.
+func TestRefusedAdmissionsReleaseTheirRetentionSlot(t *testing.T) {
+	backend := &fakeBackend{started: make(chan struct{}, 4), gate: make(chan struct{}), exit: 1}
+	service := startService(t, backend, nil, artifactstore.WithRecordBound(2))
+	held := func() int {
+		service.server.mutex.Lock()
+		defer service.server.mutex.Unlock()
+		return service.server.retentionHeld
+	}
+	first := make(chan error, 1)
+	running := job("release-running")
+	go func() {
+		_, err := service.client.Execute(background(t), running)
+		first <- err
+	}()
+	waitStarted(t, backend)
+	// Refused at the execution bound, after the slot was taken.
+	if _, err := service.client.Execute(background(t), job("release-busy")); !errors.Is(err, ErrBusy) || held() != 1 {
+		t.Fatalf("at the execution bound: err=%v held=%d", err, held())
+	}
+	close(backend.gate)
+	if err := <-first; !errors.Is(err, ErrExecutionFailed) || held() != 0 {
+		t.Fatalf("the failed run: err=%v held=%d", err, held())
+	}
+	backend.mutex.Lock()
+	backend.exit = 0
+	backend.mutex.Unlock()
+	// Both records are still free for two jobs that succeed.
+	for _, name := range []string{"release-a", "release-b"} {
+		if _, err := service.client.Execute(background(t), job(name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if held() != 0 {
+		t.Fatalf("held at the end = %d", held())
+	}
+}
+
+// TestEachJobReleasesOnlyItsOwnRetentionSlot runs two jobs at once and ends
+// one: the other's slot must still be held, or a third job could be
+// admitted against a record that is spoken for.
+func TestEachJobReleasesOnlyItsOwnRetentionSlot(t *testing.T) {
+	firstGate, secondGate := make(chan struct{}), make(chan struct{})
+	backend := &fakeBackend{started: make(chan struct{}, 4), gate: firstGate}
+	service := startService(t, backend, func(config *Config) { config.MaxExecutions = 2 }, artifactstore.WithRecordBound(2))
+	held := func() int {
+		service.server.mutex.Lock()
+		defer service.server.mutex.Unlock()
+		return service.server.retentionHeld
+	}
+	results := make(chan error, 2)
+	start := func(name string) {
+		go func() {
+			_, err := service.client.Execute(background(t), job(name))
+			results <- err
+		}()
+		waitStarted(t, backend)
+	}
+	start("slot-first")
+	backend.mutex.Lock()
+	backend.gate = secondGate
+	backend.mutex.Unlock()
+	start("slot-second")
+	if held() != 2 {
+		t.Fatalf("held with two jobs running = %d", held())
+	}
+	close(firstGate)
+	if err := <-results; err != nil {
+		t.Fatal(err)
+	}
+	// The handler of the finished job returns just after its response.
+	eventually(t, "the finished job's connection", func() bool {
+		service.server.mutex.Lock()
+		defer service.server.mutex.Unlock()
+		return service.server.connections == 1
+	})
+	if held() != 1 {
+		t.Fatalf("held with one job still running = %d", held())
+	}
+	// One record is taken by the finished job, the other is still held:
+	// a third job has no room.
+	if _, err := service.client.Execute(background(t), job("slot-third")); !errors.Is(err, ErrRetentionFull) || backend.runs() != 2 {
+		t.Fatalf("third job: err=%v runs=%d", err, backend.runs())
+	}
+	close(secondGate)
+	if err := <-results; err != nil || held() != 0 {
+		t.Fatalf("second job: err=%v held=%d", err, held())
+	}
+}
+
 func TestRecordedOutcomeWhoseObjectsWereSweptIsReported(t *testing.T) {
 	backend := &fakeBackend{}
 	service := startService(t, backend, nil)
