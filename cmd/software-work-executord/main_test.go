@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math"
 	"net"
 	"os"
@@ -207,5 +208,21 @@ func TestReadinessIsSentToTheServiceManager(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", "notify")
 	if err := notifyReady(); err == nil {
 		t.Fatal("dialed a relative notification socket")
+	}
+}
+
+func TestDiagnosticIsOneBoundedEscapedLine(t *testing.T) {
+	line := diagnostic("run", errors.New("unsupported entry \"a\nexecute: peer_uid=0 status=ok\x1b[2J\""))
+	if strings.ContainsAny(line, "\n\r\x1b") || !strings.HasPrefix(line, `backend run failed: "unsupported entry `) ||
+		!strings.Contains(line, `\nexecute: peer_uid=0`) {
+		t.Fatalf("line = %q", line)
+	}
+	long := diagnostic("run", errors.New(strings.Repeat("\n", 1<<20)))
+	// Each escaped byte is at most four characters.
+	if len(long) > 4*maxDiagnosticBytes+64 || strings.Contains(long, "\n") {
+		t.Fatalf("a megabyte cause produced %d bytes", len(long))
+	}
+	if diagnostic("readiness", nil) != `backend readiness failed: "unknown"` {
+		t.Fatalf("nil cause: %s", diagnostic("readiness", nil))
 	}
 }

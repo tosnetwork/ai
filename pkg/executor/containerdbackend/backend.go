@@ -62,6 +62,12 @@ type Config struct {
 	ImageReference   string
 	ImageDigest      string
 	ImagePlatform    string
+	// Diagnose, when set, receives the underlying cause of a failed run or
+	// readiness probe, which callers only ever see as a fixed message. It
+	// is for the operator's own log: the text comes from the runtime and
+	// may quote names from a source archive, so a sink must bound and
+	// escape it.
+	Diagnose func(operation string, cause error)
 }
 
 type engine interface {
@@ -79,6 +85,7 @@ type activeRun struct {
 // namespace. It owns no queue and starts no goroutine of its own.
 type Backend struct {
 	engine     engine
+	diagnose   func(string, error)
 	ownership  *dirlock.Lock
 	maximum    int
 	gpuDevices map[string]string
@@ -129,7 +136,7 @@ func Open(ctx context.Context, config Config) (*Backend, error) {
 		return nil, errors.New("open containerd backend")
 	}
 	backend, err := newBackendWithDevices(
-		ctx, runtimeEngine, ownership, config.MaxActive, config.GPUDevices,
+		ctx, runtimeEngine, ownership, config.MaxActive, config.GPUDevices, config.Diagnose,
 	)
 	if err != nil {
 		_ = runtimeEngine.Close()
@@ -137,6 +144,13 @@ func Open(ctx context.Context, config Config) (*Backend, error) {
 		return nil, err
 	}
 	return backend, nil
+}
+
+// report hands the cause of a failure to the operator's sink, if any.
+func (b *Backend) report(operation string, cause error) {
+	if b != nil && b.diagnose != nil && cause != nil {
+		b.diagnose(operation, cause)
+	}
 }
 
 func newBackend(
@@ -154,19 +168,30 @@ func newBackendWithDevices(
 	ownership *dirlock.Lock,
 	maximum int,
 	devices map[string]string,
+	diagnose ...func(string, error),
 ) (*Backend, error) {
+	report := func(operation string, cause error) {
+		for _, sink := range diagnose {
+			if sink != nil {
+				sink(operation, cause)
+			}
+		}
+	}
 	if ctx == nil || nilcheck.IsNil(runtimeEngine) || maximum <= 0 ||
 		maximum > executor.MaxSupervisedActiveHard {
 		return nil, errors.New("invalid containerd backend")
 	}
 	if err := callReady(ctx, runtimeEngine); err != nil {
+		report("readiness", err)
 		return nil, errors.New("containerd backend is unavailable")
 	}
 	if err := callResidue(ctx, runtimeEngine); err != nil {
+		report("residue", err)
 		return nil, errors.New("containerd backend namespace is not clean")
 	}
 	return &Backend{
-		engine: runtimeEngine, ownership: ownership, maximum: maximum,
+		diagnose: report,
+		engine:   runtimeEngine, ownership: ownership, maximum: maximum,
 		gpuDevices: cloneDeviceMap(devices),
 		active:     make(map[string]activeRun, maximum),
 	}, nil
@@ -191,6 +216,7 @@ func (b *Backend) CheckReady(ctx context.Context) error {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return contextErr
 		}
+		b.report("readiness", err)
 		return errors.New("containerd backend is unavailable")
 	}
 	return nil
@@ -287,6 +313,7 @@ func (b *Backend) runIsolated(
 		return executor.Result{}, contextErr
 	}
 	if err != nil {
+		b.report("run", err)
 		return executor.Result{}, errors.New("containerd execution failed")
 	}
 	result.Output = append([]byte(nil), result.Output...)

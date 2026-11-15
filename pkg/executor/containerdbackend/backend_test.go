@@ -449,3 +449,65 @@ func TestBoundedOutputNeverRetainsPastLimit(t *testing.T) {
 		t.Fatal("output limit was not enforced")
 	}
 }
+
+func TestBackendReportsTheCauseOfAFailureToTheOperatorOnly(t *testing.T) {
+	type report struct {
+		operation string
+		cause     error
+	}
+	var reports []report
+	sink := func(operation string, cause error) { reports = append(reports, report{operation, cause}) }
+	cause := errors.New("shim: open /run/x/fifo: permission denied")
+
+	engine := newFakeEngine()
+	backend, err := newBackendWithDevices(context.Background(), engine, nil, 1, nil, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.RunIsolated(context.Background(), validRequest(t, "ok"), nil); err != nil || len(reports) != 0 {
+		t.Fatalf("a successful run: err=%v reports=%v", err, reports)
+	}
+	engine.runErr = cause
+	_, err = backend.RunIsolated(context.Background(), validRequest(t, "failing"), nil)
+	// The caller gets the fixed text and nothing of the cause.
+	if err == nil || err.Error() != "containerd execution failed" || errors.Is(err, cause) {
+		t.Fatalf("caller error = %v", err)
+	}
+	if len(reports) != 1 || reports[0].operation != "run" || !errors.Is(reports[0].cause, cause) {
+		t.Fatalf("run reports = %+v", reports)
+	}
+	engine.mutex.Lock()
+	engine.readyErr = cause
+	engine.mutex.Unlock()
+	if err := backend.CheckReady(context.Background()); err == nil || err.Error() != "containerd backend is unavailable" {
+		t.Fatalf("readiness error = %v", err)
+	}
+	if len(reports) != 2 || reports[1].operation != "readiness" || !errors.Is(reports[1].cause, cause) {
+		t.Fatalf("readiness reports = %+v", reports)
+	}
+	// A backend that cannot open says why as well.
+	reports = nil
+	unready := newFakeEngine()
+	unready.readyErr = cause
+	if _, err := newBackendWithDevices(context.Background(), unready, nil, 1, nil, sink); err == nil {
+		t.Fatal("opened an unready backend")
+	}
+	unclean := newFakeEngine()
+	unclean.residueErr = cause
+	if _, err := newBackendWithDevices(context.Background(), unclean, nil, 1, nil, sink); err == nil {
+		t.Fatal("opened an unclean backend")
+	}
+	if len(reports) != 2 || reports[0].operation != "readiness" || reports[1].operation != "residue" ||
+		!errors.Is(reports[1].cause, cause) {
+		t.Fatalf("open reports = %+v", reports)
+	}
+	// Without a sink nothing changes.
+	silent, err := newBackend(context.Background(), newFakeEngine(), nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	silent.engine.(*fakeEngine).runErr = cause
+	if _, err := silent.RunIsolated(context.Background(), validRequest(t, "silent"), nil); err == nil {
+		t.Fatal("the failing run succeeded")
+	}
+}

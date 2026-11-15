@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -195,6 +196,7 @@ func serve(ctx context.Context, parsed options, logf func(string, ...any), ready
 		MaxActive:    parsed.maxExecutions, PolicyLimits: limits,
 		ImageReference: softwarework.FrozenV1ImageReference, ImageDigest: softwarework.FrozenV1ImageDigest,
 		ImagePlatform: "linux/amd64",
+		Diagnose:      func(operation string, cause error) { logf("%s", diagnostic(operation, cause)) },
 	})
 	if err != nil {
 		return err
@@ -249,6 +251,25 @@ func serve(ctx context.Context, parsed options, logf func(string, ...any), ready
 		return errors.New("stopped before every running job recorded its outcome")
 	}
 	return nil
+}
+
+// maxDiagnosticBytes bounds one logged cause.
+const maxDiagnosticBytes = 2048
+
+// diagnostic is one log line for the cause of a backend failure. Callers of
+// the service only ever get a fixed message; the cause goes to the service's
+// own log, which only the operator reads. Its text comes from the runtime
+// and can quote names out of a caller's archive, so it is cut to a fixed
+// length and escaped: it cannot grow the log without bound or forge a line.
+func diagnostic(operation string, cause error) string {
+	text := "unknown"
+	if cause != nil {
+		text = cause.Error()
+	}
+	if len(text) > maxDiagnosticBytes {
+		text = text[:maxDiagnosticBytes]
+	}
+	return "backend " + operation + " failed: " + strconv.QuoteToASCII(text)
 }
 
 func buildIdentity() executorservice.Identity {
