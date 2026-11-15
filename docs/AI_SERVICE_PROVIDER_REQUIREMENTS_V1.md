@@ -634,6 +634,11 @@ is tracked in the [implementation status record](AI_SERVICE_PROVIDER_IMPLEMENTAT
 In particular, the WP-03 artifact retention and `railgate` use in the CLI, and
 the WP-04 Connect body cap and rate limit, listed below as remaining, have
 since been delivered; the shared multi-worker execution claim has not.
+`openfox` #35 has since added, in `openfox earning service`, a pre-signing
+preview of actor, attestor, terms and costs with restartable publication
+(`offer`), a Quote built from a provider's offer file without a Gateway
+(`buy --offer`), and tracking of withdrawal submission and finalization
+(`withdraw`); wallet credit after a withdrawal is still not verified.
 
 | Work package | Primary repository | Exists at baseline | Remaining deliverable |
 |---|---|---|---|
