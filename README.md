@@ -82,8 +82,8 @@ key belongs in executor state.
 
 A provider runtime that should not run as root reaches the same executor
 through `software-work-executord`: a root-run service that alone opens the
-private containerd socket and serves the frozen job to an explicit uid
-allow-list over a Unix socket (`pkg/executorservice` holds the server and the
+private containerd socket and serves the frozen job to exactly one
+explicitly allowed uid over a Unix socket (`pkg/executorservice` holds the server and the
 client). A request carries digests, limits that can only tighten the preset,
 and the source bytes; never a path, image or command. See
 [the provider runbook](deploy/provider/README.md#executor-service-an-unprivileged-provider-node).

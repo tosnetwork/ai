@@ -46,13 +46,14 @@ func TestMain(m *testing.M) {
 
 // liveCallerReport is what the unprivileged caller saw.
 type liveCallerReport struct {
-	Refused     string                      `json:"refused,omitempty"`
-	Description executorservice.Description `json:"description"`
-	Outcome     softwarework.Outcome        `json:"outcome"`
-	ArtifactLen int                         `json:"artifact_len"`
-	ReportJSON  string                      `json:"report_json"`
-	OutputLog   string                      `json:"output_log"`
-	RepeatSame  bool                        `json:"repeat_same"`
+	Refused         string                      `json:"refused,omitempty"`
+	Description     executorservice.Description `json:"description"`
+	Outcome         softwarework.Outcome        `json:"outcome"`
+	ArtifactLen     int                         `json:"artifact_len"`
+	ReportJSON      string                      `json:"report_json"`
+	OutputLog       string                      `json:"output_log"`
+	RepeatSame      bool                        `json:"repeat_same"`
+	RetainUntilUnix int64                       `json:"retain_until_unix"`
 }
 
 // TestLiveServiceRunsARealJobForAnUnprivilegedCaller runs the daemon's own
@@ -76,10 +77,8 @@ func TestLiveServiceRunsARealJobForAnUnprivilegedCaller(t *testing.T) {
 	if err := os.Chmod(root, 0o711); err != nil {
 		t.Fatal(err)
 	}
-	for _, private := range []string{"state", "socket"} {
-		if err := os.Mkdir(filepath.Join(root, private), 0o700); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.Mkdir(filepath.Join(root, "socket"), 0o700); err != nil {
+		t.Fatal(err)
 	}
 	// The caller's binary lives apart from the runtime directory, which
 	// is commonly mounted noexec.
@@ -94,9 +93,20 @@ func TestLiveServiceRunsARealJobForAnUnprivilegedCaller(t *testing.T) {
 	helper := filepath.Join(callerDirectory, "caller")
 	copyTestBinary(t, helper)
 	socket := filepath.Join(root, "socket", "executor.sock")
-	parsed := options{socket: socket, socketGID: liveSocketGroup, allowedUIDs: []uint32{liveAllowedUID},
-		containerdSocket: containerdSocket, fifoDir: filepath.Join(root, "fifos"), stateDir: filepath.Join(root, "state"),
-		maxExecutions: 1, minFreeBytes: 1 << 20, stopGrace: defaultStopGrace}
+	// The state directory, and with it the staged workspace, is on disk.
+	stateParent, err := os.MkdirTemp("/var/tmp", "tos-executord-live-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(stateParent)
+	stateDir := filepath.Join(stateParent, "state")
+	if err := os.Mkdir(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	parsed := options{socket: socket, socketGID: liveSocketGroup, allowedUID: liveAllowedUID,
+		containerdSocket: containerdSocket, fifoDir: filepath.Join(root, "fifos"), stateDir: stateDir,
+		maxExecutions: 1, minFreeBytes: 1 << 20, minFreeInodes: 1 << 10,
+		defaultRetention: time.Hour, maxRetention: 2 * time.Hour, stopGrace: defaultStopGrace}
 	var logMutex sync.Mutex
 	var serviceLog strings.Builder
 	logf := func(format string, arguments ...any) {
@@ -152,6 +162,14 @@ func TestLiveServiceRunsARealJobForAnUnprivilegedCaller(t *testing.T) {
 		report.Outcome.SandboxDigest != softwarework.FrozenV1ManifestDigest ||
 		!strings.Contains(report.OutputLog, "ok") || !strings.Contains(report.OutputLog, "example.test/live") {
 		t.Fatalf("the real run did not pass: %+v %q", report.Outcome, report.OutputLog)
+	}
+	// The request asked for no deadline; the service gave its default.
+	if report.RetainUntilUnix != int64(report.Outcome.CompletedAtUnix)+3600 {
+		t.Fatalf("retained until %d for a job completed at %d", report.RetainUntilUnix, report.Outcome.CompletedAtUnix)
+	}
+	// The source was staged on the state filesystem and removed again.
+	if staged, err := os.ReadDir(filepath.Join(stateDir, workspaceDirectory, "workspaces")); err != nil || len(staged) != 0 {
+		t.Fatalf("staged workspaces after the run: %v %v", staged, err)
 	}
 	if !report.RepeatSame {
 		t.Fatal("the repeated request did not return the recorded outcome")
@@ -222,8 +240,7 @@ func liveCall() (liveCallerReport, error) {
 		ManifestDigest:  softwarework.FrozenV1ManifestDigest,
 		Limits: executorservice.Limits{CPUMillis: 60_000, MemoryBytes: 512 << 20, ScratchBytes: 1 << 30,
 			OutputBytes: 1 << 20, WallClockMillis: 120_000},
-		RetainUntilUnix: time.Now().Add(time.Hour).Unix(),
-		SourceArchive:   archive,
+		SourceArchive: archive,
 	}
 	result, err := client.Execute(ctx, request)
 	if err != nil {
@@ -234,7 +251,7 @@ func liveCall() (liveCallerReport, error) {
 		return liveCallerReport{}, err
 	}
 	report := liveCallerReport{Description: description, Outcome: result.Outcome, ArtifactLen: len(result.Artifact),
-		ReportJSON: string(result.Report),
+		ReportJSON: string(result.Report), RetainUntilUnix: result.RetainUntilUnix,
 		RepeatSame: repeated.Outcome == result.Outcome && bytes.Equal(repeated.Artifact, result.Artifact)}
 	reader := tar.NewReader(bytes.NewReader(result.Artifact))
 	for {

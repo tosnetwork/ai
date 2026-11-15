@@ -3,29 +3,34 @@ package main
 import (
 	"bytes"
 	"context"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tosnetwork/tos-ai/pkg/executorservice"
 )
 
 func validArguments() []string {
-	return []string{"--socket", "/run/tos-service-executor/executor.sock", "--socket-gid", "992", "--allow-uids", "994",
+	return []string{"--socket", "/run/tos-service-executor/executor.sock", "--socket-gid", "992", "--allow-uid", "994",
 		"--containerd-socket", "/run/tos-service-containerd/containerd.sock",
 		"--fifo-dir", "/run/tos-service-executor-private/fifos", "--state-dir", "/var/lib/tos-service-executor"}
 }
 
-func TestOptionsNeedAnExplicitNumericAllowList(t *testing.T) {
+func TestOptionsNeedExactlyOneNumericCallerUID(t *testing.T) {
 	parsed, err := parseOptions(validArguments(), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(parsed.allowedUIDs, []uint32{994}) || parsed.socketGID != 992 || parsed.maxExecutions != 1 ||
-		parsed.minFreeBytes != defaultMinFreeBytes || parsed.stopGrace != defaultStopGrace {
-		t.Fatalf("parsed = %+v", parsed)
+	want := options{socket: "/run/tos-service-executor/executor.sock", socketGID: 992, allowedUID: 994,
+		containerdSocket: "/run/tos-service-containerd/containerd.sock", fifoDir: "/run/tos-service-executor-private/fifos",
+		stateDir: "/var/lib/tos-service-executor", maxExecutions: 1, minFreeBytes: 4 << 30, minFreeInodes: 1 << 18,
+		defaultRetention: 7 * 24 * time.Hour, maxRetention: 31 * 24 * time.Hour, stopGrace: 200 * time.Second}
+	if parsed != want {
+		t.Fatalf("parsed = %+v, want %+v", parsed, want)
 	}
 	replaced := func(flag, value string) []string {
 		arguments := validArguments()
@@ -37,50 +42,56 @@ func TestOptionsNeedAnExplicitNumericAllowList(t *testing.T) {
 		}
 		return append(arguments, flag, value)
 	}
-	if parsed, err = parseOptions(replaced("--allow-uids", "994,1000,0"), &bytes.Buffer{}); err != nil ||
-		!reflect.DeepEqual(parsed.allowedUIDs, []uint32{994, 1000, 0}) {
-		t.Fatalf("uid list = %+v %v", parsed.allowedUIDs, err)
+	if parsed, err = parseOptions(replaced("--allow-uid", "0"), &bytes.Buffer{}); err != nil || parsed.allowedUID != 0 {
+		t.Fatalf("an explicit uid 0: %+v %v", parsed.allowedUID, err)
+	}
+	if parsed, err = parseOptions(replaced("--max-retention", "168h"), &bytes.Buffer{}); err != nil || parsed.maxRetention != 7*24*time.Hour {
+		t.Fatalf("maximum equal to the default: %v", err)
 	}
 	for name, arguments := range map[string][]string{
 		// An unset EnvironmentFile variable expands to the empty string.
-		"empty allow-list":      replaced("--allow-uids", ""),
-		"allow-list of a name":  replaced("--allow-uids", "openfox"),
-		"wildcard allow-list":   replaced("--allow-uids", "*"),
-		"negative uid":          replaced("--allow-uids", "-1"),
-		"uid with a space":      replaced("--allow-uids", "994, 995"),
-		"trailing comma":        replaced("--allow-uids", "994,"),
-		"duplicate uid":         replaced("--allow-uids", "994,994"),
-		"leading zero":          replaced("--allow-uids", "0994"),
-		"uid over 32 bits":      replaced("--allow-uids", "4294967296"),
-		"uid of eleven digits":  replaced("--allow-uids", "99999999999"),
-		"hexadecimal uid":       replaced("--allow-uids", "0x3e2"),
-		"too many uids":         replaced("--allow-uids", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17"),
-		"empty socket gid":      replaced("--socket-gid", ""),
-		"socket group by name":  replaced("--socket-gid", "openfox"),
-		"relative socket":       replaced("--socket", "executor.sock"),
-		"uncanonical state":     replaced("--state-dir", "/var/lib/../lib/tos-service-executor"),
-		"missing fifo dir":      replaced("--fifo-dir", ""),
-		"no executions":         replaced("--max-executions", "0"),
-		"too many executions":   replaced("--max-executions", "9"),
-		"no free-space floor":   replaced("--min-free-bytes", "0"),
-		"no stop grace":         replaced("--stop-grace", "0s"),
-		"excessive stop grace":  replaced("--stop-grace", "1h"),
-		"positional argument":   append(validArguments(), "serve"),
-		"unknown flag":          append(validArguments(), "--image", "docker.io/library/busybox"),
-		"missing allow-list":    validArguments()[:4],
-		"containerd by default": validArguments()[:6],
+		"empty uid":                replaced("--allow-uid", ""),
+		"a list of uids":           replaced("--allow-uid", "994,995"),
+		"a user name":              replaced("--allow-uid", "openfox"),
+		"wildcard":                 replaced("--allow-uid", "*"),
+		"negative uid":             replaced("--allow-uid", "-1"),
+		"uid with a space":         replaced("--allow-uid", " 994"),
+		"leading zero":             replaced("--allow-uid", "0994"),
+		"uid over 32 bits":         replaced("--allow-uid", "4294967296"),
+		"uid of eleven digits":     replaced("--allow-uid", "99999999999"),
+		"hexadecimal uid":          replaced("--allow-uid", "0x3e2"),
+		"overflow uid":             replaced("--allow-uid", "65534"),
+		"invalid uid":              replaced("--allow-uid", "4294967295"),
+		"the former list flag":     append(validArguments(), "--allow-uids", "994"),
+		"empty socket gid":         replaced("--socket-gid", ""),
+		"socket group by name":     replaced("--socket-gid", "openfox"),
+		"overflow socket gid":      replaced("--socket-gid", "65534"),
+		"invalid socket gid":       replaced("--socket-gid", "4294967295"),
+		"relative socket":          replaced("--socket", "executor.sock"),
+		"uncanonical state":        replaced("--state-dir", "/var/lib/../lib/tos-service-executor"),
+		"missing fifo dir":         replaced("--fifo-dir", ""),
+		"no executions":            replaced("--max-executions", "0"),
+		"too many executions":      replaced("--max-executions", "9"),
+		"no free-space floor":      replaced("--min-free-bytes", "0"),
+		"no free-inode floor":      replaced("--min-free-inodes", "0"),
+		"default over maximum":     replaced("--default-retention", "745h"),
+		"maximum over a year":      replaced("--max-retention", "8785h"),
+		"no default retention":     replaced("--default-retention", "0s"),
+		"negative retention":       replaced("--default-retention", "-1h"),
+		"no stop grace":            replaced("--stop-grace", "0s"),
+		"excessive stop grace":     replaced("--stop-grace", "1h"),
+		"positional argument":      append(validArguments(), "serve"),
+		"unknown flag":             append(validArguments(), "--image", "docker.io/library/busybox"),
+		"missing caller uid":       validArguments()[:4],
+		"no containerd by default": validArguments()[:6],
 	} {
 		if _, err := parseOptions(arguments, &bytes.Buffer{}); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	// Sixteen uids, the bound itself, are accepted.
-	if _, err := parseOptions(replaced("--allow-uids", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16"), &bytes.Buffer{}); err != nil {
-		t.Fatalf("allow-list at its bound: %v", err)
-	}
 }
 
-func TestRunRefusesToStartWithoutAnAllowList(t *testing.T) {
+func TestRunRefusesToStartWithoutACallerUID(t *testing.T) {
 	var stderr bytes.Buffer
 	arguments := validArguments()
 	arguments[5] = ""
@@ -142,13 +153,26 @@ func TestStateDirectoryMustBePrivateAndOwned(t *testing.T) {
 	}
 }
 
-func TestFreeBytesMeasuresTheStateFilesystem(t *testing.T) {
-	free, err := freeBytes(t.TempDir())
-	if err != nil || free == 0 {
-		t.Fatalf("free=%d err=%v", free, err)
+func TestFreeSpaceMeasuresBytesAndInodesOfTheStateFilesystem(t *testing.T) {
+	free, err := freeSpace(t.TempDir())
+	if err != nil || free.Bytes == 0 || free.Inodes == 0 {
+		t.Fatalf("free=%+v err=%v", free, err)
 	}
-	if _, err := freeBytes(filepath.Join(t.TempDir(), "absent")); err == nil {
+	if _, err := freeSpace(filepath.Join(t.TempDir(), "absent")); err == nil {
 		t.Fatal("measured a missing path")
+	}
+	for name, check := range map[string]struct {
+		blockSize, blocks, inodes, freeInodes uint64
+		want                                  executorservice.FreeSpace
+	}{
+		"plain":                {4096, 10, 100, 7, executorservice.FreeSpace{Bytes: 40960, Inodes: 7}},
+		"no inodes left":       {4096, 10, 100, 0, executorservice.FreeSpace{Bytes: 40960, Inodes: 0}},
+		"inodes on demand":     {4096, 10, 0, 0, executorservice.FreeSpace{Bytes: 40960, Inodes: math.MaxUint64}},
+		"byte count overflows": {1 << 20, 1 << 50, 100, 7, executorservice.FreeSpace{Bytes: math.MaxUint64, Inodes: 7}},
+	} {
+		if got := spaceOf(check.blockSize, check.blocks, check.inodes, check.freeInodes); got != check.want {
+			t.Errorf("%s: %+v, want %+v", name, got, check.want)
+		}
 	}
 }
 

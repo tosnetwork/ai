@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"time"
 
 	"github.com/tosnetwork/tos-ai/pkg/softwarework"
 )
@@ -63,7 +64,15 @@ type ClientConfig struct {
 	// the kernel's peer credential on every connection. The zero value is
 	// root, the production service identity.
 	ServerUID uint32
+	// Timeout bounds a call whose context has no deadline of its own, so a
+	// stalled service cannot hold a caller forever. Zero selects
+	// DefaultClientTimeout; a context deadline always takes precedence.
+	Timeout time.Duration
 }
+
+// DefaultClientTimeout covers the frozen wall clock of a job with room for
+// staging, cleanup and the transfer of its objects.
+const DefaultClientTimeout = 10 * time.Minute
 
 // Client calls the executor service. It holds no connection; every call
 // opens one. It is safe for concurrent use.
@@ -74,6 +83,12 @@ type Client struct {
 func NewClient(config ClientConfig) (*Client, error) {
 	if !filepath.IsAbs(config.SocketPath) || filepath.Clean(config.SocketPath) != config.SocketPath {
 		return nil, errors.New("executor service: the socket path must be canonical and absolute")
+	}
+	if config.Timeout < 0 {
+		return nil, errors.New("executor service: the client timeout must not be negative")
+	}
+	if config.Timeout == 0 {
+		config.Timeout = DefaultClientTimeout
 	}
 	return &Client{config: config}, nil
 }
@@ -91,8 +106,9 @@ type ExecuteRequest struct {
 	// Limits are the manifest's limits; none may be zero or looser than
 	// the frozen preset.
 	Limits Limits
-	// RetainUntilUnix is the last unix second the service keeps the job's
-	// objects. Zero leaves them pending, never swept.
+	// RetainUntilUnix is the last unix second the service should keep its
+	// copy of the job's objects. Zero asks for the service default; the
+	// service never keeps them past its maximum after completion.
 	RetainUntilUnix int64
 	// SourceArchive is the deterministic USTAR source archive.
 	SourceArchive []byte
@@ -104,11 +120,18 @@ type ExecuteResult struct {
 	Outcome  softwarework.Outcome
 	Artifact []byte
 	Report   []byte
+	// RetainUntilUnix is the last unix second the service keeps its own
+	// copy of the objects for this request: the requested deadline, the
+	// service default when none was requested, never later than the
+	// service maximum after completion.
+	RetainUntilUnix int64
 }
 
 // Describe returns the service identity, frozen image and limits, and
 // whether its backend is ready.
 func (c *Client) Describe(ctx context.Context) (Description, error) {
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
 	conn, stop, err := c.dial(ctx)
 	if err != nil {
 		return Description{}, err
@@ -118,13 +141,15 @@ func (c *Client) Describe(ctx context.Context) (Description, error) {
 	if err != nil {
 		return Description{}, contextError(ctx, err)
 	}
-	if response.Describe == nil || response.Outcome != nil || requireEOF(conn) != nil {
+	if response.Describe == nil || response.Outcome != nil || response.RetainUntilUnix != 0 || requireEOF(conn) != nil {
 		return Description{}, ErrProtocol
 	}
 	return *response.Describe, nil
 }
 
 // Execute runs request, or returns its recorded outcome if it already ran.
+// The outcome must name the frozen image as its toolchain; anything else is
+// ErrProtocol.
 //
 // It returns a *StatusError for every answer other than success: ErrBusy
 // and ErrUnavailable claimed nothing and may be retried; ErrInProgress means
@@ -138,6 +163,8 @@ func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (ExecuteRe
 		return ExecuteResult{}, errors.New("executor service: the source archive is empty or over the input bound")
 	}
 	sourceDigest := digestOf(request.SourceArchive)
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
 	conn, stop, err := c.dial(ctx)
 	if err != nil {
 		return ExecuteResult{}, err
@@ -151,7 +178,7 @@ func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (ExecuteRe
 	if err != nil {
 		return ExecuteResult{}, contextError(ctx, err)
 	}
-	if response.Outcome == nil || response.Describe != nil {
+	if response.Outcome == nil || response.Describe != nil || response.RetainUntilUnix <= 0 {
 		return ExecuteResult{}, ErrProtocol
 	}
 	outcome := *response.Outcome
@@ -159,7 +186,8 @@ func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (ExecuteRe
 	// its bytes are read.
 	if outcome.ExecutionID != request.ExecutionID || outcome.QuoteCommitment != request.QuoteCommitment ||
 		outcome.InputDigest != request.InputDigest || outcome.SourceDigest != sourceDigest ||
-		outcome.SandboxDigest != request.ManifestDigest || outcome.ExitCode != 0 || outcome.CompletedAtUnix == 0 ||
+		outcome.SandboxDigest != request.ManifestDigest || outcome.ToolchainDigest != softwarework.FrozenV1ImageDigest ||
+		outcome.ExitCode != 0 || outcome.CompletedAtUnix == 0 ||
 		outcome.Artifact.MediaType != softwarework.ArtifactMediaType || outcome.Report.MediaType != softwarework.ReportMediaType ||
 		outcome.Artifact.SizeBytes > MaxObjectBytes || outcome.Report.SizeBytes > MaxObjectBytes {
 		return ExecuteResult{}, ErrProtocol
@@ -175,7 +203,18 @@ func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (ExecuteRe
 	if requireEOF(conn) != nil || digestOf(artifact) != outcome.Artifact.Digest || digestOf(report) != outcome.Report.Digest {
 		return ExecuteResult{}, contextError(ctx, ErrProtocol)
 	}
-	return ExecuteResult{Outcome: outcome, Artifact: artifact, Report: report}, nil
+	return ExecuteResult{Outcome: outcome, Artifact: artifact, Report: report, RetainUntilUnix: response.RetainUntilUnix}, nil
+}
+
+// bounded gives a call without a deadline the client's own.
+func (c *Client) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
+	if c == nil || ctx == nil {
+		return ctx, func() {}
+	}
+	if _, set := ctx.Deadline(); set {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, c.config.Timeout)
 }
 
 // dial connects and proves the listener's uid. stop closes the connection

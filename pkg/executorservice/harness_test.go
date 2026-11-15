@@ -112,7 +112,8 @@ func assemble(state, socket string, backend executor.ContainerdClient, edit func
 	if err != nil {
 		return nil, err
 	}
-	config := Config{AllowedUIDs: []uint32{uint32(os.Getuid())}, Executor: bound, Store: store, Journal: journal,
+	self := uint32(os.Getuid())
+	config := Config{AllowedUID: &self, Executor: bound, Store: store, Journal: journal,
 		Ready:    func(context.Context) error { return nil },
 		Identity: Identity{Version: "test-version", Commit: "test-commit"}}
 	if edit != nil {
@@ -380,3 +381,5 @@ func helperDescribe() int {
 	}
 	return 0
 }
+
+func uid(value uint32) *uint32 { return &value }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"os"
 	"sync"
@@ -28,10 +29,18 @@ const (
 	DefaultInFlightBytes = uint64(256 << 20)
 	MaxInFlightBytesHard = uint64(1 << 30)
 
-	// MaxAllowedUIDs bounds the allow-list.
-	MaxAllowedUIDs = 16
-	overflowUID    = uint32(65534)
-	invalidUID     = ^uint32(0)
+	// overflowID is what the kernel reports for a uid or gid that has no
+	// mapping in this user namespace, and invalidID is the "unchanged"
+	// marker of chown; neither names a real identity.
+	overflowID = uint32(65534)
+	invalidID  = ^uint32(0)
+
+	// DefaultRetention is how long a job's objects are kept when its
+	// request states no deadline, and DefaultMaxRetention the longest any
+	// request can keep them, both counted from the job's completion.
+	DefaultRetention    = 7 * 24 * time.Hour
+	DefaultMaxRetention = 31 * 24 * time.Hour
+	MaxRetentionHard    = 366 * 24 * time.Hour
 
 	DefaultHeaderTimeout  = 10 * time.Second
 	DefaultPayloadTimeout = 30 * time.Second
@@ -53,9 +62,11 @@ type Identity struct {
 // one-shot run of the frozen job would open; the server owns them for its
 // lifetime.
 type Config struct {
-	// AllowedUIDs are the only peer uids served. An empty list is refused:
-	// there is no "any local user" mode.
-	AllowedUIDs []uint32
+	// AllowedUID is the one peer uid served; nil is refused. The service
+	// keeps no per-caller separation (execution identities, retention and
+	// slots are shared), so it serves exactly one caller identity and has
+	// no "any local user" mode.
+	AllowedUID *uint32
 	// Executor must already be bound to the frozen policy.
 	Executor executor.Executor
 	Store    *artifactstore.Store
@@ -80,21 +91,34 @@ type Config struct {
 	WriteTimeout   time.Duration
 	ReadyTimeout   time.Duration
 
-	// MinFreeBytes is the free space the state filesystem must keep for a
-	// new run to be accepted, as measured by FreeBytes. Both are set or
-	// neither.
-	MinFreeBytes uint64
-	FreeBytes    func() (uint64, error)
+	// MinFreeBytes and MinFreeInodes are what the state filesystem, which
+	// also holds the staged workspaces, must keep free for a new run to be
+	// accepted, as measured by FreeSpace. A floor needs the probe.
+	MinFreeBytes  uint64
+	MinFreeInodes uint64
+	FreeSpace     func() (FreeSpace, error)
+
+	// DefaultRetention and MaxRetention bound how long a job's objects are
+	// kept after it completes. A service job always gets a deadline. Zero
+	// selects the default.
+	DefaultRetention time.Duration
+	MaxRetention     time.Duration
 
 	// Logf receives one line per refused or completed request. Lines hold
 	// only validated digests, the peer uid and server-side error text.
 	Logf func(format string, arguments ...any)
 }
 
+// FreeSpace is what an unprivileged writer could still use on a filesystem.
+type FreeSpace struct {
+	Bytes  uint64
+	Inodes uint64
+}
+
 // Server serves the executor operation on one Unix socket.
 type Server struct {
 	config  Config
-	allowed map[uint32]struct{}
+	allowed uint32
 	base    context.Context
 	cancel  context.CancelFunc
 
@@ -106,24 +130,46 @@ type Server struct {
 	budgetFree  uint64
 	handlers    sync.WaitGroup
 	runs        sync.WaitGroup
+
+	// afterAmbiguousRead, set only by tests, runs between a journal read
+	// that found a claim without an outcome and the check whether that
+	// claim is a run in progress.
+	afterAmbiguousRead func()
 }
 
 // flight is one running execution. Its result is set before done closes.
 type flight struct {
-	done    chan struct{}
-	status  Status
-	outcome softwarework.Outcome
+	done     chan struct{}
+	status   Status
+	outcome  softwarework.Outcome
+	retained int64
 }
 
 func NewServer(config Config) (*Server, error) {
-	if len(config.AllowedUIDs) == 0 {
-		return nil, errors.New("executor service needs at least one allowed uid")
+	if config.AllowedUID == nil {
+		return nil, errors.New("executor service needs its one allowed uid")
+	}
+	// A peer whose uid has no mapping in this user namespace is reported
+	// as the overflow uid, so allowing it would allow callers of unknown
+	// identity.
+	if *config.AllowedUID == overflowID || *config.AllowedUID == invalidID {
+		return nil, errors.New("executor service allowed uid is the overflow or invalid uid")
 	}
 	if nilcheck.IsNil(config.Executor) || config.Store == nil || config.Journal == nil || config.Ready == nil {
 		return nil, errors.New("executor service needs an executor, store, journal and readiness probe")
 	}
-	if (config.MinFreeBytes == 0) != (config.FreeBytes == nil) {
+	if (config.MinFreeBytes != 0 || config.MinFreeInodes != 0) != (config.FreeSpace != nil) {
 		return nil, errors.New("executor service free-space floor needs both a floor and a probe")
+	}
+	if config.DefaultRetention == 0 {
+		config.DefaultRetention = DefaultRetention
+	}
+	if config.MaxRetention == 0 {
+		config.MaxRetention = DefaultMaxRetention
+	}
+	if config.DefaultRetention < time.Second || config.DefaultRetention > config.MaxRetention ||
+		config.MaxRetention > MaxRetentionHard {
+		return nil, errors.New("executor service retention is outside its limits")
 	}
 	if config.MaxConnections == 0 {
 		config.MaxConnections = DefaultMaxConnections
@@ -159,20 +205,8 @@ func NewServer(config Config) (*Server, error) {
 	if config.Logf == nil {
 		config.Logf = func(string, ...any) {}
 	}
-	if len(config.AllowedUIDs) > MaxAllowedUIDs {
-		return nil, errors.New("executor service allow-list is too long")
-	}
-	allowed := make(map[uint32]struct{}, len(config.AllowedUIDs))
-	for _, uid := range config.AllowedUIDs {
-		// A peer whose uid has no mapping in this user namespace is
-		// reported as the overflow uid, so allowing it would allow
-		// callers of unknown identity.
-		if uid == overflowUID || uid == invalidUID {
-			return nil, errors.New("executor service allow-list names the overflow or invalid uid")
-		}
-		allowed[uid] = struct{}{}
-	}
-	config.AllowedUIDs = nil
+	allowed := *config.AllowedUID
+	config.AllowedUID = nil
 	base, cancel := context.WithCancel(context.Background())
 	return &Server{config: config, allowed: allowed, base: base, cancel: cancel,
 		flights: make(map[string]*flight, config.MaxExecutions), budgetFree: config.MaxInFlightBytes}, nil
@@ -274,7 +308,7 @@ func (s *Server) handle(conn *net.UnixConn) {
 		s.respond(conn, refusalWriteTimeout, responseHeader{Status: StatusNotAllowed}, nil, nil)
 		return
 	}
-	if _, allowed := s.allowed[uid]; !allowed {
+	if uid != s.allowed {
 		s.config.Logf("refused: peer_uid=%d is not allowed", uid)
 		s.respond(conn, refusalWriteTimeout, responseHeader{Status: StatusNotAllowed}, nil, nil)
 		return
@@ -327,7 +361,10 @@ func (s *Server) describe() Description {
 		ImageDigest: softwarework.FrozenV1ImageDigest, ImageReference: softwarework.FrozenV1ImageReference,
 		Limits: FrozenLimits(), PIDs: softwarework.FrozenV1Limits().PIDs,
 		MaxSourceBytes: MaxSourceBytes, MaxObjectBytes: MaxObjectBytes,
-		MaxExecutions: s.config.MaxExecutions, Ready: s.config.Ready(ctx) == nil,
+		MaxExecutions:           s.config.MaxExecutions,
+		DefaultRetentionSeconds: uint64(s.config.DefaultRetention / time.Second),
+		MaxRetentionSeconds:     uint64(s.config.MaxRetention / time.Second),
+		Ready:                   s.config.Ready(ctx) == nil,
 	}
 }
 
@@ -374,14 +411,16 @@ func (s *Server) handleExecute(conn *net.UnixConn, uid uint32, header executeHea
 		s.refuse(conn, uid, StatusInvalidRequest)
 		return
 	}
-	runner, err := softwarework.NewRunner(s.config.Executor, s.config.Store, s.config.Journal, contract)
+	// The limits come with the request here, so they are part of what the
+	// execution identity is bound to.
+	runner, err := softwarework.NewRunner(s.config.Executor, s.config.Store, s.config.Journal, contract, softwarework.BindLimits())
 	if err != nil {
 		s.refuse(conn, uid, StatusUnavailable)
 		return
 	}
 	request := softwarework.Request{QuoteCommitment: header.QuoteCommitment, ExecutionID: header.ExecutionID,
 		InputDigest: header.InputDigest, SourceDigest: header.SourceDigest, SourceArchive: source}
-	status, outcome, started := s.execute(runner, request, header.RetainUntilUnix)
+	status, outcome, retained, started := s.execute(runner, request, header.RetainUntilUnix)
 	if started {
 		// The run owns the source reservation and releases it when it ends.
 		sourceHeld = false
@@ -395,29 +434,47 @@ func (s *Server) handleExecute(conn *net.UnixConn, uid uint32, header executeHea
 		s.release(header.SourceBytes)
 		sourceHeld = false
 	}
-	s.deliver(conn, uid, outcome)
+	s.deliver(conn, uid, outcome, retained)
 }
 
 // execute answers request from the journal when it is recorded and runs it
-// otherwise. started reports that a run took over the source reservation.
-func (s *Server) execute(runner *softwarework.Runner, request softwarework.Request, retainUntil int64) (Status, softwarework.Outcome, bool) {
-	s.mutex.Lock()
-	_, running := s.flights[request.ExecutionID]
-	s.mutex.Unlock()
-	if running {
-		return StatusInProgress, softwarework.Outcome{}, false
+// otherwise. It returns the retention deadline given to the job's objects,
+// and started reports that a run took over the source reservation.
+func (s *Server) execute(runner *softwarework.Runner, request softwarework.Request, requested int64) (Status, softwarework.Outcome, int64, bool) {
+	refuse := func(status Status) (Status, softwarework.Outcome, int64, bool) {
+		return status, softwarework.Outcome{}, 0, false
+	}
+	if s.flying(request.ExecutionID) {
+		return refuse(StatusInProgress)
 	}
 	outcome, recorded, err := runner.Recorded(request)
+	if errors.Is(err, softwarework.ErrAmbiguous) {
+		// A claim without an outcome is also what a run in progress looks
+		// like, and a request that passed the check above may have read
+		// the journal just after another one claimed it. A flight is
+		// registered before its claim and removed after its outcome is
+		// journaled, so if one is flying now this run is in progress, and
+		// if none is the journal read below is final.
+		if s.afterAmbiguousRead != nil {
+			s.afterAmbiguousRead()
+		}
+		if s.flying(request.ExecutionID) {
+			return refuse(StatusInProgress)
+		}
+		outcome, recorded, err = runner.Recorded(request)
+	}
 	if err != nil {
-		return s.runnerStatus(request.ExecutionID, err, StatusUnavailable), softwarework.Outcome{}, false
+		return refuse(s.runnerStatus(request.ExecutionID, err, StatusUnavailable))
 	}
 	if recorded {
 		// A repeated request may extend the retention of the recorded
-		// objects; it never shortens it and never runs anything.
-		if status := s.retain(outcome, retainUntil); status != StatusOK {
-			return status, softwarework.Outcome{}, false
+		// objects within the same bound; it never shortens it and never
+		// runs anything.
+		retained, status := s.retain(outcome, requested)
+		if status != StatusOK {
+			return refuse(status)
 		}
-		return StatusOK, outcome, false
+		return StatusOK, outcome, retained, false
 	}
 	// A new run. Every reason to refuse it is checked before the execution
 	// identity is claimed, because a claim without an outcome is ambiguous
@@ -427,36 +484,35 @@ func (s *Server) execute(runner *softwarework.Runner, request softwarework.Reque
 	cancel()
 	if err != nil {
 		s.config.Logf("execute: execution_id=%s backend not ready: %v", request.ExecutionID, err)
-		return StatusUnavailable, softwarework.Outcome{}, false
+		return refuse(StatusUnavailable)
 	}
-	if s.config.FreeBytes != nil {
-		free, err := s.config.FreeBytes()
+	if s.config.FreeSpace != nil {
+		free, err := s.config.FreeSpace()
 		if err != nil {
-			return StatusUnavailable, softwarework.Outcome{}, false
+			return refuse(StatusUnavailable)
 		}
-		if free < s.config.MinFreeBytes {
-			return StatusStorageFull, softwarework.Outcome{}, false
+		if free.Bytes < s.config.MinFreeBytes || free.Inodes < s.config.MinFreeInodes {
+			return refuse(StatusStorageFull)
 		}
 	}
-	if retainUntil > 0 {
-		if err := s.config.Store.CheckCapacity(s.base, 1); errors.Is(err, artifactstore.ErrRetentionFull) {
-			return StatusRetentionFull, softwarework.Outcome{}, false
-		} else if err != nil {
-			return StatusUnavailable, softwarework.Outcome{}, false
-		}
+	// Every service job is given a deadline, so there must be room for one.
+	if err := s.config.Store.CheckCapacity(s.base, 1); errors.Is(err, artifactstore.ErrRetentionFull) {
+		return refuse(StatusRetentionFull)
+	} else if err != nil {
+		return refuse(StatusUnavailable)
 	}
 	s.mutex.Lock()
 	if s.closing {
 		s.mutex.Unlock()
-		return StatusUnavailable, softwarework.Outcome{}, false
+		return refuse(StatusUnavailable)
 	}
 	if _, running := s.flights[request.ExecutionID]; running {
 		s.mutex.Unlock()
-		return StatusInProgress, softwarework.Outcome{}, false
+		return refuse(StatusInProgress)
 	}
 	if len(s.flights) >= s.config.MaxExecutions {
 		s.mutex.Unlock()
-		return StatusBusy, softwarework.Outcome{}, false
+		return refuse(StatusBusy)
 	}
 	current := &flight{done: make(chan struct{})}
 	s.flights[request.ExecutionID] = current
@@ -467,7 +523,7 @@ func (s *Server) execute(runner *softwarework.Runner, request softwarework.Reque
 	// always journaled and a repeated request finds it.
 	go func() {
 		defer s.runs.Done()
-		current.status, current.outcome = s.run(runner, request, retainUntil)
+		current.status, current.outcome, current.retained = s.run(runner, request, requested)
 		s.release(uint64(len(request.SourceArchive)))
 		s.mutex.Lock()
 		delete(s.flights, request.ExecutionID)
@@ -475,18 +531,26 @@ func (s *Server) execute(runner *softwarework.Runner, request softwarework.Reque
 		close(current.done)
 	}()
 	<-current.done
-	return current.status, current.outcome, true
+	return current.status, current.outcome, current.retained, true
 }
 
-func (s *Server) run(runner *softwarework.Runner, request softwarework.Request, retainUntil int64) (Status, softwarework.Outcome) {
+func (s *Server) flying(executionID string) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	_, running := s.flights[executionID]
+	return running
+}
+
+func (s *Server) run(runner *softwarework.Runner, request softwarework.Request, requested int64) (Status, softwarework.Outcome, int64) {
 	outcome, err := runner.Execute(s.base, request)
 	if err != nil {
-		return s.runnerStatus(request.ExecutionID, err, StatusExecutionFailed), softwarework.Outcome{}
+		return s.runnerStatus(request.ExecutionID, err, StatusExecutionFailed), softwarework.Outcome{}, 0
 	}
-	if status := s.retain(outcome, retainUntil); status != StatusOK {
-		return status, softwarework.Outcome{}
+	retained, status := s.retain(outcome, requested)
+	if status != StatusOK {
+		return status, softwarework.Outcome{}, 0
 	}
-	return StatusOK, outcome
+	return StatusOK, outcome, retained
 }
 
 func (s *Server) runnerStatus(executionID string, err error, fallback Status) Status {
@@ -502,29 +566,49 @@ func (s *Server) runnerStatus(executionID string, err error, fallback Status) St
 	return fallback
 }
 
-// retain gives the job's objects their deadline. The outcome is already
-// journaled, so a failure here is answered by asking again.
-func (s *Server) retain(outcome softwarework.Outcome, retainUntil int64) Status {
-	if retainUntil <= 0 {
-		return StatusOK
+// retentionDeadline is the last second the job's objects are kept: what the
+// request asked for, the server default when it asked for nothing, and never
+// later than the server maximum. Both are counted from the job's completion,
+// so repeating a request cannot push the deadline out indefinitely.
+func (s *Server) retentionDeadline(completedAt uint64, requested int64) (int64, bool) {
+	maximum := uint64(s.config.MaxRetention / time.Second)
+	if completedAt == 0 || completedAt > math.MaxInt64-maximum {
+		return 0, false
 	}
-	err := s.config.Store.Retain(s.base, outcome.ExecutionID, time.Unix(retainUntil, 0),
+	latest := int64(completedAt + maximum)
+	switch {
+	case requested == 0:
+		return int64(completedAt + uint64(s.config.DefaultRetention/time.Second)), true
+	case requested > latest:
+		return latest, true
+	}
+	return requested, true
+}
+
+// retain gives the job's objects their deadline and returns it. The outcome
+// is already journaled, so a failure here is answered by asking again.
+func (s *Server) retain(outcome softwarework.Outcome, requested int64) (int64, Status) {
+	deadline, ok := s.retentionDeadline(outcome.CompletedAtUnix, requested)
+	if !ok {
+		return 0, StatusUnavailable
+	}
+	err := s.config.Store.Retain(s.base, outcome.ExecutionID, time.Unix(deadline, 0),
 		[]string{outcome.Artifact.Digest, outcome.Report.Digest})
 	switch {
 	case err == nil:
-		return StatusOK
+		return deadline, StatusOK
 	case errors.Is(err, artifactstore.ErrRetentionFull):
-		return StatusRetentionFull
+		return 0, StatusRetentionFull
 	case errors.Is(err, artifactstore.ErrRetentionBusy):
-		return StatusUnavailable
+		return 0, StatusUnavailable
 	}
 	s.config.Logf("execute: execution_id=%s retention: %v", outcome.ExecutionID, err)
-	return StatusObjectsUnavailable
+	return 0, StatusObjectsUnavailable
 }
 
 // deliver sends the outcome with its two objects, read back from the store
 // and held against the byte budget while they are written.
-func (s *Server) deliver(conn *net.UnixConn, uid uint32, outcome softwarework.Outcome) {
+func (s *Server) deliver(conn *net.UnixConn, uid uint32, outcome softwarework.Outcome, retained int64) {
 	if outcome.Artifact.SizeBytes > MaxObjectBytes || outcome.Report.SizeBytes > MaxObjectBytes {
 		s.refuse(conn, uid, StatusObjectsUnavailable)
 		return
@@ -544,7 +628,7 @@ func (s *Server) deliver(conn *net.UnixConn, uid uint32, outcome softwarework.Ou
 		return
 	}
 	s.config.Logf("execute: peer_uid=%d execution_id=%s status=%s", uid, outcome.ExecutionID, StatusOK)
-	s.respond(conn, s.config.WriteTimeout, responseHeader{Status: StatusOK, Outcome: &outcome}, artifact, report)
+	s.respond(conn, s.config.WriteTimeout, responseHeader{Status: StatusOK, Outcome: &outcome, RetainUntilUnix: retained}, artifact, report)
 }
 
 // respond writes one response under a write deadline. A peer that does not

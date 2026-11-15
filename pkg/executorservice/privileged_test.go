@@ -51,7 +51,7 @@ func TestRealCallersAreAdmittedByTheirKernelUID(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := socketIn(t, root)
-	bound, err := assemble(state, socket, &fakeBackend{}, func(config *Config) { config.AllowedUIDs = []uint32{allowedUID} })
+	bound, err := assemble(state, socket, &fakeBackend{}, func(config *Config) { config.AllowedUID = uid(allowedUID) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,15 @@ func TestRealCallersAreAdmittedByTheirKernelUID(t *testing.T) {
 			t.Errorf("%s: %s, want %s", check.name, got, check.want)
 		}
 	}
-	// Root is not on the list either: being root is not being allowed.
+	// As root the group change itself would succeed for these, so only
+	// the check refuses them.
+	for name, gid := range map[string]uint32{"overflow gid": 65534, "invalid gid": ^uint32(0)} {
+		if refused, err := Listen(socketIn(t, shortDir(t)), gid); err == nil {
+			_ = refused.Close()
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// Root is not the allowed uid either: being root is not being allowed.
 	client, err := NewClient(ClientConfig{SocketPath: socket})
 	if err != nil {
 		t.Fatal(err)

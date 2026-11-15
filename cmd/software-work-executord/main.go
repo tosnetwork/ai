@@ -1,7 +1,7 @@
 // Command software-work-executord is the root-run executor service of a
 // provider host. It is the only process that opens the private containerd
-// socket, and it offers local callers on an explicit uid allow-list exactly
-// one operation over a Unix socket: run the frozen software-work job.
+// socket, and it offers exactly one explicitly allowed local uid exactly one
+// operation over a Unix socket: run the frozen software-work job.
 //
 // It is a separate command, not a mode of software-work-execute, so that the
 // long-running privileged process links only the executor, the journal and
@@ -22,7 +22,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
-	"strings"
 	"syscall"
 	"time"
 
@@ -45,6 +44,16 @@ const (
 	exitUsage = 2
 
 	defaultMinFreeBytes = uint64(4 << 30)
+	// defaultMinFreeInodes leaves room for several workspaces at the node
+	// bound of the unpacker next to the journal and the store.
+	defaultMinFreeInodes = uint64(1 << 18)
+	// idOverflow is what the kernel reports for an unmapped uid or gid and
+	// idInvalid the "unchanged" marker of chown; neither is an identity.
+	idOverflow = uint32(65534)
+	idInvalid  = ^uint32(0)
+	// workspaceDirectory is where sources are unpacked, under the state
+	// directory so they are on disk and under the free-space floor.
+	workspaceDirectory = "staging"
 	// defaultStopGrace lets a running job reach its frozen wall clock and
 	// record its outcome before a stop cancels it.
 	defaultStopGrace = 200 * time.Second
@@ -60,12 +69,15 @@ func main() {
 type options struct {
 	socket           string
 	socketGID        uint32
-	allowedUIDs      []uint32
+	allowedUID       uint32
 	containerdSocket string
 	fifoDir          string
 	stateDir         string
 	maxExecutions    int
 	minFreeBytes     uint64
+	minFreeInodes    uint64
+	defaultRetention time.Duration
+	maxRetention     time.Duration
 	stopGrace        time.Duration
 }
 
@@ -93,14 +105,20 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	var allowed, group string
 	flags.StringVar(&parsed.socket, "socket", "", "service socket to create, inside a directory owned by this process")
 	flags.StringVar(&group, "socket-gid", "", "numeric gid given access to the service socket")
-	flags.StringVar(&allowed, "allow-uids", "", "comma-separated numeric uids that may call the service")
+	flags.StringVar(&allowed, "allow-uid", "", "the one numeric uid that may call the service")
 	flags.StringVar(&parsed.containerdSocket, "containerd-socket", "", "private containerd socket")
 	flags.StringVar(&parsed.fifoDir, "fifo-dir", "", "private FIFO directory")
-	flags.StringVar(&parsed.stateDir, "state-dir", "", "persistent private state directory (journal, artifacts)")
+	flags.StringVar(&parsed.stateDir, "state-dir", "", "persistent private state directory (journal, artifacts, staged workspaces)")
 	flags.IntVar(&parsed.maxExecutions, "max-executions", executorservice.DefaultMaxExecutions,
 		fmt.Sprintf("jobs run at once (1-%d)", executorservice.MaxExecutionsHard))
 	flags.Uint64Var(&parsed.minFreeBytes, "min-free-bytes", defaultMinFreeBytes,
 		"free bytes the state filesystem must keep for a new job to be accepted")
+	flags.Uint64Var(&parsed.minFreeInodes, "min-free-inodes", defaultMinFreeInodes,
+		"free inodes the state filesystem must keep for a new job to be accepted")
+	flags.DurationVar(&parsed.defaultRetention, "default-retention", executorservice.DefaultRetention,
+		"how long after completion a job's objects are kept when its request states no deadline")
+	flags.DurationVar(&parsed.maxRetention, "max-retention", executorservice.DefaultMaxRetention,
+		"the longest after completion any request can keep a job's objects")
 	flags.DurationVar(&parsed.stopGrace, "stop-grace", defaultStopGrace,
 		"how long a stop waits for running jobs to record their outcome")
 	if err := flags.Parse(args); err != nil {
@@ -115,50 +133,32 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 		}
 	}
 	gid, err := parseID(group)
-	if err != nil {
-		return options{}, errors.New("--socket-gid must be one canonical numeric gid")
+	if err != nil || gid == idOverflow || gid == idInvalid {
+		return options{}, errors.New("--socket-gid must be one canonical numeric gid of a real group")
 	}
 	parsed.socketGID = gid
-	if parsed.allowedUIDs, err = parseUIDList(allowed); err != nil {
-		return options{}, err
+	// Exactly one uid: an empty value, a name, a list or the id of no real
+	// user is refused. The service never accepts any local user.
+	if allowed == "" {
+		return options{}, errors.New("--allow-uid is required: the service never accepts any local user")
+	}
+	if parsed.allowedUID, err = parseID(allowed); err != nil || parsed.allowedUID == idOverflow || parsed.allowedUID == idInvalid {
+		return options{}, errors.New("--allow-uid must be exactly one canonical numeric uid of a real user")
 	}
 	if parsed.maxExecutions < 1 || parsed.maxExecutions > executorservice.MaxExecutionsHard {
 		return options{}, errors.New("--max-executions is outside its limits")
 	}
-	if parsed.minFreeBytes == 0 {
-		return options{}, errors.New("--min-free-bytes must be positive")
+	if parsed.minFreeBytes == 0 || parsed.minFreeInodes == 0 {
+		return options{}, errors.New("--min-free-bytes and --min-free-inodes must be positive")
+	}
+	if parsed.defaultRetention < time.Second || parsed.defaultRetention > parsed.maxRetention ||
+		parsed.maxRetention > executorservice.MaxRetentionHard {
+		return options{}, errors.New("--default-retention and --max-retention are outside their limits")
 	}
 	if parsed.stopGrace <= 0 || parsed.stopGrace > maxStopGrace {
 		return options{}, errors.New("--stop-grace is outside its limits")
 	}
 	return parsed, nil
-}
-
-// parseUIDList accepts only an explicit list of canonical numeric uids. An
-// empty list, a name, a duplicate or a spelling with spaces is refused: the
-// allow-list is never guessed.
-func parseUIDList(value string) ([]uint32, error) {
-	if value == "" {
-		return nil, errors.New("--allow-uids is required: the service never accepts any local user")
-	}
-	fields := strings.Split(value, ",")
-	if len(fields) > executorservice.MaxAllowedUIDs {
-		return nil, errors.New("--allow-uids names too many uids")
-	}
-	seen := make(map[uint32]struct{}, len(fields))
-	list := make([]uint32, 0, len(fields))
-	for _, field := range fields {
-		uid, err := parseID(field)
-		if err != nil {
-			return nil, errors.New("--allow-uids must be comma-separated canonical numeric uids")
-		}
-		if _, duplicate := seen[uid]; duplicate {
-			return nil, errors.New("--allow-uids names a uid twice")
-		}
-		seen[uid] = struct{}{}
-		list = append(list, uid)
-	}
-	return list, nil
 }
 
 // parseID parses one canonical decimal 32-bit id.
@@ -190,7 +190,9 @@ func serve(ctx context.Context, parsed options, logf func(string, ...any), ready
 	limits := softwarework.FrozenV1Limits()
 	backend, err := containerdbackend.Open(ctx, containerdbackend.Config{
 		SocketPath: parsed.containerdSocket, Namespace: "tos-service-paid-work", Snapshotter: "overlayfs",
-		Runtime: "io.containerd.runc.v2", FIFODir: parsed.fifoDir, MaxActive: parsed.maxExecutions, PolicyLimits: limits,
+		Runtime: "io.containerd.runc.v2", FIFODir: parsed.fifoDir,
+		WorkspaceDir: filepath.Join(parsed.stateDir, workspaceDirectory),
+		MaxActive:    parsed.maxExecutions, PolicyLimits: limits,
 		ImageReference: softwarework.FrozenV1ImageReference, ImageDigest: softwarework.FrozenV1ImageDigest,
 		ImagePlatform: "linux/amd64",
 	})
@@ -212,9 +214,11 @@ func serve(ctx context.Context, parsed options, logf func(string, ...any), ready
 	}
 	defer journal.Close()
 	server, err := executorservice.NewServer(executorservice.Config{
-		AllowedUIDs: parsed.allowedUIDs, Executor: bound, Store: store, Journal: journal, Ready: backend.CheckReady,
+		AllowedUID: &parsed.allowedUID, Executor: bound, Store: store, Journal: journal, Ready: backend.CheckReady,
 		Identity: buildIdentity(), MaxExecutions: parsed.maxExecutions,
-		MinFreeBytes: parsed.minFreeBytes, FreeBytes: func() (uint64, error) { return freeBytes(parsed.stateDir) },
+		MinFreeBytes: parsed.minFreeBytes, MinFreeInodes: parsed.minFreeInodes,
+		FreeSpace:        func() (executorservice.FreeSpace, error) { return freeSpace(parsed.stateDir) },
+		DefaultRetention: parsed.defaultRetention, MaxRetention: parsed.maxRetention,
 		Logf: logf,
 	})
 	if err != nil {
@@ -268,18 +272,27 @@ func buildIdentity() executorservice.Identity {
 	return identity
 }
 
-// freeBytes is the space an unprivileged writer could still use on the
-// filesystem holding path.
-func freeBytes(path string) (uint64, error) {
+// freeSpace is the bytes and inodes an unprivileged writer could still use
+// on the filesystem holding path.
+func freeSpace(path string) (executorservice.FreeSpace, error) {
 	var stat unix.Statfs_t
 	if err := unix.Statfs(path, &stat); err != nil || stat.Bsize <= 0 {
-		return 0, errors.New("measure state filesystem free space")
+		return executorservice.FreeSpace{}, errors.New("measure state filesystem free space")
 	}
-	blockSize := uint64(stat.Bsize)
-	if stat.Bavail > math.MaxUint64/blockSize {
-		return math.MaxUint64, nil
+	return spaceOf(uint64(stat.Bsize), stat.Bavail, stat.Files, stat.Ffree), nil
+}
+
+func spaceOf(blockSize, availableBlocks, totalInodes, freeInodes uint64) executorservice.FreeSpace {
+	free := executorservice.FreeSpace{Bytes: math.MaxUint64, Inodes: freeInodes}
+	if availableBlocks <= math.MaxUint64/blockSize {
+		free.Bytes = availableBlocks * blockSize
 	}
-	return stat.Bavail * blockSize, nil
+	// A filesystem that allocates inodes on demand reports no inode total
+	// at all; its inodes are bounded by its free bytes.
+	if totalInodes == 0 {
+		free.Inodes = math.MaxUint64
+	}
+	return free
 }
 
 // requirePrivateOwnedDirectory refuses a state directory another user could

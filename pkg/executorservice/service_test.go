@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +37,9 @@ func TestExecuteReturnsTheOutcomeAndItsVerifiedObjects(t *testing.T) {
 	result, err := service.client.Execute(background(t), request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if result.RetainUntilUnix != request.RetainUntilUnix {
+		t.Fatalf("retained until %d, asked for %d", result.RetainUntilUnix, request.RetainUntilUnix)
 	}
 	outcome := result.Outcome
 	if outcome.ExecutionID != request.ExecutionID || outcome.QuoteCommitment != request.QuoteCommitment ||
@@ -80,14 +85,73 @@ func TestExecuteReturnsTheOutcomeAndItsVerifiedObjects(t *testing.T) {
 	}
 }
 
-func TestExecuteWithoutRetentionLeavesTheJobPending(t *testing.T) {
-	service := startService(t, &fakeBackend{}, nil)
-	if _, err := service.client.Execute(background(t), job("pending")); err != nil {
+func TestEveryJobGetsABoundedRetentionDeadline(t *testing.T) {
+	service := startService(t, &fakeBackend{}, func(config *Config) {
+		config.DefaultRetention, config.MaxRetention = time.Hour, 3*time.Hour
+	})
+	sweepAt := func(second int64) artifactstore.SweepReport {
+		t.Helper()
+		report, err := service.store.Sweep(context.Background(), time.Unix(second, 0), 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	// No deadline asked for: the server default, never a pending record.
+	unstated, err := service.client.Execute(background(t), job("unstated"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := service.store.Sweep(context.Background(), time.Now().Add(1000*time.Hour), 8)
-	if err != nil || report.Pending != 1 || report.DeletedJobs != 0 {
-		t.Fatalf("sweep = %+v %v", report, err)
+	completed := int64(unstated.Outcome.CompletedAtUnix)
+	if unstated.RetainUntilUnix != completed+3600 {
+		t.Fatalf("default deadline = completion%+d", unstated.RetainUntilUnix-completed)
+	}
+	if report := sweepAt(completed + 3600); report.Pending != 0 || report.Live != 1 || report.DeletedJobs != 0 {
+		t.Fatalf("at the default deadline: %+v", report)
+	}
+	// A deadline past the maximum is clamped to it, and repeating the
+	// request does not move it: the bound counts from completion.
+	forever := job("forever")
+	forever.RetainUntilUnix = math.MaxInt64
+	for attempt := 0; attempt < 2; attempt++ {
+		pinned, err := service.client.Execute(background(t), forever)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if limit := int64(pinned.Outcome.CompletedAtUnix) + 3*3600; pinned.RetainUntilUnix != limit {
+			t.Fatalf("attempt %d: deadline = limit%+d", attempt, pinned.RetainUntilUnix-limit)
+		}
+		completed = int64(pinned.Outcome.CompletedAtUnix)
+	}
+	// A repeat may extend within the bound and never shortens.
+	longer := job("unstated")
+	longer.RetainUntilUnix = int64(unstated.Outcome.CompletedAtUnix) + 2*3600
+	if extended, err := service.client.Execute(background(t), longer); err != nil || extended.RetainUntilUnix != longer.RetainUntilUnix {
+		t.Fatalf("extension: %+v %v", extended.RetainUntilUnix, err)
+	}
+	if report := sweepAt(int64(unstated.Outcome.CompletedAtUnix) + 3600 + 1); report.DeletedJobs != 0 || report.Live != 2 {
+		t.Fatalf("after the extension: %+v", report)
+	}
+	// One second past the maximum nothing of either job is left.
+	if report := sweepAt(completed + 3*3600 + 1); report.DeletedJobs != 2 || report.Live != 0 || report.Pending != 0 {
+		t.Fatalf("past the maximum: %+v", report)
+	}
+}
+
+func TestRetentionBoundsAreValidated(t *testing.T) {
+	for name, edit := range map[string]func(*Config){
+		"default over maximum": func(c *Config) { c.DefaultRetention, c.MaxRetention = 2*time.Hour, time.Hour },
+		"maximum over a year":  func(c *Config) { c.MaxRetention = MaxRetentionHard + time.Second },
+		"sub-second default":   func(c *Config) { c.DefaultRetention = time.Millisecond },
+		"negative maximum":     func(c *Config) { c.MaxRetention = -time.Hour },
+	} {
+		root := shortDir(t)
+		built, err := assemble(root, socketIn(t, root), &fakeBackend{}, edit)
+		if err == nil {
+			_ = built.listener.Close()
+			_ = built.journal.Close()
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
 
@@ -115,14 +179,15 @@ func TestRepeatedRequestReturnsTheRecordedOutcomeWithoutRunningAgain(t *testing.
 	if _, err := service.client.Execute(background(t), other); !errors.Is(err, ErrConflict) {
 		t.Fatalf("conflict err = %v", err)
 	}
-	// A repeat may extend retention but still runs nothing.
-	request.RetainUntilUnix = time.Now().Add(time.Hour).Unix()
-	if _, err := service.client.Execute(background(t), request); err != nil {
-		t.Fatal(err)
+	// So is the same identity under other limits: the limits it ran under
+	// are part of what was recorded.
+	relimited := request
+	relimited.Limits.OutputBytes--
+	if _, err := service.client.Execute(background(t), relimited); !errors.Is(err, ErrConflict) {
+		t.Fatalf("other limits: err = %v", err)
 	}
-	report, err := service.store.Sweep(context.Background(), time.Now(), 8)
-	if err != nil || report.Live != 1 || report.Pending != 0 || backend.runs() != 1 {
-		t.Fatalf("sweep = %+v %v runs=%d", report, err, backend.runs())
+	if backend.runs() != 1 {
+		t.Fatalf("a conflicting repeat ran: %d", backend.runs())
 	}
 }
 
@@ -237,7 +302,7 @@ func TestMalformedRequestsAreRefusedBeforeAnythingRuns(t *testing.T) {
 func TestPeerOutsideTheAllowListIsRefused(t *testing.T) {
 	backend := &fakeBackend{}
 	// The kernel reports this process's real uid; the list names another.
-	service := startService(t, backend, func(config *Config) { config.AllowedUIDs = []uint32{uint32(os.Getuid()) + 1} })
+	service := startService(t, backend, func(config *Config) { config.AllowedUID = uid(uint32(os.Getuid()) + 1) })
 	if _, err := service.client.Describe(background(t)); !errors.Is(err, ErrNotAllowed) {
 		t.Fatalf("describe err = %v", err)
 	}
@@ -256,15 +321,14 @@ func TestPeerOutsideTheAllowListIsRefused(t *testing.T) {
 	}
 }
 
-func TestServerRefusesAnAllowListThatAdmitsUnknownCallers(t *testing.T) {
-	for name, list := range map[string][]uint32{
-		"empty":        nil,
-		"overflow uid": {1000, 65534},
-		"invalid uid":  {^uint32(0)},
-		"too long":     make([]uint32, MaxAllowedUIDs+1),
+func TestServerServesExactlyOneRealCallerIdentity(t *testing.T) {
+	for name, allowed := range map[string]*uint32{
+		"none":         nil,
+		"overflow uid": uid(65534),
+		"invalid uid":  uid(^uint32(0)),
 	} {
 		root := shortDir(t)
-		built, err := assemble(root, socketIn(t, root), &fakeBackend{}, func(config *Config) { config.AllowedUIDs = list })
+		built, err := assemble(root, socketIn(t, root), &fakeBackend{}, func(config *Config) { config.AllowedUID = allowed })
 		if err == nil {
 			_ = built.listener.Close()
 			_ = built.journal.Close()
@@ -565,7 +629,8 @@ func TestDescribeReportsIdentityPresetAndReadiness(t *testing.T) {
 	want := Description{Version: "test-version", Commit: "test-commit",
 		ImageDigest: softwarework.FrozenV1ImageDigest, ImageReference: softwarework.FrozenV1ImageReference,
 		Limits: Limits{CPUMillis: 120_000, MemoryBytes: 1 << 30, ScratchBytes: 2 << 30, OutputBytes: 16 << 20, WallClockMillis: 180_000},
-		PIDs:   64, MaxSourceBytes: 16 << 20, MaxObjectBytes: 64 << 20, MaxExecutions: 2, Ready: true}
+		PIDs:   64, MaxSourceBytes: 16 << 20, MaxObjectBytes: 64 << 20, MaxExecutions: 2,
+		DefaultRetentionSeconds: 7 * 24 * 3600, MaxRetentionSeconds: 31 * 24 * 3600, Ready: true}
 	if description != want {
 		t.Fatalf("description = %+v, want %+v", description, want)
 	}
@@ -577,13 +642,14 @@ func TestDescribeReportsIdentityPresetAndReadiness(t *testing.T) {
 
 func TestNewRunIsRefusedBeforeItsIdentityIsClaimed(t *testing.T) {
 	var ready switchable[error]
-	var free switchable[uint64]
+	var free switchable[FreeSpace]
 	ready.set(errors.New("backend is down"))
-	free.set(99)
+	free.set(FreeSpace{Bytes: 99, Inodes: 10})
 	backend := &fakeBackend{}
 	service := startService(t, backend, func(config *Config) {
 		config.Ready = func(context.Context) error { return ready.get() }
-		config.MinFreeBytes, config.FreeBytes = 100, func() (uint64, error) { return free.get(), nil }
+		config.MinFreeBytes, config.MinFreeInodes = 100, 10
+		config.FreeSpace = func() (FreeSpace, error) { return free.get(), nil }
 	}, artifactstore.WithRecordBound(1))
 	deadline := time.Now().Add(time.Hour).Unix()
 	request := job("gated")
@@ -595,7 +661,12 @@ func TestNewRunIsRefusedBeforeItsIdentityIsClaimed(t *testing.T) {
 	if _, err := service.client.Execute(background(t), request); !errors.Is(err, ErrStorageFull) {
 		t.Fatalf("below the free-space floor: err = %v", err)
 	}
-	free.set(100)
+	// Bytes at the floor are not enough while inodes are below theirs.
+	free.set(FreeSpace{Bytes: 100, Inodes: 9})
+	if _, err := service.client.Execute(background(t), request); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("below the inode floor: err = %v", err)
+	}
+	free.set(FreeSpace{Bytes: 100, Inodes: 10})
 	// The only deadline-bearing record the store admits goes to another job.
 	holder := job("holder")
 	holder.RetainUntilUnix = deadline
@@ -604,6 +675,10 @@ func TestNewRunIsRefusedBeforeItsIdentityIsClaimed(t *testing.T) {
 	}
 	if _, err := service.client.Execute(background(t), request); !errors.Is(err, ErrRetentionFull) {
 		t.Fatalf("store at its record bound: err = %v", err)
+	}
+	// A request that states no deadline gets one too, so it needs room.
+	if _, err := service.client.Execute(background(t), job("no-deadline")); !errors.Is(err, ErrRetentionFull) {
+		t.Fatalf("store at its record bound, no deadline stated: err = %v", err)
 	}
 	if backend.runs() != 1 {
 		t.Fatalf("a refused job ran: %d", backend.runs())
@@ -736,6 +811,16 @@ func TestListenLeavesOnlyTheGroupAbleToReachTheSocket(t *testing.T) {
 	if err := os.Mkdir(nested, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	for name, gid := range map[string]uint32{"overflow gid": 65534, "invalid gid": ^uint32(0)} {
+		fresh := socketIn(t, shortDir(t))
+		if listener, err := Listen(fresh, gid); err == nil {
+			_ = listener.Close()
+			t.Errorf("%s: accepted", name)
+		}
+		if _, err := os.Lstat(fresh); err == nil {
+			t.Errorf("%s: a socket was left behind", name)
+		}
+	}
 	for name, path := range map[string]string{
 		"symlinked directory":        filepath.Join(link, "y.sock"),
 		"below a symlink":            filepath.Join(link, "nested", "y.sock"),
@@ -794,7 +879,7 @@ func TestClientTrustsNothingInAResponseThatBreaksTheProtocol(t *testing.T) {
 		trailer  []byte
 	}
 	valid := func() reply {
-		return reply{header: map[string]any{"schema": ResponseSchema, "status": "ok"},
+		return reply{header: map[string]any{"schema": ResponseSchema, "status": "ok", "retain_until_unix": 1_776_003_600},
 			outcome: softwarework.Outcome{QuoteCommitment: request.QuoteCommitment, ExecutionID: request.ExecutionID,
 				InputDigest: request.InputDigest, ResultDigest: digestOf([]byte("result")),
 				Artifact:     artifactstore.Descriptor{Digest: digestOf(artifact), MediaType: softwarework.ArtifactMediaType, SizeBytes: uint64(len(artifact))},
@@ -819,7 +904,8 @@ func TestClientTrustsNothingInAResponseThatBreaksTheProtocol(t *testing.T) {
 		return append(wire, current.trailer...)
 	})
 	current = valid()
-	if result, err := client.Execute(background(t), request); err != nil || !bytes.Equal(result.Artifact, artifact) || !bytes.Equal(result.Report, report) {
+	if result, err := client.Execute(background(t), request); err != nil || !bytes.Equal(result.Artifact, artifact) ||
+		!bytes.Equal(result.Report, report) || result.RetainUntilUnix != 1_776_003_600 {
 		t.Fatalf("well-formed response: %v", err)
 	}
 	for name, edit := range map[string]func(*reply){
@@ -832,6 +918,8 @@ func TestClientTrustsNothingInAResponseThatBreaksTheProtocol(t *testing.T) {
 		"another input":               func(r *reply) { r.outcome.InputDigest = digestOf([]byte("another")) },
 		"another source":              func(r *reply) { r.outcome.SourceDigest = digestOf([]byte("another")) },
 		"another sandbox":             func(r *reply) { r.outcome.SandboxDigest = digestOf([]byte("another")) },
+		"another toolchain":           func(r *reply) { r.outcome.ToolchainDigest = digestOf([]byte("another image")) },
+		"no retention deadline":       func(r *reply) { delete(r.header, "retain_until_unix") },
 		"failed exit code":            func(r *reply) { r.outcome.ExitCode = 1 },
 		"no completion time":          func(r *reply) { r.outcome.CompletedAtUnix = 0 },
 		"another artifact media type": func(r *reply) { r.outcome.Artifact.MediaType = softwarework.ReportMediaType },
@@ -878,6 +966,165 @@ func TestClientRefusesASocketServedByAnotherUID(t *testing.T) {
 	if _, err := impostor.Execute(background(t), job("impostor")); !errors.Is(err, ErrServerIdentity) || service.backend.runs() != 0 {
 		t.Fatalf("execute err = %v", err)
 	}
+}
+
+func TestClientBoundsACallWhoseContextHasNoDeadline(t *testing.T) {
+	// A listener that accepts and then says nothing.
+	socket := socketIn(t, shortDir(t))
+	listener, err := Listen(socket, uint32(os.Getegid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+		}
+	}()
+	client, err := NewClient(ClientConfig{SocketPath: socket, ServerUID: uint32(os.Getuid()), Timeout: 200 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 2)
+	go func() {
+		_, err := client.Describe(context.Background())
+		finished <- err
+	}()
+	go func() {
+		_, err := client.Execute(context.Background(), job("silent"))
+		finished <- err
+	}()
+	for call := 0; call < 2; call++ {
+		select {
+		case err := <-finished:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("silent service: err = %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("a call without a deadline was not bounded")
+		}
+	}
+	// The caller's own deadline wins over the client's.
+	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	patient, err := NewClient(ClientConfig{SocketPath: socket, ServerUID: uint32(os.Getuid()), Timeout: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := patient.Describe(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("caller deadline: err = %v", err)
+	}
+	if _, err := NewClient(ClientConfig{SocketPath: socket, Timeout: -time.Second}); err == nil {
+		t.Fatal("accepted a negative timeout")
+	}
+}
+
+// TestConcurrentIdenticalRequestsNeverReadAsAmbiguous races many copies of
+// one request. Exactly one of them runs; every other one must be told the
+// run is in progress or be given its outcome. "Ambiguous" would tell a
+// caller that a healthy execution is spent.
+func TestConcurrentIdenticalRequestsNeverReadAsAmbiguous(t *testing.T) {
+	backend := &fakeBackend{}
+	service := startService(t, backend, func(config *Config) { config.MaxConnections = 32 })
+	const rounds, callers = 150, 12
+	for round := 0; round < rounds; round++ {
+		request := job(fmt.Sprintf("race-%d", round))
+		start := make(chan struct{})
+		results := make(chan error, callers)
+		for caller := 0; caller < callers; caller++ {
+			go func() {
+				<-start
+				_, err := service.client.Execute(background(t), request)
+				results <- err
+			}()
+		}
+		close(start)
+		succeeded := 0
+		for caller := 0; caller < callers; caller++ {
+			switch err := <-results; {
+			case err == nil:
+				succeeded++
+			case errors.Is(err, ErrInProgress):
+			default:
+				t.Fatalf("round %d: a concurrent identical request got %v", round, err)
+			}
+		}
+		if succeeded == 0 {
+			t.Fatalf("round %d: no request got the outcome", round)
+		}
+		if _, err := service.client.Execute(background(t), request); err != nil {
+			t.Fatalf("round %d: after the race: %v", round, err)
+		}
+	}
+	if backend.runs() != rounds {
+		t.Fatalf("%d rounds ran %d jobs", rounds, backend.runs())
+	}
+}
+
+// TestRunThatEndsDuringARepeatedRequestIsAnsweredWithItsOutcome pins the
+// narrowest interleaving: a repeated request reads the journal while the run
+// is still claimed, and the run records its outcome and ends before the
+// request looks for it. The answer must be the outcome, not "ambiguous".
+func TestRunThatEndsDuringARepeatedRequestIsAnsweredWithItsOutcome(t *testing.T) {
+	backend := &fakeBackend{started: make(chan struct{}, 1), gate: make(chan struct{})}
+	service := startService(t, backend, nil)
+	request := job("ends-during-repeat")
+	first := make(chan error, 1)
+	go func() {
+		_, err := service.client.Execute(background(t), request)
+		first <- err
+	}()
+	waitStarted(t, backend)
+	// The flight is registered before its claim, so wait for the claim
+	// itself: the repeated request below must see it in the journal.
+	record := filepath.Join(service.state, "journal", request.ExecutionID[len("sha256:"):]+".json")
+	eventually(t, "the journal claim", func() bool {
+		_, err := os.Stat(record)
+		return err == nil
+	})
+	// Hide the flight from the repeat's first check, so it goes on to read
+	// the journal while the run is still claimed; the run then records its
+	// outcome and ends before the repeat looks for the flight again.
+	service.server.mutex.Lock()
+	running := service.server.flights[request.ExecutionID]
+	delete(service.server.flights, request.ExecutionID)
+	service.server.mutex.Unlock()
+	if running == nil {
+		t.Fatal("the run has no flight")
+	}
+	hooked := false
+	service.server.afterAmbiguousRead = func() {
+		hooked = true
+		close(backend.gate)
+		<-running.done
+	}
+	runner, err := softwarework.NewRunner(service.server.config.Executor, service.store, service.journal,
+		mustContract(t, request), softwarework.BindLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, outcome, _, started := service.server.execute(runner, softwarework.Request{QuoteCommitment: request.QuoteCommitment,
+		ExecutionID: request.ExecutionID, InputDigest: request.InputDigest,
+		SourceDigest: digestOf(request.SourceArchive), SourceArchive: request.SourceArchive}, 0)
+	if !hooked || status != StatusOK || started || outcome.ExecutionID != request.ExecutionID {
+		t.Fatalf("hooked=%v status=%s started=%v", hooked, status, started)
+	}
+	if err := <-first; err != nil || backend.runs() != 1 {
+		t.Fatalf("the run itself: err=%v runs=%d", err, backend.runs())
+	}
+}
+
+func mustContract(t *testing.T, request ExecuteRequest) softwarework.Contract {
+	t.Helper()
+	contract, err := softwarework.ManifestContract(request.ManifestDigest, request.Limits.manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contract
 }
 
 func TestClientRefusesASourceOutsideTheInputBound(t *testing.T) {

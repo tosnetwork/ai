@@ -250,6 +250,12 @@ install -d -o root -g root -m 0700 \
   --retain-until RETAIN_UNTIL_UNIX_SECOND
 ```
 
+The source archive is unpacked into a private directory for the run. Only
+regular files and directories are accepted; links, devices, duplicate paths,
+path traversal and sparse entries are refused, as is an archive whose
+entries claim more bytes than the archive itself holds or that would create
+more than 32 768 files and directories. A refused archive writes nothing.
+
 `--retain-until` gives the job's artifact and report a retention deadline;
 without it the job's retention record stays pending and the objects are
 never swept (see [Artifact retention](#artifact-retention)). The caller must first resolve the exact Capability
@@ -266,15 +272,15 @@ must itself be the executor identity, which means root: the executor accepts
 only a containerd socket and state, source and FIFO directories owned by its
 own user. `software-work-executord` removes that requirement. It is a small
 root-run service that is the only process opening the private containerd
-socket, and it offers local callers on an explicit uid allow-list exactly one
-operation over a Unix socket. The provider node, its `tosctl`, its vault and
-its network listeners then run as an ordinary user.
+socket, and it offers exactly one local caller uid exactly one operation
+over a Unix socket. The provider node, its `tosctl`, its vault and its
+network listeners then run as an ordinary user.
 
 Do not replace it with either shortcut: giving the node's user the containerd
 socket gives that user host root, and a `sudo` rule for `software-work-execute`
 lets an unprivileged caller choose the paths a root process reads and writes.
 
-### What an allowed uid can make root do
+### What the allowed uid can make root do
 
 Exactly this, and nothing else:
 
@@ -285,21 +291,40 @@ Exactly this, and nothing else:
   `memory_bytes`, `scratch_bytes`, `output_bytes`, `wall_clock_millis` must be
   non-zero and at most the frozen preset; anything else is refused before
   the request's payload is read);
+- **stage one source per running job on disk**, under
+  `/var/lib/tos-service-executor/staging`, for the length of the run. The
+  unpacked tree can never be larger than the archive that was sent (at most
+  16 MiB) nor hold more than 32 768 files and directories: an archive with
+  sparse entries, or whose entries claim more bytes than the archive holds,
+  is refused before anything is written. Nothing a caller sends is unpacked
+  onto `/run`;
 - **fill bounded storage**: per job a journal record of at most 32 KiB, a
   report and an artifact of at most the job's output bound plus the report
-  (the store refuses any object over 64 MiB); in total, until the state
-  filesystem has less than `--min-free-bytes` free (default 4 GiB), at which
-  point new jobs are refused and nothing is claimed. While a request is
-  being served the service also holds its source (at most 16 MiB) and its
-  two objects in memory, bounded across all connections at 256 MiB.
+  (the store refuses any object over 64 MiB). Every job's objects get a
+  deadline no later than `--max-retention` (31 days) after the job
+  completed, and the store admits at most 65 536 jobs with a deadline, so
+  the worst case is 65 536 retained jobs of about 16 MiB each, roughly
+  1 TiB. Long before that the free-space floor applies: a new job is
+  refused, with nothing claimed, while the state filesystem has less than
+  `--min-free-bytes` (4 GiB) or `--min-free-inodes` (262 144) free. Swept
+  on schedule, storage is bounded by what one caller can run in 31 days;
+- hold at most 256 MiB of request and response payloads in the service's
+  memory across all connections; the unit caps the whole process at 1 GiB.
 
 A request carries no path, image, command, argument, environment, mount,
 network, device or user: there is no field for any of them and an unknown
 field refuses the request. The service stages everything in its own
 directories; a caller never reads them and gets the outcome, artifact and
-report as bytes in the response. An allowed uid also spends execution
+report as bytes in the response. The allowed uid also spends execution
 identities: an identity whose run failed or was interrupted is ambiguous for
 good, exactly as with the CLI.
+
+**One caller identity.** The service keeps no separation between callers:
+execution identities, retention deadlines and execution slots are shared by
+whoever is allowed. It therefore serves exactly one uid (`--allow-uid`) and
+refuses to start with none, a list, a name, or the id of no real user. One
+provider node per Service Actor needs one identity; a second node needs its
+own service instance and state directory.
 
 ### Socket permission model
 
@@ -307,19 +332,19 @@ good, exactly as with the CLI.
 |---|---|---|---|
 | `/run/tos-service-executor` | `root:<socket gid>` | `0750` | only root and the group can reach the socket |
 | `/run/tos-service-executor/executor.sock` | `root:<socket gid>` | `0660` | only root and the group can connect |
-| `/run/tos-service-executor-private` | `root:root` | `0700` | FIFOs and staged workspaces |
-| `/var/lib/tos-service-executor` | `root:root` | `0700` | journal and artifact store |
+| `/run/tos-service-executor-private` | `root:root` | `0700` | container stdio FIFOs only |
+| `/var/lib/tos-service-executor` | `root:root` | `0700` | journal, artifact store and staged workspaces |
 
 systemd creates the runtime directories `root:root 0700`; the executor opens
 the first one to the group itself, and only after the socket inside it has
 its final mode. The file modes only decide who can connect. Who is served is
 decided per connection from the kernel's peer credential (`SO_PEERCRED`)
-against `TOS_EXECUTOR_ALLOWED_UIDS`: a member of the group whose uid is not
-listed is refused, and so is root unless it is listed. The list must be
-numeric and non-empty, and may not name uid 65534, which is what the kernel
-reports for a peer whose uid has no mapping. Use a dedicated group whose
-only members are the allowed users. The client checks the other direction:
-it refuses a socket that is not served by root.
+against `TOS_EXECUTOR_ALLOWED_UID`: a member of the group with another uid
+is refused, and so is root unless it is the allowed uid. Both ids must be
+numeric. Neither may be 65534, which is what the kernel reports for an
+identity that has no mapping, nor 4294967295. Use a dedicated group whose
+only member is the allowed user. The client checks the other direction: it
+refuses a socket that is not served by root.
 
 ### Install
 
@@ -335,7 +360,7 @@ usermod -a -G tos-executor PROVIDER_USER
 install -o root -g root -m 0600 deploy/provider/executor.env.example \
   /etc/tos-service/executor.env
 # Set both values in /etc/tos-service/executor.env:
-#   TOS_EXECUTOR_ALLOWED_UIDS=$(id -u PROVIDER_USER)
+#   TOS_EXECUTOR_ALLOWED_UID=$(id -u PROVIDER_USER)
 #   TOS_EXECUTOR_SOCKET_GID=$(getent group tos-executor | cut -d: -f3)
 install -o root -g root -m 0644 deploy/provider/tos-service-executor.service \
   /etc/systemd/system/tos-service-executor.service
@@ -354,19 +379,54 @@ test "$(stat -c '%U:%G:%a' /var/lib/tos-service-executor)" = root:root:700
 ```
 
 and, as the provider user, a `describe` call that reports `ready: true` and
-the pinned image digest. On a host with passwordless `sudo`,
-`make test-privileged` runs the real-uid and live checks: it builds the test
-binaries as the invoking user, runs only those binaries as root, and fails
-(it does not skip) when it cannot.
+the pinned image digest. `ready` means the daemon answers **and** holds the
+pinned image unpacked; a new job is refused, with nothing claimed, while it
+is false. On a host with passwordless `sudo`, `make test-privileged` runs
+the real-uid and live checks: it builds the test binaries as the invoking
+user, runs only those binaries as root, and fails (it does not skip) when it
+cannot.
 
 The unit is ordered after and requires `tos-service-containerd.service`. It
 runs with no network namespace access, a read-only system, no home
-directories, and `CAP_CHOWN` as its only capability (used once, to give the
-socket to the group). The private containerd unit and its socket modes are
-unchanged: the socket stays `root:root 0600` and only this service and
-operator-run `software-work-execute` open it. **Do not run the two against
-the same state directory**, and do not run a by-hand job while the service
-is executing one: both would use the one private namespace.
+directories, other processes hidden, `CAP_CHOWN` as its only capability
+(used once, to give the socket to the group), and memory and task caps. The
+private containerd unit and its socket modes are unchanged: the socket stays
+`root:root 0600` and only this service and operator-run
+`software-work-execute` open it. **Do not run the two against the same state
+directory**, and do not run a by-hand job while the service is executing
+one: both would use the one private namespace.
+
+### Stopping, and cleaning up after a kill
+
+On `systemctl stop` the service stops accepting and waits up to
+`--stop-grace` (200 s, past the frozen 180 s wall clock) for a running job
+to record its outcome, then cancels it and waits for its container to be
+removed. `TimeoutStopSec=270s` is the outer limit: **if the service is still
+waiting then, systemd sends SIGKILL**, as it does on an out-of-memory kill.
+A killed service leaves, for the job that was running:
+
+- its execution identity `ambiguous` for good (never rerun, never attest);
+- possibly its container and snapshot in the private namespace;
+- possibly its unpacked source under
+  `/var/lib/tos-service-executor/staging/workspaces/`.
+
+The service refuses to start while either of the last two is present; it
+never adopts or silently removes them. After five failed starts in five
+minutes the unit stays failed. Clean up as root, then start it again:
+
+```bash
+socket=/run/tos-service-containerd/containerd.sock
+ctr --address "$socket" -n tos-service-paid-work tasks ls
+ctr --address "$socket" -n tos-service-paid-work tasks kill -s SIGKILL ID   # if listed
+ctr --address "$socket" -n tos-service-paid-work containers rm ID
+ctr --address "$socket" -n tos-service-paid-work snapshots --snapshotter overlayfs rm ID
+chmod -R u+rwx /var/lib/tos-service-executor/staging/workspaces
+rm -rf /var/lib/tos-service-executor/staging/workspaces/*
+systemctl reset-failed tos-service-executor.service
+systemctl start tos-service-executor.service
+```
+
+Never delete the journal or the artifact store to "fix" a start.
 
 ### Protocol
 
@@ -402,64 +462,84 @@ followed by exactly `source_bytes` (1 to 16 MiB) bytes of the USTAR source
 archive whose SHA-256 is `source_digest`. The response header (at most
 16 KiB) is `{"schema":"tos.ai.executor-service.response.v1","status":...}`
 with `describe` (version, commit, image digest and reference, the frozen
-limits, payload bounds, `max_executions`, `ready`) or `outcome` (the same
-object the CLI prints), and for an outcome the artifact and report bytes in
-that order, their sizes and digests being the outcome's descriptors. An
-unknown field, another schema, data after the header or after the payload,
-an oversize length or a digest mismatch is refused.
+limits, payload bounds, `max_executions`, `default_retention_seconds`,
+`max_retention_seconds`, `ready`) or `outcome` (the same object the CLI
+prints) with `retain_until_unix`, the deadline this request gave the
+objects. For an outcome the artifact and report bytes follow in that order,
+their sizes and digests being the outcome's descriptors. An unknown field,
+another schema, data after the header or after the payload, an oversize
+length or a digest mismatch is refused.
 
 | `status` | Meaning for the caller |
 |---|---|
 | `ok` | The response carries the description, or a recorded successful outcome and its objects. |
-| `not_allowed` | The peer uid is not on the allow-list. Nothing was read. |
+| `not_allowed` | The peer uid is not the allowed uid. Nothing was read. |
 | `invalid_request` | Malformed, oversize, another version, trailing data, or bytes that do not match their digest. Nothing was claimed. |
 | `limits_refused` | A limit is zero or looser than the frozen preset. Nothing was claimed. |
 | `timeout` | The request was not received within the read deadlines (10 s header, 30 s payload). |
 | `busy` | A bound is reached: 8 connections, `--max-executions` running jobs, or the in-flight byte budget. Nothing was claimed; retry. |
 | `in_progress` | This execution id is running now. Send the same request later to get its outcome. |
 | `ambiguous` | The execution id was claimed and has no recorded outcome (a crash, a failed run, a forced stop). It is never run again; never attest it. |
-| `conflict` | The execution id is bound to other commitments. |
+| `conflict` | The execution id is bound to other commitments or other limits. |
 | `execution_failed` | The run started and did not produce a recorded success. The id is `ambiguous` from now on. |
-| `unavailable` | The backend is not ready, or the journal or store cannot serve now. A new run was not claimed; retry. |
-| `storage_full` | The state filesystem is below the free-space floor. Nothing was claimed; sweep. |
-| `retention_full` | The store cannot give another job a deadline. A new run was not claimed; sweep. |
+| `unavailable` | The backend is not ready (daemon down, image missing or not unpacked), or the journal or store cannot serve now. A new run was not claimed; retry. |
+| `storage_full` | The state filesystem is below its free-byte or free-inode floor. Nothing was claimed; sweep. |
+| `retention_full` | The store holds its maximum of jobs with a deadline. A new run was not claimed; sweep. |
 | `objects_unavailable` | The outcome is recorded but its objects were swept after their retention ended. |
 
 Every refusal carries a fixed message and none of the caller's data.
 
-**Idempotence.** The journal is keyed by `execution_id`, as in the CLI. A
-repeated request returns the journaled outcome and its stored objects
-without running anything (and may extend, never shorten, the retention
-deadline). Readiness, the free-space floor and retention capacity are
-checked before the identity is claimed, so those refusals do not spend it.
+**Idempotence.** The journal is keyed by `execution_id`, as in the CLI. An
+identity is bound to its quote commitment, input digest, source digest,
+manifest digest **and limits**: a repeated request with all of them equal
+returns the journaled outcome and its stored objects without running
+anything, and any difference is a `conflict`. (The CLI does not bind the
+limits, because there they follow from the manifest.) Readiness, the
+free-space floors and retention capacity are checked before the identity is
+claimed, so those refusals do not spend it.
+
+**While an execution id is running**, every other request for that id is
+answered `in_progress`, whatever its other fields are: a request with
+different commitments learns of the `conflict` only once the run has ended.
+A request can only ever get `ambiguous` for an execution that is not
+running.
 
 **A caller that disconnects does not cancel its run.** The run belongs to
 the service: it continues to its own wall-clock limit and its outcome is
 journaled, so the caller asks again with the same request (`in_progress`
 while it runs, then `ok`). Cancelling instead would turn a paid execution
 ambiguous whenever a provider node restarts. The only thing that cancels a
-run is a service stop that outlasts `--stop-grace`; that execution is then
-`ambiguous`. A service that was killed mid-run reports the identity as
-`ambiguous` after it restarts, and it refuses to start at all while the
-private namespace still holds that run's container: remove it by hand with
-`ctr`, as after an interrupted CLI run.
+run is a service stop that outlasts `--stop-grace`; see above.
 
 A provider runtime imports `pkg/executorservice` for the client side:
 `NewClient(ClientConfig{SocketPath: ...})`, then `Describe` for its preflight
 and `Execute` per job. The client verifies that the socket is served by
-root, that the outcome is a success of exactly the request it sent, and that
-each returned object matches the digest the outcome names.
+root, that the outcome is a success of exactly the request it sent in the
+frozen image, and that each returned object matches the digest the outcome
+names. A call whose context has no deadline is bounded at 10 minutes.
 
 ### Retention and collection
 
 The service's store is the same artifact store as the CLI's, under
-`/var/lib/tos-service-executor/artifacts`, and the same rules apply (see
-[Artifact retention](#artifact-retention)). A request with
-`retain_until_unix` gives its job that deadline; without one the job stays
-pending and is never collected, so **a provider runtime should always send
-`retain_until_unix`** and keep its own copy of the returned bytes for
-delivery. Sweep as root with the existing command, which may run while the
-service is serving:
+`/var/lib/tos-service-executor/artifacts`, swept the same way (see
+[Artifact retention](#artifact-retention)), with one difference: **a
+service job is never left pending**. Counted from the second the job
+completed:
+
+- a request without `retain_until_unix` (zero) keeps the objects for
+  `--default-retention` (7 days);
+- a request with one keeps them until then, but never later than
+  `--max-retention` (31 days);
+- a repeated request may extend the deadline within that same bound and
+  never shortens it. Because the bound counts from completion, repeating a
+  request cannot keep objects alive past it.
+
+The response states the deadline that was applied. The service's copy is a
+convenience for asking again; **a provider runtime keeps its own copy of the
+returned bytes for delivery** and should send the end of the response window
+plus the manifest's `retention_seconds` as `retain_until_unix`. Sweep as
+root with the existing command, which may run while the service is serving,
+for example from a timer:
 
 ```bash
 /usr/local/libexec/tos-service/software-work-execute artifacts-gc \

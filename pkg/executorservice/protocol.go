@@ -5,7 +5,8 @@
 //
 // The boundary carries one operation and no paths. A request names an
 // execution by digests, states limits that may only tighten the frozen
-// preset, and carries the source archive bytes; the response carries the
+// preset and an optional retention deadline the server bounds, and carries
+// the source archive bytes; the response carries the
 // outcome and the artifact and report bytes. The image, command, mounts,
 // network and devices are fixed by the server and cannot be chosen by a
 // caller.
@@ -60,7 +61,7 @@ type Status string
 const (
 	// StatusOK: the response carries what was asked for.
 	StatusOK Status = "ok"
-	// StatusNotAllowed: the peer uid is not on the allow-list. Nothing was
+	// StatusNotAllowed: the peer uid is not the allowed uid. Nothing was
 	// read from the connection.
 	StatusNotAllowed Status = "not_allowed"
 	// StatusInvalidRequest: the request is malformed, oversize, of another
@@ -74,21 +75,24 @@ const (
 	// was claimed; retry later.
 	StatusBusy Status = "busy"
 	// StatusInProgress: this execution is running now. Nothing new was
-	// started; ask again for its outcome.
+	// started; ask again for its outcome. Every request for a running
+	// execution id gets this answer, whatever its other fields are.
 	StatusInProgress Status = "in_progress"
 	// StatusAmbiguous: the execution was claimed and has no recorded
 	// outcome. It may have run; it is never run again.
 	StatusAmbiguous Status = "ambiguous"
-	// StatusConflict: the execution id is bound to other commitments.
+	// StatusConflict: the execution id is bound to other commitments or
+	// other limits.
 	StatusConflict Status = "conflict"
 	// StatusExecutionFailed: the run started and did not produce a recorded
 	// success. The execution id is ambiguous from now on.
 	StatusExecutionFailed Status = "execution_failed"
-	// StatusUnavailable: the backend, journal or store cannot serve now.
+	// StatusUnavailable: the backend (daemon or pinned image), journal or
+	// store cannot serve now.
 	// Nothing new was claimed.
 	StatusUnavailable Status = "unavailable"
-	// StatusStorageFull: the state filesystem is below its free-space
-	// floor. Nothing was claimed.
+	// StatusStorageFull: the state filesystem is below its free-byte or
+	// free-inode floor. Nothing was claimed.
 	StatusStorageFull Status = "storage_full"
 	// StatusRetentionFull: the store cannot give another job a retention
 	// deadline; sweep expired jobs.
@@ -153,6 +157,11 @@ type Description struct {
 	MaxObjectBytes uint64 `json:"max_object_bytes"`
 	// MaxExecutions is how many jobs run at once.
 	MaxExecutions int `json:"max_executions"`
+	// DefaultRetentionSeconds is how long after completion a job's objects
+	// are kept when its request states no deadline, MaxRetentionSeconds
+	// the longest any request can keep them.
+	DefaultRetentionSeconds uint64 `json:"default_retention_seconds"`
+	MaxRetentionSeconds     uint64 `json:"max_retention_seconds"`
 	// Ready reports whether the container backend answered its readiness
 	// probe for this request.
 	Ready bool `json:"ready"`
@@ -181,6 +190,9 @@ type responseHeader struct {
 	Error    string                `json:"error,omitempty"`
 	Describe *Description          `json:"describe,omitempty"`
 	Outcome  *softwarework.Outcome `json:"outcome,omitempty"`
+	// RetainUntilUnix is the deadline this request gave the outcome's
+	// objects, after the server's default and maximum were applied.
+	RetainUntilUnix int64 `json:"retain_until_unix,omitempty"`
 }
 
 var (

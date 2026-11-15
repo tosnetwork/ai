@@ -40,13 +40,18 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 // replaced, anything else there refuses the start.
 // Listen leaves it mode 0750 owner:gid and the socket mode 0660 owner:gid, so
 // only the owner and members of that one group can reach the socket at all;
-// the uid allow-list is then enforced per connection. The directory is kept
+// the one allowed uid is then enforced per connection. The directory is kept
 // owner-only while the socket is created and opened only once the socket has
 // its final mode, so there is no moment at which another user can connect to
 // a wider socket.
 func Listen(path string, gid uint32) (*net.UnixListener, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > 100 {
 		return nil, errors.New("executor service socket path must be canonical, absolute and short")
+	}
+	// The overflow gid stands for every unmapped group, and the invalid
+	// gid would make the group change below a silent no-op.
+	if gid == overflowID || gid == invalidID {
+		return nil, errors.New("executor service socket group is the overflow or invalid gid")
 	}
 	parent := filepath.Dir(path)
 	info, err := os.Lstat(parent)
