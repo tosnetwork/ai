@@ -9,8 +9,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/tosutils-go/adnl/dht"
 	"github.com/tosnetwork/tosutils-go/adnl/keys"
 	"github.com/tosnetwork/tosutils-go/tl"

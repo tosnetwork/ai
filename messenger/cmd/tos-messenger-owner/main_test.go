@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/localapi"
+	"github.com/tosnetwork/ai/messenger/pkg/localapi"
 )
 
 func TestOfflineSignProducesBoundDecision(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 var testRoom = "room_" + strings.Repeat("a", 64)

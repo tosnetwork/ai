@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 const MaxGiftCanonicalBytes = 64 << 10

@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/tosnetwork/tos-messenger/pkg/conformance"
+	"github.com/tosnetwork/ai/messenger/pkg/conformance"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }

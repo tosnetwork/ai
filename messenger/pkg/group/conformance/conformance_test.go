@@ -10,8 +10,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/group"
-	"github.com/tosnetwork/tos-messenger/pkg/room"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 // example is NOT cryptography and must never be used for anything. It is a

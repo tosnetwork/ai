@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 // pairResult is one complete measurement: two halves that agree.

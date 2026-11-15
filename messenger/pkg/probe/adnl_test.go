@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 // The route decision turns on whether a real ADNL session comes up, not on

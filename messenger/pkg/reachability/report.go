@@ -7,7 +7,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 // Finding is what a study concluded. The vocabulary depends on which probe

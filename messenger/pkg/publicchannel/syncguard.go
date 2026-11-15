@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 const (

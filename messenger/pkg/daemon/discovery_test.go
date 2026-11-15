@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 )
 
 const validDHTGlobalConfig = `{

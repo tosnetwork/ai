@@ -10,9 +10,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/pkg/fault"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/pkg/fault"
 )
 
 var deliveryCopyPattern = regexp.MustCompile(`^cpy_[0-9a-f]{64}$`)

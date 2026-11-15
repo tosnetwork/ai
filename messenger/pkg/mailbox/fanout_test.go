@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 )
 
 type fakeRelay struct {

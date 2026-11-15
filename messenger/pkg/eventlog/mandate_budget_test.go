@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 func mandateBudgetAsset() negotiation.Asset {

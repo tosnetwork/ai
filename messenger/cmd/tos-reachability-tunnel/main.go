@@ -17,7 +17,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/probe"
+	"github.com/tosnetwork/ai/messenger/pkg/probe"
 )
 
 func main() {

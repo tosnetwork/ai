@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee/conformance"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee/conformance"
 )
 
 func candidateBinding() e2ee.Binding {

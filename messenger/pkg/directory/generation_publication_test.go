@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 type locatorSink struct {

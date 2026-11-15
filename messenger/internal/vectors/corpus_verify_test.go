@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/directory"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/group"
-	"github.com/tosnetwork/tos-messenger/pkg/mailbox"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/directory"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/mailbox"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 // The verify layer is where an object is refused for what it means, not for how

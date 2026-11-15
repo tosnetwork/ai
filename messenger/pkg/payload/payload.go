@@ -21,7 +21,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 // Bounds on the parts a body is built from. They exist so that a decoder

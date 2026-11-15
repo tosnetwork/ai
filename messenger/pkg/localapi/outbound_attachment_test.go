@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentops"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentops"
 )
 
 type recordingAttachmentEmitter struct {

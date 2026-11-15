@@ -11,18 +11,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/pkg/admission"
+	"github.com/tosnetwork/ai/messenger/pkg/directhttps"
+	"github.com/tosnetwork/ai/messenger/pkg/directory"
+	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
-	"github.com/tosnetwork/tos-messenger/pkg/admission"
-	"github.com/tosnetwork/tos-messenger/pkg/directhttps"
-	"github.com/tosnetwork/tos-messenger/pkg/directory"
-	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
 )
 
 type phaseAResolver struct {

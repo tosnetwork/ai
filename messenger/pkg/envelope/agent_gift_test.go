@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
 )
 
 func giftEvent(t *testing.T) Event {

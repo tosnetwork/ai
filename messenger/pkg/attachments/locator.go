@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tosnetwork/tos-messenger/internal/safehttps"
+	"github.com/tosnetwork/ai/messenger/internal/safehttps"
 )
 
 const locatorPathPrefix = "/.well-known/tos-messenger/attachments/"

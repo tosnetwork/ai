@@ -16,8 +16,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/safehttps"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/internal/safehttps"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 type Caller interface {

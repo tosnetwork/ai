@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 // Authority separates what an Agent may do from what it may only propose.

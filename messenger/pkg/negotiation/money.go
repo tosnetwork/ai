@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-messenger/internal/canon"
 )
 
 const (

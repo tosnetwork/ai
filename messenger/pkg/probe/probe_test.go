@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 const testSession = "ses_" + "0123456789abcdef0123456789abcdef"

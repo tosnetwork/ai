@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/directory"
-	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/directory"
+	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 type daemonContactDirectory struct {

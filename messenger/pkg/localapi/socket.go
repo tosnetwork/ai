@@ -3,7 +3,7 @@ package localapi
 import (
 	"net"
 
-	"github.com/tosnetwork/tos-messenger/internal/localwire"
+	"github.com/tosnetwork/ai/messenger/internal/localwire"
 )
 
 // PeerCheckAvailable reports whether this platform can identify the caller.

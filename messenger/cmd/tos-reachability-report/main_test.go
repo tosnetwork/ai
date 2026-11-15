@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 // The example policy is published as guidance, so a change that makes it

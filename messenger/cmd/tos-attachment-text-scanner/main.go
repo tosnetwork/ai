@@ -14,8 +14,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 const maxReferenceTextBytes = 8 << 20

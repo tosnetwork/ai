@@ -17,7 +17,7 @@ import (
 	"github.com/tosnetwork/tosutils-go/adnl/rldp"
 	"github.com/tosnetwork/tosutils-go/tl"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 const (

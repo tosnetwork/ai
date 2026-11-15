@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/group"
-	"github.com/tosnetwork/tos-messenger/pkg/mlslab"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/mlslab"
 )
 
 type stringFlags []string

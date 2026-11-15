@@ -9,7 +9,7 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 // FilterResult is what one filter exchange with one coordinator produced.

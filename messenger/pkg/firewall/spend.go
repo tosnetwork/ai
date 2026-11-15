@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 // EvaluateSpend judges an action that would commit value.

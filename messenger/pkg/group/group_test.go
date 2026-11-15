@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/room"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 func testMembership(t *testing.T) room.Membership {

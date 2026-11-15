@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/dirlock"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/internal/dirlock"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 const (

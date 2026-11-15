@@ -25,7 +25,7 @@ package group
 import (
 	"errors"
 
-	"github.com/tosnetwork/tos-messenger/pkg/room"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 // MinEpochSecretBytes is the shortest an epoch secret may be. A secret shorter

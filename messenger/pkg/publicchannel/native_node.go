@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/tosutils-go/adnl"
 	"github.com/tosnetwork/tosutils-go/adnl/address"
 	"github.com/tosnetwork/tosutils-go/adnl/dht"

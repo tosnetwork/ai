@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/localwire"
+	"github.com/tosnetwork/ai/messenger/internal/localwire"
 )
 
 const (

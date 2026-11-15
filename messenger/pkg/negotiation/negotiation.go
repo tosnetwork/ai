@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/internal/ids"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-messenger/internal/ids"
 )
 
 // State is where a negotiation stands.

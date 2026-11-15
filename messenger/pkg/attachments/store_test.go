@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/dirlock"
+	"github.com/tosnetwork/ai/messenger/internal/dirlock"
 )
 
 func storedAttachment(t *testing.T, now time.Time) (Reference, []Chunk, []byte) {

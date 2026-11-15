@@ -1,4 +1,4 @@
-module github.com/tosnetwork/tos-messenger
+module github.com/tosnetwork/ai/messenger
 
 go 1.26.11
 

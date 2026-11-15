@@ -8,9 +8,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/localwire"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/mailbox"
+	"github.com/tosnetwork/ai/messenger/internal/localwire"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/mailbox"
 )
 
 const DefaultTimeout = 30 * time.Second

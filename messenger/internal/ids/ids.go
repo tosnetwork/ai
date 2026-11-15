@@ -10,7 +10,7 @@ import (
 	"errors"
 	"regexp"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 // Identifier patterns. Every value is a prefix and 32 bytes of lowercase hex,

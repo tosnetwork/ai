@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	"github.com/tosnetwork/tos-messenger/pkg/room"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 func roomEvent(t *testing.T, delegation identity.Delegation, roomID, kind string, body payload.Payload, now time.Time) envelope.Event {

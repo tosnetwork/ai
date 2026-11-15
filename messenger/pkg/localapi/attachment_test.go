@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentadmission"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/firewall"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentadmission"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/firewall"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
 )
 
 type fixedAttachmentAdmitter struct {

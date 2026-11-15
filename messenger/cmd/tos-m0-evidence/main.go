@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tosnetwork/tos-messenger/pkg/evidence"
+	"github.com/tosnetwork/ai/messenger/pkg/evidence"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }

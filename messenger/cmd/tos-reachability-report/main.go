@@ -18,7 +18,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 func main() {

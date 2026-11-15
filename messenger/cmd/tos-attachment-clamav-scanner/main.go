@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 const (

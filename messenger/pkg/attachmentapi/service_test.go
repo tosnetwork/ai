@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 type fixedAuthority struct{ key ed25519.PublicKey }

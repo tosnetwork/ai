@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
-	"github.com/tosnetwork/tos-messenger/internal/canon"
 )
 
 const MaxInlineOperationOutcomeBytes = 96 << 10

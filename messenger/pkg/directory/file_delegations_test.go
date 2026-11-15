@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 func TestFileDelegationsReloadsPinnedAgentDocument(t *testing.T) {

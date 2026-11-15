@@ -1,6 +1,6 @@
 package payload
 
-import "github.com/tosnetwork/tos-messenger/internal/canon"
+import "github.com/tosnetwork/ai/messenger/internal/canon"
 
 // codecs binds every event kind to the body it carries.
 //

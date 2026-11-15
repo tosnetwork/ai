@@ -27,9 +27,9 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 var idempotencyKeyPattern = regexp.MustCompile(`^idem_[0-9a-f]{64}$`)

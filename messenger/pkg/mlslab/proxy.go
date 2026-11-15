@@ -24,9 +24,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/pkg/group"
-	"github.com/tosnetwork/tos-messenger/pkg/labgroup"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/labgroup"
 )
 
 const (

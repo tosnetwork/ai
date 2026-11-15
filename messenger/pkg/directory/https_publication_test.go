@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 )
 
 func publicationPrekeys(t *testing.T, delegationKey ed25519.PrivateKey, descriptor Descriptor) (string, []byte) {

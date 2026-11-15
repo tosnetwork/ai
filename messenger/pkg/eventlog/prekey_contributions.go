@@ -11,10 +11,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 const (

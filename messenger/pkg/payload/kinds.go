@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 // Text is a message meant for a person or an Agent to read.

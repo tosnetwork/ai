@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/internal/actionauthoritytest"
+	"github.com/tosnetwork/ai/messenger/pkg/economicaction"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	"github.com/tosnetwork/ai/protocol/pkg/codec"
-	"github.com/tosnetwork/tos-messenger/internal/actionauthoritytest"
-	"github.com/tosnetwork/tos-messenger/pkg/economicaction"
 )
 
 type publicationFixture struct {

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-messenger/internal/canon"
 )
 
 const MaxIntentApplicationBytes = 64 << 10

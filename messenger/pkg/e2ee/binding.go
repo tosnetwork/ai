@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/internal/ids"
 )
 
 // Binding names exactly where one ciphertext belongs.

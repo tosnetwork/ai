@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/fault"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	"github.com/tosnetwork/tos-messenger/pkg/fault"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
 )
 
 const (

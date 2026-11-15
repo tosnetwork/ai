@@ -18,11 +18,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/internal/securefile"
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentapi"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
-	"github.com/tosnetwork/tos-messenger/pkg/daemon"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/internal/securefile"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentapi"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/daemon"
 )
 
 const maxStorageKeyBytes = 256

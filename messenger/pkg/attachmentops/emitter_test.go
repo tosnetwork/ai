@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentapi"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/signerapi"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentapi"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
-	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	"github.com/tosnetwork/tos-messenger/pkg/signerapi"
 )
 
 type testAuthority struct{ endpoint ed25519.PublicKey }

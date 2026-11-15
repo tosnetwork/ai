@@ -5,9 +5,9 @@ import (
 	"errors"
 	"path/filepath"
 
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/internal/securefile"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/internal/securefile"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 const MaxDelegationWireBytes = 64 << 10

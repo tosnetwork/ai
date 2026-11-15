@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 const (

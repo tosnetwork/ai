@@ -20,8 +20,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/tosnetwork/tos-messenger/pkg/group"
-	"github.com/tosnetwork/tos-messenger/pkg/room"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 // Check is one property and what the candidate did about it.

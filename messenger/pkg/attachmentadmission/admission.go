@@ -13,10 +13,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentapi"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentapi"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
 )
 
 // CallerFactory resolves only the already validated HTTPS locator. Tests may

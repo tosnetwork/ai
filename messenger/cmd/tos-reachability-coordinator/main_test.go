@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/probe"
+	"github.com/tosnetwork/ai/messenger/pkg/probe"
 )
 
 func keyPath(t *testing.T) string {

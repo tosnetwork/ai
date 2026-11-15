@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	"github.com/tosnetwork/tos-messenger/pkg/firewall"
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/firewall"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 func selfCheckTerms() *negotiation.Terms {

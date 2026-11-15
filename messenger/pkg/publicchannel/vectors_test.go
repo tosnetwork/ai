@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 var updatePublicChannelVectors = flag.Bool("update-public-channel-vectors", false, "rewrite public channel interoperability vectors")

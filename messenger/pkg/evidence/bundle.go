@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 const (

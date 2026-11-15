@@ -11,17 +11,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
-	"github.com/tosnetwork/tos-messenger/pkg/conformance"
-	"github.com/tosnetwork/tos-messenger/pkg/directory"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/group"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	"github.com/tosnetwork/tos-messenger/pkg/mailbox"
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
-	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/conformance"
+	"github.com/tosnetwork/ai/messenger/pkg/directory"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/mailbox"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 var updateCorpus = flag.Bool("update-corpus", false, "rewrite the adversarial corpus")

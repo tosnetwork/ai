@@ -16,11 +16,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/internal/securefile"
-	"github.com/tosnetwork/tos-messenger/pkg/daemon"
-	"github.com/tosnetwork/tos-messenger/pkg/mailbox"
-	"github.com/tosnetwork/tos-messenger/pkg/mailboxapi"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/internal/securefile"
+	"github.com/tosnetwork/ai/messenger/pkg/daemon"
+	"github.com/tosnetwork/ai/messenger/pkg/mailbox"
+	"github.com/tosnetwork/ai/messenger/pkg/mailboxapi"
 )
 
 const maxRelayKeyBytes = 256

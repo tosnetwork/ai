@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentcorpus"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentcorpus"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 func TestEvaluateSampleDoesNotCountInfrastructureFailureAsDeny(t *testing.T) {

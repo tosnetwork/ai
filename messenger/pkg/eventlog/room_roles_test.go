@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	"github.com/tosnetwork/tos-messenger/pkg/room"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 func rolePolicy(t *testing.T, membership room.Membership, delegation identity.Delegation, revision uint64, assignments []room.RoleAssignment, now time.Time) room.RolePolicy {

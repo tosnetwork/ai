@@ -3,7 +3,7 @@ package attachmentapi
 import (
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 func FuzzDecodeAttachmentServiceRequest(f *testing.F) {

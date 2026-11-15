@@ -20,12 +20,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
-	"github.com/tosnetwork/tos-messenger/internal/osguard"
-	"github.com/tosnetwork/tos-messenger/internal/securefile"
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentcorpus"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
-	"github.com/tosnetwork/tos-messenger/pkg/daemon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/osguard"
+	"github.com/tosnetwork/ai/messenger/internal/securefile"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentcorpus"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/daemon"
 )
 
 const maxPolicyBytes = 1 << 20

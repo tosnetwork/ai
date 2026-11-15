@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 )
 
 // MinClaimRetention is the floor for how long a delivered event's claim is

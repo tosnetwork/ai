@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 func TestInspectText(t *testing.T) {

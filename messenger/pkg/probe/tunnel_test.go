@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 // testTunnelRelay builds a relay with test-friendly limits and a controllable

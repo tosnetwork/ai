@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/tosnetwork/ai/messenger/internal/dirlock"
 	trusted "github.com/tosnetwork/ai/protocol/pkg/trustedcapability"
-	"github.com/tosnetwork/tos-messenger/internal/dirlock"
 )
 
 type JournalAuthority interface {

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 )
 
 // SealState is the daemon-owned, restartable state for one streaming

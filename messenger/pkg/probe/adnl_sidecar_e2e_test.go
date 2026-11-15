@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 // sidecarBinaryEnv names the real tos-adnl-probe binary. These tests are the

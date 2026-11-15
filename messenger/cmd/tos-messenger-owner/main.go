@@ -17,9 +17,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tosnetwork/tos-messenger/internal/osguard"
-	"github.com/tosnetwork/tos-messenger/internal/securefile"
-	"github.com/tosnetwork/tos-messenger/pkg/localapi"
+	"github.com/tosnetwork/ai/messenger/internal/osguard"
+	"github.com/tosnetwork/ai/messenger/internal/securefile"
+	"github.com/tosnetwork/ai/messenger/pkg/localapi"
 )
 
 const decisionSchema = "tos.messaging.owner-decision.v1"

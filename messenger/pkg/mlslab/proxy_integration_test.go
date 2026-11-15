@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/group"
-	"github.com/tosnetwork/tos-messenger/pkg/labgroup"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/labgroup"
 )
 
 func TestOpenMLSProxiesEncryptOpaqueRelayAndRestart(t *testing.T) {

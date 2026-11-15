@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
 )
 
 const (

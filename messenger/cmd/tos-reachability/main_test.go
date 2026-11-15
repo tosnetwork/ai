@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/probe"
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/probe"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 func TestSplitAddresses(t *testing.T) {

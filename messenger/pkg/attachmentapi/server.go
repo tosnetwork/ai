@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/localwire"
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/internal/localwire"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 const DefaultTimeout = 30 * time.Second

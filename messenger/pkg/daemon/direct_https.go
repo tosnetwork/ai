@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/safehttps"
-	"github.com/tosnetwork/tos-messenger/pkg/admission"
-	"github.com/tosnetwork/tos-messenger/pkg/directhttps"
-	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
+	"github.com/tosnetwork/ai/messenger/internal/safehttps"
+	"github.com/tosnetwork/ai/messenger/pkg/admission"
+	"github.com/tosnetwork/ai/messenger/pkg/directhttps"
+	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
 )
 
 type daemonHTTPSReceiver struct{ daemon *Daemon }

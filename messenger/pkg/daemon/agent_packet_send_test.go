@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/pkg/agentpacketbridge"
+	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
-	"github.com/tosnetwork/tos-messenger/pkg/agentpacketbridge"
-	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
 )
 
 // sendKeys stands in for the ML-DSA-44 helper; it is not ML-DSA-44.

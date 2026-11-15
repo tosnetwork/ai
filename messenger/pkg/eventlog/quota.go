@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/fault"
+	"github.com/tosnetwork/ai/messenger/pkg/fault"
 )
 
 // expiredCode is what an undecided event is refused with.

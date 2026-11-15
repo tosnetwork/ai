@@ -21,9 +21,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/securefile"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	"github.com/tosnetwork/tos-messenger/pkg/publicchannel"
+	"github.com/tosnetwork/ai/messenger/internal/securefile"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/publicchannel"
 	"github.com/tosnetwork/tosutils-go/adnl"
 	"github.com/tosnetwork/tosutils-go/adnl/address"
 	"github.com/tosnetwork/tosutils-go/adnl/dht"

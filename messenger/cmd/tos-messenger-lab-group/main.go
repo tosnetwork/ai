@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/labgroup"
+	"github.com/tosnetwork/ai/messenger/pkg/labgroup"
 )
 
 type credentialFlags []string

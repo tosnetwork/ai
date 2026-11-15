@@ -13,10 +13,10 @@ import (
 	"context"
 	"errors"
 
+	"github.com/tosnetwork/ai/messenger/internal/ids"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
-	"github.com/tosnetwork/tos-messenger/internal/ids"
 	"google.golang.org/protobuf/proto"
 )
 

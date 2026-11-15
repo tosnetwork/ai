@@ -8,10 +8,10 @@ import (
 	"net"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/localwire"
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/internal/localwire"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 const DefaultRequestTimeout = 30 * time.Second

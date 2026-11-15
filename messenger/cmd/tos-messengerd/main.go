@@ -16,14 +16,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/safehttps"
-	"github.com/tosnetwork/tos-messenger/pkg/attachmentops"
-	"github.com/tosnetwork/tos-messenger/pkg/daemon"
-	"github.com/tosnetwork/tos-messenger/pkg/directhttps"
-	"github.com/tosnetwork/tos-messenger/pkg/directory"
-	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
-	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
-	"github.com/tosnetwork/tos-messenger/pkg/publicationops"
+	"github.com/tosnetwork/ai/messenger/internal/safehttps"
+	"github.com/tosnetwork/ai/messenger/pkg/attachmentops"
+	"github.com/tosnetwork/ai/messenger/pkg/daemon"
+	"github.com/tosnetwork/ai/messenger/pkg/directhttps"
+	"github.com/tosnetwork/ai/messenger/pkg/directory"
+	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
+	"github.com/tosnetwork/ai/messenger/pkg/publicationops"
 )
 
 func main() {

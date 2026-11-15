@@ -9,9 +9,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/ids"
-	"github.com/tosnetwork/tos-messenger/pkg/firewall"
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/internal/ids"
+	"github.com/tosnetwork/ai/messenger/pkg/firewall"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 var approvalIdempotencyPattern = regexp.MustCompile(`^idem_[0-9a-f]{64}$`)

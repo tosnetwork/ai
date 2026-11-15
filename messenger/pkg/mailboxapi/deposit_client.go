@@ -8,8 +8,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/envelope"
-	"github.com/tosnetwork/tos-messenger/pkg/mailbox"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
+	"github.com/tosnetwork/ai/messenger/pkg/mailbox"
 )
 
 // DepositClient adapts the bounded service protocol to mailbox.RelayClient.

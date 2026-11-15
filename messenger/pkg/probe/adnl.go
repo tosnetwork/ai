@@ -14,7 +14,7 @@ import (
 	"github.com/tosnetwork/tosutils-go/adnl"
 	"github.com/tosnetwork/tosutils-go/adnl/address"
 
-	"github.com/tosnetwork/tos-messenger/pkg/reachability"
+	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
 
 const (

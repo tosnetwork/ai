@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 type fixedResolver []netip.Addr

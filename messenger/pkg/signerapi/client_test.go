@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/internal/localwire"
+	"github.com/tosnetwork/ai/messenger/internal/localwire"
 )
 
 func serveSignerOnce(t *testing.T, key ed25519.PrivateKey, mutate func(*response)) string {

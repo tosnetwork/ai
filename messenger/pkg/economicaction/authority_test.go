@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/internal/actionauthoritytest"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
-	"github.com/tosnetwork/tos-messenger/internal/actionauthoritytest"
 )
 
 func writeKeyFile(t *testing.T, directory, name, contents string, mode os.FileMode) string {

@@ -20,11 +20,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/internal/dirlock"
+	"github.com/tosnetwork/ai/messenger/pkg/economicaction"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	"github.com/tosnetwork/ai/protocol/pkg/codec"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
-	"github.com/tosnetwork/tos-messenger/internal/dirlock"
-	"github.com/tosnetwork/tos-messenger/pkg/economicaction"
 )
 
 const (

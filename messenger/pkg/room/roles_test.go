@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 func signedRolePolicy(t *testing.T) (Membership, RolePolicy, identityFixture) {

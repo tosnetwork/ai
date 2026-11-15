@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tosnetwork/tos-messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/attachments"
 )
 
 func TestRunBindsPinnedEngineDatabasesAndVerdict(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 )
 
 // Check is one property and what the candidate did about it.

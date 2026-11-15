@@ -8,7 +8,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
 // PublicGeneration is the durable public-only output of an exact device

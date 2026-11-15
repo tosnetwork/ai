@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 func approvalTerms() *negotiation.Terms {
