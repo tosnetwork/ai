@@ -210,6 +210,19 @@ The card's Agent:
   taken from the offer file, before sealing to it. `VerifyKeyCard` proves only
   that the card's own Agent signed it; it cannot know which Capability the
   card is used for, so this owner check is the client's.
+- **Provider, in band.** A card lives at most 30 days, but a request can run
+  longer (a response SLA of up to 30 days plus the redelivery horizon), so the
+  card a buyer took from the offer file can expire while the buyer still has
+  packets to send. The provider SHOULD therefore also carry its current card
+  inside each result it delivers, valid until the end of that result's
+  redelivery horizon; the result is signed and, over this Carrier, encrypted.
+  The buyer MUST take such a card only from a packet of its own purchase,
+  whose sender is that purchase's provider, and MUST verify it exactly like an
+  offer-file card: `VerifyKeyCard` against finalized state and the card's
+  Agent equal to the Capability's finalized owner. A card that fails either
+  check is not used and does not invalidate the result. Where OpenFox carries
+  it (the result message header) is specified in the OpenFox Service Actor
+  rail guide.
 - **Buyer.** The buyer's current card travels inside its task message, which is
   itself signed and, over this Carrier, encrypted. The provider requires the
   card's Agent to equal the task packet's sender and seals results and
@@ -231,6 +244,12 @@ they are not downloaded again from that relay, and leaves them to expire at the
 relay. The memory follows the not-again rules of section 8.6. A recipient MAY
 open an envelope under any key it still holds, including one whose card has
 passed `not_after_unix`.
+
+A recipient MAY skip the download altogether when the listing (9.3) names a
+`recipient_key_id` it does not hold, remembering the entry under the same
+rules. The listed key ID is the relay's unauthenticated word; a relay that
+lies about it can only hide that envelope from this recipient, which it can do
+anyway by not listing it.
 
 ## 7. Plaintext wrapper
 
@@ -317,6 +336,22 @@ aead_ciphertext = ctx.Seal(aad = header, plaintext)
 4. Journal the envelope bytes durably **before** the first deposit. Sealing is
    randomized; a retry of an ambiguous deposit MUST resend the journaled bytes,
    never a fresh seal, so the relay can recognize it as the same envelope.
+5. Before journaled bytes are sent again (a retry, a redundant deposit to
+   another relay of the card, or a resend after a restart), the sender checks
+   the card they were sealed to: if its last successful `VerifyKeyCard` is 10
+   minutes old or older, it verifies it again (6.3). If the card has expired
+   (`now >= not_after_unix`), was revoked (it no longer verifies against
+   finalized state) or is no longer held, the sender MUST NOT send those bytes
+   again. For a send that no relay has accepted yet it seals the same packet
+   JSON to the recipient's current valid card under a fresh `ack_secret` (a new
+   envelope ID), journals that envelope before its first deposit, and
+   continues with it; without a valid card the send fails and is retried
+   later. An envelope that a relay already accepted is not deposited at
+   further relays. If finalized state cannot answer the check, nothing is sent
+   and the send is retried; the bytes are never sent to a card whose standing
+   is unknown past the 10-minute window. Step 4 still holds: a fresh seal
+   happens only because the old card cannot be used, never to retry an
+   ambiguous deposit to a usable card.
 
 ### 8.5 Recipient rules
 
@@ -526,8 +561,10 @@ signing, frames, the courier journal or the receiver.
    file, buyer card from the task). No card → a fixed `no route` error; the
    courier keeps the packet journaled.
 2. Seal once per `IdempotencyKey`, with `expires_at_unix =
-   min(OutboundPacket.ExpiresAtUnix, now + 86,400)`, and journal the envelope
-   next to the courier record before the first deposit.
+   min(OutboundPacket.ExpiresAtUnix, now + 86,400)`. The envelope is durably
+   journaled, keyed by the packet's idempotency key, before the first deposit;
+   it is sealed again only under the 8.4 step 5 card rule or the 8.6
+   conflict rule.
 3. Deposit the journaled bytes to every relay in the card, in card order, each
    with a bounded timeout (default 30 s). Return nil once at least one relay
    answered `200`, `201` or `410`; keep trying the remaining relays in the
@@ -553,6 +590,15 @@ deduplicates them.
   the same envelope ID.
 - A relay outage delays delivery only; nothing is lost while any one relay of
   the card holds the envelope and its TTL has not passed.
+
+**Implementation bounds.** These bound the client's own memory and are not
+protocol limits; another client may choose others. The OpenFox client keeps
+at most 8,192 entries in its not-again memory and at most 8,192 in its memory
+of settled envelope IDs, and forgets an entry after its listed expiry and at
+the latest 24 hours and 5 minutes after it was recorded; evicting an entry
+early only costs a repeated download. It keeps at most 8 cards per peer Agent
+(dropping the least preferred under 6.3) and cards of at most 1,024 peers, and
+holds at most 16 of its own keys.
 
 ## 11. Threat model
 
