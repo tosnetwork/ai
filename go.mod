@@ -4,7 +4,7 @@ go 1.26.11
 
 require (
 	connectrpc.com/connect v1.19.1
-	github.com/tosnetwork/tos-service-protocol v0.0.0-20261108031740-cb4273a60ded
+	github.com/tosnetwork/tos-service-protocol v0.0.0-20261114153902-49a25714e971
 	golang.org/x/sys v0.46.0
 	google.golang.org/protobuf v1.36.11
 )

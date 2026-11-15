@@ -97,6 +97,20 @@ one finalized checkpoint and quotes the actor's current native-TOS price,
 storage fee and terms hash. The proposal grants no authority; the buyer
 re-verifies every rail field before calling.
 
+The profile `transport` is the binding every proposal carries, and the gateway
+re-validates it on every `RequestQuoteProposal` response. `security_mode` 1 is
+HTTPS and `security_mode` 0 is plaintext HTTP to an explicit loopback
+endpoint; both take `max_request_bytes` from 1 to 16 MiB, and the `base_url`
+may carry a canonical path prefix (`https://provider.example/tos/v1`:
+non-empty segments of unreserved characters, no `.` or `..` segment, no
+trailing slash, percent-encoding, query, fragment or user info).
+`security_mode` 2 delivers work as Agent Packets to the provider Agent: the
+`base_url` is exactly `agent-packet:<provider_agent_id>` (lowercase hex) and
+`max_request_bytes` is at most 1 MiB. A malformed binding stops the gateway at
+startup. A mode-2 binding that names any Agent other than `provider_agent_id`
+loads, but no proposal is ever produced: every request fails as a retryable
+dependency-unavailable error, so check it before deploying.
+
 The optional Intent Carrier (`TOS_SERVICE_INTENT_CARRIER_DIRECTORY`) admits a
 publication only under an ML-DSA-44 Action Authority Writer Fence and
 AuthorizedActionV1. `TOS_SERVICE_INTENT_AUTHORITY_PINS` is a comma-separated
