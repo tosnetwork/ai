@@ -1,0 +1,501 @@
+syntax = "proto3";
+
+package tos.service.v1;
+
+option go_package = "github.com/tosnetwork/tos-service-spec/proto/tos/service/v1;tosservicev1";
+
+// TOS Native Service defines one canonical authority and execution protocol.
+
+message RequestContext {
+  string request_id = 1;
+  string trace_id = 2;
+  string idempotency_key = 3;
+  string caller_id = 4;
+  int64 deadline_unix_millis = 5;
+}
+
+enum NativeErrorCodeV1 {
+  NATIVE_ERROR_CODE_V1_UNSPECIFIED = 0;
+  NATIVE_ERROR_CODE_V1_BAD_MESSAGE = 2200;
+  NATIVE_ERROR_CODE_V1_WRONG_NETWORK = 2201;
+  NATIVE_ERROR_CODE_V1_WRONG_CONTRACT = 2202;
+  NATIVE_ERROR_CODE_V1_BAD_ACTION = 2203;
+  NATIVE_ERROR_CODE_V1_BAD_PREDECESSOR = 2204;
+  NATIVE_ERROR_CODE_V1_BAD_SEQUENCE = 2205;
+  NATIVE_ERROR_CODE_V1_TOMBSTONED = 2206;
+  NATIVE_ERROR_CODE_V1_BAD_POLICY = 2207;
+  NATIVE_ERROR_CODE_V1_BAD_SIGNATURE = 2208;
+  NATIVE_ERROR_CODE_V1_THRESHOLD = 2209;
+  NATIVE_ERROR_CODE_V1_BAD_TRANSITION = 2210;
+  NATIVE_ERROR_CODE_V1_IMMUTABLE_VERSION = 2211;
+  NATIVE_ERROR_CODE_V1_TIMELOCK = 2212;
+  NATIVE_ERROR_CODE_V1_DUPLICATE_SIGNATURE = 2213;
+  // 2214 (formerly WEAK_KEY, an Ed25519 weak-key refusal) is retired: the
+  // current Native Registry contract does not emit it and the number is never
+  // reused.
+  reserved 2214;
+  reserved "NATIVE_ERROR_CODE_V1_WEAK_KEY";
+  NATIVE_ERROR_CODE_V1_POLICY_TOO_WIDE = 2215;
+  NATIVE_ERROR_CODE_V1_PUBLIC_BAD_REQUEST = 2300;
+  NATIVE_ERROR_CODE_V1_PUBLIC_NOT_FOUND = 2301;
+  NATIVE_ERROR_CODE_V1_PUBLIC_CONFLICT = 2302;
+  NATIVE_ERROR_CODE_V1_PUBLIC_DEPENDENCY_UNAVAILABLE = 2303;
+  NATIVE_ERROR_CODE_V1_PUBLIC_CAPACITY = 2304;
+  NATIVE_ERROR_CODE_V1_PUBLIC_AMBIGUOUS_OUTCOME = 2305;
+  NATIVE_ERROR_CODE_V1_PUBLIC_DEADLINE = 2306;
+  NATIVE_ERROR_CODE_V1_PUBLIC_UNAUTHENTICATED = 2307;
+  NATIVE_ERROR_CODE_V1_PUBLIC_PERMISSION_DENIED = 2308;
+}
+
+enum RetryDispositionV1 {
+  RETRY_DISPOSITION_V1_UNSPECIFIED = 0;
+  RETRY_DISPOSITION_V1_NEVER = 1;
+  RETRY_DISPOSITION_V1_SAME_REQUEST_AFTER_BACKOFF = 2;
+  RETRY_DISPOSITION_V1_RESOLVE_BEFORE_RETRY = 3;
+}
+
+message NativeErrorV1 {
+  NativeErrorCodeV1 code = 1;
+  string identifier = 2;
+  RetryDispositionV1 retry_disposition = 3;
+  // Set only for SAME_REQUEST_AFTER_BACKOFF; bounded to 100..300000.
+  uint32 retry_after_millis = 4;
+}
+
+message NetworkDomain {
+  string network_id = 1;
+  string genesis_root_hash = 2;
+  string genesis_file_hash = 3;
+}
+
+message ChainReference {
+  int32 workchain = 1;
+  string account = 2;
+  uint64 logical_time = 3;
+  string transaction_hash = 4;
+  string contract_code_hash = 5;
+  uint64 finalized_checkpoint = 6;
+}
+
+message TOSAccountAddressV1 {
+  int32 workchain = 1;
+  // Exactly 32 bytes.
+  bytes account_id = 2;
+}
+
+message ControllerV1 {
+  // Exactly mldsa44:<64 lowercase hex key_id>, where
+  // key_id = SHA-256("TOS-PQ-CONSENSUS-KEY-v1" || 0x01 0x00 || public_key).
+  // It must equal the id derived from mldsa44_public_key; Native v1 does not
+  // depend on an off-chain alias table to reconstruct controller identity.
+  string key_id = 1;
+  // ML-DSA-44 (FIPS 204) public key, exactly 1,312 bytes.
+  bytes mldsa44_public_key = 2;
+  reserved "ed25519_public_key";
+  uint32 weight = 3;
+  uint32 purpose_mask = 4;
+  bool recovery = 5;
+}
+
+message ControllerPolicyV1 {
+  uint32 threshold = 1;
+  uint32 recovery_threshold = 2;
+  uint64 recovery_timelock_seconds = 3;
+  // 1..8 controllers in strictly ascending key_id order; a wider policy is
+  // refused with POLICY_TOO_WIDE.
+  repeated ControllerV1 controllers = 4;
+}
+
+message SignatureV1 {
+  // Exactly mldsa44:<64 lowercase hex key_id> of a controller in the policy
+  // the signature is checked against.
+  string key_id = 1;
+  // Pure ML-DSA-44 (FIPS 204, no pre-hash) signature, exactly 2,420 bytes,
+  // over the 32 raw bytes of the action cell hash with context string
+  // "TOS-NATIVE-REGISTRY". Signing may be hedged, so the operation is
+  // identified by its action hash, never by these bytes.
+  bytes mldsa44_signature = 2;
+  reserved "ed25519_signature";
+}
+
+message CapabilityVersionV1 {
+  string version = 1;
+  string manifest_digest = 2;
+  bool revoked = 3;
+}
+
+message RegisterAgentV1 {
+  bytes object_nonce = 1;
+  ControllerPolicyV1 initial_policy = 2;
+}
+
+message UpdateAgentPolicyV1 {
+  ControllerPolicyV1 new_policy = 1;
+}
+
+message DelegateAgentV1 {
+  string delegation_digest = 1;
+}
+
+message InitiateRecoveryV1 {
+  uint64 execute_after_unix_seconds = 1;
+  ControllerPolicyV1 new_policy = 2;
+}
+
+message CompleteRecoveryV1 {
+  string initiation_action_hash = 1;
+}
+
+message RevokeAgentV1 {}
+
+message RegisterCapabilityV1 {
+  bytes object_nonce = 1;
+  string owner_agent_id = 2;
+  reserved 3;
+  CapabilityVersionV1 initial_version = 4;
+}
+
+message AddCapabilityVersionV1 {
+  CapabilityVersionV1 version = 1;
+  string owner_agent_id = 2;
+}
+
+message TransferCapabilityV1 {
+  string current_owner_agent_id = 1;
+  string new_owner_agent_id = 2;
+  reserved 3;
+}
+
+message RevokeCapabilityV1 {
+  string version = 1; // empty means tombstone the complete Capability
+  string owner_agent_id = 2;
+}
+
+message NativeActionV1 {
+  reserved 30;
+  string protocol = 1; // exactly tos_service_v1
+  NetworkDomain network = 2;
+  string target_object_id = 3;
+  string target_contract_code_hash = 4;
+  uint64 generation = 5;
+  uint64 sequence = 6;
+  string predecessor_tvm_state_hash = 7;
+  bytes nonce = 8;
+
+  oneof payload {
+    RegisterAgentV1 register_agent = 20;
+    UpdateAgentPolicyV1 update_agent_policy = 21;
+    DelegateAgentV1 delegate_agent = 22;
+    InitiateRecoveryV1 initiate_recovery = 23;
+    CompleteRecoveryV1 complete_recovery = 24;
+    RevokeAgentV1 revoke_agent = 25;
+    RegisterCapabilityV1 register_capability = 26;
+    AddCapabilityVersionV1 add_capability_version = 27;
+    TransferCapabilityV1 transfer_capability = 28;
+    RevokeCapabilityV1 revoke_capability = 29;
+  }
+}
+
+message SignedNativeActionV1 {
+  NativeActionV1 action = 1;
+  // At most 8 entries in strictly ascending key_id order.
+  repeated SignatureV1 authority_signatures = 2;
+  // New-owner acceptance for Capability transfer, or proof of possession by
+  // every key in a newly installed Agent policy. At most 8 entries in strictly
+  // ascending key_id order.
+  repeated SignatureV1 counterparty_signatures = 3;
+  reserved 4, 5; // caller-supplied deterministic action results were removed
+}
+
+message AgentStateV1 {
+  string agent_id = 1;
+  uint64 generation = 2;
+  uint64 sequence = 3;
+  string last_action_hash = 4;
+  ControllerPolicyV1 policy = 5;
+  repeated string delegation_digests = 6;
+  uint64 recovery_execute_after_unix_seconds = 7;
+  string recovery_initiation_action_hash = 8;
+  ControllerPolicyV1 recovery_policy = 9;
+  bool tombstoned = 10;
+  // Hash of the live canonical policy cell at recovery initiation. Completion
+  // fails unless this still matches the current live policy.
+  string recovery_initiating_policy_hash = 11;
+}
+
+message CapabilityStateV1 {
+  string capability_id = 1;
+  uint64 generation = 2;
+  uint64 sequence = 3;
+  string last_action_hash = 4;
+  string owner_agent_id = 5;
+  reserved 6;
+  repeated CapabilityVersionV1 versions = 7;
+  bool tombstoned = 8;
+}
+
+message NativeStateV1 {
+  NetworkDomain network = 1;
+  string tvm_state_hash = 2;
+  ChainReference reference = 3;
+  oneof state {
+    AgentStateV1 agent = 10;
+    CapabilityStateV1 capability = 11;
+  }
+}
+
+message SubmitNativeActionRequest {
+  RequestContext context = 1;
+  SignedNativeActionV1 submission = 2;
+}
+
+message SubmitNativeActionResponse {
+  string action_hash = 1;
+  NativeStateV1 state = 2;
+  reserved 3;
+  // Transport acknowledgement only. Canonical success requires a later
+  // finalized ResolveNativeState result containing this action hash.
+  bool relay_accepted = 4;
+}
+
+message ResolveNativeStateRequest {
+  RequestContext context = 1;
+  string object_id = 2;
+  string expected_tvm_state_hash = 3;
+}
+
+message ResolveNativeStateResponse {
+  bool found = 1;
+  NativeStateV1 state = 2;
+}
+
+enum DNSAliasKindV1 {
+  DNS_ALIAS_KIND_V1_UNSPECIFIED = 0;
+  DNS_ALIAS_KIND_V1_AGENT = 1;
+  DNS_ALIAS_KIND_V1_CAPABILITY = 2;
+  // A Messenger alias resolves to an Agent, never directly to an endpoint.
+  DNS_ALIAS_KIND_V1_MESSENGER = 3;
+}
+
+enum DNSProvenanceV1 {
+  DNS_PROVENANCE_V1_UNSPECIFIED = 0;
+  // Independently verified agreement of a strict majority of configured TOS
+  // endpoints. This is deliberately not named or represented as a proof.
+  DNS_PROVENANCE_V1_QUORUM_AGREED = 1;
+}
+
+message DNSCheckpointV1 {
+  int32 workchain = 1;
+  int64 shard = 2;
+  uint64 sequence = 3;
+  bytes root_hash = 4; // exactly 32 bytes
+  bytes file_hash = 5; // exactly 32 bytes
+  uint64 generation_unix_seconds = 6;
+}
+
+message DNSLifecycleV1 {
+  uint64 auction_end_unix_seconds = 1;
+  uint64 last_fill_up_unix_seconds = 2;
+  uint64 renewal_deadline_unix_seconds = 3;
+}
+
+message ResolveDNSAliasRequest {
+  RequestContext context = 1;
+  // Canonical lowercase ASCII .tos name, at most 126 bytes.
+  string name = 2;
+  DNSAliasKindV1 kind = 3;
+}
+
+message ResolveDNSAliasResponse {
+  string canonical_name = 1;
+  DNSAliasKindV1 kind = 2;
+  string category_hash = 3;
+  TOSAccountAddressV1 resolved_account = 4;
+  string native_object_id = 5;
+  // Fresh finalized typed state after deterministic address/code/object-ID
+  // re-derivation. Messenger aliases contain Agent state.
+  NativeStateV1 native_state = 6;
+  DNSCheckpointV1 checkpoint = 7;
+  DNSLifecycleV1 lifecycle = 8;
+  DNSProvenanceV1 provenance = 9;
+  // Root, Collection, Domain Item, then any delegated resolvers; 3..8.
+  repeated TOSAccountAddressV1 resolver_path = 10;
+}
+
+// Contract identities are network-relative. NetworkDomain supplies the
+// network/genesis binding; the account tuple and exact code bind the asset.
+message TOSContractIdentityV1 {
+  int32 workchain = 1;
+  bytes account_id = 2;
+  string code_hash = 3;
+}
+
+message TOSAssetIdentityV1 {
+  TOSContractIdentityV1 master = 1;
+  string wallet_code_hash = 2;
+  uint32 decimals = 3;
+}
+
+// A Quote Proposal is gateway-local and non-canonical until accepted on TOS.
+// It settles on the Service Actor rail (docs/SERVICE_ACTOR_TVM_V1.md): the
+// price is native TOS and every rail field must equal finalized actor state
+// and manifest key 21 before a buyer builds a call.
+message QuoteProposalV1 {
+  // The stablecoin price, escrow terms and dispute policy of the retired
+  // escrow rail.
+  reserved 7, 8, 9;
+  reserved "maximum_price", "escrow_terms_digest", "dispute_policy_digest";
+
+  string proposal_id = 1;
+  string capability_id = 2;
+  string capability_version = 3;
+  string provider_agent_id = 4;
+  string manifest_digest = 5;
+  string transport_binding_digest = 6;
+  // Buyer-side acceptance deadline only; the actor does not enforce it.
+  uint64 expires_at_unix_seconds = 10;
+  // Service Actor account; workchain 0 only.
+  TOSAccountAddressV1 actor = 11;
+  // tvm-cell-sha256:<64 lowercase hex>; must equal a published release.
+  string actor_code_hash = 12;
+  uint32 policy_version = 13;
+  // 64 lowercase hex; the actor's terms_hash for the quoted policy.
+  string terms_hash = 14;
+  // Exact price_per_call in nanoTOS: positive, [1-9][0-9]*, below 2^120. A
+  // zero price is refused, as in ACCEPTED_QUOTE_TVM_V1 and SETTLEMENT.
+  string price_nanotos = 15;
+  // Non-refundable storage fee in nanoTOS, same encoding and bound.
+  string storage_fee_nanotos = 16;
+  // mldsa44:<64 lowercase hex key id>; equals manifest key 21 field 5.
+  string attestor_key_id = 17;
+}
+
+message AcceptedQuoteV1 {
+  // The client-chosen execution signer of the retired escrow rail; the
+  // attestor key now comes from the proposal and manifest.
+  reserved 4;
+  reserved "execution_signer_authorization";
+
+  string protocol = 1; // exactly tos_service_v1
+  string quote_commitment = 2;
+  QuoteProposalV1 proposal = 3;
+  // The finalized Service Actor call transaction that accepted the Quote.
+  ChainReference reference = 5;
+  NetworkDomain network = 6;
+  // Request ID from the call's request snapshot message.
+  uint64 request_id = 7;
+  // 64 lowercase hex; cell_hash of the NSR1 service request.
+  string request_hash = 8;
+}
+
+// Discovery is explicitly derived and may be incomplete. Each returned state
+// is nevertheless a fresh finalized Native resolution, not index authority.
+message ListCapabilitiesRequest {
+  RequestContext context = 1;
+  uint32 page_size = 2;
+  string after_capability_id = 3;
+}
+
+message ListCapabilitiesResponse {
+  repeated NativeStateV1 capabilities = 1;
+  string next_after_capability_id = 2;
+}
+
+// Gateway-local projection of digest-authenticated manifest content. These
+// fields and their match score are discovery hints, never TOS state.
+message GatewayLocalCapabilityMetadataV1 {
+  string name = 1;
+  string description = 2;
+  string operation = 3;
+  uint32 match_score = 4;
+}
+
+message CapabilitySearchResultV1 {
+  // Fresh finalized TOS Registry state.
+  NativeStateV1 capability = 1;
+  // Version and digest selected from capability, not from the local index.
+  string capability_version = 2;
+  string manifest_digest = 3;
+  // Optional, incomplete gateway-local manifest projection.
+  GatewayLocalCapabilityMetadataV1 gateway_local = 4;
+}
+
+message SearchCapabilitiesRequest {
+  RequestContext context = 1;
+  string query = 2;
+  uint32 page_size = 3;
+  string after_capability_id = 4;
+}
+
+message SearchCapabilitiesResponse {
+  repeated CapabilitySearchResultV1 results = 1;
+  string next_after_capability_id = 2;
+}
+
+message PublishSoftwareWorkManifestRequest {
+  RequestContext context = 1;
+  string capability_id = 2;
+  bytes canonical_cbor = 3;
+}
+
+message PublishSoftwareWorkManifestResponse {
+  string manifest_digest = 1;
+  NativeStateV1 capability = 2;
+}
+
+message GetSoftwareWorkManifestRequest {
+  RequestContext context = 1;
+  string manifest_digest = 2;
+}
+
+message GetSoftwareWorkManifestResponse {
+  string manifest_digest = 1;
+  bytes canonical_cbor = 2;
+}
+
+// A buyer requests non-canonical terms for one exact Capability version.
+// The provider decides price, expiry, transport, and Service Actor policy.
+message RequestQuoteProposalRequest {
+  RequestContext context = 1;
+  string capability_id = 2;
+  string capability_version = 3;
+  string buyer_address = 4;
+}
+
+// Every digest-bearing proposal field has its complete portable preimage.
+// The package remains non-canonical until the Service Actor call finalizes.
+// The terms_hash preimage is the finalized actor policy, not package data.
+message QuoteProposalPackageV1 {
+  // Escrow terms and dispute policy preimages of the retired escrow rail.
+  reserved 3, 5;
+  reserved "escrow_terms_boc", "dispute_policy_boc";
+
+  QuoteProposalV1 proposal = 1;
+  bytes canonical_manifest_cbor = 2;
+  bytes transport_binding_boc = 4;
+}
+
+message RequestQuoteProposalResponse {
+  QuoteProposalPackageV1 package = 1;
+}
+
+service NativeService {
+  rpc SubmitNativeAction(SubmitNativeActionRequest) returns (SubmitNativeActionResponse);
+  rpc ResolveNativeState(ResolveNativeStateRequest) returns (ResolveNativeStateResponse);
+}
+
+// DNSAliasService is a bounded, read-only convenience boundary. It cannot
+// register, bid for, renew, mutate, or authorize use of a name.
+service DNSAliasService {
+  rpc ResolveDNSAlias(ResolveDNSAliasRequest) returns (ResolveDNSAliasResponse);
+}
+
+// CapabilityDiscoveryService stores no canonical fact. Clients must compare
+// manifests with a fresh Capability or Accepted Quote commitment.
+service CapabilityDiscoveryService {
+  rpc ListCapabilities(ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
+  rpc SearchCapabilities(SearchCapabilitiesRequest) returns (SearchCapabilitiesResponse);
+  rpc PublishSoftwareWorkManifest(PublishSoftwareWorkManifestRequest) returns (PublishSoftwareWorkManifestResponse);
+  rpc GetSoftwareWorkManifest(GetSoftwareWorkManifestRequest) returns (GetSoftwareWorkManifestResponse);
+  rpc RequestQuoteProposal(RequestQuoteProposalRequest) returns (RequestQuoteProposalResponse);
+}

@@ -1,0 +1,84 @@
+{
+  "schema": "tos-service-test-identities-v1",
+  "test_only": true,
+  "warning": "PLAINTEXT TEST SECRETS: never fund or use these identities outside disposable test networks",
+  "algorithm": "Ed25519",
+  "derivation": "TOS mnemonic PBKDF2-HMAC-SHA512 (TOS default seed)",
+  "wallet_version": "V1R3",
+  "workchain": 0,
+  "subwallet_id": 0,
+  "identities": [
+    {
+      "role": "agent-a-controller-0",
+      "mnemonic": "title into accident monkey disorder decade saddle hen ability soul tomato current this pumpkin pill tube shallow dirt tackle december foil shop negative poverty",
+      "private_seed_hex": "b9f1e9cc6d620ecc1331de29fddcb740e455f459093f5b827f0c0ee7cf80a508",
+      "public_key_hex": "76a5c8cde7238ccef3feaababf5f62c526c96255b3313508692c8c1b3121ad18",
+      "address": "EQDx1KyGJJYMvjPHF8tigpo5l5mMJpF9EmTaeDMFHToEZhwg",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a6167656e742d612d636f6e74726f6c6c65722d30",
+      "proof_signature_hex": "47d38d75b142e4ded8bdaeea0d4408ad3037b40694e419dcfe2dd24a2f7ef7550472e43976208a5f4e3cc95923ae9ee8e0939082b9d423fafcaea6c804406308"
+    },
+    {
+      "role": "agent-a-controller-1",
+      "mnemonic": "jacket often tennis grain rebel sock lemon harsh plate price unaware expand eager logic surround insect outer dwarf version tent want main tribe machine",
+      "private_seed_hex": "fe397891d32d50a24b4b5b47418b468bc48781b685f93075420db82ba52abd8c",
+      "public_key_hex": "965e7475178c335d5185afc8c0e73b917bde9c35006c060d71aab59e48c84db7",
+      "address": "EQCUooLFEufx1AZ1dU5FXR0-Xf5h9zVuEs_xUwDOIhjNlEni",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a6167656e742d612d636f6e74726f6c6c65722d31",
+      "proof_signature_hex": "33e50b7a063bfa9fe1ab06af4134a2668a9a1c1984282e978ee025c2c21411c09138fd7c2c07a65514e4b88f228255b0c6f35e33551f125b99a3f14bd5e00e02"
+    },
+    {
+      "role": "agent-recovery",
+      "mnemonic": "soup access confirm knee quit black keep shaft empower agree rain wonder mask rifle mad innocent awake only peanut ensure glimpse message leopard hood",
+      "private_seed_hex": "b7920277e7e87e32b69a6d0d3c22fa5524e154ee577197c2dfbee818d67d125a",
+      "public_key_hex": "ae77d58ae6ff964659c5c5c8acea92c4b60f3c6988b18eaa0f7b68f08e5b3142",
+      "address": "EQBJNrf0XrbKHnW3rwTmdoJBoNQ-Mm9QxSnurDXDCI3vrF2H",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a6167656e742d7265636f76657279",
+      "proof_signature_hex": "2c4f22df4f57583c8584ad0da0814fafd01f5005043d6b6300455bcc75ba94f6552fd39c05fd5dadb211f3e6978696de89f9f9bd62c90911ef3d437dc3b67702"
+    },
+    {
+      "role": "provider-controller",
+      "mnemonic": "autumn spread sand maple kiwi life blur useful swamp legal setup foster romance reveal demise egg say follow return issue absorb daring result sunset",
+      "private_seed_hex": "79c1b7a8254dfc84ba7cc535123e1fbfe998cae2ffbaf6e9ede5ea731a0a0e13",
+      "public_key_hex": "50be94a19fa8bcf02d92076ced0dfd830d666b1c48460f1ba58657993db9ed54",
+      "address": "EQCjpcsMfVKfcm1eCOZ0F28f_db-jUire_GuCGyLzKp1qCrW",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a70726f76696465722d636f6e74726f6c6c6572",
+      "proof_signature_hex": "c1ae8bf9db56fb4bc86c5d144139b539c7e9b47c30b5615efa8c3856bb83f02607dcb25702293f4adcc7ba40792c27762d0683858cb65143db8c2e450bbfaa0e"
+    },
+    {
+      "role": "test-usdt-buyer",
+      "mnemonic": "razor rotate mother tomorrow scare edge large action cinnamon edit shiver guitar mushroom dish liar soda roast skull dog item horror empty unhappy farm",
+      "private_seed_hex": "38f03cca8d9dc66fc480bcfecd6e5862ef05ff6462e51a1f2d4c7dafcd4711dc",
+      "public_key_hex": "834a596f4feeef294c2cf23a45f97f561810b6d160eac8c758ae87f9eba240f0",
+      "address": "EQBjK7o8stJ-pMAnTBApq9i0fBQOdXmZCvZNAdI5x55ime5W",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a746573742d757364742d6275796572",
+      "proof_signature_hex": "0ca6b409d77202191546bb5a1df1c3a8f93a24bb6f2663175bc37370d716f2d856ea1a1c2b8b781abedfe75560933923df4157e282a41f0bc9033527d0312001"
+    },
+    {
+      "role": "execution-signer",
+      "mnemonic": "speak bleak rural taste common sustain this insect duck cloud finish alter human glue insane rookie hard lend crawl walk frame spray roof fox",
+      "private_seed_hex": "7d6f4d910bb5749fb09188c2c580a15ba0966ef98bcd8cb97789a84094b9c5d3",
+      "public_key_hex": "2a5f8d7eb3fd588f7a18c3262942930ffebefe8ee426e7a26491c9b6338c5aa4",
+      "address": "EQCMqzUxrDnAvtAs4dsVR9ReCB5oX_Kx7rJJNcjajorucdcS",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a657865637574696f6e2d7369676e6572",
+      "proof_signature_hex": "6308c47ce7b6879a57ff28f02ebf3333c77439104fec344e9718734480fb529d842ce05e6e71488583c185c6609e00db5f3fa5343ffd1e9f1d83a25ce83df40b"
+    },
+    {
+      "role": "refund-authority",
+      "mnemonic": "galaxy song jeans bullet jungle peanut demand leader tattoo slush salt hunt worth head wall dirt predict disagree isolate laugh galaxy fringe area maze",
+      "private_seed_hex": "75824e9f9090f983653e15584acfea723ffb1c4c0ad55874f75e8f9a21a8acb8",
+      "public_key_hex": "3c3120217b5a904670f908fc73808ad8fd0fa2fff6b89a4fd2e57b4ff24bd22e",
+      "address": "EQCG5_R_cC42IegFdL7UOMYypW_o-KJUCsJ2R2Bs0mu4L3N9",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a726566756e642d617574686f72697479",
+      "proof_signature_hex": "b5780d0958b9937f7a111ef3e97ed329ef5ef842047fcf5981c76ef641ad06a284501a02f6e25e802d15b719259b691f2e72f7631717641c9edb1e8db89b9102"
+    },
+    {
+      "role": "relay-fee-payer",
+      "mnemonic": "arrest depend food surround canal pool guard clutch exotic dilemma tape trap swear alley derive cross parade mind unable senior buffalo culture climb valley",
+      "private_seed_hex": "229a7787729b1febca26da80649edc2e2a5f9c31baf4a867ebdd47124a9280a2",
+      "public_key_hex": "1b6b0e4a8e39f38cc652cfcf66f858d83b5a8850fed476c90c31323a4e1f09fa",
+      "address": "EQDIspgPW-rpq4B7eBYmflCPxGkzVkZ__TgFjx3t5Z25MCGe",
+      "proof_message_hex": "544f535f534552564943455f544553545f4944454e544954595f56313a72656c61792d6665652d7061796572",
+      "proof_signature_hex": "1e8e18f0706da9dc2be0e9fcb8d67bd681418c04a66f15210ae583544cdbe7598d131b00c954a73c4fb7fe2a0c0ec6f7779672cbad1e1dc7716f35d6ad2dba09"
+    }
+  ]
+}

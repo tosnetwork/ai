@@ -1,0 +1,348 @@
+// Package config loads the Native-only TOS Service Gateway configuration.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/tosnetwork/ai/gateway/internal/ingress"
+	"github.com/tosnetwork/ai/gateway/internal/intentcarrier"
+)
+
+type TOSRPCConfig struct {
+	URL             string
+	Token           string
+	Insecure        bool
+	Timeout         time.Duration
+	MaxMessageBytes int
+	ServerName      string
+	CAFile          string
+	ClientCertFile  string
+	ClientKeyFile   string
+}
+
+type Config struct {
+	Addr              string
+	PublicBaseURL     string
+	NativeReadToken   string
+	NativeRelayToken  string
+	TOSRPC            TOSRPCConfig
+	Catalog           CatalogConfig
+	IntentCarrier     IntentCarrierConfig
+	CapabilityCarrier CapabilityCarrierConfig
+	QuoteProfileFile  string
+	// Ingress bounds the public Connect services.
+	Ingress ingress.Limits
+}
+
+type CapabilityCarrierConfig struct {
+	Directory, AuthorityURL, AuthorityTokenFile, AuthorityPublicKey, GenerationLeaseFile, CarrierID, SigningKeyFile string
+	SourceGeneration                                                                                                uint64
+	PrincipalTokens                                                                                                 map[string]string
+}
+
+type IntentCarrierConfig struct {
+	Directory       string
+	CarrierID       string
+	MaxEntries      uint32
+	MaxActorEntries uint32
+	AuthorityPins   map[string]intentcarrier.PinnedAuthority
+	// TosctlBinary and TosctlSHA256 pin the verify-only tosctl helper that
+	// checks ML-DSA-44 Action Authority signatures.
+	TosctlBinary string
+	TosctlSHA256 string
+}
+
+type CatalogConfig struct {
+	Directory        string
+	NetworkID        string
+	GenesisRootHash  string
+	GenesisFileHash  string
+	RegistryCodeHash string
+	MaxEntries       uint32
+}
+
+func Load() (Config, error) {
+	timeout, err := durationEnv("TOS_SERVICE_TOS_RPC_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	maxBytes, err := intEnv("TOS_SERVICE_TOS_RPC_MAX_MESSAGE_BYTES", 16<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	maxCatalogEntries, err := intEnv("TOS_SERVICE_CAPABILITY_CATALOG_MAX_ENTRIES", 10_000)
+	if err != nil || maxCatalogEntries <= 0 {
+		return Config{}, errors.New("TOS_SERVICE_CAPABILITY_CATALOG_MAX_ENTRIES must be a positive integer")
+	}
+	maxIntentEntries, err := intEnv("TOS_SERVICE_INTENT_CARRIER_MAX_ENTRIES", 100_000)
+	if err != nil || maxIntentEntries <= 0 || maxIntentEntries > 1_000_000 {
+		return Config{}, errors.New("TOS_SERVICE_INTENT_CARRIER_MAX_ENTRIES must be between 1 and 1000000")
+	}
+	maxActorIntentEntries, err := intEnv("TOS_SERVICE_INTENT_CARRIER_MAX_ACTOR_ENTRIES", 1_000)
+	if err != nil || maxActorIntentEntries <= 0 || maxActorIntentEntries > maxIntentEntries {
+		return Config{}, errors.New("TOS_SERVICE_INTENT_CARRIER_MAX_ACTOR_ENTRIES must be positive and no greater than the Carrier capacity")
+	}
+	insecure, err := boolEnv("TOS_SERVICE_TOS_RPC_INSECURE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	limits, err := ingressLimitsFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg := Config{
+		Ingress:          limits,
+		Addr:             envOr("TOS_SERVICE_ADDR", "127.0.0.1:8080"),
+		PublicBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("TOS_SERVICE_PUBLIC_BASE_URL")), "/"),
+		NativeReadToken:  strings.TrimSpace(os.Getenv("TOS_SERVICE_READ_TOKEN")),
+		NativeRelayToken: strings.TrimSpace(os.Getenv("TOS_SERVICE_RELAY_TOKEN")),
+		TOSRPC: TOSRPCConfig{
+			URL: envOr("TOS_SERVICE_TOS_RPC_URL", "https://127.0.0.1:9443"), Token: strings.TrimSpace(os.Getenv("TOS_SERVICE_TOS_RPC_TOKEN")),
+			Insecure: insecure, Timeout: timeout, MaxMessageBytes: maxBytes,
+			ServerName: strings.TrimSpace(os.Getenv("TOS_SERVICE_TOS_RPC_SERVER_NAME")), CAFile: strings.TrimSpace(os.Getenv("TOS_SERVICE_TOS_RPC_CA_FILE")),
+			ClientCertFile: strings.TrimSpace(os.Getenv("TOS_SERVICE_TOS_RPC_CLIENT_CERT_FILE")), ClientKeyFile: strings.TrimSpace(os.Getenv("TOS_SERVICE_TOS_RPC_CLIENT_KEY_FILE")),
+		},
+		Catalog: CatalogConfig{Directory: strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CATALOG_DIRECTORY")),
+			NetworkID:        strings.TrimSpace(os.Getenv("TOS_SERVICE_NETWORK_ID")),
+			GenesisRootHash:  strings.TrimSpace(os.Getenv("TOS_SERVICE_GENESIS_ROOT_HASH")),
+			GenesisFileHash:  strings.TrimSpace(os.Getenv("TOS_SERVICE_GENESIS_FILE_HASH")),
+			RegistryCodeHash: strings.TrimSpace(os.Getenv("TOS_SERVICE_REGISTRY_CODE_HASH")), MaxEntries: uint32(maxCatalogEntries)},
+		IntentCarrier: IntentCarrierConfig{Directory: strings.TrimSpace(os.Getenv("TOS_SERVICE_INTENT_CARRIER_DIRECTORY")),
+			CarrierID: strings.TrimSpace(os.Getenv("TOS_SERVICE_INTENT_CARRIER_ID")), MaxEntries: uint32(maxIntentEntries),
+			MaxActorEntries: uint32(maxActorIntentEntries),
+			TosctlBinary:    strings.TrimSpace(os.Getenv("TOS_SERVICE_TOSCTL")),
+			TosctlSHA256:    strings.TrimSpace(os.Getenv("TOS_SERVICE_TOSCTL_SHA256"))},
+		QuoteProfileFile: strings.TrimSpace(os.Getenv("TOS_SERVICE_PROVIDER_QUOTE_PROFILE_FILE")),
+		CapabilityCarrier: CapabilityCarrierConfig{Directory: strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_DIRECTORY")),
+			AuthorityURL:        strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_AUTHORITY_URL")),
+			AuthorityTokenFile:  strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_AUTHORITY_TOKEN_FILE")),
+			AuthorityPublicKey:  strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_AUTHORITY_PUBLIC_KEY")),
+			GenerationLeaseFile: strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_GENERATION_LEASE_FILE")),
+			CarrierID:           strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_ID")), SigningKeyFile: strings.TrimSpace(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_SIGNING_KEY_FILE")),
+			SourceGeneration: uint64Env("TOS_SERVICE_CAPABILITY_CARRIER_SOURCE_GENERATION", 0)},
+	}
+	cfg.IntentCarrier.AuthorityPins, err = parseAuthorityPins(os.Getenv("TOS_SERVICE_INTENT_AUTHORITY_PINS"))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.CapabilityCarrier.PrincipalTokens, err = parsePrincipalTokens(os.Getenv("TOS_SERVICE_CAPABILITY_CARRIER_PRINCIPAL_TOKENS"))
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg, cfg.Validate()
+}
+
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.Addr) == "" {
+		return errors.New("TOS_SERVICE_ADDR is required")
+	}
+	listenHost, _, listenErr := net.SplitHostPort(c.Addr)
+	listenIP := net.ParseIP(listenHost)
+	if listenErr != nil || listenIP == nil || !listenIP.IsLoopback() {
+		return errors.New("TOS_SERVICE_ADDR must be a literal loopback backend address behind an authenticated TLS terminator")
+	}
+	publicURL, err := url.Parse(c.PublicBaseURL)
+	if err != nil || publicURL == nil || publicURL.Scheme == "" || publicURL.Host == "" || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" || publicURL.Path != "" {
+		return errors.New("TOS_SERVICE_PUBLIC_BASE_URL must be an absolute origin without path, credentials, query, or fragment")
+	}
+	if publicURL.Scheme != "https" && !(publicURL.Scheme == "http" && (publicURL.Hostname() == "127.0.0.1" || publicURL.Hostname() == "localhost" || publicURL.Hostname() == "::1")) {
+		return errors.New("TOS_SERVICE_PUBLIC_BASE_URL must use HTTPS outside loopback development")
+	}
+	if c.NativeReadToken == "" || c.NativeRelayToken == "" {
+		return errors.New("TOS_SERVICE_READ_TOKEN and TOS_SERVICE_RELAY_TOKEN are required")
+	}
+	if c.NativeReadToken == c.NativeRelayToken {
+		return errors.New("Native read and relay tokens must be distinct")
+	}
+	if c.TOSRPC.Token == "" {
+		return errors.New("TOS_SERVICE_TOS_RPC_TOKEN is required")
+	}
+	parsed, err := url.Parse(c.TOSRPC.URL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return errors.New("TOS_SERVICE_TOS_RPC_URL must be an absolute http(s) URL")
+	}
+	if parsed.Scheme == "http" && !c.TOSRPC.Insecure {
+		return errors.New("plaintext tos-service-protocol RPC requires TOS_SERVICE_TOS_RPC_INSECURE=true")
+	}
+	if c.TOSRPC.Timeout <= 0 || c.TOSRPC.Timeout > 15*time.Minute {
+		return errors.New("TOS_SERVICE_TOS_RPC_TIMEOUT is outside bounds")
+	}
+	if c.TOSRPC.MaxMessageBytes <= 0 || c.TOSRPC.MaxMessageBytes > 64<<20 {
+		return errors.New("TOS_SERVICE_TOS_RPC_MAX_MESSAGE_BYTES is outside bounds")
+	}
+	if (c.TOSRPC.ClientCertFile == "") != (c.TOSRPC.ClientKeyFile == "") {
+		return errors.New("tos-service-protocol client certificate and key must be configured together")
+	}
+	if !filepath.IsAbs(c.Catalog.Directory) || filepath.Clean(c.Catalog.Directory) != c.Catalog.Directory {
+		return errors.New("TOS_SERVICE_CAPABILITY_CATALOG_DIRECTORY must be absolute and clean")
+	}
+	if c.Catalog.NetworkID == "" || c.Catalog.GenesisRootHash == "" || c.Catalog.GenesisFileHash == "" || c.Catalog.RegistryCodeHash == "" {
+		return errors.New("Native network/genesis/Registry identity is required for Capability discovery")
+	}
+	if c.Catalog.MaxEntries == 0 || c.Catalog.MaxEntries > 1_000_000 {
+		return errors.New("Capability catalog entry bound is invalid")
+	}
+	if c.IntentCarrier.Directory != "" {
+		if !filepath.IsAbs(c.IntentCarrier.Directory) || filepath.Clean(c.IntentCarrier.Directory) != c.IntentCarrier.Directory {
+			return errors.New("TOS_SERVICE_INTENT_CARRIER_DIRECTORY must be absolute and clean")
+		}
+		if c.IntentCarrier.CarrierID == "" || c.IntentCarrier.MaxEntries == 0 || c.IntentCarrier.MaxEntries > 1_000_000 ||
+			c.IntentCarrier.MaxActorEntries == 0 || c.IntentCarrier.MaxActorEntries > c.IntentCarrier.MaxEntries || len(c.IntentCarrier.AuthorityPins) == 0 {
+			return errors.New("enabled Intent Carrier requires a bounded ID and capacity")
+		}
+		if c.IntentCarrier.TosctlBinary == "" || c.IntentCarrier.TosctlSHA256 == "" {
+			return errors.New("enabled Intent Carrier requires TOS_SERVICE_TOSCTL and TOS_SERVICE_TOSCTL_SHA256 to verify ML-DSA-44 Action Authority signatures")
+		}
+	} else if c.IntentCarrier.CarrierID != "" || len(c.IntentCarrier.AuthorityPins) != 0 ||
+		c.IntentCarrier.TosctlBinary != "" || c.IntentCarrier.TosctlSHA256 != "" {
+		return errors.New("partial Intent Carrier configuration is forbidden")
+	}
+	if c.CapabilityCarrier.Directory != "" {
+		for _, path := range []string{c.CapabilityCarrier.Directory, c.CapabilityCarrier.AuthorityTokenFile, c.CapabilityCarrier.GenerationLeaseFile, c.CapabilityCarrier.SigningKeyFile} {
+			if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+				return errors.New("enabled Capability Carrier paths must be absolute and clean")
+			}
+		}
+		authorityURL, authorityErr := url.Parse(c.CapabilityCarrier.AuthorityURL)
+		if authorityErr != nil || authorityURL == nil || authorityURL.Scheme != "https" || authorityURL.Host == "" || authorityURL.User != nil || authorityURL.Path != "/v1/carrier-source-state" || authorityURL.RawQuery != "" || authorityURL.Fragment != "" {
+			return errors.New("enabled Capability Carrier requires an external HTTPS authority URL ending at /v1/carrier-source-state")
+		}
+		if c.CapabilityCarrier.CarrierID == "" || c.CapabilityCarrier.SourceGeneration == 0 || len(c.CapabilityCarrier.PrincipalTokens) == 0 || !strings.HasPrefix(c.CapabilityCarrier.AuthorityPublicKey, "ed25519:") {
+			return errors.New("enabled Capability Carrier requires external authority, ID, generation, signing key, and principals")
+		}
+	} else if c.CapabilityCarrier.CarrierID != "" || c.CapabilityCarrier.AuthorityURL != "" || c.CapabilityCarrier.AuthorityTokenFile != "" || c.CapabilityCarrier.AuthorityPublicKey != "" || c.CapabilityCarrier.GenerationLeaseFile != "" || c.CapabilityCarrier.SigningKeyFile != "" || c.CapabilityCarrier.SourceGeneration != 0 || len(c.CapabilityCarrier.PrincipalTokens) != 0 {
+		return errors.New("partial Capability Carrier configuration is forbidden")
+	}
+	if c.QuoteProfileFile != "" && (!filepath.IsAbs(c.QuoteProfileFile) || filepath.Clean(c.QuoteProfileFile) != c.QuoteProfileFile) {
+		return errors.New("TOS_SERVICE_PROVIDER_QUOTE_PROFILE_FILE must be absolute and clean")
+	}
+	return nil
+}
+
+func parsePrincipalTokens(value string) (map[string]string, error) {
+	out := map[string]string{}
+	usedTokens := map[string]bool{}
+	for _, item := range strings.Split(value, ",") {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		parts := strings.SplitN(strings.TrimSpace(item), "=", 2)
+		if len(parts) != 2 || parts[0] == "" || len(parts[0]) > 256 || strings.TrimSpace(parts[0]) != parts[0] ||
+			len(parts[1]) < 32 || strings.TrimSpace(parts[1]) != parts[1] || usedTokens[parts[1]] {
+			return nil, errors.New("Capability Carrier principal token mapping is invalid or ambiguous")
+		}
+		if _, duplicate := out[parts[0]]; duplicate {
+			return nil, errors.New("duplicate Capability Carrier principal")
+		}
+		out[parts[0]] = parts[1]
+		usedTokens[parts[1]] = true
+	}
+	return out, nil
+}
+
+// parseAuthorityPins accepts a comma-separated list of
+// authority-id=mldsa44:<key ID>@<absolute key file> pins. Pins are explicit
+// deployment authority, not trust-on-first-use state.
+func parseAuthorityPins(value string) (map[string]intentcarrier.PinnedAuthority, error) {
+	if strings.TrimSpace(value) == "" {
+		return map[string]intentcarrier.PinnedAuthority{}, nil
+	}
+	items := strings.Split(value, ",")
+	for index := range items {
+		items[index] = strings.TrimSpace(items[index])
+	}
+	pins, err := intentcarrier.ParseAuthorityPins(items)
+	if err != nil {
+		return nil, fmt.Errorf("TOS_SERVICE_INTENT_AUTHORITY_PINS is invalid: %w", err)
+	}
+	return pins, nil
+}
+
+// ingressLimitsFromEnv reads the public Connect ingress limits. Every override
+// is bounded so a typo cannot disable a limit or exhaust memory.
+func ingressLimitsFromEnv() (ingress.Limits, error) {
+	limits := ingress.DefaultLimits()
+	global, err := intEnv("TOS_SERVICE_INGRESS_GLOBAL_CONCURRENT", limits.GlobalConcurrent)
+	if err != nil || global < 1 || global > 10_000 {
+		return ingress.Limits{}, errors.New("TOS_SERVICE_INGRESS_GLOBAL_CONCURRENT must be between 1 and 10000")
+	}
+	client, err := intEnv("TOS_SERVICE_INGRESS_CLIENT_CONCURRENT", limits.ClientConcurrent)
+	if err != nil || client < 1 || client > global {
+		return ingress.Limits{}, errors.New("TOS_SERVICE_INGRESS_CLIENT_CONCURRENT must be between 1 and the global concurrency")
+	}
+	perMinute, err := intEnv("TOS_SERVICE_INGRESS_CLIENT_REQUESTS_PER_MINUTE", limits.ClientRequestsPerWindow)
+	if err != nil || perMinute < 1 || perMinute > 1_000_000 {
+		return ingress.Limits{}, errors.New("TOS_SERVICE_INGRESS_CLIENT_REQUESTS_PER_MINUTE must be between 1 and 1000000")
+	}
+	header := envOr("TOS_SERVICE_CLIENT_ADDRESS_HEADER", limits.ClientAddressHeader)
+	if !ingress.ValidClientAddressHeader(header) {
+		return ingress.Limits{}, fmt.Errorf("TOS_SERVICE_CLIENT_ADDRESS_HEADER must be one of %s, %s, %s or %s",
+			ingress.HeaderXForwardedFor, ingress.HeaderXRealIP, ingress.HeaderCFConnectingIP, ingress.HeaderNone)
+	}
+	limits.GlobalConcurrent, limits.ClientConcurrent, limits.ClientRequestsPerWindow = global, client, perMinute
+	limits.ClientAddressHeader = header
+	return limits, limits.Validate()
+}
+
+func envOr(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func durationEnv(name string, fallback time.Duration) (time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, errors.New(name + " must be a duration")
+	}
+	return parsed, nil
+}
+
+func intEnv(name string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, errors.New(name + " must be an integer")
+	}
+	return parsed, nil
+}
+
+func boolEnv(name string, fallback bool) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, errors.New(name + " must be a boolean")
+	}
+	return parsed, nil
+}
+
+func uint64Env(name string, fallback uint64) uint64 {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}

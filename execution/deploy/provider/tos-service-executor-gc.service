@@ -1,0 +1,54 @@
+[Unit]
+Description=TOS Service Protocol executor artifact collection
+Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
+# Nothing to collect before the executor has created its store.
+ConditionPathIsDirectory=/var/lib/tos-service-executor/artifacts
+
+[Service]
+Type=oneshot
+# Deletes the objects of jobs whose retention ended, at most 128 jobs per
+# run, and prints a JSON report to the journal. It may run while the executor
+# is serving, and never opens the executor's journal, FIFOs or sockets. The
+# two coordinate through the store's retention lock: a sweep holds it for its
+# whole run, and a job that finishes meanwhile waits for it, at most 60 s,
+# before it can commit its result; a job that waits longer fails after having
+# run. The batch is therefore kept small: each deleted job costs two
+# directory syncs, so 128 jobs take about 9 s even on a disk that needs 34 ms
+# per sync, where 1024 would take over a minute. Do not raise --limit to
+# collect faster; run the timer more often instead.
+ExecStart=/usr/local/libexec/tos-service/software-work-execute artifacts-gc \
+  --state-dir /var/lib/tos-service-executor --limit 128
+# The sweep itself waits up to 60 s for the retention lock.
+TimeoutStartSec=900s
+UMask=0077
+MemoryMax=512M
+TasksMax=128
+
+# The sweep only reads and deletes files it owns under the state directory.
+ReadWritePaths=/var/lib/tos-service-executor
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Root needs no capability for this: it owns everything it touches.
+CapabilityBoundingSet=
+AmbientCapabilities=

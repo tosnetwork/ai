@@ -1,0 +1,21 @@
+name: PredictionMarket compatibility
+
+# Runs on every pull request and every push to main. A paths filter is
+# evaluated against only the first 300 changed files of a pull request, so on
+# a large change it can skip this check even when the manifest or its vectors
+# changed; the check takes seconds.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify closed release manifest
+        run: make spec-check

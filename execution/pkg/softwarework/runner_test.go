@@ -1,0 +1,228 @@
+package softwarework
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tosnetwork/ai/execution/pkg/artifactstore"
+	"github.com/tosnetwork/ai/execution/pkg/executor"
+)
+
+type fakeExecutor struct {
+	calls int
+	spec  executor.Spec
+	input []byte
+	err   error
+}
+
+func (f *fakeExecutor) Execute(_ context.Context, _ string, spec executor.Spec, input []byte) (executor.Result, error) {
+	f.calls++
+	f.spec = spec
+	f.input = append([]byte(nil), input...)
+	if f.err != nil {
+		return executor.Result{}, f.err
+	}
+	return executor.Result{ExitCode: 0, Output: []byte("ok\n"), Usage: executor.Usage{CPUMillis: 1, PeakMemory: 1024, DiskWritten: 10, Duration: time.Millisecond}}, nil
+}
+
+func fixture(t *testing.T) (*Runner, *fakeExecutor, *Journal, Request) {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := artifactstore.Open(filepath.Join(root, "artifacts"), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := OpenJournal(filepath.Join(root, "journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &fakeExecutor{}
+	contract := Contract{
+		ManifestDigest: digest([]byte("manifest")), ToolchainDigest: digest([]byte("toolchain")), SandboxDigest: digest([]byte("manifest")),
+		Executable: "/usr/local/bin/go", Arguments: []string{"test", "./...", "-count=1"}, WorkingDirectory: "/workspace/source",
+		Limits: executor.Limits{CPUMillis: 1000, MemoryBytes: 1 << 20, DiskBytes: 1 << 20, PIDs: 32, ExecutionTime: time.Second, OutputBytes: 1 << 16},
+		UserID: 65532, GroupID: 65532,
+	}
+	archive := testArchive(t)
+	request := Request{QuoteCommitment: "tvm-cell-" + digest([]byte("quote")), ExecutionID: digest([]byte("execution")), InputDigest: digest([]byte("input")), SourceDigest: digest(archive), SourceArchive: archive}
+	runner, err := NewRunner(backend, store, journal, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.now = func() time.Time { return time.Unix(1_776_000_000, 0) }
+	return runner, backend, journal, request
+}
+
+func TestRunnerBindsExactContractAndReturnsImmutableArtifacts(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	defer journal.Close()
+	outcome, err := runner.Execute(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.calls != 1 || !backend.spec.WorkspaceArchive || backend.spec.Network != executor.NetworkNone ||
+		backend.spec.WorkingDirectory != "/workspace/source" || backend.spec.Entrypoint[0] != "/usr/local/bin/go" ||
+		backend.spec.Environment["GOROOT"] != "/usr/local/go" || backend.spec.Environment["CGO_ENABLED"] != "0" ||
+		backend.spec.Environment["HOME"] != "/workspace" || backend.spec.Environment["GOCACHE"] != "/workspace/go-cache" ||
+		backend.spec.Environment["GOTMPDIR"] != "/workspace" || backend.spec.Environment["TMPDIR"] != "/workspace" ||
+		backend.spec.Environment["GOMAXPROCS"] != "2" ||
+		!bytes.Equal(backend.input, request.SourceArchive) || outcome.Artifact.MediaType != ArtifactMediaType || outcome.Report.MediaType != ReportMediaType {
+		t.Fatalf("contract mapping or outcome mismatch: %#v %#v", backend.spec, outcome)
+	}
+	replayed, err := runner.Execute(context.Background(), request)
+	if err != nil || replayed.Artifact.Digest != outcome.Artifact.Digest || backend.calls != 1 {
+		t.Fatalf("completed replay = %#v, %v, calls=%d", replayed, err, backend.calls)
+	}
+}
+
+// The runner binds both objects to its execution as it stores them: they are
+// kept while the job is pending and swept once the job is retained and
+// expires, rather than held forever or left unprotected.
+func TestRunnerBindsItsObjectsToTheExecution(t *testing.T) {
+	runner, _, journal, request := fixture(t)
+	defer journal.Close()
+	outcome, err := runner.Execute(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	pending, err := runner.store.Sweep(context.Background(), now, 8)
+	if err != nil || pending.Pending != 1 || pending.Live != 0 || pending.DeletedObjects != 0 || pending.Held != 0 {
+		t.Fatalf("pending job = %+v %v", pending, err)
+	}
+	if err := runner.store.Retain(context.Background(), request.ExecutionID, now.Add(-time.Hour),
+		[]string{outcome.Artifact.Digest, outcome.Report.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	swept, err := runner.store.Sweep(context.Background(), now, 8)
+	if err != nil || swept.DeletedJobs != 1 || swept.DeletedObjects != 2 {
+		t.Fatalf("expired job = %+v %v", swept, err)
+	}
+}
+
+// Pre-admitted work that never sets a deadline keeps running however full
+// the store's record bound is: its pending records are never refused.
+func TestRunnerKeepsRunningPastTheRecordBound(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	defer journal.Close()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := artifactstore.Open(filepath.Join(root, "artifacts"), 1<<20, artifactstore.WithRecordBound(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.store = store
+	filler := digest([]byte("retained job"))
+	object, err := store.PutFor(context.Background(), filler, "application/octet-stream", bytes.NewReader([]byte("retained")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Retain(context.Background(), filler, time.Unix(1_900_000_000, 0), []string{object.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckCapacity(context.Background(), 1); err == nil {
+		t.Fatal("the store is not at its bound")
+	}
+	for index := range 5 {
+		request.ExecutionID = digest([]byte{byte(index)})
+		if _, err := runner.Execute(context.Background(), request); err != nil {
+			t.Fatalf("execution %d past the bound: %v", index, err)
+		}
+	}
+	report, err := store.Sweep(context.Background(), time.Unix(1_800_000_000, 0), 8)
+	if err != nil || report.Pending != 5 || report.Live != 1 || backend.calls != 5 {
+		t.Fatalf("report = %+v %v calls=%d", report, err, backend.calls)
+	}
+}
+
+func TestRunnerRejectsConflictingExecutionIdentity(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	defer journal.Close()
+	if _, err := runner.Execute(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	request.InputDigest = digest([]byte("other input"))
+	if _, err := runner.Execute(context.Background(), request); err == nil || !strings.Contains(err.Error(), "conflicts") || backend.calls != 1 {
+		t.Fatalf("conflict err=%v calls=%d", err, backend.calls)
+	}
+}
+
+func TestRunnerRejectsUnboundSandboxIdentity(t *testing.T) {
+	runner, _, journal, _ := fixture(t)
+	defer journal.Close()
+	contract := runner.contract
+	contract.SandboxDigest = digest([]byte("uncommitted sandbox"))
+	if _, err := NewRunner(runner.executor, runner.store, journal, contract); err == nil {
+		t.Fatal("accepted a sandbox identity not bound by the manifest")
+	}
+}
+
+func TestRunnerRejectsCommitmentMismatchBeforeExecution(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	defer journal.Close()
+	request.SourceDigest = digest([]byte("different"))
+	if _, err := runner.Execute(context.Background(), request); err == nil || backend.calls != 0 {
+		t.Fatalf("mismatch err=%v calls=%d", err, backend.calls)
+	}
+}
+
+func TestRunnerRejectsNonTVMQuoteCommitmentBeforeExecution(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	defer journal.Close()
+	request.QuoteCommitment = digest([]byte("not a TVM cell"))
+	if _, err := runner.Execute(context.Background(), request); err == nil || backend.calls != 0 {
+		t.Fatalf("quote grammar err=%v calls=%d", err, backend.calls)
+	}
+}
+
+func TestRunnerCrashBoundaryFailsClosedWithoutSecondExecution(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	backend.err = errors.New("runtime connection lost")
+	if _, err := runner.Execute(context.Background(), request); err == nil || backend.calls != 1 {
+		t.Fatalf("first execution err=%v calls=%d", err, backend.calls)
+	}
+	backend.err = nil
+	if _, err := runner.Execute(context.Background(), request); err == nil || !strings.Contains(err.Error(), "ambiguous") || backend.calls != 1 {
+		t.Fatalf("ambiguous replay err=%v calls=%d", err, backend.calls)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenJournal(journal.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.journal = reopened
+	defer reopened.Close()
+	if _, err := runner.Execute(context.Background(), request); err == nil || backend.calls != 1 {
+		t.Fatalf("restart replay err=%v calls=%d", err, backend.calls)
+	}
+}
+
+func testArchive(t *testing.T) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	body := []byte("module example.test/work\n\ngo 1.26.5\n")
+	if err := writer.WriteHeader(&tar.Header{Name: "go.mod", Mode: 0o444, Size: int64(len(body)), Format: tar.FormatUSTAR}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}

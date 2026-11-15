@@ -29,8 +29,8 @@ history (every original commit keeps its SHA) at the following point:
 |---|---|---|
 | `spec/` | `tosnetwork/tos-service-spec` | `a67148cc969d26c637bf6f88e1c3c544432c6dc0` |
 | `protocol/` | `tosnetwork/tos-service-protocol` | `49a25714e971f3f5b5ad7ad3fe8915936752efd4` |
-| `gateway/` | `tosnetwork/tos-service-gateway` | `2dae45404d3cab91589664da1549458a50765147` |
-| `execution/` | `tosnetwork/tos-ai` | `274e7ee47c73005205e24666a3b256086a44443c` |
+| `gateway/` | `tosnetwork/tos-service-gateway` | `4561e4ac44a3de1245a60f81f9061ca92756dc1c` |
+| `execution/` | `tosnetwork/tos-ai` | `9e0728c8e53bcd4c4c71eb02d676021e4d4d9d1b` |
 
 Go import paths changed by prefix only:
 
