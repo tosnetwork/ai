@@ -25,6 +25,7 @@ type sdkEngine struct {
 	namespace      string
 	snapshotter    string
 	fifoDir        string
+	workspaceDir   string
 	cleanupTimeout time.Duration
 	imageReference string
 	imageDigest    string
@@ -52,8 +53,13 @@ func newSDKEngine(config Config) (*sdkEngine, error) {
 			return nil, err
 		}
 	}
+	workspaceDir := config.WorkspaceDir
+	if workspaceDir == "" {
+		workspaceDir = config.FIFODir
+	}
 	return &sdkEngine{
-		client: client, namespace: config.Namespace,
+		workspaceDir: workspaceDir,
+		client:       client, namespace: config.Namespace,
 		snapshotter: config.Snapshotter, fifoDir: config.FIFODir,
 		cleanupTimeout: config.CleanupTimeout,
 		imageReference: config.ImageReference, imageDigest: config.ImageDigest,
@@ -69,8 +75,28 @@ func (e *sdkEngine) CheckReady(ctx context.Context) error {
 	if e == nil || e.client == nil {
 		return errors.New("invalid containerd client")
 	}
-	_, err := e.client.Version(e.runtimeContext(ctx))
+	ctx = e.runtimeContext(ctx)
+	if _, err := e.client.Version(ctx); err != nil {
+		return err
+	}
+	// A daemon without the pinned image, or with it not unpacked, fails
+	// every run only after the caller has committed to it.
+	_, err := e.usableImage(ctx, e.imageDigest)
 	return err
+}
+
+// usableImage is the configured image, present under its pinned digest and
+// unpacked for the snapshotter.
+func (e *sdkEngine) usableImage(ctx context.Context, digest string) (containerd.Image, error) {
+	image, err := e.resolveImage(ctx, digest)
+	if err != nil {
+		return nil, err
+	}
+	unpacked, err := image.IsUnpacked(ctx, e.snapshotter)
+	if err != nil || !unpacked {
+		return nil, errors.New("container image is not unpacked")
+	}
+	return image, nil
 }
 
 func (e *sdkEngine) CheckResidue(ctx context.Context) error {
@@ -111,13 +137,9 @@ func (e *sdkEngine) Run(
 ) (result executor.Result, returnedErr error) {
 	ctx = e.runtimeContext(ctx)
 	started := time.Now()
-	image, err := e.resolveImage(ctx, request.ImageDigest)
+	image, err := e.usableImage(ctx, request.ImageDigest)
 	if err != nil {
 		return executor.Result{}, err
-	}
-	unpacked, err := image.IsUnpacked(ctx, e.snapshotter)
-	if err != nil || !unpacked {
-		return executor.Result{}, errors.New("container image is not unpacked")
 	}
 	if err := e.ensureIdentityAbsent(ctx, id); err != nil {
 		return executor.Result{}, err
@@ -125,7 +147,7 @@ func (e *sdkEngine) Run(
 	var workspaceSource []string
 	if request.WorkspaceArchive {
 		directory, cleanupWorkspace, err := prepareWorkspace(
-			e.fifoDir, id, input, request.Limits.DiskBytes,
+			e.workspaceDir, id, input, request.Limits.DiskBytes,
 		)
 		if err != nil {
 			return executor.Result{}, err

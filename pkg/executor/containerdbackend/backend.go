@@ -41,11 +41,16 @@ var defaultCDISpecDirs = []string{"/etc/cdi", "/var/run/cdi"}
 var runtimeIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,75}$`)
 
 type Config struct {
-	SocketPath       string
-	Namespace        string
-	Snapshotter      string
-	Runtime          string
-	FIFODir          string
+	SocketPath  string
+	Namespace   string
+	Snapshotter string
+	Runtime     string
+	FIFODir     string
+	// WorkspaceDir is where source archives are unpacked for the run. Empty
+	// keeps them beside the FIFOs; a long-running service names a private
+	// disk-backed directory so staged sources never land on a memory-backed
+	// runtime filesystem.
+	WorkspaceDir     string
 	MaxActive        int
 	OperationTimeout time.Duration
 	CleanupTimeout   time.Duration
@@ -111,6 +116,12 @@ func Open(ctx context.Context, config Config) (*Backend, error) {
 	if err := validateFIFODir(config.FIFODir); err != nil {
 		_ = ownership.Close()
 		return nil, err
+	}
+	if config.WorkspaceDir != "" {
+		if err := validateWorkspaceDir(config.WorkspaceDir); err != nil {
+			_ = ownership.Close()
+			return nil, err
+		}
 	}
 	runtimeEngine, err := newSDKEngine(config)
 	if err != nil {
@@ -330,6 +341,8 @@ func validateConfig(config Config) error {
 		filepath.Clean(config.SocketPath) != config.SocketPath ||
 		!filepath.IsAbs(config.FIFODir) ||
 		filepath.Clean(config.FIFODir) != config.FIFODir ||
+		(config.WorkspaceDir != "" && (!filepath.IsAbs(config.WorkspaceDir) ||
+			filepath.Clean(config.WorkspaceDir) != config.WorkspaceDir || config.WorkspaceDir == config.FIFODir)) ||
 		!runtimeIdentifier.MatchString(config.Namespace) ||
 		!runtimeIdentifier.MatchString(config.Snapshotter) ||
 		!runtimeIdentifier.MatchString(config.Runtime) ||
@@ -418,6 +431,42 @@ func validateFIFODir(path string) error {
 		}
 		if name != ownershipLockName {
 			return errors.New("containerd FIFO residue is present")
+		}
+	}
+	return nil
+}
+
+// validateWorkspaceDir requires a private owned directory that holds
+// nothing but an empty workspace root: a workspace left by an interrupted
+// run is never adopted or silently removed.
+func validateWorkspaceDir(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return errors.New("create containerd workspace directory")
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 ||
+		info.Mode().Perm() != 0o700 || !ownedByCurrentUser(info) {
+		return errors.New("containerd workspace directory is not private")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil || resolved != path {
+		return errors.New("containerd workspace directory path contains a symlink")
+	}
+	directory, err := os.Open(path)
+	if err != nil {
+		return errors.New("inspect containerd workspace directory")
+	}
+	defer directory.Close()
+	names, err := directory.Readdirnames(2)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return errors.New("inspect containerd workspace directory")
+	}
+	for _, name := range names {
+		if name != workspaceRootName {
+			return errors.New("containerd workspace residue is present")
+		}
+		if err := validateEmptyWorkspaceRoot(filepath.Join(path, name)); err != nil {
+			return err
 		}
 	}
 	return nil

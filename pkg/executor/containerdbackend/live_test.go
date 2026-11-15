@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +56,45 @@ func TestContainerdBackendLiveWorkspace(t *testing.T) {
 	result, err := backend.RunIsolated(context.Background(), request, liveWorkspaceArchive(t))
 	if err != nil || result.ExitCode != 0 || !bytes.Contains(result.Output, []byte("ok")) {
 		t.Fatalf("workspace result exit=%d output=%q err=%v", result.ExitCode, result.Output, err)
+	}
+}
+
+// TestContainerdBackendLiveReadinessRequiresTheImage opens the backend for
+// an image the daemon does not hold. Readiness must fail then, because a
+// run would fail only after its caller had committed to it.
+func TestContainerdBackendLiveReadinessRequiresTheImage(t *testing.T) {
+	configuration, enabled := liveTestConfiguration(t)
+	if !enabled {
+		t.Skip("private containerd live-test environment is not configured")
+	}
+	limits := executor.Limits{
+		CPUMillis: 30_000, MemoryBytes: 512 << 20, DiskBytes: 1 << 30,
+		PIDs: 64, ExecutionTime: 30 * time.Second, OutputBytes: 1 << 20,
+	}
+	open := func(reference, digest string) (*containerdbackend.Backend, error) {
+		return containerdbackend.Open(context.Background(), containerdbackend.Config{
+			SocketPath: configuration.socket, Namespace: configuration.namespace,
+			Snapshotter: "overlayfs", Runtime: "io.containerd.runc.v2",
+			FIFODir: configuration.fifoDir, MaxActive: 1, PolicyLimits: limits,
+			ImageReference: reference, ImageDigest: digest, ImagePlatform: "linux/amd64",
+		})
+	}
+	// The same daemon with the image it does hold is ready.
+	present, err := open(configuration.imageReference, configuration.imageDigest)
+	if err != nil {
+		t.Fatalf("the provisioned image: %v", err)
+	}
+	if err := present.CheckReady(context.Background()); err != nil {
+		t.Fatalf("readiness with the provisioned image: %v", err)
+	}
+	if err := present.Close(); err != nil {
+		t.Fatal(err)
+	}
+	absent := "sha256:" + strings.Repeat("0", 63) + "1"
+	missing, err := open("example.invalid/absent/image:none@"+absent, absent)
+	if err == nil {
+		_ = missing.Close()
+		t.Fatal("a backend whose image is absent reported ready")
 	}
 }
 
