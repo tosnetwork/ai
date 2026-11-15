@@ -1,0 +1,58 @@
+{
+  "schema": "atos.local-gate-e-native-publication.v1",
+  "recorded_at": "2026-08-15T00:00:00Z",
+  "acceptance_scope": "same-host public-testnet rehearsal; not external independence",
+  "network": {
+    "network_id": "tos-local-gate-c-20260814",
+    "genesis_root_hash": "sha256:fbd138d37f7e8e83ecb8fa66cca54dae657e362ea16ead259b6a1876e37cfc2c",
+    "genesis_file_hash": "sha256:bdd806fc091bb3c96cc657fecc160a987ef41acf2e36cdfdc19e14723e0683d8",
+    "resolver_quorum": "2-of-3"
+  },
+  "native_registry_code_hash": "tvm-cell-sha256:600f2fda83462bc86a1c32af930c35a4fc8f80f1d2966f5593ceba217a91ffa0",
+  "relayer": {
+    "address": "0:a07bde0c70e71725f4edf81671e0519c3611d8c1d00114529878d12c54c2006c",
+    "wallet_state_after": "active",
+    "wallet_seqno_after": 3,
+    "balance_tos_after": "8.9991"
+  },
+  "agent": {
+    "object_id": "agent_0ee64baf62571e4941e78f06aef327c1c86de174779441fd69522de01b055a6d",
+    "address": "0:a6936ca4c94490619218673dda8a1145df7f316fd3332aa85a4948fe62a9dc99",
+    "registration_action_hash": "sha256:6a91dc4b9d91d6986f519f4ee135f00d9ad18b7d2989a6902e39ce4f512904c3",
+    "generation": 1,
+    "sequence": 1,
+    "tvm_state_hash": "tvm-cell-sha256:1cacaa5cadd01961862244382e8c276bf7f59999dbe3c4df292cd2e810107c86"
+  },
+  "capability": {
+    "object_id": "cap_bf84b0dcd3fba0b201216cfbc69963b9f6e495c138aed51571bd470be3519bf8",
+    "address": "0:9a9ffcab49841846115ffcd4679160e48a9e4c356919309a4b243b8f181f2807",
+    "registration_action_hash": "sha256:c19e69006733b78b9ab40ff98f8170d8e8afee1330ba7c6ce3473f90bd2090fd",
+    "owner_agent_id": "agent_0ee64baf62571e4941e78f06aef327c1c86de174779441fd69522de01b055a6d",
+    "version": "1.1.0",
+    "manifest_digest": "sha256:9d39a2d3f5c34a4bfeb63324681e0f457437b756ffb79da8a1681aa79bf9f3e5",
+    "generation": 1,
+    "sequence": 1,
+    "tvm_state_hash": "tvm-cell-sha256:94b7c0cb2beab494758a1717371ce5fe50eedd09eb3220a99c2514f5fb41d2f8",
+    "publication_path": "tos-protocol/pkg/providersdk",
+    "manifest_source": "test-vectors/software-work-manifest-v1.json",
+    "canonical_cbor_verified": true
+  },
+  "security": {
+    "controller_key_generated_fresh": true,
+    "controller_key_committed": false,
+    "controller_key_file_mode": "0600",
+    "vault_file_mode": "0600",
+    "signed_actions_used": true,
+    "typed_finalized_state_used": true
+  },
+  "verification": {
+    "race_test_packages": [
+      "pkg/nativecore",
+      "pkg/toschain",
+      "pkg/chainactionpublisher",
+      "pkg/providersdk",
+      "pkg/buyersdk"
+    ],
+    "race_tests_passed": true
+  }
+}

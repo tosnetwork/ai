@@ -1,0 +1,105 @@
+# A2A Software-Work Adapter V1
+
+**Rail change (2026-11-07).** Stablecoin escrow v2 is retired and the
+software-work profile settles in native TOS on the Service Actor
+([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
+[`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
+Escrow addresses and funded-escrow checks below are superseded by the `(actor, request_id)` of a pending Service Actor request; the settler submits `respond` with the attestor's SRP2 signature. Where this document conflicts with those, they govern; its in-place
+rewrite follows the implementation change listed in the design's section 7.
+
+## Scope
+
+This adapter maps the Linux Foundation A2A 1.0 Task model into the existing
+TOS Native Service software-work lifecycle. A2A remains transport. It cannot create an
+Agent, Capability, Accepted Quote, funded escrow, Receipt, balance, or
+settlement fact.
+
+The implementation uses the official Go SDK module
+`github.com/a2aproject/a2a-go/v2` and extension URI:
+
+```text
+https://tos.service.im/extensions/native-software-work/v1
+```
+
+V1 is a synchronous `SendMessage` mapping. Streaming, push notifications,
+multi-turn input, arbitrary tools, and remote-selected execution policy are not
+part of this profile.
+
+## Request mapping
+
+The user-role A2A Message contains exactly two Parts and exactly the extension
+URI above:
+
+1. `application/vnd.tos.service.a2a.software-work-task.v1+json` Data containing only
+   `protocol`, `escrow_address`, `quote_commitment`, `execution_id`,
+   `input_digest`, and `source_digest`;
+2. `application/vnd.tos.service.software-source.v1+tar` raw bytes named `source.tar`.
+
+`protocol` is exactly `tos_service_v1`. Quote and SHA-256 digests use their
+canonical lowercase forms. The source digest is SHA-256 over the exact raw
+Part. The input digest is SHA-256 over this domain prefix plus canonical JSON
+of protocol, escrow address, Quote commitment, execution ID, and source digest:
+
+```text
+tos.service.a2a.software-work-input.v1 || 0x00 || canonical_binding_json
+```
+
+Unknown binding fields, additional Parts, alternate media types, Part metadata,
+changed source bytes, malformed digests, agent-role requests, or multiple TOS Service Protocol
+extension declarations fail before any authoritative read or execution lease.
+
+## Authority gate
+
+Before the runner is called, the provider adapter must independently verify
+from finalized TOS state and atomically claim the Quote/escrow execution slot:
+
+- exact network and Registry identity;
+- live provider Agent, plus active Capability and version and manifest digest;
+- Accepted Quote commitment and execution authorization;
+- exact funded stablecoin escrow; and
+- authenticated chain references and nonzero finalized checkpoints for escrow,
+  Agent, and Capability.
+
+The shared Native Execution Gate binds Quote commitment, escrow, execution ID,
+input digest, and source digest in one atomic record. A second execution intent
+or a claim through another transport for one paid purchase is a conflict, even
+if the escrow remains funded. `NATIVE_EXECUTION_GATE_V1.md` freezes this rule.
+
+The A2A sender, Message metadata, bearer credential, task ID, endpoint, and
+gateway are not evidence for any of these facts. Failure is fail-closed and no
+container starts.
+
+## Result mapping
+
+Objective execution failure produces a terminal A2A failed Task without a
+result artifact. Success produces a terminal completed Task with one Artifact,
+extension URI above, and one
+`application/vnd.tos.service.a2a.software-work-result.v1+json` Data Part. It contains:
+
+- the finalized authorization evidence;
+- Quote, execution, input, result, source, toolchain, and sandbox digests;
+- exit code and completion time; and
+- artifact/report media type, byte size, SHA-256 digest, and HTTPS retrieval
+  URL.
+
+The retrieval URL is transport metadata. The digest authenticates downloaded
+bytes. An A2A completed Task means the bounded provider execution completed; it
+is not a signed Receipt and does not release escrow. Receipt signing and TOS
+settlement remain the canonical post-execution flow.
+
+The A2A task ID is provider-derived from the Quote commitment and execution ID.
+The existing execution journal remains the at-most-once authority: completed
+replay returns the immutable prior outcome, while ambiguous running state is
+never executed again automatically.
+
+## Acceptance
+
+Unit and race tests must prove exact request mapping, mutation rejection before
+authority reads, finalized authorization before execution, terminal failure
+mapping, conflicting-runner rejection, HTTPS-only result locations, and exact
+result commitments. The official synchronous JSON-RPC server binding and the
+production finalized-state Gate are implemented. The shared public boundary
+requires TLS 1.3, bearer authentication, bounded bodies/headers/concurrency,
+and rejects browser origins by default. Gate E additionally requires a fresh
+buyer/provider interoperability session. The local TLS cross-transport suite
+already proves that an A2A-claimed purchase cannot execute again through MCP.

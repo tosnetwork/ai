@@ -1,0 +1,41 @@
+{
+  "schema": "tos.service.registry.deployment.v1",
+  "status": "template-not-evidence",
+  "protocol": "tos_service_v1",
+  "acceptance_profile": "REQUIRED",
+  "operator_independence": false,
+  "public_internet_reachability": false,
+  "known_limitations": ["REQUIRED"],
+  "network": {
+    "network_id": "REQUIRED",
+    "genesis_root_hash": "sha256:REQUIRED",
+    "genesis_file_hash": "sha256:REQUIRED"
+  },
+  "registry_workchain": 0,
+  "release": {
+    "source_commit": "REQUIRED",
+    "code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+    "boc_sha256": "sha256:dcf41afaa7da7761839f3d26955ebab8dcd8adfe1d428b89229780c6647cdb9b",
+    "boc_bytes": 4143
+  },
+  "endpoints": [
+    {"url": "REQUIRED", "operator": "REQUIRED"},
+    {"url": "REQUIRED", "operator": "REQUIRED"},
+    {"url": "REQUIRED", "operator": "REQUIRED"}
+  ],
+  "quorum": 2,
+  "deployed_at": "REQUIRED",
+  "first_agent": {
+    "object_id": "REQUIRED",
+    "account": "REQUIRED",
+    "registration_action_hash": "sha256:REQUIRED",
+    "state_hash": "tvm-cell-sha256:REQUIRED",
+    "transaction_hash": "sha256:REQUIRED",
+    "logical_time": 0,
+    "finalized_checkpoint": 0
+  },
+  "explorer_url": "REQUIRED",
+  "typed_state_checker_url": "REQUIRED",
+  "independent_audit": "REQUIRED",
+  "lifecycle_evidence": "REQUIRED"
+}
