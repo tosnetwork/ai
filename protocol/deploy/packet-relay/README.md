@@ -157,6 +157,11 @@ Every series is present, at zero, from the first scrape.
 | `packet_relay_stored_envelopes`, `_stored_tombstones`, `_stored_entries`, `_stored_bytes` | gauge | the store's own accounting; a scrape never reads the disk |
 | `packet_relay_global_max_entries`, `_global_max_bytes` | gauge | the configured global limits, for usage ratios |
 
+If the metrics listener stops serving with an error, the whole relay stops
+too. This fail-stop is on purpose: systemd restarts the relay rather than
+leaving one running whose refusals nobody can see. On shutdown both
+listeners are drained.
+
 Counters restart from zero when the process restarts. Requests the HTTP
 server rejects before the relay handler sees them (a malformed request
 line, oversized headers) are not counted.

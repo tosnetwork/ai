@@ -320,7 +320,14 @@ func runWithMetrics(ctx context.Context, args []string, output io.Writer, ready,
 		errCh <- server.Serve(listener)
 	}()
 	if metricsServer != nil {
-		go func() { errCh <- metricsServer.Serve(metricsListener) }()
+		// A metrics listener that fails stops the relay too (fail-stop): a
+		// relay whose refusals can no longer be observed should not keep
+		// running unnoticed.
+		go func() {
+			if err := metricsServer.Serve(metricsListener); err != nil {
+				errCh <- fmt.Errorf("metrics: %w", err)
+			}
+		}()
 		logger.Info("agent packet relay metrics listening", "address", metricsListener.Addr().String())
 		if metricsReady != nil {
 			metricsReady(metricsListener.Addr())
@@ -340,15 +347,23 @@ func runWithMetrics(ctx context.Context, args []string, output io.Writer, ready,
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if metricsServer != nil {
-		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("metrics shutdown: %w", err)
+	return shutdownServers(shutdownCtx, server, metricsServer)
+}
+
+// shutdownServers drains the relay server and then the metrics server (nil
+// when off). Both are always shut down, whichever fails, and both errors
+// are returned.
+func shutdownServers(ctx context.Context, relay, metrics *http.Server) error {
+	var relayErr, metricsErr error
+	if err := relay.Shutdown(ctx); err != nil {
+		relayErr = fmt.Errorf("shutdown: %w", err)
+	}
+	if metrics != nil {
+		if err := metrics.Shutdown(ctx); err != nil {
+			metricsErr = fmt.Errorf("metrics shutdown: %w", err)
 		}
 	}
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown: %w", err)
-	}
-	return nil
+	return errors.Join(relayErr, metricsErr)
 }
 
 func main() {
