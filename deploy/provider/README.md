@@ -364,9 +364,18 @@ install -o root -g root -m 0600 deploy/provider/executor.env.example \
 #   TOS_EXECUTOR_SOCKET_GID=$(getent group tos-executor | cut -d: -f3)
 install -o root -g root -m 0644 deploy/provider/tos-service-executor.service \
   /etc/systemd/system/tos-service-executor.service
+install -o root -g root -m 0644 deploy/provider/tos-service-executor-gc.service \
+  /etc/systemd/system/tos-service-executor-gc.service
+install -o root -g root -m 0644 deploy/provider/tos-service-executor-gc.timer \
+  /etc/systemd/system/tos-service-executor-gc.timer
 systemctl daemon-reload
 systemctl enable --now tos-service-executor.service
+systemctl enable --now tos-service-executor-gc.timer
 ```
+
+The timer is part of the installation, not an option: nothing else collects
+expired jobs, and at the store's record bound every new job is refused with
+`retention_full`.
 
 Then require:
 
@@ -376,25 +385,55 @@ test "$(stat -c '%U:%a' /run/tos-service-executor)" = root:750
 test "$(stat -c '%U:%a' /run/tos-service-executor/executor.sock)" = root:660
 test "$(stat -c '%U:%G:%a' /run/tos-service-executor-private)" = root:root:700
 test "$(stat -c '%U:%G:%a' /var/lib/tos-service-executor)" = root:root:700
+systemctl is-enabled --quiet tos-service-executor-gc.timer
+systemctl is-active --quiet tos-service-executor-gc.timer
+systemctl start tos-service-executor-gc.service   # one sweep now; must exit 0
+journalctl -u tos-service-executor-gc.service -n 12 --no-pager   # its JSON report
 ```
 
 and, as the provider user, a `describe` call that reports `ready: true` and
 the pinned image digest. `ready` means the daemon answers **and** holds the
 pinned image unpacked; a new job is refused, with nothing claimed, while it
-is false. On a host with passwordless `sudo`, `make test-privileged` runs
-the real-uid and live checks: it builds the test binaries as the invoking
-user, runs only those binaries as root, and fails (it does not skip) when it
-cannot.
+is false. A `describe` that is ready does not prove a job runs: finish with
+one real job through the socket.
+
+On a host with passwordless `sudo`, `make test-privileged` runs the
+real-uid and live checks: it builds the test binaries as the invoking user,
+runs only those binaries as root, and fails (it does not skip) when it
+cannot. Its last check starts the daemon in a transient systemd unit that
+carries every `[Service]` setting of the shipped unit file except its paths,
+runs a real job through that socket as an unprivileged uid, and then runs
+the collection command under the shipped collection unit's settings against
+the still-running daemon. A sandbox setting the code cannot live under fails
+there, before it reaches a host.
 
 The unit is ordered after and requires `tos-service-containerd.service`. It
 runs with no network namespace access, a read-only system, no home
 directories, other processes hidden, `CAP_CHOWN` as its only capability
-(used once, to give the socket to the group), and memory and task caps. The
+(used once, to give the socket to the group), and memory and task caps. It
+cannot mount anything and does not need to: the container's specification is
+built from the runtime defaults and the fixed isolation settings, never from
+the image's own configuration, which would make the client mount the
+container's snapshot in the executor process. The
 private containerd unit and its socket modes are unchanged: the socket stays
 `root:root 0600` and only this service and operator-run
 `software-work-execute` open it. **Do not run the two against the same state
 directory**, and do not run a by-hand job while the service is executing
 one: both would use the one private namespace.
+
+### When a job fails
+
+A caller only ever gets a fixed status and message. The cause is in the
+service's own log, which only root reads:
+
+```bash
+journalctl -u tos-service-executor.service -n 50 --no-pager
+```
+
+A line `backend run failed: "..."` (or `readiness`, or `residue` at start)
+carries the runtime's own error for the `execution_failed` or `unavailable`
+that follows it. The text is cut to 2048 bytes and escaped, because it can
+quote names out of a caller's archive.
 
 ### Stopping, and cleaning up after a kill
 
@@ -537,14 +576,26 @@ completed:
 The response states the deadline that was applied. The service's copy is a
 convenience for asking again; **a provider runtime keeps its own copy of the
 returned bytes for delivery** and should send the end of the response window
-plus the manifest's `retention_seconds` as `retain_until_unix`. Sweep as
-root with the existing command, which may run while the service is serving,
-for example from a timer:
+plus the manifest's `retention_seconds` as `retain_until_unix`.
+
+`tos-service-executor-gc.timer` sweeps hourly by running the existing
+command as root, in its own sandbox with no capability at all:
 
 ```bash
 /usr/local/libexec/tos-service/software-work-execute artifacts-gc \
-  --state-dir /var/lib/tos-service-executor --limit 64
+  --state-dir /var/lib/tos-service-executor --limit 1024
 ```
+
+It may run while the service is serving. The two coordinate through the
+store's retention lock only: committing an object, giving a job its deadline
+and each sweep take it and wait a bounded time for one another, and the
+sweep never opens the service's journal, FIFOs or sockets. A sweep that
+cannot get the lock in time fails and the next hour's run does the work;
+`systemctl start tos-service-executor-gc.service` runs one by hand.
+
+With `--max-executions` above 1 the service holds a retention record for
+each job from its admission until the job has recorded its own, so two jobs
+are never admitted against the last free record.
 
 Journal records are never collected: they are what keeps an execution id
 from running twice.

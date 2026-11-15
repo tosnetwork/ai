@@ -12,7 +12,6 @@ import (
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
 	"github.com/tosnetwork/tos-ai/pkg/executor"
@@ -173,11 +172,16 @@ func (e *sdkEngine) Run(
 		// spec.Root.Readonly, empty capabilities, no-new-privileges and seccomp.
 		// The digest-derived snapshot is still removed synchronously below.
 		containerd.WithNewSnapshot(id, image),
-		// WithImageConfig reads the new snapshot metadata. Containerd options
-		// execute in order, so specification construction must follow snapshot
-		// creation or it fails before runc starts.
+		// The specification is built from the runtime defaults and the fixed
+		// isolation settings alone. The image's own configuration is
+		// deliberately not applied: everything it would set (arguments,
+		// environment, working directory, user and supplementary groups) is
+		// replaced by fixedIsolationSpec, and applying it makes the client
+		// mount the new snapshot in this process to read the image's user
+		// database. That needs the privilege to mount, which an executor
+		// confined to its two sockets and its own directories must not hold.
 		containerd.WithNewSpec(
-			oci.WithImageConfig(image), fixedIsolationSpec(request, workspaceSource...),
+			fixedIsolationSpec(request, workspaceSource...),
 			e.cdi.specOpt(devices),
 		),
 	)

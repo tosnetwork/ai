@@ -15,8 +15,9 @@ build:
 	GOWORK=off go build ./...
 
 # The authoritative privileged suite of the executor service: a real caller
-# under another uid, and a real job through the service on the private
-# containerd. The test binaries are built as the invoking user and only they
+# under another uid, a real job through the service on the private
+# containerd, and the same job with the daemon and the collection command
+# each running in a transient unit under the sandbox of its shipped unit file. The test binaries are built as the invoking user and only they
 # run as root. It fails, never skips, when root is unavailable.
 PRIVATE_CONTAINERD_SOCKET ?= /run/tos-service-containerd/containerd.sock
 PRIVATE_CONTAINERD_NAMESPACE ?= tos-service-paid-work
@@ -34,6 +35,13 @@ test-privileged:
 		-test.run '^TestRealCallersAreAdmittedByTheirKernelUID$$' -test.count=1 -test.v
 	sudo -n env TOS_AI_EXECUTORD_LIVE_CONTAINERD_SOCKET=$(PRIVATE_CONTAINERD_SOCKET) bin/privileged/executord.test \
 		-test.run '^TestLiveServiceRunsARealJobForAnUnprivilegedCaller$$' -test.count=1 -test.v
+	GOWORK=off go build -o bin/privileged/software-work-execute ./cmd/software-work-execute
+	sudo -n env TOS_AI_EXECUTORD_LIVE_CONTAINERD_SOCKET=$(PRIVATE_CONTAINERD_SOCKET) \
+		TOS_AI_EXECUTORD_UNIT_FILE=$(CURDIR)/deploy/provider/tos-service-executor.service \
+		TOS_AI_EXECUTORD_GC_UNIT_FILE=$(CURDIR)/deploy/provider/tos-service-executor-gc.service \
+		TOS_AI_EXECUTORD_GC_BINARY=$(CURDIR)/bin/privileged/software-work-execute \
+		bin/privileged/executord.test \
+		-test.run '^TestLiveServiceUnderTheShippedUnitSandbox$$' -test.count=1 -test.v
 	sudo -n install -d -o root -g root -m 0700 $(PRIVATE_BACKEND_TEST_DIR)
 	sudo -n env TOS_AI_CONTAINERD_TEST_SOCKET=$(PRIVATE_CONTAINERD_SOCKET) \
 		TOS_AI_CONTAINERD_TEST_NAMESPACE=$(PRIVATE_CONTAINERD_NAMESPACE) \

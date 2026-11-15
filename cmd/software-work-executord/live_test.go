@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,6 +32,9 @@ const (
 
 	liveHelperEnv       = "TOS_AI_EXECUTORD_TEST_HELPER"
 	liveHelperSocketEnv = "TOS_AI_EXECUTORD_TEST_SOCKET"
+	// liveHelperRetainEnv makes the caller ask for this retention deadline
+	// instead of the service default.
+	liveHelperRetainEnv = "TOS_AI_EXECUTORD_TEST_RETAIN_UNTIL"
 
 	liveSocketGroup = 61000
 	liveAllowedUID  = 61001
@@ -38,8 +42,11 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv(liveHelperEnv) == "call" {
+	switch os.Getenv(liveHelperEnv) {
+	case "call":
 		os.Exit(liveCaller())
+	case "daemon":
+		os.Exit(daemonHelper())
 	}
 	os.Exit(m.Run())
 }
@@ -241,6 +248,11 @@ func liveCall() (liveCallerReport, error) {
 		Limits: executorservice.Limits{CPUMillis: 60_000, MemoryBytes: 512 << 20, ScratchBytes: 1 << 30,
 			OutputBytes: 1 << 20, WallClockMillis: 120_000},
 		SourceArchive: archive,
+	}
+	if deadline := os.Getenv(liveHelperRetainEnv); deadline != "" {
+		if request.RetainUntilUnix, err = strconv.ParseInt(deadline, 10, 64); err != nil {
+			return liveCallerReport{}, err
+		}
 	}
 	result, err := client.Execute(ctx, request)
 	if err != nil {
