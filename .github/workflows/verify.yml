@@ -18,7 +18,10 @@ env:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Pinned: the attachment scanner sandbox depends on the image (bubblewrap,
+    # the user systemd manager, AppArmor policy), and an unannounced image
+    # change must not silently change what the sandbox tests cover.
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
       # The helper is built outside the workspace so the repository's own
@@ -53,10 +56,32 @@ jobs:
       - name: build
         run: go build ./...
 
+      # The attachment scanner runs a pinned, staged copy of bubblewrap in an
+      # unprivileged user namespace. The runner restricts such namespaces
+      # through AppArmor (kernel.apparmor_restrict_unprivileged_userns=1) and
+      # no profile covers the staged copy, so bwrap cannot configure the
+      # sandbox ("loopback: Failed RTM_NEWADDR: Operation not permitted").
+      # Lift the restriction for this job, and install bubblewrap where an
+      # image lacks it, so the sandbox tests run instead of skipping.
+      - name: Provide the attachment scanner sandbox
+        run: |
+          command -v bwrap >/dev/null || { sudo apt-get update && sudo apt-get install -y bubblewrap; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # The race detector is the point of running tests here. Most of what this
       # repository gets wrong under concurrency is invisible without it.
       - name: test
         run: go test -race -count=1 ./...
+      # The sandbox tests skip when a sandbox executable or the user systemd
+      # manager is missing. Here they must run: fail on a skip.
+      - name: Attachment scanner sandbox tests ran
+        run: |
+          out=$(go test -count=1 -v -run '^(TestOpenForAgentRequiresPinnedSandboxedScanner|TestScannerResourcesAreCopiedReadOnlyAndVerdictBound|TestScannerCgroupHardLimitsLive|TestScannerSandboxCannotReadUnboundHostFile)$' ./pkg/attachments 2>&1 &&
+            go test -count=1 -v -run '^TestAdmitFetchesAuthenticatesAndScansBeforeReturningText$' ./pkg/attachmentadmission 2>&1) ||
+            { printf '%s\n' "$out"; exit 1; }
+          printf '%s\n' "$out" | grep -E '^(--- |ok|FAIL)'
+          if printf '%s\n' "$out" | grep -q -- '--- SKIP'; then echo "an attachment sandbox test skipped" >&2; exit 1; fi
+          test "$(printf '%s\n' "$out" | grep -cE '^--- PASS')" = 5
       - name: Test ADNL gateway paths (no race detector)
         # tonutils-go's TL serializer trips checkptr, so the ADNL gateway
         # cannot run under -race; these tests skip there and run here.
