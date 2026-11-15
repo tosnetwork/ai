@@ -6,15 +6,19 @@ ConditionPathIsDirectory=/var/lib/tos-service-executor/artifacts
 
 [Service]
 Type=oneshot
-# Deletes the objects of jobs whose retention ended, at most 1024 jobs per
+# Deletes the objects of jobs whose retention ended, at most 128 jobs per
 # run, and prints a JSON report to the journal. It may run while the executor
-# is serving: both take the store's retention lock for each step and wait a
-# bounded time for the other, and it never opens the executor's journal,
-# FIFOs or sockets. A run that cannot get the lock in time fails and the
-# next timer run does the work.
+# is serving, and never opens the executor's journal, FIFOs or sockets. The
+# two coordinate through the store's retention lock: a sweep holds it for its
+# whole run, and a job that finishes meanwhile waits for it, at most 60 s,
+# before it can commit its result; a job that waits longer fails after having
+# run. The batch is therefore kept small: each deleted job costs two
+# directory syncs, so 128 jobs take about 9 s even on a disk that needs 34 ms
+# per sync, where 1024 would take over a minute. Do not raise --limit to
+# collect faster; run the timer more often instead.
 ExecStart=/usr/local/libexec/tos-service/software-work-execute artifacts-gc \
-  --state-dir /var/lib/tos-service-executor --limit 1024
-# A sweep waits up to 60 s for the retention lock per step.
+  --state-dir /var/lib/tos-service-executor --limit 128
+# The sweep itself waits up to 60 s for the retention lock.
 TimeoutStartSec=900s
 UMask=0077
 MemoryMax=512M

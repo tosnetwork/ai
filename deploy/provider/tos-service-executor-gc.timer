@@ -3,8 +3,11 @@ Description=Hourly TOS Service Protocol executor artifact collection
 Documentation=https://github.com/tosnetwork/tos-ai/tree/main/deploy/provider
 
 [Timer]
-# The store admits 65 536 retained jobs; an hourly sweep of up to 1024
-# expired jobs keeps it far from that bound at one job at a time.
+# Each run collects at most 128 expired jobs, so 128 per hour. At one job at
+# a time, a job on the frozen image taking about a minute, the service
+# admits about 60 per hour, and the store has room for 65 536 retained
+# jobs. If jobs expire faster than 128 per hour for long, shorten this
+# interval rather than enlarge the batch.
 OnCalendar=hourly
 RandomizedDelaySec=5min
 Persistent=true

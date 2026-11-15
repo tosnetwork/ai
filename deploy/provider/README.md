@@ -583,15 +583,24 @@ command as root, in its own sandbox with no capability at all:
 
 ```bash
 /usr/local/libexec/tos-service/software-work-execute artifacts-gc \
-  --state-dir /var/lib/tos-service-executor --limit 1024
+  --state-dir /var/lib/tos-service-executor --limit 128
 ```
 
 It may run while the service is serving. The two coordinate through the
-store's retention lock only: committing an object, giving a job its deadline
-and each sweep take it and wait a bounded time for one another, and the
-sweep never opens the service's journal, FIFOs or sockets. A sweep that
-cannot get the lock in time fails and the next hour's run does the work;
-`systemctl start tos-service-executor-gc.service` runs one by hand.
+store's retention lock only, and the sweep never opens the service's
+journal, FIFOs or sockets. A sweep holds the lock for its whole run, and a
+job that finishes meanwhile waits for it, at most 60 seconds, before it can
+commit its result; a job that waits longer fails after having run. That is
+why one run collects at most 128 jobs: at two directory syncs per deleted
+job a full batch takes about 9 seconds even on a disk that needs 34 ms per
+sync, far inside the 60 second wait, where a batch of 1024 would take more
+than a minute. The resulting bound is 128 collected jobs per hour, against
+about 60 admitted per hour at one job at a time (a job on the frozen image
+takes about a minute) and room for 65 536 retained jobs; if jobs expire
+faster than that for long, run the timer more often instead of raising
+`--limit`. A sweep that cannot get the lock in time fails and the next
+hour's run does the work; `systemctl start tos-service-executor-gc.service`
+runs one by hand.
 
 With `--max-executions` above 1 the service holds a retention record for
 each job from its admission until the job has recorded its own, so two jobs

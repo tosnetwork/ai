@@ -122,7 +122,7 @@ func TestServiceSettingsAreReadFromTheShippedUnit(t *testing.T) {
 		collected[setting[0]] = setting[1]
 	}
 	if strings.Join(strings.Fields(collected["ExecStart"]), " ") != "/usr/local/libexec/tos-service/software-work-execute artifacts-gc --state-dir "+
-		"/var/lib/tos-service-executor --limit 1024" || collected["ReadWritePaths"] != "/var/lib/tos-service-executor" ||
+		"/var/lib/tos-service-executor --limit 128" || collected["ReadWritePaths"] != "/var/lib/tos-service-executor" ||
 		collected["Type"] != "oneshot" || collected["CapabilityBoundingSet"] != "" || collected["ProtectSystem"] != "strict" {
 		t.Fatalf("collection unit = %+v", collected)
 	}
@@ -245,7 +245,7 @@ func TestLiveServiceUnderTheShippedUnitSandbox(t *testing.T) {
 	stateDir := filepath.Join("/var/lib", name)
 	sweep := []string{"--quiet", "--collect", "--wait", "--pipe", "--unit=" + name + "-gc", "--property=ReadWritePaths=" + stateDir}
 	sweep = append(sweep, shippedProperties(t, collectionUnit, 25)...)
-	sweep = append(sweep, collector, "artifacts-gc", "--state-dir", stateDir, "--limit", "1024")
+	sweep = append(sweep, collector, "artifacts-gc", "--state-dir", stateDir, "--limit", "128")
 	var sweepErrors bytes.Buffer
 	sweepCommand := exec.Command("systemd-run", sweep...)
 	sweepCommand.Stderr = &sweepErrors
