@@ -228,6 +228,12 @@ evidence.
 - `tos-messenger` still mentions `tos-service-protocol` in prose (three places:
   `docs/AGENT_PACKET_BRIDGE.md`, `pkg/chainagent/resolver.go`,
   `pkg/payload/agent_gift.go`).
+- Two stale references predate the move and were left unchanged by it:
+  `spec/docs/GATE_E_BUYER_ONBOARDING.md` names
+  `tos-service-protocol/pkg/toschain.StablecoinResolver`, which no longer
+  exists, and `spec/deployments/README.md` and `spec/docs/ROADMAP.md` name
+  `native-safe-handoff-pack` and `native-safe-handoff-check`, which are not in
+  `protocol/cmd`. Correct or remove them in a separate change.
 - Planned later, each as its own reviewed change: make `spec/proto` the single
   schema source and remove `protocol/api`, and reconcile the diverged copies of
   `internal/osguard` and `internal/actionauthoritytest`.
