@@ -238,6 +238,47 @@ evidence.
   schema source and remove `protocol/api`, and reconcile the diverged copies of
   `internal/osguard` and `internal/actionauthoritytest`.
 
+## Agent Packet Relay — sale through a relay daemon, nodes in separate network namespaces
+
+Local integration evidence only. Everything runs on one physical host. The
+buyer, the provider and the relay are separated by Linux network namespaces
+and firewall rules, not by machines. The relay is operated by the run itself,
+and no internet path exists. So this does not qualify as public or
+independent acceptance, and it is not Gate O evidence (relay spec section 12).
+
+| Record | What it proves | Script commit | Result |
+|---|---|---|---|
+| [`local-openfox-relay-loopback-20261115.json`](../deployments/local-openfox-relay-loopback-20261115.json) (sha256 `228648e3d0e3b9586132c6e031775e6d76aace28ab4976eb0b08b5448359611a`, copied byte for byte) | `openfox` `scripts/service-front-door-e2e.sh` with `E2E_RELAY_URL=http://127.0.0.1:49960` and `E2E_EXECUTOR_SOCKET`, 2026-11-15 14:18 to 14:22 UTC (`tos` `5af405dcb`). The front-door sale with both nodes on one user and one network stack, carried only by a `tos-service-packet-relay` daemon process on loopback (built from `ai` `c957c17b`; plain HTTP, which the relay allows only on loopback) instead of the direct transport. The offer file carries the provider's key card, both nodes name the relay and no direct peer, and the provider's envelopes were accepted by the relay. The first run of this mode found an `openfox` defect: `preflight` failed `relay.card` on every relay node because its checkpoint fences were deleted before the relay checks ran. It is fixed in `openfox` `92dbf349` (tosnetwork/openfox#40) | `openfox` `92dbf349` (clean tree) | ALL PASS, 40 of 40; `qualifies_as_public_acceptance: false` |
+| [`local-openfox-relay-two-host-20261115.json`](../deployments/local-openfox-relay-two-host-20261115.json) (sha256 `d173c45bd2b408aba13d6ec1b0a84deaf4ea6d71fa50ae6066a5e2d3450b70a2`, copied byte for byte) | `openfox` `scripts/service-relay-two-host-e2e.sh`, 2026-11-15 14:43 to 14:46 UTC (`tos` `5af405dcb`, tosctl sha256 `6de21cb2…`, relay daemon built from `ai` `c957c17b` with sha256 `f8ff662f…`). The setup: the buyer, the provider and the relay daemon run in three network namespaces on a private bridge with no default route. The chain stays in the host namespace on 127.0.0.1 and is reached only through explicit forwarders: on the bridge's host end, and on each node namespace's loopback. Every node, relay and forwarder process runs as the same ordinary uid. **Isolation.** A listener in each node namespace is reachable from the other node before the firewall rules and times out after them, in both directions. A node reaches neither host services nor the internet, and the relay namespace cannot reach the chain. Each node sees the other node's directory, the run's private files and the relay state as empty. **TLS.** The relay serves TLS on its namespace address under a certificate authority generated for the run. The nodes trust only that authority (`SSL_CERT_FILE` plus an empty `SSL_CERT_DIR`; verification on), and a preflight with an unrelated authority cannot reach the relay. **Sale.** Relay only: no direct peer and no Messenger socket. One paid sale with the front-door checks: exactly one request on chain, the Receipt hash on chain and on both nodes, the artifact digest inside the Receipt, and exactly one execution. **Outages.** The relay daemon is stopped by SIGTERM while it holds the task, the provider's polls fail, and after a restart on the same state directory the relay still holds the task. It is stopped again as soon as the provider acknowledged the task: the provider responds on chain while its result deposits fail and stay journaled, and after the restart the courier's retry delivers the result. **No plaintext.** No file the relay wrote contains the source archive, the artifact, the buyer wallet address or the Quote package. That includes copies of its state taken while it held the task and while it held the result. The search is shown to find each of these in a control file, and the relay log names no Agent and no client address. **Root.** Only the namespace, firewall and teardown commands and namespace entry ran as root (`ran_as_root`); uid and gid are recorded numerically | `openfox` `5d4ceb39` (clean tree; tosnetwork/openfox#41, stacked on #40) | ALL PASS, 56 of 56; `qualifies_as_public_acceptance: false` |
+
+The relay spec's section 12.1 marks the acceptance items these records cover.
+
+Not covered by these records:
+
+- two physical machines, an internet path, or a relay operated by anyone but
+  the run itself;
+- a second relay in the card carrying traffic while the first is down;
+- live adversarial cases: tampered, forged, foreign and replayed envelopes,
+  quota pressure, and the section 8.6 public-ID race. No live adversarial run
+  was performed. The two-host record lists by name the merged in-repository
+  tests that cover them (`protocol/pkg/agentpacketrelay`,
+  `protocol/pkg/agentpacketseal`, `openfox` `pkg/servicebridge`);
+- key expiry and rotation, covered by unit tests only (listed by name in the
+  record);
+- crash windows of the nodes (relay spec section 12 item 3);
+- a per-relay certificate authority option in OpenFox: a relay with a private
+  authority currently needs the system trust store or `SSL_CERT_FILE`.
+
+A run of the two-host script at the same commit, before the recorded one,
+failed `buy` with `Quote Capability is not available from finalized state`.
+`buy` and the buyer's `serve` share the state directory's monotonic registry
+checkpoint fence. `buy` checks the offer and builds the Quote at one pinned
+finalized checkpoint, so when `serve` commits a newer checkpoint in between,
+the second registry read at the pinned checkpoint is refused as a regression.
+`quoteprovider.RequestQuoteProposal` reports any read error as "not
+available", so the cause is not visible. This is an open follow-up for both
+repositories, not fixed by these changes.
+
 ## Not delivered by these changes
 
 - WP-07 independent commercial acceptance: a provider and buyer outside the
@@ -245,8 +286,8 @@ evidence.
 - WP-08 inference profile and adapters: locked until the expansion gate opens.
 - A paid run on an independent provider host (the M1 and front-door runs each
   use one host for everything).
-- Agent Packet carriage between two hosts (a Messenger daemon per Agent), run
-  end to end.
+- Agent Packet carriage between two physical hosts, run end to end. The relay
+  record above separates the nodes by network namespaces on one host.
 - A `buy` preview step; keeping `--confirm-above` when `init` is re-run with
   `--allow-provider`; a command that closes a purchase whose call never
   landed.
