@@ -1,6 +1,10 @@
 """Prefix substitution of the former module paths, called by rewrite-imports.sh.
 
-Only tracked files inside the four component directories are considered.
+Only tracked files inside the component directories are considered. In Go
+files only import declarations are rewritten: a module path in a string
+literal is data (for example a repository named in emitted evidence), not an
+import, and a pure move must not change it. The rewritten Go files are then
+formatted with gofmt, which restores canonical import order.
 Hash-pinned data (frozen test vectors, golden files, fixtures, conformance
 corpora, release manifests and evidence records) is never rewritten, and
 neither are generated protobuf files, whose raw descriptors carry
@@ -18,9 +22,10 @@ SUBSTITUTIONS = {
     "github.com/tosnetwork/tos-service-protocol": "github.com/tosnetwork/ai/protocol",
     "github.com/tosnetwork/tos-service-gateway": "github.com/tosnetwork/ai/gateway",
     "github.com/tosnetwork/tos-ai": "github.com/tosnetwork/ai/execution",
+    "github.com/tosnetwork/tos-messenger": "github.com/tosnetwork/ai/messenger",
 }
 
-COMPONENTS = ("spec/", "protocol/", "gateway/", "execution/")
+COMPONENTS = ("spec/", "protocol/", "gateway/", "execution/", "messenger/")
 
 # Hash-pinned or generated paths, by prefix or by path segment.
 SKIPPED_PREFIXES = (
@@ -28,6 +33,7 @@ SKIPPED_PREFIXES = (
     "spec/deployments/",
     "spec/manifests/",
     "protocol/tests/conformance/",
+    "messenger/docs/evidence/",
 )
 SKIPPED_SEGMENTS = ("testdata", "fixtures", "golden")
 SKIPPED_SUFFIXES = (".golden", ".pb.go")
@@ -44,6 +50,8 @@ PATTERN = re.compile(
     re.MULTILINE,
 )
 GO_PACKAGE = re.compile(r"^option\s+go_package\s*=", re.MULTILINE)
+# One import spec per line: in an import block, or a single import declaration.
+GO_IMPORT = re.compile(r'^\s*(?:import\s+)?(?:[A-Za-z_.][A-Za-z0-9_]*\s+)?"[^"]+"\s*(?://.*)?$')
 
 
 def skipped(path):
@@ -67,11 +75,22 @@ def rewrite_proto(text):
     return "".join(lines), count
 
 
+def rewrite_go(text):
+    lines = text.splitlines(keepends=True)
+    count = 0
+    for index, line in enumerate(lines):
+        if GO_IMPORT.match(line):
+            lines[index], replaced = PATTERN.subn(lambda m: SUBSTITUTIONS[m.group(1)], line)
+            count += replaced
+    return "".join(lines), count
+
+
 def main():
     repo = Path(sys.argv[1])
     listed = subprocess.run(["git", "-C", str(repo), "ls-files", "-z", "--", *COMPONENTS],
                             check=True, stdout=subprocess.PIPE).stdout.decode("utf-8")
     total = 0
+    go_files = []
     for path in sorted(filter(None, listed.split("\0"))):
         file = repo / path
         if file.is_symlink() or not file.is_file():
@@ -86,12 +105,22 @@ def main():
         original = file.read_bytes().decode("utf-8")
         if path.endswith(".proto"):
             rewritten, count = rewrite_proto(original)
+        elif path.endswith(".go"):
+            rewritten, count = rewrite_go(original)
+            if count:
+                go_files.append(str(file))
         else:
             rewritten, count = PATTERN.subn(lambda m: SUBSTITUTIONS[m.group(1)], original)
         if count:
             file.write_bytes(rewritten.encode("utf-8"))
             total += count
             print(f"{count:4d} {path}")
+    if go_files:
+        subprocess.run(["gofmt", "-w", *go_files], check=True)
+    left = [line for path in go_files for line in Path(path).read_text(encoding="utf-8").splitlines()
+            if PATTERN.search(line) and GO_IMPORT.match(line)]
+    if left:
+        sys.exit("rewrite left former module paths in import lines:\n" + "\n".join(left))
     print(f"{total} substitutions")
 
 
