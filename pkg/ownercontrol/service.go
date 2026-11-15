@@ -13,8 +13,8 @@ import (
 	"sort"
 	"strings"
 
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	trusted "github.com/tosnetwork/tos-service-protocol/pkg/trustedcapability"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	trusted "github.com/tosnetwork/ai/protocol/pkg/trustedcapability"
 )
 
 type Authorizer interface {

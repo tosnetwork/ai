@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 const schema = "tos.messaging.economic-action-store.v1"

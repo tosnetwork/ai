@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
 // publicKeyHexBytes is the length of a 1,312-byte ML-DSA-44 public key in

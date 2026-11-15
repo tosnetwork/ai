@@ -4,12 +4,12 @@ import (
 	"errors"
 	"time"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/tos-messenger/internal/securefile"
 	"github.com/tosnetwork/tos-messenger/pkg/chainagent"
 	"github.com/tosnetwork/tos-messenger/pkg/identity"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentpacket"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativecore"
 )
 
 const maxDelegationFileBytes = 64 << 10

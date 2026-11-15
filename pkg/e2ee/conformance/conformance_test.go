@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
 )
 
 // The doubles below are NOT cryptography and must never be used for anything.

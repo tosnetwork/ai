@@ -3,7 +3,7 @@ package ownercontrol
 import (
 	"encoding/hex"
 	"encoding/json"
-	trusted "github.com/tosnetwork/tos-service-protocol/pkg/trustedcapability"
+	trusted "github.com/tosnetwork/ai/protocol/pkg/trustedcapability"
 	"io"
 	"net/http"
 )

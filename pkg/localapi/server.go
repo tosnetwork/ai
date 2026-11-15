@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
 	"github.com/tosnetwork/tos-messenger/internal/canon"
 	"github.com/tosnetwork/tos-messenger/internal/ids"
 	"github.com/tosnetwork/tos-messenger/internal/localwire"
@@ -27,8 +29,6 @@ import (
 	"github.com/tosnetwork/tos-messenger/pkg/identity"
 	"github.com/tosnetwork/tos-messenger/pkg/negotiation"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	protocolcodec "github.com/tosnetwork/tos-service-protocol/pkg/codec"
 )
 
 // DefaultRequestTimeout bounds how long one call may hold a connection.

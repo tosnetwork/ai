@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	nativev1 "github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/tos-service-protocol/gen/tos/service/v1/tosservicev1connect"
-	"github.com/tosnetwork/tos-service-protocol/pkg/nativeclient"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/gen/tos/service/v1/tosservicev1connect"
+	"github.com/tosnetwork/ai/protocol/pkg/nativeclient"
 	"google.golang.org/protobuf/proto"
 )
 

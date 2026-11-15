@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	commerce "github.com/tosnetwork/tos-service-protocol/pkg/agentcommerce"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44/mldsa44test"
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
 )
 
 func TestCarrierPinsNeedTheVerifyOnlyHelperAndMLDSA44Keys(t *testing.T) {

@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/tos-messenger/internal/ids"
 	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
 	"github.com/tosnetwork/tos-messenger/pkg/payload"
-	"github.com/tosnetwork/tos-service-protocol/pkg/agentpacket"
-	"github.com/tosnetwork/tos-service-protocol/pkg/mldsa44"
 )
 
 const (
