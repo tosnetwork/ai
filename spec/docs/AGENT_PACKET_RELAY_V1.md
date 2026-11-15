@@ -162,7 +162,10 @@ Rules:
   `127.0.0.1`, `localhost` or `::1`; non-empty lowercase host; optional port;
   no user information, query (not even an empty `?`), fragment, opaque part,
   percent-escaped path, or trailing slash; path empty or beginning with `/`;
-  re-serializing the parsed URL yields the same string.
+  re-serializing the parsed URL yields the same string. No `%` byte appears
+  anywhere in the URL: re-serialization alone does not catch an escape the
+  parser keeps verbatim (such as `%20`), and a host has no valid escape here
+  (an IPv6 zone is never a relay host).
 - The body is at most 2,346 bytes; the end of the last URL is the end of the
   body.
 
