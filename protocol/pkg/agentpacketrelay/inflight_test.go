@@ -2,10 +2,15 @@ package agentpacketrelay
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,11 +119,16 @@ func TestDepositWaitsForInFlightWrite(t *testing.T) {
 // TestConcurrentDepositBound refuses a deposit past the in-memory body
 // bound with 503 before reading it.
 func TestConcurrentDepositBound(t *testing.T) {
-	relay, backend, gate := gatedRelay(t, func(c *ServerConfig) { c.MaxConcurrentDeposits = 1 })
+	relay, backend, gate := gatedRelay(t, func(c *ServerConfig) {
+		c.MaxConcurrentDeposits = 1
+		c.MaxConcurrentDepositsPerClient = 1
+		c.TrustedProxies = []netipPrefix{mustPrefix(t, "127.0.0.1/32")}
+	})
 	alice := newRecipient(t)
 	first := depositAsync(relay.client, alice.seal(t, testPacket(8), relay.clock.unix()+600).envelope)
 	waitBusy(t, relay.store)
-	got := relay.putSealed(alice.seal(t, testPacket(8), relay.clock.unix()+600))
+	// Another client address: its own share is free, the shared slot is not.
+	got := relay.putSealed(alice.seal(t, testPacket(8), relay.clock.unix()+600), "X-Forwarded-For", "192.0.2.50")
 	expectStatus(t, got, http.StatusServiceUnavailable)
 	if got.header.Get("Retry-After") == "" {
 		t.Fatal("503 without Retry-After")
@@ -160,4 +170,118 @@ func TestDiskWritesAreAtomic(t *testing.T) {
 	if len(checked) != 2 || checked[0] != dirEnvelopes || checked[1] != dirTombstones {
 		t.Fatalf("hook saw %v", checked)
 	}
+}
+
+// TestPerClientDepositBound: one client address holds at most its share of
+// deposit bodies at once; past it that client gets 429 while another client
+// is still served, and the share frees when a deposit ends.
+func TestPerClientDepositBound(t *testing.T) {
+	relay, backend, gate := gatedRelay(t, func(c *ServerConfig) {
+		c.MaxConcurrentDeposits = 16
+		c.MaxConcurrentDepositsPerClient = 4
+		c.TrustedProxies = []netipPrefix{mustPrefix(t, "127.0.0.1/32")}
+	})
+	alice := newRecipient(t)
+	from := func(addr string) []string { return []string{"X-Forwarded-For", addr} }
+	type parked struct{ done chan response }
+	park := func(addr string) parked {
+		env := alice.seal(t, testPacket(8), relay.clock.unix()+600)
+		done := make(chan response, 1)
+		go func() { done <- relay.putSealed(env, from(addr)...) }()
+		return parked{done}
+	}
+	var held []parked
+	for range 4 {
+		held = append(held, park("198.51.100.9"))
+	}
+	waitFor(t, func() bool {
+		relay.server.inflightMu.Lock()
+		defer relay.server.inflightMu.Unlock()
+		return relay.server.inflight[mustAddr(t, "198.51.100.9")] == 4
+	})
+	select {
+	case got := <-park("198.51.100.9").done:
+		expectStatus(t, got, http.StatusTooManyRequests)
+	case <-time.After(2 * time.Second):
+		t.Fatal("a fifth concurrent deposit from one address was admitted")
+	}
+	other := park("198.51.100.10")
+	waitFor(t, func() bool {
+		relay.server.inflightMu.Lock()
+		defer relay.server.inflightMu.Unlock()
+		return relay.server.inflight[mustAddr(t, "198.51.100.10")] == 1
+	})
+	openGate(backend, gate)
+	for _, p := range append(held, other) {
+		expectStatus(t, <-p.done, http.StatusCreated)
+	}
+	relay.server.inflightMu.Lock()
+	left := len(relay.server.inflight)
+	relay.server.inflightMu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d clients still hold deposit slots", left)
+	}
+	expectStatus(t, relay.putSealed(alice.seal(t, testPacket(8), relay.clock.unix()+600), from("198.51.100.9")...), http.StatusCreated)
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not reached")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// TestDepositBodyDeadline: a body trickled slower than the minimum rate
+// loses its slot when its deadline passes, long before the request read
+// timeout, and the slot is free again for the next deposit.
+func TestDepositBodyDeadline(t *testing.T) {
+	relay := newTestRelay(t, testLimits(), func(c *ServerConfig) {
+		c.MaxConcurrentDeposits = 1
+		c.MaxConcurrentDepositsPerClient = 1
+		c.DepositReadBase = 300 * time.Millisecond
+		c.DepositMinBytesPerSecond = 1 << 30
+	})
+	alice := newRecipient(t)
+	conn, err := net.Dial("tcp", strings.TrimPrefix(relay.http.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	env := alice.seal(t, testPacket(8), relay.clock.unix()+600)
+	request := "PUT /v1/mailboxes/" + alice.agentID + "/envelopes/" + hex.EncodeToString(env.id[:]) + " HTTP/1.1\r\n" +
+		"Host: relay\r\nContent-Type: application/octet-stream\r\nContent-Length: " + strconv.Itoa(len(env.envelope)) + "\r\n\r\n"
+	if _, err := io.WriteString(conn, request); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		for index := 0; index < len(env.envelope); index++ {
+			if _, err := conn.Write(env.envelope[index : index+1]); err != nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(make([]byte, 512)); err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatal("a trickled deposit body held its slot past its deadline")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("the trickled body was cut after %s", elapsed)
+	}
+	conn.Close()
+	<-ended
+	// The slot is free: a normal deposit is stored.
+	waitFor(t, func() bool {
+		relay.server.inflightMu.Lock()
+		defer relay.server.inflightMu.Unlock()
+		return len(relay.server.inflight) == 0 && len(relay.server.bodies) == 0
+	})
+	expectStatus(t, relay.putSealed(alice.seal(t, testPacket(8), relay.clock.unix()+600)), http.StatusCreated)
 }

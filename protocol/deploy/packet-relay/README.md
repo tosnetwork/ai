@@ -55,6 +55,11 @@ A base path is supported with `-base-path /relay` (the key card then names
 | `-max-connections` | 1024 | concurrent connections; past it a new connection is closed at once |
 | `-max-connections-per-client` | 16 | concurrent connections per TCP peer address (IPv6 per /64); trusted proxies exempt |
 | `-max-concurrent-deposits` | 256 | deposit bodies in memory at once; past it `503` |
+| `-max-concurrent-deposits-per-client` | 4 | deposit bodies one client address holds at once; past it `429` |
+
+A deposit body must arrive within 5 s plus its declared length at
+32 KiB/s (13 s for a maximal 256 KiB envelope); a slower body is cut off
+with `400` and frees its slot.
 | `-sweep-interval` | 1m | expiry sweep |
 
 A client address is the IP address, IPv6 aggregated to its /64. A full

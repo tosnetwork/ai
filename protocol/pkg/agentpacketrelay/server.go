@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
@@ -35,6 +36,17 @@ type ServerConfig struct {
 	// once, whatever the number of connections or HTTP/2 streams; a deposit
 	// past it is answered 503. Zero takes DefaultMaxConcurrentDeposits.
 	MaxConcurrentDeposits int
+	// MaxConcurrentDepositsPerClient bounds the deposit bodies one client
+	// address holds at once, so a few addresses cannot take every body slot;
+	// a deposit past it is answered 429. Zero takes
+	// DefaultMaxConcurrentDepositsPerClient.
+	MaxConcurrentDepositsPerClient int
+	// DepositReadBase and DepositMinBytesPerSecond set the deadline for
+	// reading a deposit body: DepositReadBase plus the declared length at
+	// DepositMinBytesPerSecond. Zero takes DefaultDepositReadBase and
+	// DefaultDepositMinBytesPerSecond.
+	DepositReadBase          time.Duration
+	DepositMinBytesPerSecond int
 	// TrustedProxies are the peers whose X-Forwarded-For is believed. Empty
 	// means the TCP peer is always the client.
 	TrustedProxies []netip.Prefix
@@ -45,19 +57,38 @@ type ServerConfig struct {
 	Logger *slog.Logger
 }
 
-// DefaultMaxConcurrentDeposits holds at most 64 MiB of deposit bodies.
-const DefaultMaxConcurrentDeposits = 256
+// Deposit body bounds.
+const (
+	// DefaultMaxConcurrentDeposits holds at most 64 MiB of deposit bodies.
+	DefaultMaxConcurrentDeposits = 256
+	// DefaultMaxConcurrentDepositsPerClient lets one address hold 4 of the
+	// 256 slots, so holding them all takes 64 addresses.
+	DefaultMaxConcurrentDepositsPerClient = 4
+	// DefaultDepositReadBase and DefaultDepositMinBytesPerSecond give a
+	// maximal 256 KiB body 5 s + 8 s = 13 s, well under the 30 s request
+	// read timeout: 32 KiB/s is 256 kbit/s, slower than any link a relay
+	// client is expected to use, while a sender trickling a body loses its
+	// slot within seconds instead of half a minute.
+	DefaultDepositReadBase          = 5 * time.Second
+	DefaultDepositMinBytesPerSecond = 32 << 10
+)
 
 // Server is the relay HTTP API of Agent Packet Relay V1.
 type Server struct {
-	store    *Store
-	bodies   chan struct{}
-	base     string
-	deposits *rateLimiter
-	reads    *rateLimiter
-	trusted  []netip.Prefix
-	now      func() time.Time
-	logger   *slog.Logger
+	store  *Store
+	bodies chan struct{}
+	// inflight counts the deposit bodies each client address holds.
+	inflightMu sync.Mutex
+	inflight   map[netip.Addr]int
+	perClient  int
+	readBase   time.Duration
+	minRate    int
+	base       string
+	deposits   *rateLimiter
+	reads      *rateLimiter
+	trusted    []netip.Prefix
+	now        func() time.Time
+	logger     *slog.Logger
 }
 
 // NewServer checks the configuration and returns the handler.
@@ -96,6 +127,19 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if bodies < 0 {
 		return nil, errors.New("agentpacketrelay: concurrent deposit bound must be positive")
 	}
+	perClient, readBase, minRate := config.MaxConcurrentDepositsPerClient, config.DepositReadBase, config.DepositMinBytesPerSecond
+	if perClient == 0 {
+		perClient = min(DefaultMaxConcurrentDepositsPerClient, bodies)
+	}
+	if readBase == 0 {
+		readBase = DefaultDepositReadBase
+	}
+	if minRate == 0 {
+		minRate = DefaultDepositMinBytesPerSecond
+	}
+	if perClient < 0 || perClient > bodies || readBase < 0 || minRate < 0 {
+		return nil, errors.New("agentpacketrelay: per-client deposit bound must be positive and at most the total; deposit read bounds must be positive")
+	}
 	now := config.Now
 	if now == nil {
 		now = time.Now
@@ -104,7 +148,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	return &Server{store: config.Store, bodies: make(chan struct{}, bodies), base: config.BasePath, deposits: newRateLimiter(deposit, maxClients),
+	return &Server{store: config.Store, bodies: make(chan struct{}, bodies), inflight: map[netip.Addr]int{},
+		perClient: perClient, readBase: readBase, minRate: minRate, base: config.BasePath, deposits: newRateLimiter(deposit, maxClients),
 		reads: newRateLimiter(read, maxClients), trusted: append([]netip.Prefix(nil), config.TrustedProxies...),
 		now: now, logger: logger}, nil
 }
@@ -207,6 +252,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 
 func unixNow(now time.Time) uint64 { return uint64(max(now.Unix(), 0)) }
 
+func (s *Server) takeClientSlot(client netip.Addr) bool {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if s.inflight[client] >= s.perClient {
+		return false
+	}
+	s.inflight[client]++
+	return true
+}
+
+func (s *Server) releaseClientSlot(client netip.Addr) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if s.inflight[client]--; s.inflight[client] <= 0 {
+		delete(s.inflight, client)
+	}
+}
+
 func (s *Server) deposit(w http.ResponseWriter, request *http.Request, agentText string, id [32]byte,
 	client netip.Addr, now time.Time,
 ) {
@@ -220,12 +283,28 @@ func (s *Server) deposit(w http.ResponseWriter, request *http.Request, agentText
 		s.fail(w, http.StatusBadRequest, 0)
 		return
 	}
+	// The client's own share first, so a few addresses cannot take the
+	// shared slots; then a shared slot.
+	if !s.takeClientSlot(client) {
+		s.fail(w, http.StatusTooManyRequests, time.Second)
+		return
+	}
+	defer s.releaseClientSlot(client)
 	select {
 	case s.bodies <- struct{}{}:
 		defer func() { <-s.bodies }()
 	default:
 		w.Header().Set("Retry-After", "1")
 		s.json(w, http.StatusServiceUnavailable, wireError{Schema: SchemaError, Code: CodeUnavailable})
+		return
+	}
+	// A slot is held only as long as the body arrives at the minimum rate.
+	// The deadline is wall-clock time whatever clock the server judges
+	// expiry by.
+	deadline := s.readBase + time.Duration(request.ContentLength)*time.Second/time.Duration(s.minRate)
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(deadline)); err != nil &&
+		!errors.Is(err, http.ErrNotSupported) {
+		s.unavailable(w, "set deposit read deadline", err)
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(http.MaxBytesReader(w, request.Body, MaxEnvelopeBytes+1), MaxEnvelopeBytes+1))

@@ -585,7 +585,12 @@ Where the table above leaves a choice, the reference relay makes these:
 - At most a configured number of deposit bodies (default 256, so 64 MiB) are
   read at once, whatever the number of connections or HTTP/2 streams; a
   deposit past it is answered `503` with `Retry-After` before its body is
-  read.
+  read. One client address holds at most 4 of them at once (past that its
+  deposit is `429` with `Retry-After`), so holding every slot takes 64
+  addresses. A body must arrive within 5 s plus its declared length at
+  32 KiB/s (at most 13 s, well under the 30-second request read timeout);
+  a slower body is cut off with `400`, so a trickling sender holds a slot
+  for seconds, not half a minute.
 - The relay keeps the depositing client address with each stored envelope so
   that the per-(client, recipient) quota survives a restart.
 - A record that fails its checksum, an unknown file or an unknown layout

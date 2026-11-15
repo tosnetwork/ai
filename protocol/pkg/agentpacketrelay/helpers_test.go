@@ -122,7 +122,9 @@ func newTestRelay(t testing.TB, limits Limits, opts ...relayOption) *testRelay {
 
 func newTestRelayWithStore(t testing.TB, store *Store, clock *fakeClock, opts ...relayOption) *testRelay {
 	t.Helper()
-	config := ServerConfig{Store: store, Now: clock.Now,
+	// Tests drive many concurrent deposits from one loopback address; the
+	// per-client deposit bound is tested on its own.
+	config := ServerConfig{Store: store, Now: clock.Now, MaxConcurrentDepositsPerClient: DefaultMaxConcurrentDeposits,
 		DepositRate: RateLimit{PerMinute: 1 << 20, Burst: 1 << 20}, ReadRate: RateLimit{PerMinute: 1 << 20, Burst: 1 << 20}}
 	for _, opt := range opts {
 		opt(&config)
