@@ -32,6 +32,10 @@ type ServerConfig struct {
 	// MaxRateClients bounds each rate-limiter table; zero takes
 	// DefaultMaxRateClients.
 	MaxRateClients int
+	// MaxRateClientsPer48 bounds the own buckets of the /64 clients inside
+	// one IPv6 /48; further /64s of that /48 share one bucket. Zero takes
+	// DefaultMaxRateClientsPer48.
+	MaxRateClientsPer48 int
 	// MaxConcurrentDeposits bounds the deposit bodies held in memory at
 	// once, whatever the number of connections or HTTP/2 streams; a deposit
 	// past it is answered 503. Zero takes DefaultMaxConcurrentDeposits.
@@ -117,8 +121,12 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if maxClients == 0 {
 		maxClients = DefaultMaxRateClients
 	}
-	if maxClients < 0 {
-		return nil, errors.New("agentpacketrelay: rate-limiter table bound must be positive")
+	per48 := config.MaxRateClientsPer48
+	if per48 == 0 {
+		per48 = DefaultMaxRateClientsPer48
+	}
+	if maxClients < 0 || per48 < 0 {
+		return nil, errors.New("agentpacketrelay: rate-limiter table bounds must be positive")
 	}
 	bodies := config.MaxConcurrentDeposits
 	if bodies == 0 {
@@ -149,8 +157,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Server{store: config.Store, bodies: make(chan struct{}, bodies), inflight: map[netip.Addr]int{},
-		perClient: perClient, readBase: readBase, minRate: minRate, base: config.BasePath, deposits: newRateLimiter(deposit, maxClients),
-		reads: newRateLimiter(read, maxClients), trusted: append([]netip.Prefix(nil), config.TrustedProxies...),
+		perClient: perClient, readBase: readBase, minRate: minRate, base: config.BasePath,
+		deposits: newRateLimiter(deposit, maxClients, per48), reads: newRateLimiter(read, maxClients, per48), trusted: append([]netip.Prefix(nil), config.TrustedProxies...),
 		now: now, logger: logger}, nil
 }
 

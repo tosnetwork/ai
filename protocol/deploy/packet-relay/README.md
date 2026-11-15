@@ -63,9 +63,10 @@ with `400` and frees its slot.
 | `-sweep-interval` | 1m | expiry sweep |
 
 A client address is the IP address, IPv6 aggregated to its /64. A full
-mailbox or a full relay answers `507`; nothing is ever evicted. When a rate
-table is full of clients that are all still being limited, a new client is
-answered `429` rather than evicting one of them.
+mailbox or a full relay answers `507`; no envelope is ever evicted. A full
+rate table evicts its least recently used bucket to admit a new client;
+within one IPv6 /48 at most 256 /64s get their own bucket and the rest of
+that /48 shares one.
 
 ## State directory
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -566,8 +567,11 @@ func TestRateLimit(t *testing.T) {
 	expectStatus(t, relay.putSealed(alice.seal(t, testPacket(8), relay.clock.unix()+600), from("198.51.100.1")...), 429)
 }
 
-func TestRateLimiterTableBound(t *testing.T) {
-	limiter := newRateLimiter(RateLimit{PerMinute: 60, Burst: 2}, 2)
+// TestRateLimiterEvictsLeastRecentlyUsed: a full table admits a new client
+// by evicting the least recently used bucket, never by refusing, and keeps
+// the state of the more recently used ones.
+func TestRateLimiterEvictsLeastRecentlyUsed(t *testing.T) {
+	limiter := newRateLimiter(RateLimit{PerMinute: 60, Burst: 1}, 2, DefaultMaxRateClientsPer48)
 	now := testStart
 	a, b, c := mustAddr(t, "192.0.2.1"), mustAddr(t, "192.0.2.2"), mustAddr(t, "192.0.2.3")
 	for _, addr := range []netipAddr{a, b} {
@@ -575,17 +579,64 @@ func TestRateLimiterTableBound(t *testing.T) {
 			t.Fatal("first request refused")
 		}
 	}
-	// Both buckets are still draining: a third client is refused rather
-	// than evicting one that is being limited.
-	if ok, _ := limiter.allow(c, now); ok {
-		t.Fatal("table grew past its bound")
+	// a is used again (and limited), so b is now the least recently used.
+	if ok, _ := limiter.allow(a, now); ok {
+		t.Fatal("burst not enforced")
 	}
-	if len(limiter.buckets) != 2 {
-		t.Fatalf("table size = %d", len(limiter.buckets))
+	if ok, _ := limiter.allow(c, now); !ok {
+		t.Fatal("a new client was refused instead of evicting a bucket")
 	}
-	// Once a bucket has refilled it is dropped to make room.
-	if ok, _ := limiter.allow(c, now.Add(2*time.Second)); !ok {
-		t.Fatal("refilled bucket was not reclaimed")
+	if len(limiter.buckets) != 2 || limiter.order.Len() != 2 {
+		t.Fatalf("table size = %d / %d", len(limiter.buckets), limiter.order.Len())
+	}
+	if _, held := limiter.buckets[rateKey{addr: b}]; held {
+		t.Fatal("the least recently used bucket was not the one evicted")
+	}
+	// a kept its limited state across the eviction.
+	if ok, _ := limiter.allow(a, now); ok {
+		t.Fatal("a limited client lost its state to an eviction of another bucket")
+	}
+}
+
+// TestRateLimiterPer48: one IPv6 /48 cannot fill the table with its /64s;
+// past the bound its further /64s share one bucket, and other prefixes are
+// unaffected.
+func TestRateLimiterPer48(t *testing.T) {
+	limiter := newRateLimiter(RateLimit{PerMinute: 60, Burst: 1}, 1000, 4)
+	now := testStart
+	for index := range 20 {
+		addr := mustAddr(t, fmt.Sprintf("2001:db8:aa:%x::", index))
+		ok, _ := limiter.allow(addr, now)
+		// Four own buckets, then the shared bucket admits one request and
+		// is empty for the rest.
+		if want := index <= 4; ok != want {
+			t.Fatalf("/64 number %d: allowed %v, want %v", index, ok, want)
+		}
+	}
+	if len(limiter.buckets) != 5 {
+		t.Fatalf("one /48 holds %d buckets", len(limiter.buckets))
+	}
+	if ok, _ := limiter.allow(mustAddr(t, "2001:db8:bb::"), now); !ok {
+		t.Fatal("another /48 was limited by the first one")
+	}
+	// The /48's own /64s keep their own buckets.
+	if ok, _ := limiter.allow(mustAddr(t, "2001:db8:aa:1::"), now.Add(time.Second)); !ok {
+		t.Fatal("an own /64 bucket did not refill")
+	}
+	// Evicting an own bucket frees its place in the /48 bound.
+	small := newRateLimiter(RateLimit{PerMinute: 60, Burst: 1}, 2, 1)
+	small.allow(mustAddr(t, "2001:db8:cc:1::"), now)
+	small.allow(mustAddr(t, "192.0.2.1"), now)
+	small.allow(mustAddr(t, "192.0.2.2"), now) // evicts the /64
+	if small.groups[mustAddr(t, "2001:db8:cc::")] != 0 {
+		t.Fatal("an evicted bucket still counts against its /48")
+	}
+	if _, shared := small.buckets[rateKey{addr: mustAddr(t, "2001:db8:cc::"), shared: true}]; shared {
+		t.Fatal("unexpected shared bucket")
+	}
+	small.allow(mustAddr(t, "2001:db8:cc:2::"), now)
+	if _, own := small.buckets[rateKey{addr: mustAddr(t, "2001:db8:cc:2::")}]; !own {
+		t.Fatal("a /64 did not get its own bucket after the /48 count was freed")
 	}
 }
 

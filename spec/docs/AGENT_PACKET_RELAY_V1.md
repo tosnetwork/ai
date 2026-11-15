@@ -576,9 +576,13 @@ Where the table above leaves a choice, the reference relay makes these:
   keep-alive connections close after 30 seconds, long enough to span one
   15-second poll interval with its jitter.
 - The list/download/ack burst defaults to 100. Rate limits are token buckets
-  in a table of bounded size; when it is full and every bucket is still
-  draining, a new client is answered `429` rather than evicting a client that
-  is being limited.
+  in a table of bounded size (65,536 per class) kept in least-recently-used
+  order. A new client is never refused for lack of room: the least recently
+  used bucket is evicted in constant time. A limited client can lose its
+  state only after as many other clients as the table holds have been
+  active more recently. Within one IPv6 /48 at most 256 /64 clients get
+  their own bucket; further /64s of that /48 share one bucket, so one /48
+  holds at most 257 entries and cannot by itself flush the table.
 - The global byte limit counts envelope bytes; the global count limit counts
   envelopes plus tombstones; neither has a default. Retention defaults to the
   24-hour ceiling and the operator MAY lower it.

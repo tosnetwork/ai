@@ -1,6 +1,7 @@
 package agentpacketrelay
 
 import (
+	"container/list"
 	"errors"
 	"math"
 	"net"
@@ -24,8 +25,16 @@ var (
 	DefaultReadRate    = RateLimit{PerMinute: 600, Burst: 100}
 )
 
-// DefaultMaxRateClients bounds the rate-limiter table.
-const DefaultMaxRateClients = 1 << 16
+// Rate-limiter table bounds.
+const (
+	// DefaultMaxRateClients bounds each rate-limiter table.
+	DefaultMaxRateClients = 1 << 16
+	// DefaultMaxRateClientsPer48 bounds the buckets of the /64 client
+	// addresses inside one IPv6 /48. A /48 holds 65,536 /64s, enough to fill
+	// a whole table alone; past this bound its further /64s share one
+	// bucket, so one /48 holds at most 257 of the table's entries.
+	DefaultMaxRateClientsPer48 = 256
+)
 
 func (r RateLimit) validate() error {
 	if r.PerMinute <= 0 || r.Burst <= 0 || r.PerMinute > 1<<20 || r.Burst > 1<<20 {
@@ -34,43 +43,72 @@ func (r RateLimit) validate() error {
 	return nil
 }
 
+// rateKey names a bucket: a client address, or (shared) the IPv6 /48 whose
+// own buckets are at their bound.
+type rateKey struct {
+	addr   netip.Addr
+	shared bool
+}
+
 type bucket struct {
+	key    rateKey
+	group  netip.Addr // the /48 of an IPv6 client's own bucket; zero otherwise
 	tokens float64
 	last   time.Time
+	elem   *list.Element
 }
 
-// rateLimiter is a bounded table of token buckets. A client whose bucket
-// has refilled is indistinguishable from a new one, so such buckets are the
-// ones dropped when the table is full. When every bucket is still draining
-// the new client is refused: the table never grows without bound and never
-// forgets a client that is being limited.
+// rateLimiter is a bounded table of token buckets in least-recently-used
+// order. A new client never waits for room: when the table is full the
+// least recently used bucket is evicted in constant time. That bucket is
+// the one most likely to have refilled; a limited client can lose its
+// state only after as many other buckets as the table holds have been
+// used more recently, and the per-/48 bound keeps one IPv6 /48 from
+// supplying them.
 type rateLimiter struct {
-	mu      sync.Mutex
-	perSec  float64
-	burst   float64
-	max     int
-	buckets map[netip.Addr]*bucket
+	mu       sync.Mutex
+	perSec   float64
+	burst    float64
+	max      int
+	perGroup int
+	buckets  map[rateKey]*bucket
+	order    *list.List // front is the most recently used
+	groups   map[netip.Addr]int
 }
 
-func newRateLimiter(limit RateLimit, maxClients int) *rateLimiter {
+func newRateLimiter(limit RateLimit, maxClients, perGroup int) *rateLimiter {
 	return &rateLimiter{perSec: float64(limit.PerMinute) / 60, burst: float64(limit.Burst), max: maxClients,
-		buckets: map[netip.Addr]*bucket{}}
+		perGroup: perGroup, buckets: map[rateKey]*bucket{}, order: list.New(), groups: map[netip.Addr]int{}}
 }
 
 // allow takes one token for client, or returns how long until one is free.
 func (l *rateLimiter) allow(client netip.Addr, now time.Time) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	b := l.buckets[client]
-	if b == nil {
-		if len(l.buckets) >= l.max {
-			l.prune(now)
-			if len(l.buckets) >= l.max {
-				return false, time.Second
+	key := rateKey{addr: client}
+	b := l.buckets[key]
+	var group netip.Addr
+	if b == nil && client.Is6() {
+		if prefix, err := client.Prefix(48); err == nil {
+			group = prefix.Addr()
+			if l.groups[group] >= l.perGroup {
+				key, group = rateKey{addr: group, shared: true}, netip.Addr{}
+				b = l.buckets[key]
 			}
 		}
-		b = &bucket{tokens: l.burst, last: now}
-		l.buckets[client] = b
+	}
+	if b == nil {
+		for len(l.buckets) >= l.max {
+			l.evictOldest()
+		}
+		b = &bucket{key: key, group: group, tokens: l.burst, last: now}
+		b.elem = l.order.PushFront(b)
+		l.buckets[key] = b
+		if group.IsValid() {
+			l.groups[group]++
+		}
+	} else {
+		l.order.MoveToFront(b.elem)
 	}
 	if elapsed := now.Sub(b.last).Seconds(); elapsed > 0 {
 		b.tokens = math.Min(l.burst, b.tokens+elapsed*l.perSec)
@@ -84,10 +122,17 @@ func (l *rateLimiter) allow(client netip.Addr, now time.Time) (bool, time.Durati
 	return false, wait
 }
 
-func (l *rateLimiter) prune(now time.Time) {
-	for key, b := range l.buckets {
-		if b.tokens+now.Sub(b.last).Seconds()*l.perSec >= l.burst {
-			delete(l.buckets, key)
+func (l *rateLimiter) evictOldest() {
+	oldest := l.order.Back()
+	if oldest == nil {
+		return
+	}
+	b := oldest.Value.(*bucket)
+	l.order.Remove(oldest)
+	delete(l.buckets, b.key)
+	if b.group.IsValid() {
+		if l.groups[b.group]--; l.groups[b.group] <= 0 {
+			delete(l.groups, b.group)
 		}
 	}
 }
