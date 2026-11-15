@@ -54,14 +54,16 @@ What it is **not**, today:
 - no delivery between two hosts yet: that needs a Messenger daemon per Agent,
   which has not been run between two nodes
   ([section 3.6](#36-carrying-the-work-transports));
-- a provider with a root-only container runtime runs its whole node as root.
-  This is an open design problem, not a recommendation
-  ([section 3.8](#38-open-problem-the-provider-node-runs-as-root)).
+- the provider node runs as an ordinary user, but the operator still installs
+  the private container runtime and the executor service in front of it as
+  root, once ([section 3.8](#38-the-provider-node-runs-as-an-ordinary-user)).
 
 ## 2. Prerequisites
 
 - **OS:** Linux x86-64 or arm64. A provider host also needs cgroup v2,
-  containerd 2.x, runc v2, overlayfs and root access.
+  containerd 2.x, runc v2, overlayfs, and root access for the operator's
+  one-time installation of the container runtime and the executor service
+  (section 4.1). The provider node itself runs as an ordinary user.
 - **Go 1.26.11** for the Go repositories; Rust (`cargo`) for `tosctl`.
 - **A funded, activated wallet** on the network you use, held in `tosctl`
   custody, of type V3R2, V4R2 or V5R1
@@ -83,8 +85,9 @@ cd <TOS_CHECKOUT>/tosctl/src && cargo build --release -p tosctl
 # openfox: the entry point for selling and buying on the rail
 cd <OPENFOX_CHECKOUT> && GOWORK=off go build -tags goolm,stdjson -o <BIN_DIR>/ ./cmd/openfox
 
-# tos-ai: the provider's sandboxed executor
-cd <TOS_AI_CHECKOUT> && GOWORK=off go build -o <BIN_DIR>/ ./cmd/software-work-execute
+# tos-ai: the provider's sandboxed executor, the root-run executor service in
+# front of it, and the collection command its timer runs
+cd <TOS_AI_CHECKOUT> && GOWORK=off go build -o <BIN_DIR>/ ./cmd/software-work-execute ./cmd/software-work-executord
 
 # tos-service-protocol: only for the manual paths of section 6
 cd <PROTOCOL_CHECKOUT>
@@ -92,8 +95,10 @@ GOWORK=off go build -o <BIN_DIR>/ ./cmd/tos-service-buyer ./cmd/tos-service-prov
   ./cmd/tos-service-wallet ./cmd/tos-service-discovery
 ```
 
-Record the SHA-256 of `tosctl` and of the executor (`sha256sum <FILE>`):
-every tool that drives them pins that digest and refuses a different binary.
+Record the SHA-256 of `tosctl` (`sha256sum <FILE>`): every tool that drives
+it pins that digest and refuses a different binary. The same holds for the
+executor binary in the legacy single-user mode (section 3.8), where OpenFox
+runs it itself; with the executor service, OpenFox runs no executor binary.
 
 The pinned release artifacts live in the `tos` repository:
 
@@ -153,16 +158,22 @@ TOSCTL=<TOSCTL> \
 E2E_WORKDIR=<OWNER_ONLY_WORK_DIR> \
 REGISTRY_CODE_BOC=<TOS_CHECKOUT>/crypto/smartcont/tos-service-native-registry-v1.boc.base64 \
 ACTOR_CODE_HASH=<SERVICE_ACTOR_CODE_HASH> \
-E2E_EXECUTOR=<SOFTWARE_WORK_EXECUTE> \
+E2E_EXECUTOR_SOCKET=/run/tos-service-executor/executor.sock \
 THERMAL_GUARD=<GUARD_PROGRAM> \
   <OPENFOX_CHECKOUT>/scripts/service-front-door-e2e.sh
 ```
 
-It needs the private container runtime of [section 4.1](#41-install-the-private-container-runtime-and-the-executor)
-and runs both nodes with `sudo -n`, staging their state under
-`E2E_ROOT_BASE` (default `/var/lib/openfox-front-door-e2e`, every ancestor
-root-owned). Read [section 3.8](#38-open-problem-the-provider-node-runs-as-root)
-before running it.
+It needs the private container runtime and the executor service of
+[section 4.1](#41-install-the-private-container-runtime-and-the-executor-service),
+installed by the operator beforehand; the script installs and starts nothing.
+With `E2E_EXECUTOR_SOCKET` both nodes run as the invoking user, whose uid the
+service must allow and whose current login session must carry the socket's
+group, and the run uses no root command. The nodes' state is staged under
+`<E2E_WORKDIR>/private/nodes` (or `E2E_ROOT_BASE`); choose a work directory
+outside your home directory, because the run fails when its evidence names a
+home path. Without `E2E_EXECUTOR_SOCKET` the script runs the legacy
+single-user mode with `E2E_EXECUTOR=<SOFTWARE_WORK_EXECUTE>`, both nodes as
+root under `sudo -n` (section 3.8).
 
 **The manual path** (`tos-service-protocol`
 `scripts/service-actor-buyer-e2e.sh`): the real `tosctl` and
@@ -291,8 +302,8 @@ refused before anything is signed.
 the binary must have that digest. Without it, the digest printed is the
 digest of whatever binary was found: **compare it with the release you meant
 to install.** A binary that later differs from the pin is refused until its
-new digest is given explicitly. `offer` pins the executor the same way
-(`--executor-sha256`).
+new digest is given explicitly. In the legacy single-user mode `offer` pins
+the executor binary the same way (`--executor-sha256`).
 
 ### 3.6 Carrying the work: transports
 
@@ -343,50 +354,73 @@ OpenFox does not do these:
 - **Provide the chain files:** the chain global configuration file and the
   Native Registry code BOC. You supply both; `init` checks that they agree
   with each other and with a quorum of the RPC endpoints.
-- **Install the private container runtime, its image and the executor**, as
-  root (section 4.1). `offer` only pins the executor binary and records the
-  socket path.
+- **Install the private container runtime, its image and the executor
+  service**, as root, once (section 4.1). `offer` only asks the service to
+  describe itself and records its socket.
 - **Change a published actor's terms:**
   `tosctl agent service send --operation update-policy` (section 4.10).
 - **Carry packets between hosts:** a Messenger daemon per Agent (section 3.6).
 - **Export the bought artifact:** it is stored in the buyer's state directory
   (section 5.4); no command prints that path or copies the file out.
 
-### 3.8 Open problem: the provider node runs as root
+### 3.8 The provider node runs as an ordinary user
 
-The executor accepts only a container runtime socket that its own user owns,
-in a private directory. The private runtime of section 4.1 is root-only
-(directory `root:root 700`, socket `root:root 600`), and raw access to a
-containerd socket equals root. OpenFox runs the executor as its own child
-process and reads the executor's artifact store. So today:
+A job runs in a private container runtime, and raw access to that runtime's
+socket is equivalent to root, so only root may reach it. Nothing else a
+provider node does needs root: not `tosctl`, not the vault, not the packet
+listener. The operator therefore installs, as root and once, the runtime and
+the **executor service** (`tos-ai` `software-work-executord`) in front of it
+(section 4.1). The service is the only process that opens the runtime socket.
+It listens on `/run/tos-service-executor/executor.sock` and serves exactly one
+uid, the provider node's user. That user runs every provider command; the rail
+configuration, the state directory, the `tosctl` configuration and the vault
+belong to it.
 
-- with a root-only runtime, **every provider command runs as root**, and
-  through it `tosctl` and the vault that holds the provider's keys;
-- on the direct transport, which joins nodes of one user, **the buyer node
-  runs as root too**;
-- `tosctl` run as root refuses a configuration under a directory another user
-  can modify, so both nodes' state must sit under root-owned directories;
-- `preflight` reports this itself: `process.user` warns
-  `running as root; run the provider node as an unprivileged owner user`.
+What the node's uid can make root do is what the service offers, and the
+service enforces it: run the one frozen job (the pinned image, `go test ./...
+-count=1`, no network, no device, a read-only root, no host mount) a bounded
+number at a time, under limits a request can only tighten; keep each job's
+records and objects in the service's own root-only directories until a
+deadline within the service's storage bounds; and spend execution identities,
+each run at most once. A request carries no path, image, command, argument,
+environment variable, mount, network, device or user.
 
-The live local run was done exactly this way, with both nodes under
-`sudo -n`. **Running the node, the wallet custody and the vault as root is
-not recommended and is not the intended design.** It is the only arrangement
-that works with a root-only runtime today. A privilege boundary between the
-node and the executor (a configured launcher plus a way to hand artifacts
-back), or a runtime whose socket the provider's own user owns, is planned
-follow-up work and is not implemented. Until then, treat a provider host as
-single-purpose and keep no more funds in its wallet than the work needs.
+The node trusts only a socket that root serves, verifies every outcome and the
+artifact and report bytes itself, and keeps its own copy of them for delivery
+and retention. The OpenFox guide lists what each answer of the service leads to
+([Executor](https://github.com/tosnetwork/openfox/blob/main/docs/guides/service-actor-rail.md#executor)).
+
+`preflight` reports `process.user` as `pass` for an ordinary user and as
+`fail` for a node that runs as root with the executor service: a root node
+would give `tosctl`, the vault access and the listeners the privilege the
+service exists to confine.
+
+#### Legacy single-user mode
+
+**Not the recommended setup.** An operator who runs the node and a container
+runtime as one user can keep the earlier arrangement: `offer --executor
+<SOFTWARE_WORK_EXECUTE> --containerd-socket <SOCKET>` (optionally
+`--executor-sha256` and `--fifo-dir`). OpenFox then runs the pinned executor
+binary as its own child and reads its artifact store. The executor accepts
+only a runtime socket, in a private directory, that its own user owns, so the
+node runs as the socket's owner. With the root-only runtime of section 4.1 that
+is root: every provider command, and through it `tosctl` and the vault, runs
+as root; on the direct transport the buyer node runs as root too; `tosctl` run
+as root refuses a configuration under a directory another user can modify;
+and `preflight` warns `process.user`. In this mode an execution that has no
+outcome when the node restarts is ambiguous for good and is never attested.
+The [front-door record](AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md#openfox-front-door--local-two-node-sale)
+was produced in this mode.
 
 ## 4. Provider guide
 
 Do the steps in order. Each key stays in `tosctl` custody.
 
-### 4.1 Install the private container runtime and the executor
+### 4.1 Install the private container runtime and the executor service
 
-Not OpenFox; done as root. Follow
-[tos-ai `deploy/provider/README.md`](https://github.com/tosnetwork/tos-ai/blob/main/deploy/provider/README.md).
-In short:
+Not OpenFox; done by the operator as root, once. Follow
+[tos-ai `deploy/provider/README.md`](https://github.com/tosnetwork/tos-ai/blob/main/deploy/provider/README.md);
+this is only a summary:
 
 1. Install `containerd.toml` and `tos-service-containerd.service` as root and
    enable the unit. It serves its own socket at
@@ -399,11 +433,22 @@ In short:
    looks the image up by that exact name.
 4. Run the live backend conformance tests from that README. Both must pass
    before the host serves paid work.
+5. Install the executor service, section "Executor service: an unprivileged
+   provider node" of that README: the `software-work-executord` binary, a
+   dedicated system group (`tos-executor` in the README) whose only member is
+   the provider node's user, `/etc/tos-service/executor.env` with
+   `TOS_EXECUTOR_ALLOWED_UID` (the node user's uid) and
+   `TOS_EXECUTOR_SOCKET_GID` (the group's gid), and the units
+   `tos-service-executor.service` and `tos-service-executor-gc.timer`, both
+   enabled and started. The timer is part of the installation: nothing else
+   collects expired jobs. Then run the README's checks: the socket directory
+   `root:<group> 750` and the socket `660`, both units active, one collection
+   run by hand, and one real job through the socket as the provider user.
+6. A user who was just added to the group reaches the socket only from a
+   **new login session**, or through `sg tos-executor -c '<COMMAND>'`.
+   `preflight` says so when that is why the socket cannot be reached.
 
-Read [section 3.8](#38-open-problem-the-provider-node-runs-as-root): with this
-runtime the provider commands below run as the socket's owner, root, and the
-rail configuration, state directory and `tosctl` configuration must be under
-root-owned directories.
+From here on, every provider command runs as the node's ordinary user.
 
 ### 4.2 Establish the node: `init`
 
@@ -435,11 +480,17 @@ Optional: `--quorum` (default: a strict majority of `--rpc`),
 ```sh
 openfox earning service offer --rail-config <RAIL_CONFIG> \
   --price <TOS> --storage-fee <TOS> --cleanup-bounty <TOS> \
-  --response-sla <SECONDS> --refund-claim-window <SECONDS> \
-  --executor <SOFTWARE_WORK_EXECUTE> --executor-sha256 <EXECUTOR_SHA256> \
-  --containerd-socket /run/tos-service-containerd/containerd.sock
+  --response-sla <SECONDS> --refund-claim-window <SECONDS>
 # read the preview, then repeat the command with --yes
 ```
+
+The executor is the executor service at
+`/run/tos-service-executor/executor.sock`; `--executor-socket <PATH>` names a
+service on another socket. Before `offer` creates a key or sends a message it
+asks the service to describe itself and stops unless root answers on that
+socket, the service is ready and it runs the image and the limits the manifest
+commits to. `--executor` and `--containerd-socket` select the legacy
+single-user mode instead (section 3.8); the two cannot be combined.
 
 Amounts are decimal TOS. The contract's bounds are applied before anything is
 sent: the price is positive; the cleanup bounty is 0.1 to 1 TOS; the storage
@@ -449,8 +500,9 @@ refund-claim window are 3600 to 2592000 seconds.
 Optional: `--version` (default `1.0.0`), `--attestor-controller` (default
 `service-attestor`, created if absent), `--deploy-funding` (default and
 minimum 1.2 TOS), `--retention-seconds` (default 86400),
-`--respond-budget-seconds` (default 120), `--fifo-dir` (default
-`<STATE_DIR>/fifo`; the executor needs a private, empty one), `--offer-out`.
+`--respond-budget-seconds` (default 120), `--offer-out`; in the legacy mode
+also `--executor-sha256` and `--fifo-dir` (default `<STATE_DIR>/fifo`; the
+executor needs a private, empty one).
 
 The preview shows the owner wallet, the terms, the value attached to each
 message and the totals. With the defaults the three messages attach
@@ -506,11 +558,12 @@ openfox earning service preflight --rail-config <RAIL_CONFIG>
 ```
 
 It runs side-effect-free checks (permissions, pins, transport, endpoints and
-genesis, Registry, Capability, actor, attestor, clock skew, signer keys),
-prints a JSON report and exits non-zero if any check is `fail`. It sends and
-signs nothing. Three results are expected today and are not failures:
-`rpc.independence` and `signer.wallet` are always `unknown`, and
-`process.user` warns when the node runs as root (section 3.8).
+genesis, Registry, Capability, actor, attestor, clock skew, signer keys, and
+the executor service: `executor.service`, `executor.image`,
+`executor.limits`), prints a JSON report and exits non-zero if any check is
+`fail`. It sends and signs nothing. Two results are expected today and are not
+failures: `rpc.independence` and `signer.wallet` are always `unknown`.
+`process.user` passes for an ordinary user (section 3.8).
 `transport.peers` warns while a direct peer's socket is absent, which means
 that node is not serving yet.
 
@@ -524,8 +577,10 @@ openfox earning service serve --rail-config <RAIL_CONFIG>      # keep running
 with separate state for the same actor can each admit and execute the same
 request.
 
-For each task `serve` admits the request once through finalized state, runs
-the pinned executor, builds the Receipt, has it checked against the attestor
+For each task `serve` asks the executor service whether it can run the job
+(a task it cannot run waits, unadmitted, for at most one hour), admits the
+request once through finalized state, sends the job to the service and
+verifies the outcome and its bytes, builds the Receipt, has it checked against the attestor
 policy, re-checks that the request is still pending, and sends `respond`.
 After the respond is final it delivers the result and redelivers it until the
 buyer acknowledges it or the manifest retention ends. A failed or ambiguous
@@ -1056,8 +1111,9 @@ After a manual publication, write the provider section of the rail
 configuration by hand (fields in the
 [OpenFox rail guide](https://github.com/tosnetwork/openfox/blob/main/docs/guides/service-actor-rail.md#configuration):
 `capability_id`, `version`, `manifest_file`, `attestor_controller`,
-`respond_budget_seconds`, `executor_binary`, `executor_sha256`,
-`containerd_socket` and `fifo_dir`), then continue at section 4.5.
+`respond_budget_seconds` and `executor_socket`; or, for the legacy mode,
+`executor_binary`, `executor_sha256`, `containerd_socket` and `fifo_dir`
+instead of `executor_socket`), then continue at section 4.5.
 
 ### 6.3 Provider: execute and respond without OpenFox
 
@@ -1126,15 +1182,21 @@ OpenFox front door:
 | `the owner wallet's type is not supported` | the wallet is not V3R2, V4R2 or V5R1, or `tosctl` did not report its type | use a wallet of an accepted type (section 3.4); nothing was sent |
 | `init` or `offer` stops naming a wallet address and an amount | the wallet is missing, not active or short | fund and activate it with `tosctl` (section 2), then run the command again |
 | `the tosctl configuration is under a directory another user can modify` | `tosctl` run as root refuses such a configuration | put the node's files under directories whose every ancestor is owned by the user running OpenFox or by root |
-| `the tosctl binary changed since it was pinned` (likewise the executor) | the binary was replaced after `init` or `offer` pinned it | verify the new binary, then pass its digest with `--tosctl-sha256` or `--executor-sha256` |
+| `the tosctl binary changed since it was pinned` (likewise the executor in the legacy mode) | the binary was replaced after `init` or `offer` pinned it | verify the new binary, then pass its digest with `--tosctl-sha256` or `--executor-sha256` |
 | `an input that determines an on-chain identity changed after a step was sent` | `init` or `offer` re-run with another network, controller or terms | restore the original inputs; change terms with `update-policy` (section 4.10) |
-| `preflight`: `containerd.socket` fails as a non-root user although the daemon runs | a socket in a root-only directory reads as missing to any other user | run the provider node as the socket's owner; see section 3.8 |
-| `preflight`: `process.user` is `warn` | the node runs as root | expected with a root-only runtime; see section 3.8 |
+| `preflight`: `executor.service` says the user is a member of the group in the group database but the process does not carry it | the user was added to the socket's group after this login session began | log in again, or run the command with `sg tos-executor -c '…'` |
+| `preflight`: `executor.service` says the service refuses this user | the service admits one uid, and it is another | set `TOS_EXECUTOR_ALLOWED_UID` to this user's uid and restart the service (section 4.1) |
+| `preflight`: `executor.service` says the socket is not served by root | another process listens at that path | point `--executor-socket` (or `executor_socket`) at the root-run executor service's socket |
+| `preflight`: `executor.service` or `executor.image` reports the service not ready | the private runtime is down, or the pinned image is not imported and unpacked in it | start the runtime and import and tag the image (section 4.1); a job sent now is refused with nothing claimed |
+| `serve` logs `executor not ready` every round | the executor service cannot run work now | nothing was admitted or spent; fix the service. A task waits at most one hour, then is retired with a logged reason |
+| `preflight`: `process.user` fails | the node runs as root with the executor service | run the node as the ordinary user the service allows |
+| `preflight`: `containerd.socket` fails as a non-root user although the daemon runs (legacy mode) | a socket in a root-only directory reads as missing to any other user | use the executor service (section 3.8) |
+| `preflight`: `process.user` is `warn` (legacy mode) | the node runs as root | expected in the legacy mode with a root-only runtime; use the executor service |
 | `preflight`: `transport.peers` is `warn` | a direct peer's receiver socket is absent | start `serve` on that node first |
 | `the direct peer socket is missing, a symbolic link, not a socket, owned by another user ...` or `the direct peer's receiver runs as another user` | the direct transport joins nodes of one user on one host only | run both nodes as the same user with owner-only socket directories, or use the Messenger |
 | `no route to the recipient Agent` | the recipient is not a direct peer and no Messenger is configured | add it with `init --direct-peer`, listing every peer |
 | `the offer's manifest does not hash to the digest the offer states`, or `the offer file does not match finalized state` | the offer file was altered, or is not the published version | nothing was paid; get the offer file again from the provider |
-| the executor fails with `containerd FIFO residue is present` or `containerd FIFO directory is not private` | the FIFO directory holds leftovers of an earlier run, or others can access it | give `offer` a private, empty `--fifo-dir` |
+| the executor fails with `containerd FIFO residue is present` or `containerd FIFO directory is not private` (legacy mode) | the FIFO directory holds leftovers of an earlier run, or others can access it | give `offer` a private, empty `--fifo-dir` |
 | a script cannot parse a command's output | the preview and progress are on standard error | parse standard output only; it is exactly one JSON document when it is a pipe or a file |
 
 Runtime, `tosctl` and the manual tools:
@@ -1154,9 +1216,12 @@ Runtime, `tosctl` and the manual tools:
 
 - No public network today; independent buyers and providers (WP-07) and
   Gates D–G are not done. Inference (WP-08) is locked.
-- The OpenFox front door has run end to end only on one host, with both nodes
-  as root, over the direct transport. Not covered by that run: the Messenger
-  transport, nodes on different hosts, a refund, and `withdraw --acknowledge`.
+- The OpenFox front door has run end to end only on one host, over the direct
+  transport: once in the legacy mode with both nodes as root, and once with
+  both nodes as an ordinary user through the executor service. Not covered by
+  those runs: the Messenger transport, nodes on different hosts, a refund,
+  `withdraw --acknowledge`, a node restart during a run, and more than one
+  job at a time on the executor service.
 - The Gateway publication route was not part of any local run.
 - `buy` has no preview step, unlike `init`, `offer` and `withdraw`; it pays
   at once unless `--confirm-above` is set, and the live run always passed
@@ -1169,7 +1234,8 @@ Runtime, `tosctl` and the manual tools:
   - [AI Service Provider Requirements V1](AI_SERVICE_PROVIDER_REQUIREMENTS_V1.md)
   - [Implementation Status](AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md)
   - Local evidence:
-    [OpenFox front door](../deployments/local-openfox-front-door-20261115.json),
+    [OpenFox provider as an ordinary user](../deployments/local-openfox-unprivileged-provider-20261115.json),
+    [OpenFox front door (legacy mode)](../deployments/local-openfox-front-door-20261115.json),
     [M1](../deployments/local-service-actor-provider-m1-20261114.json),
     [settlement lifecycle](../deployments/local-service-actor-settlement-lifecycle-20261114.json),
     [paid execution](../deployments/local-service-actor-paid-execution-20261114.json)
