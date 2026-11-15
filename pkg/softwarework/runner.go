@@ -80,14 +80,34 @@ type Runner struct {
 	journal  *Journal
 	contract Contract
 	now      func() time.Time
+	// bindLimits makes the limits part of the request fingerprint.
+	bindLimits bool
 }
 
-func NewRunner(boundExecutor executor.Executor, store *artifactstore.Store, journal *Journal, contract Contract) (*Runner, error) {
+// RunnerOption adjusts a Runner built by NewRunner.
+type RunnerOption func(*Runner)
+
+// BindLimits makes the contract's limits part of what an execution identity
+// is bound to: a repeated request under other limits is a conflict instead
+// of an answer from the journal. A caller whose limits are fixed by the
+// manifest digest does not need it; one that takes limits per request does.
+func BindLimits() RunnerOption {
+	return func(r *Runner) { r.bindLimits = true }
+}
+
+func NewRunner(boundExecutor executor.Executor, store *artifactstore.Store, journal *Journal, contract Contract, options ...RunnerOption) (*Runner, error) {
 	if boundExecutor == nil || store == nil || journal == nil || validateContract(contract) != nil {
 		return nil, errors.New("invalid software-work runner configuration")
 	}
 	contract.Arguments = append([]string(nil), contract.Arguments...)
-	return &Runner{executor: boundExecutor, store: store, journal: journal, contract: contract, now: time.Now}, nil
+	runner := &Runner{executor: boundExecutor, store: store, journal: journal, contract: contract, now: time.Now}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("invalid software-work runner configuration")
+		}
+		option(runner)
+	}
+	return runner, nil
 }
 
 func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) {
@@ -97,7 +117,7 @@ func (r *Runner) Execute(ctx context.Context, request Request) (Outcome, error) 
 	if err := validateRequest(r.contract, request); err != nil {
 		return Outcome{}, err
 	}
-	fingerprint := requestFingerprint(r.contract, request)
+	fingerprint := r.fingerprint(request)
 	lease, record, err := r.journal.Claim(request.ExecutionID, fingerprint)
 	if err != nil {
 		return Outcome{}, err
@@ -178,7 +198,7 @@ func (r *Runner) Recorded(request Request) (Outcome, bool, error) {
 	if err := validateRequest(r.contract, request); err != nil {
 		return Outcome{}, false, err
 	}
-	record, found, err := r.journal.lookup(request.ExecutionID, requestFingerprint(r.contract, request))
+	record, found, err := r.journal.lookup(request.ExecutionID, r.fingerprint(request))
 	if err != nil || !found {
 		return Outcome{}, false, err
 	}
@@ -223,14 +243,27 @@ func validateRequest(contract Contract, value Request) error {
 	return nil
 }
 
-func requestFingerprint(contract Contract, request Request) string {
+func (r *Runner) fingerprint(request Request) string {
+	return requestFingerprint(r.contract, request, r.bindLimits)
+}
+
+// requestFingerprint is what an execution identity is bound to. Without
+// bound limits its encoding has no limits field at all, so identities
+// journaled before the option existed keep their fingerprint.
+func requestFingerprint(contract Contract, request Request, bindLimits bool) string {
+	var limits *[6]uint64
+	if bindLimits {
+		limits = &[6]uint64{contract.Limits.CPUMillis, contract.Limits.MemoryBytes, contract.Limits.DiskBytes,
+			uint64(contract.Limits.PIDs), uint64(contract.Limits.ExecutionTime), contract.Limits.OutputBytes}
+	}
 	encoded, _ := json.Marshal(struct {
-		Manifest  string `json:"manifest"`
-		Quote     string `json:"quote"`
-		Execution string `json:"execution"`
-		Input     string `json:"input"`
-		Source    string `json:"source"`
-	}{contract.ManifestDigest, request.QuoteCommitment, request.ExecutionID, request.InputDigest, request.SourceDigest})
+		Manifest  string     `json:"manifest"`
+		Quote     string     `json:"quote"`
+		Execution string     `json:"execution"`
+		Input     string     `json:"input"`
+		Source    string     `json:"source"`
+		Limits    *[6]uint64 `json:"limits,omitempty"`
+	}{contract.ManifestDigest, request.QuoteCommitment, request.ExecutionID, request.InputDigest, request.SourceDigest, limits})
 	return digest(encoded)
 }
 

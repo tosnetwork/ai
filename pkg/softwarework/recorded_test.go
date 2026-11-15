@@ -100,3 +100,77 @@ func TestManifestContractOnlyTightensTheFrozenPreset(t *testing.T) {
 		}
 	}
 }
+
+func TestBoundLimitsMakeARepeatUnderOtherLimitsAConflict(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	defer journal.Close()
+	rebuilt := func(edit func(*Contract), options ...RunnerOption) *Runner {
+		t.Helper()
+		contract := runner.contract
+		edit(&contract)
+		built, err := NewRunner(backend, runner.store, journal, contract, options...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return built
+	}
+	same := func(*Contract) {}
+	tighter := func(contract *Contract) { contract.Limits.OutputBytes-- }
+	if _, err := rebuilt(same, BindLimits()).Execute(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := rebuilt(same, BindLimits()).Recorded(request); !found || err != nil {
+		t.Fatalf("same limits: found=%v err=%v", found, err)
+	}
+	for name, edit := range map[string]func(*Contract){
+		"output":     tighter,
+		"cpu":        func(contract *Contract) { contract.Limits.CPUMillis-- },
+		"memory":     func(contract *Contract) { contract.Limits.MemoryBytes-- },
+		"disk":       func(contract *Contract) { contract.Limits.DiskBytes-- },
+		"pids":       func(contract *Contract) { contract.Limits.PIDs-- },
+		"wall clock": func(contract *Contract) { contract.Limits.ExecutionTime-- },
+	} {
+		other := rebuilt(edit, BindLimits())
+		if _, _, err := other.Recorded(request); !errors.Is(err, ErrConflict) {
+			t.Errorf("%s: lookup err = %v", name, err)
+		}
+		if _, err := other.Execute(context.Background(), request); !errors.Is(err, ErrConflict) {
+			t.Errorf("%s: execute err = %v", name, err)
+		}
+	}
+	if backend.calls != 1 {
+		t.Fatalf("a conflicting repeat ran: %d", backend.calls)
+	}
+	if _, err := NewRunner(backend, runner.store, journal, runner.contract, nil); err == nil {
+		t.Fatal("accepted a nil option")
+	}
+}
+
+func TestUnboundFingerprintIsUnchangedByLimits(t *testing.T) {
+	runner, backend, journal, request := fixture(t)
+	defer journal.Close()
+	if _, err := runner.Execute(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	// A runner whose limits are fixed by its manifest keeps answering a
+	// repeat from the journal whatever its limits are now.
+	contract := runner.contract
+	contract.Limits.OutputBytes--
+	other, err := NewRunner(backend, runner.store, journal, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := other.Recorded(request); !found || err != nil || backend.calls != 1 {
+		t.Fatalf("found=%v err=%v calls=%d", found, err, backend.calls)
+	}
+	// Its fingerprint is the encoding identities were journaled under
+	// before limits could be bound.
+	legacy := digest([]byte(`{"manifest":"` + contract.ManifestDigest + `","quote":"` + request.QuoteCommitment +
+		`","execution":"` + request.ExecutionID + `","input":"` + request.InputDigest + `","source":"` + request.SourceDigest + `"}`))
+	if got := requestFingerprint(contract, request, false); got != legacy {
+		t.Fatalf("unbound fingerprint changed: %s", got)
+	}
+	if requestFingerprint(contract, request, true) == legacy {
+		t.Fatal("bound fingerprint ignores the limits")
+	}
+}
