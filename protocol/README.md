@@ -5,7 +5,7 @@ TOS Service Gateway and finalized TOS Network state. It has one protocol and one
 authority model: typed TVM state in finalized TOS accounts.
 
 The normative product and protocol design lives in
-[`tosnetwork/tos-service-spec`](https://github.com/tosnetwork/tos-service-spec).
+[`spec/`](../spec/).
 
 ## What remains here
 

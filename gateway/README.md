@@ -9,7 +9,7 @@ and resolution requests; it does not keep a canonical business database or
 define alternate trust modes.
 
 The product and protocol specification lives in
-[`tosnetwork/tos-service-spec`](https://github.com/tosnetwork/tos-service-spec).
+[`spec/`](../spec/).
 
 ## Runtime surface
 

@@ -419,7 +419,7 @@ Do the steps in order. Each key stays in `tosctl` custody.
 ### 4.1 Install the private container runtime and the executor service
 
 Not OpenFox; done by the operator as root, once. Follow
-[tos-ai `deploy/provider/README.md`](https://github.com/tosnetwork/tos-ai/blob/main/deploy/provider/README.md);
+[`execution/deploy/provider/README.md`](../../execution/deploy/provider/README.md);
 this is only a summary:
 
 1. Install `containerd.toml` and `tos-service-containerd.service` as root and
