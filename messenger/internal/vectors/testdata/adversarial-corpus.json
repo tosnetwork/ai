@@ -1,0 +1,593 @@
+[
+  {
+    "name": "conformance-report/empty",
+    "layer": "decode",
+    "target": "conformance-report",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "conformance-report/trailing-json",
+    "layer": "decode",
+    "target": "conformance-report",
+    "wire": "{\"schema\":\"tos.messaging.conformance-report.v1\",\"implementation\":\"example.org/independent-messenger\",\"implementation_commit\":\"release-1\",\"toolchain\":\"rustc-1.90\",\"run_at_unix\":1800000002,\"artifacts\":[{\"name\":\"adversarial\",\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},{\"name\":\"e2ee\",\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"},{\"name\":\"objects\",\"sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\"}],\"positive_checks\":12,\"adversarial_checks\":44,\"consumer_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"signature_hex\":\"7a95a1d736d7a08a2645af8f3d70b0183b9d851623e4fd1ccfac324db2ae92bc0d789cc7e0b55a964ef69dc25117a598f4048ecd72f5f8d4f9b0ebc665f9790b\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "conformance-report/truncated",
+    "layer": "decode",
+    "target": "conformance-report",
+    "wire": "{\"schema\":\"tos.messaging.conformance-report.v1\",\"implementation\":\"example.org/independent-messenger\",\"implementation_commit\":\"release-1\",\"toolchain\":\"rustc-1.90\",\"run_at_unix\":1800000002,\"artifacts\":[{\"name\":\"adversarial\",\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},{\"name\":\"e2ee\",\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"},{\"name\":\"objects\",\"sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\"}],\"positive_checks\":12,\"adversarial_checks\":44,\"consumer_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"signature_hex\":\"7a95a1d736d7a08a2645af8f3d70b0183b9d851623e4fd1ccfac324db2ae92bc0d789cc7e0b55a964ef69dc25117a598f4048ecd72f5f8d4f9b0ebc665f9790b\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "conformance-report/unknown-field",
+    "layer": "decode",
+    "target": "conformance-report",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.conformance-report.v1\",\"implementation\":\"example.org/independent-messenger\",\"implementation_commit\":\"release-1\",\"toolchain\":\"rustc-1.90\",\"run_at_unix\":1800000002,\"artifacts\":[{\"name\":\"adversarial\",\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},{\"name\":\"e2ee\",\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"},{\"name\":\"objects\",\"sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\"}],\"positive_checks\":12,\"adversarial_checks\":44,\"consumer_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"signature_hex\":\"7a95a1d736d7a08a2645af8f3d70b0183b9d851623e4fd1ccfac324db2ae92bc0d789cc7e0b55a964ef69dc25117a598f4048ecd72f5f8d4f9b0ebc665f9790b\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "contact-descriptor/empty",
+    "layer": "decode",
+    "target": "contact-descriptor",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "contact-descriptor/trailing-json",
+    "layer": "decode",
+    "target": "contact-descriptor",
+    "wire": "{\"schema\":\"tos.messaging.contact-descriptor.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"delegation_digest\":\"sha256:f24dcc0e35921e3b0fa9be623934afde6e68a6e7d7893f8cef6c1828644ad5dc\",\"supported_messaging_versions\":[1],\"supported_a2a_versions\":[\"0.3\"],\"supported_mcp_versions\":[\"2025-06-18\"],\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"optional_https_endpoint\":\"https://endpoint.example/messaging\",\"prekey_bundle_digest\":\"sha256:7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a\",\"mailbox_relay_set_digest\":\"sha256:09814ff3195302b0b11123e0b08daca08ec8874e4653d866aec0ece6ba654ade\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\",\"maximum_envelope_bytes\":65536,\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"c5d68a0e4ff6c2d57323f1150544d2b6f4f56c6631d78ed769b7562b47a91fd4c59d755728204196e04c327681e1d1f4fe4aa82a89fa0070cec4cd68adf4100e\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "contact-descriptor/truncated",
+    "layer": "decode",
+    "target": "contact-descriptor",
+    "wire": "{\"schema\":\"tos.messaging.contact-descriptor.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"delegation_digest\":\"sha256:f24dcc0e35921e3b0fa9be623934afde6e68a6e7d7893f8cef6c1828644ad5dc\",\"supported_messaging_versions\":[1],\"supported_a2a_versions\":[\"0.3\"],\"supported_mcp_versions\":[\"2025-06-18\"],\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"optional_https_endpoint\":\"https://endpoint.example/messaging\",\"prekey_bundle_digest\":\"sha256:7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a\",\"mailbox_relay_set_digest\":\"sha256:09814ff3195302b0b11123e0b08daca08ec8874e4653d866aec0ece6ba654ade\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\",\"maximum_envelope_bytes\":65536,\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"c5d68a0e4ff6c2d57323f1150544d2b6f4f56c6631d78ed769b7562b47a91fd4c59d755728204196e04c327681e1d1f4fe4aa82a89fa0070cec4cd68adf4100e\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "contact-descriptor/unknown-field",
+    "layer": "decode",
+    "target": "contact-descriptor",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.contact-descriptor.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"delegation_digest\":\"sha256:f24dcc0e35921e3b0fa9be623934afde6e68a6e7d7893f8cef6c1828644ad5dc\",\"supported_messaging_versions\":[1],\"supported_a2a_versions\":[\"0.3\"],\"supported_mcp_versions\":[\"2025-06-18\"],\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"optional_https_endpoint\":\"https://endpoint.example/messaging\",\"prekey_bundle_digest\":\"sha256:7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a\",\"mailbox_relay_set_digest\":\"sha256:09814ff3195302b0b11123e0b08daca08ec8874e4653d866aec0ece6ba654ade\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\",\"maximum_envelope_bytes\":65536,\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"c5d68a0e4ff6c2d57323f1150544d2b6f4f56c6631d78ed769b7562b47a91fd4c59d755728204196e04c327681e1d1f4fe4aa82a89fa0070cec4cd68adf4100e\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "descriptor-policy-binding/wrong-commitment",
+    "layer": "verify",
+    "target": "descriptor-policy-binding",
+    "wire": "{\"schema\":\"tos.messaging.descriptor-policy.v1\",\"max_envelope_bytes\":131072,\"max_lifetime_seconds\":86399,\"allow_https_endpoint\":true,\"require_adnl\":false}",
+    "reason": "a valid policy document is not this Agent's policy unless it reproduces the digest committed by the finalized delegation"
+  },
+  {
+    "name": "descriptor-policy/empty",
+    "layer": "decode",
+    "target": "descriptor-policy",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "descriptor-policy/trailing-json",
+    "layer": "decode",
+    "target": "descriptor-policy",
+    "wire": "{\"schema\":\"tos.messaging.descriptor-policy.v1\",\"max_envelope_bytes\":131072,\"max_lifetime_seconds\":86400,\"allow_https_endpoint\":true,\"require_adnl\":false}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "descriptor-policy/truncated",
+    "layer": "decode",
+    "target": "descriptor-policy",
+    "wire": "{\"schema\":\"tos.messaging.descriptor-policy.v1\",\"max_envelope_bytes\":131072,\"max_lifetime_seconds\":86400,\"allow_https_endpoint\":true,\"require_adnl\":false",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "descriptor-policy/unknown-field",
+    "layer": "decode",
+    "target": "descriptor-policy",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.descriptor-policy.v1\",\"max_envelope_bytes\":131072,\"max_lifetime_seconds\":86400,\"allow_https_endpoint\":true,\"require_adnl\":false}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "dht-locator/truncated",
+    "layer": "decode",
+    "target": "dht-locator",
+    "wire": "017e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46ad40a84e2ca2c34debe12c9a61bcd135aa0067cb13ebe8ed298e22342ca1344f2000000006b49d200000000006b49e010002468747470733a2f2f6469726563746f72792e6578616d706c652f64657363726970746f72feddce52c3e27280e38b634a0a7500d1a6be7932d1f261de1c30c243f0aab8ea98df2c7998fe342f7c4b53259d83e4200716a0cedcf32e69568b83d285af",
+    "binary": true,
+    "reason": "a truncated locator is not the locator it was cut from"
+  },
+  {
+    "name": "encrypted-attachment/empty",
+    "layer": "decode",
+    "target": "encrypted-attachment",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "encrypted-attachment/trailing-json",
+    "layer": "decode",
+    "target": "encrypted-attachment",
+    "wire": "{\"manifest\":{\"schema\":\"tos.messaging.encrypted-attachment.v1\",\"algorithm\":\"AES-256-GCM\",\"attachment_id_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"nonce_prefix_hex\":\"5d5d5d5d\",\"plaintext_bytes\":25,\"chunk_bytes\":262144,\"metadata_digest\":\"sha256:4ed26b5a09fed613cd9a7adfd58b900be2f01c2656964faf5dc611091c24e2ca\",\"chunk_digests\":[\"sha256:d265e0cc9657e7b4411b32919015352994a36f5a2072a084d611f437b19c68a5\"]},\"key_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"metadata\":{\"filename\":\"vector.txt\",\"media_type\":\"text/plain\",\"plaintext_digest\":\"sha256:d828b946880cc1e577cee7bb1b5df1db56d960d1c315fd0e754d6fb419d7e8e5\",\"expires_at_unix\":1800003600}}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "encrypted-attachment/truncated",
+    "layer": "decode",
+    "target": "encrypted-attachment",
+    "wire": "{\"manifest\":{\"schema\":\"tos.messaging.encrypted-attachment.v1\",\"algorithm\":\"AES-256-GCM\",\"attachment_id_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"nonce_prefix_hex\":\"5d5d5d5d\",\"plaintext_bytes\":25,\"chunk_bytes\":262144,\"metadata_digest\":\"sha256:4ed26b5a09fed613cd9a7adfd58b900be2f01c2656964faf5dc611091c24e2ca\",\"chunk_digests\":[\"sha256:d265e0cc9657e7b4411b32919015352994a36f5a2072a084d611f437b19c68a5\"]},\"key_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"metadata\":{\"filename\":\"vector.txt\",\"media_type\":\"text/plain\",\"plaintext_digest\":\"sha256:d828b946880cc1e577cee7bb1b5df1db56d960d1c315fd0e754d6fb419d7e8e5\",\"expires_at_unix\":1800003600}",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "encrypted-attachment/unknown-field",
+    "layer": "decode",
+    "target": "encrypted-attachment",
+    "wire": "{\"unknown_field\":1,\"manifest\":{\"schema\":\"tos.messaging.encrypted-attachment.v1\",\"algorithm\":\"AES-256-GCM\",\"attachment_id_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"nonce_prefix_hex\":\"5d5d5d5d\",\"plaintext_bytes\":25,\"chunk_bytes\":262144,\"metadata_digest\":\"sha256:4ed26b5a09fed613cd9a7adfd58b900be2f01c2656964faf5dc611091c24e2ca\",\"chunk_digests\":[\"sha256:d265e0cc9657e7b4411b32919015352994a36f5a2072a084d611f437b19c68a5\"]},\"key_hex\":\"5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d\",\"metadata\":{\"filename\":\"vector.txt\",\"media_type\":\"text/plain\",\"plaintext_digest\":\"sha256:d828b946880cc1e577cee7bb1b5df1db56d960d1c315fd0e754d6fb419d7e8e5\",\"expires_at_unix\":1800003600}}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "endpoint-delegation/empty",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "endpoint-delegation/trailing-json",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "endpoint-delegation/truncated",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "endpoint-delegation/unknown-field",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.endpoint-delegation.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "endpoint-delegation/window-inverted",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800086400,\"expires_at_unix\":1800000000,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"}",
+    "reason": "a delegation whose window ends before it starts is valid for no instant"
+  },
+  {
+    "name": "endpoint-delegation/zero-inbox-digest",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"}",
+    "reason": "an all-zero digest is an uninitialised field, not a commitment"
+  },
+  {
+    "name": "mailbox-access-request-binding/tampered-capability-signature",
+    "layer": "verify",
+    "target": "mailbox-access-request-binding",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-access-request.v1\",\"grant_digest\":\"sha256:4e88e4e90d20a64fc99396aecdb422b4f6dbb9ed59437b493613307504d61252\",\"operation\":\"read\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"body_digest\":\"sha256:c1659b66de6302a3c67ef35d523778c8ad1eaef52e2821f46c14093b7d40fddf\",\"nonce_hex\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"issued_at_unix\":1800000010,\"expires_at_unix\":1800000070,\"capability_signature_hex\":\"d387f75f6fff8c0cf5a6a7c58c962398628bce4da32312ddc3f9f92fea0ee41d4ca95ff96c10d52b7df1103643608ce6361842e6f25b7d9c8e519d663fd1db02\"}",
+    "reason": "an operation request whose signature is not the scoped capability key's over its exact body and nonce grants no mailbox access"
+  },
+  {
+    "name": "mailbox-access-request/empty",
+    "layer": "decode",
+    "target": "mailbox-access-request",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "mailbox-access-request/trailing-json",
+    "layer": "decode",
+    "target": "mailbox-access-request",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-access-request.v1\",\"grant_digest\":\"sha256:4e88e4e90d20a64fc99396aecdb422b4f6dbb9ed59437b493613307504d61252\",\"operation\":\"read\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"body_digest\":\"sha256:c1659b66de6302a3c67ef35d523778c8ad1eaef52e2821f46c14093b7d40fddf\",\"nonce_hex\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"issued_at_unix\":1800000010,\"expires_at_unix\":1800000070,\"capability_signature_hex\":\"2c87f75f6fff8c0cf5a6a7c58c962398628bce4da32312ddc3f9f92fea0ee41d4ca95ff96c10d52b7df1103643608ce6361842e6f25b7d9c8e519d663fd1db02\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "mailbox-access-request/truncated",
+    "layer": "decode",
+    "target": "mailbox-access-request",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-access-request.v1\",\"grant_digest\":\"sha256:4e88e4e90d20a64fc99396aecdb422b4f6dbb9ed59437b493613307504d61252\",\"operation\":\"read\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"body_digest\":\"sha256:c1659b66de6302a3c67ef35d523778c8ad1eaef52e2821f46c14093b7d40fddf\",\"nonce_hex\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"issued_at_unix\":1800000010,\"expires_at_unix\":1800000070,\"capability_signature_hex\":\"2c87f75f6fff8c0cf5a6a7c58c962398628bce4da32312ddc3f9f92fea0ee41d4ca95ff96c10d52b7df1103643608ce6361842e6f25b7d9c8e519d663fd1db02\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "mailbox-access-request/unknown-field",
+    "layer": "decode",
+    "target": "mailbox-access-request",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.mailbox-access-request.v1\",\"grant_digest\":\"sha256:4e88e4e90d20a64fc99396aecdb422b4f6dbb9ed59437b493613307504d61252\",\"operation\":\"read\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"body_digest\":\"sha256:c1659b66de6302a3c67ef35d523778c8ad1eaef52e2821f46c14093b7d40fddf\",\"nonce_hex\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"issued_at_unix\":1800000010,\"expires_at_unix\":1800000070,\"capability_signature_hex\":\"2c87f75f6fff8c0cf5a6a7c58c962398628bce4da32312ddc3f9f92fea0ee41d4ca95ff96c10d52b7df1103643608ce6361842e6f25b7d9c8e519d663fd1db02\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "mailbox-capability-grant-binding/tampered-endpoint-signature",
+    "layer": "verify",
+    "target": "mailbox-capability-grant-binding",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-capability-grant.v1\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"relay_public_key_hex\":\"c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f73242\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"capability_public_key_hex\":\"d759793bbc13a2819a827c76adb6fba8a49aee007f49f2d0992d99b825ad2c48\",\"operations\":[\"delete\",\"deposit\",\"read\"],\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"929403abcdbba856adc46cc3565f06522472a739186cc035c70a28946f77cae073d332acf789368b38ffd78bcd31166c6a8667b6dd0e782f07b1783d11fbfa04\"}",
+    "reason": "a grant whose signature is not the finalized Endpoint's over this exact Relay, mailbox, capability key, and operation set grants no authority"
+  },
+  {
+    "name": "mailbox-capability-grant/empty",
+    "layer": "decode",
+    "target": "mailbox-capability-grant",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "mailbox-capability-grant/trailing-json",
+    "layer": "decode",
+    "target": "mailbox-capability-grant",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-capability-grant.v1\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"relay_public_key_hex\":\"c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f73242\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"capability_public_key_hex\":\"d759793bbc13a2819a827c76adb6fba8a49aee007f49f2d0992d99b825ad2c48\",\"operations\":[\"delete\",\"deposit\",\"read\"],\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6d9403abcdbba856adc46cc3565f06522472a739186cc035c70a28946f77cae073d332acf789368b38ffd78bcd31166c6a8667b6dd0e782f07b1783d11fbfa04\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "mailbox-capability-grant/truncated",
+    "layer": "decode",
+    "target": "mailbox-capability-grant",
+    "wire": "{\"schema\":\"tos.messaging.mailbox-capability-grant.v1\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"relay_public_key_hex\":\"c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f73242\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"capability_public_key_hex\":\"d759793bbc13a2819a827c76adb6fba8a49aee007f49f2d0992d99b825ad2c48\",\"operations\":[\"delete\",\"deposit\",\"read\"],\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6d9403abcdbba856adc46cc3565f06522472a739186cc035c70a28946f77cae073d332acf789368b38ffd78bcd31166c6a8667b6dd0e782f07b1783d11fbfa04\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "mailbox-capability-grant/unknown-field",
+    "layer": "decode",
+    "target": "mailbox-capability-grant",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.mailbox-capability-grant.v1\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"relay_public_key_hex\":\"c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f73242\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"capability_public_key_hex\":\"d759793bbc13a2819a827c76adb6fba8a49aee007f49f2d0992d99b825ad2c48\",\"operations\":[\"delete\",\"deposit\",\"read\"],\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6d9403abcdbba856adc46cc3565f06522472a739186cc035c70a28946f77cae073d332acf789368b38ffd78bcd31166c6a8667b6dd0e782f07b1783d11fbfa04\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "messaging-event-network-route/local-only-from-network",
+    "layer": "verify",
+    "target": "messaging-event-network-route",
+    "wire": "{\"schema\":\"tos.messaging.event.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"event_id\":\"evt_74f2c8178b2aca53c916fb713fcd6d0fcf7832535ff3a1d9054957da4d63a4c6\",\"sender_agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"sender_messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"sender_device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"created_at_unix\":1800000010,\"event_kind\":\"owner.approval.grant\",\"payload_schema\":\"tos.messaging.payload.owner-approval-grant.v1\",\"content_base64\":\"dG9zLm1lc3NhZ2luZy5wYXlsb2FkLnYxAHRvcy5tZXNzYWdpbmcucGF5bG9hZC5vd25lci1hcHByb3ZhbC1ncmFudC52MQAAAAAMYXByLXZlcmlmeS0xAAAARGV2dF9hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhAAAAAGtJ0gA=\",\"rendering\":\"grant\"}",
+    "reason": "an owner-approval kind expresses local authority and cannot be spoken by a remote party"
+  },
+  {
+    "name": "messaging-event/empty",
+    "layer": "decode",
+    "target": "messaging-event",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "messaging-event/trailing-json",
+    "layer": "decode",
+    "target": "messaging-event",
+    "wire": "{\"schema\":\"tos.messaging.event.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"event_id\":\"evt_907a3ee25f59981718c2021d8dedd81451f45159878e7fc97b95201d216e0614\",\"sender_agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"sender_messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"sender_device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"created_at_unix\":1800000010,\"event_kind\":\"text\",\"payload_schema\":\"tos.messaging.payload.text.v1\",\"content_base64\":\"dG9zLm1lc3NhZ2luZy5wYXlsb2FkLnYxAHRvcy5tZXNzYWdpbmcucGF5bG9hZC50ZXh0LnYxAAAAABl0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04AAAABWhlbGxvAAAAAA==\",\"rendering\":\"hello\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "messaging-event/truncated",
+    "layer": "decode",
+    "target": "messaging-event",
+    "wire": "{\"schema\":\"tos.messaging.event.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"event_id\":\"evt_907a3ee25f59981718c2021d8dedd81451f45159878e7fc97b95201d216e0614\",\"sender_agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"sender_messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"sender_device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"created_at_unix\":1800000010,\"event_kind\":\"text\",\"payload_schema\":\"tos.messaging.payload.text.v1\",\"content_base64\":\"dG9zLm1lc3NhZ2luZy5wYXlsb2FkLnYxAHRvcy5tZXNzYWdpbmcucGF5bG9hZC50ZXh0LnYxAAAAABl0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04AAAABWhlbGxvAAAAAA==\",\"rendering\":\"hello\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "messaging-event/unknown-field",
+    "layer": "decode",
+    "target": "messaging-event",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.event.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"event_id\":\"evt_907a3ee25f59981718c2021d8dedd81451f45159878e7fc97b95201d216e0614\",\"sender_agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"sender_messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"sender_device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"created_at_unix\":1800000010,\"event_kind\":\"text\",\"payload_schema\":\"tos.messaging.payload.text.v1\",\"content_base64\":\"dG9zLm1lc3NhZ2luZy5wYXlsb2FkLnYxAHRvcy5tZXNzYWdpbmcucGF5bG9hZC50ZXh0LnYxAAAAABl0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04AAAABWhlbGxvAAAAAA==\",\"rendering\":\"hello\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "mls-credential-binding/stale-device-set",
+    "layer": "verify",
+    "target": "mls-credential-binding",
+    "wire": "{\"schema\":\"tos.messaging.mls-device-credential.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"device_set_digest\":\"sha256:9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d\",\"leaf_signature_public_key_hex\":\"17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce\",\"cipher_suite\":1,\"key_package_base64\":\"Zml4ZWQgUkZDIDk0MjAgS2V5UGFja2FnZSBjYW5kaWRhdGUgYnl0ZXM=\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"f808e3654d467d84d21ef8fafad57adf596bd39812ebf0a2365cb3eca919105fa221f70779fdde9fe2cd63e410df8731c934c1cd6168116e744301495e821806\"}",
+    "reason": "an MLS credential bound to an old device set cannot authorise a leaf after device succession"
+  },
+  {
+    "name": "mls-credential-binding/tampered-signature",
+    "layer": "verify",
+    "target": "mls-credential-binding",
+    "wire": "{\"schema\":\"tos.messaging.mls-device-credential.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"device_set_digest\":\"sha256:8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c\",\"leaf_signature_public_key_hex\":\"17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce\",\"cipher_suite\":1,\"key_package_base64\":\"Zml4ZWQgUkZDIDk0MjAgS2V5UGFja2FnZSBjYW5kaWRhdGUgYnl0ZXM=\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"41cc6d3f73e3b8479c402a9d861cc1381c0b8c585412a9be1104d02552648dc270ff5a58c3704703fa5646360873f426a585fbe16564887651801f855de01900\"}",
+    "reason": "an MLS device credential must carry the delegated Endpoint's signature over the exact leaf key and KeyPackage"
+  },
+  {
+    "name": "mls-device-credential/empty",
+    "layer": "decode",
+    "target": "mls-device-credential",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "mls-device-credential/trailing-json",
+    "layer": "decode",
+    "target": "mls-device-credential",
+    "wire": "{\"schema\":\"tos.messaging.mls-device-credential.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"device_set_digest\":\"sha256:8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c\",\"leaf_signature_public_key_hex\":\"17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce\",\"cipher_suite\":1,\"key_package_base64\":\"Zml4ZWQgUkZDIDk0MjAgS2V5UGFja2FnZSBjYW5kaWRhdGUgYnl0ZXM=\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"becc6d3f73e3b8479c402a9d861cc1381c0b8c585412a9be1104d02552648dc270ff5a58c3704703fa5646360873f426a585fbe16564887651801f855de01900\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "mls-device-credential/truncated",
+    "layer": "decode",
+    "target": "mls-device-credential",
+    "wire": "{\"schema\":\"tos.messaging.mls-device-credential.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"device_set_digest\":\"sha256:8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c\",\"leaf_signature_public_key_hex\":\"17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce\",\"cipher_suite\":1,\"key_package_base64\":\"Zml4ZWQgUkZDIDk0MjAgS2V5UGFja2FnZSBjYW5kaWRhdGUgYnl0ZXM=\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"becc6d3f73e3b8479c402a9d861cc1381c0b8c585412a9be1104d02552648dc270ff5a58c3704703fa5646360873f426a585fbe16564887651801f855de01900\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "mls-device-credential/unknown-field",
+    "layer": "decode",
+    "target": "mls-device-credential",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.mls-device-credential.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"device_set_digest\":\"sha256:8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c\",\"leaf_signature_public_key_hex\":\"17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce\",\"cipher_suite\":1,\"key_package_base64\":\"Zml4ZWQgUkZDIDk0MjAgS2V5UGFja2FnZSBjYW5kaWRhdGUgYnl0ZXM=\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"becc6d3f73e3b8479c402a9d861cc1381c0b8c585412a9be1104d02552648dc270ff5a58c3704703fa5646360873f426a585fbe16564887651801f855de01900\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "negotiation-snapshot/empty",
+    "layer": "decode",
+    "target": "negotiation-snapshot",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "negotiation-snapshot/future-approval",
+    "layer": "decode",
+    "target": "negotiation-snapshot",
+    "wire": "{\"schema\":\"tos.messaging.negotiation-state.v1\",\"negotiation_id\":\"neg-1\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"counterparty_agent_id\":\"agent_5555555555555555555555555555555555555555555555555555555555555555\",\"mandate_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"network\":{\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"state\":\"intent-agreed\",\"generation\":1,\"counteroffers\":0,\"needs_owner_approval\":false,\"owner_approval\":{\"TermsDigest\":\"sha256:4444444444444444444444444444444444444444444444444444444444444444\",\"Generation\":5,\"MandateDigest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"AtUnix\":1800000000}}",
+    "reason": "an approval from a later version of the negotiation than the snapshot is an approval for terms that do not exist"
+  },
+  {
+    "name": "negotiation-snapshot/terms-on-another-network",
+    "layer": "decode",
+    "target": "negotiation-snapshot",
+    "wire": "{\"schema\":\"tos.messaging.negotiation-state.v1\",\"negotiation_id\":\"neg-1\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"counterparty_agent_id\":\"agent_5555555555555555555555555555555555555555555555555555555555555555\",\"mandate_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"network\":{\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"state\":\"proposal-pending\",\"generation\":0,\"counteroffers\":0,\"needs_owner_approval\":false,\"on_table\":{\"CapabilityID\":\"cap_9999999999999999999999999999999999999999999999999999999999999999\",\"CapabilityVersion\":\"1.0.0\",\"CapabilityClass\":\"software.audit\",\"ProviderAgentID\":\"agent_5555555555555555555555555555555555555555555555555555555555555555\",\"ManifestDigest\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"TransportBindingDigest\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"Price\":{\"Asset\":{\"Network\":{\"network_id\":\"tos-somewhere-else\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"Workchain\":0,\"AccountID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"MasterCodeHash\":\"tvm-cell-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"WalletCodeHash\":\"tvm-cell-sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"Decimals\":6},\"Atomic\":\"100\"},\"EscrowTermsDigest\":\"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"DisputePolicyDigest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"NotAfterUnix\":1800003600}}",
+    "reason": "terms priced on another network digest to a different commitment, so they cannot ride a negotiation bound to this one"
+  },
+  {
+    "name": "negotiation-snapshot/trailing-json",
+    "layer": "decode",
+    "target": "negotiation-snapshot",
+    "wire": "{\"schema\":\"tos.messaging.negotiation-state.v1\",\"negotiation_id\":\"neg-1\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"counterparty_agent_id\":\"agent_5555555555555555555555555555555555555555555555555555555555555555\",\"mandate_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"network\":{\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"state\":\"discussing\",\"generation\":0,\"counteroffers\":0,\"needs_owner_approval\":false}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "negotiation-snapshot/truncated",
+    "layer": "decode",
+    "target": "negotiation-snapshot",
+    "wire": "{\"schema\":\"tos.messaging.negotiation-state.v1\",\"negotiation_id\":\"neg-1\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"counterparty_agent_id\":\"agent_5555555555555555555555555555555555555555555555555555555555555555\",\"mandate_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"network\":{\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"state\":\"discussing\",\"generation\":0,\"counteroffers\":0,\"needs_owner_approval\":false",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "negotiation-snapshot/unknown-field",
+    "layer": "decode",
+    "target": "negotiation-snapshot",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.negotiation-state.v1\",\"negotiation_id\":\"neg-1\",\"conversation_id\":\"conv_1111111111111111111111111111111111111111111111111111111111111111\",\"counterparty_agent_id\":\"agent_5555555555555555555555555555555555555555555555555555555555555555\",\"mandate_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"network\":{\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"state\":\"discussing\",\"generation\":0,\"counteroffers\":0,\"needs_owner_approval\":false}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "payload-text/oversized-length",
+    "layer": "decode",
+    "target": "payload-text",
+    "wire": "746f732e6d6573736167696e672e7061796c6f61642e763100746f732e6d6573736167696e672e7061796c6f61642e746578742e76310000000019746578742f706c61696e3b20636861727365743d7574662d380000000568656c6c6fffffffff",
+    "binary": true,
+    "reason": "a length prefix a peer chooses is an allocation a peer chooses, and must be bounded before the read"
+  },
+  {
+    "name": "payload-text/trailing-bytes",
+    "layer": "decode",
+    "target": "payload-text",
+    "wire": "746f732e6d6573736167696e672e7061796c6f61642e763100746f732e6d6573736167696e672e7061796c6f61642e746578742e76310000000019746578742f706c61696e3b20636861727365743d7574662d380000000568656c6c6f0000000000",
+    "binary": true,
+    "reason": "trailing bytes give one body two encodings"
+  },
+  {
+    "name": "prekey-bundle-binding/foreign-agent",
+    "layer": "verify",
+    "target": "prekey-bundle-binding",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_9999999999999999999999999999999999999999999999999999999999999999\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e30cd4035d8023899dfea4350373f53864d209b85c31fc22a6cadbb439387ac39354969c30886a973ea5ffd5ca33311f49beec3e892e3941bba117f5f29f3e02\"}",
+    "reason": "a validly signed bundle for another Agent is not authorised by this delegation"
+  },
+  {
+    "name": "prekey-bundle-binding/outlives-delegation",
+    "layer": "verify",
+    "target": "prekey-bundle-binding",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800086401,\"endpoint_signature_hex\":\"c799efcb8de71b0f492f24d952caf290e0c8ceb07e85f8c0c5ebb2717bd2d078d370bcab90bca2bbb77952f5242a20faf33554c3414f24c52ec00893f55f7101\"}",
+    "reason": "a bundle that outlives the delegation authorising its key claims authority past the point the delegation grants it"
+  },
+  {
+    "name": "prekey-bundle-binding/tampered-signature",
+    "layer": "verify",
+    "target": "prekey-bundle-binding",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"1be1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"}",
+    "reason": "a bundle whose signature is not the delegated endpoint's over this content is not published material the endpoint stands behind"
+  },
+  {
+    "name": "prekey-bundle-set/empty",
+    "layer": "decode",
+    "target": "prekey-bundle-set",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "prekey-bundle-set/trailing-json",
+    "layer": "decode",
+    "target": "prekey-bundle-set",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle-set.v2\",\"bundles\":[{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"},{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_7777777777777777777777777777777777777777777777777777777777777777\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6419f19cfda7944694903f03008a5c56fc06e449cc305c312be7bdabe6f8e2a9b7be4445bf75c0097b0ee602aa6c1c85fb5085b59fc137e446d3cef75c276800\"}]}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "prekey-bundle-set/truncated",
+    "layer": "decode",
+    "target": "prekey-bundle-set",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle-set.v2\",\"bundles\":[{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"},{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_7777777777777777777777777777777777777777777777777777777777777777\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6419f19cfda7944694903f03008a5c56fc06e449cc305c312be7bdabe6f8e2a9b7be4445bf75c0097b0ee602aa6c1c85fb5085b59fc137e446d3cef75c276800\"}]",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "prekey-bundle-set/unknown-field",
+    "layer": "decode",
+    "target": "prekey-bundle-set",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.prekey-bundle-set.v2\",\"bundles\":[{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"},{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_7777777777777777777777777777777777777777777777777777777777777777\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"6419f19cfda7944694903f03008a5c56fc06e449cc305c312be7bdabe6f8e2a9b7be4445bf75c0097b0ee602aa6c1c85fb5085b59fc137e446d3cef75c276800\"}]}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "prekey-bundle/empty",
+    "layer": "decode",
+    "target": "prekey-bundle",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "prekey-bundle/trailing-json",
+    "layer": "decode",
+    "target": "prekey-bundle",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "prekey-bundle/truncated",
+    "layer": "decode",
+    "target": "prekey-bundle",
+    "wire": "{\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "prekey-bundle/unknown-field",
+    "layer": "decode",
+    "target": "prekey-bundle",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.prekey-bundle.v2\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"device_id\":\"dev_4444444444444444444444444444444444444444444444444444444444444444\",\"algorithm_id\":\"tos.messaging.e2ee.example-suite.v1\",\"material_base64\":\"cHVibGlzaGVkIHByZWtleSBtYXRlcmlhbA==\",\"issued_at_unix\":1800000000,\"expires_at_unix\":1800003600,\"endpoint_signature_hex\":\"e4e1fc8180b8aff68341d73da2691810ea053dfdd218da756011bb8166d25aed005486f087f155a5a0adc07d9f5ba3d65ecc93de42d83f099cc4c3b37337a70d\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  },
+  {
+    "name": "reachability-observation/tampered-signature",
+    "layer": "verify",
+    "target": "reachability-observation",
+    "wire": "{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-verify-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"yes\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"4b6411cd48f76b45cc2425127c0edb4dbaaf61db15358944b1e491cf75c61c7b54ebe41b56d46dca6036712d5378d4ca9d96b139feb0116d02803a5e2a8c4f0c\"}",
+    "reason": "an attestation whose signature does not verify under its named coordinator key attests nothing"
+  },
+  {
+    "name": "reachability-trial/duplicate-filtering-coordinator",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"filtering_observations\":[{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"filter_source\":\"same-address-other-port\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"ee3c592b0ed08fad6aa4ccf60716eb24c06502c598b5c3274909fdbfc16f16793d7cd0a57c69ecfb4af235b00c02960631c57fc58bd9877fd9ee20d38e03330d\"},{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"filter_source\":\"same-address-other-port\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"ee3c592b0ed08fad6aa4ccf60716eb24c06502c598b5c3274909fdbfc16f16793d7cd0a57c69ecfb4af235b00c02960631c57fc58bd9877fd9ee20d38e03330d\"}],\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"aed341fb4ccb5fdd63e32d5040cdfd16deeeeb2820807f8a0e21f4e5c8b4913bec62f2400f47926d0e9c42b2fd1cb8906864e64164c51d21dd9da19b6dc4e002\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "one coordinator attesting the same cold source twice could pad the set or hide two conflicting receipts under one name"
+  },
+  {
+    "name": "reachability-trial/duplicate-sized-echo-payload",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"adnl\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"ad8bda398a6b269c8964ed16a255052429f6df43d005721677b3e916197cf045c5c090c29a51f5d1a88edc4c696a2171c86416396e626f7da0a58bee41d0e20c\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"f60d933f9f73c8f48f44f7b67b76df99516a49017fdbb0041384d0433559eac7e91c80db43fcef683dea0c30c0ed3414d6af7de78d839a0b3bef3e01e01fa30f\",\"probe\":\"adnl\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"sized_echoes\":[{\"payload_bytes\":1024,\"succeeded\":true,\"round_trip_millis\":4},{\"payload_bytes\":1024,\"succeeded\":true,\"round_trip_millis\":9}],\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "one payload size may contribute at most one attempt per endpoint half"
+  },
+  {
+    "name": "reachability-trial/filtering-names-another-session",
+    "layer": "verify",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"filtering_observations\":[{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-other\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"filter_source\":\"same-address-other-port\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"0852d54ebe42a7d5a7157fac33efcfb90e841016b1c6db04832b3f105f973d726fabcb8f92ebcec11ffc5a7037ef85f4f3ffaa5cc1f22900433c87a87483f206\"}],\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"46398405d41b34a056f343d94b2f41a7737613e898ee81a0a1c6fce67c3500d1bdaf82cb0c4e47fdfdc1ddbd729eab1f291a6e03a9b8d13530febfa7553b6c07\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a validly signed filtering receipt for a different session is somebody else's receipt and must not count for this trial"
+  },
+  {
+    "name": "reachability-trial/foreign-coordinator",
+    "layer": "verify",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_ce95e25200cfc666\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c\",\"coordinator_signature_hex\":\"822a5d642900044f926f2642051faf199d0e4e5858e43c9402a34846fdaa50d4305f538dfdf9c695859adc4e8147666d78a74885d928a63071d9edde84868103\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"dac3233c6fcb5d28b2f18448ab9900f6731ab35538ee7dea960f6e3d74998b30d98e414f234287d344821f997225680ed4592acb7af9c1a7cbaaa350f01e120e\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a trial attested by a coordinator the policy did not predeclare can be minted by anyone and must not count"
+  },
+  {
+    "name": "reachability-trial/forged-filtering-signature",
+    "layer": "verify",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"filtering_observations\":[{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"filter_source\":\"same-address-other-port\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"113c592b0ed08fad6aa4ccf60716eb24c06502c598b5c3274909fdbfc16f16793d7cd0a57c69ecfb4af235b00c02960631c57fc58bd9877fd9ee20d38e03330d\"}],\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"e4380d075849215e25b0ee64b87e5e239d93d24bdf83592e08178c5653710043ccaaa9f1d74609a03794d4efa02bfbb72943aa791f0b77702c37b3a388a7f202\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a filtering receipt whose coordinator signature does not verify attests no receipt at all"
+  },
+  {
+    "name": "reachability-trial/hold-completed-without-attempt",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"aed341fb4ccb5fdd63e32d5040cdfd16deeeeb2820807f8a0e21f4e5c8b4913bec62f2400f47926d0e9c42b2fd1cb8906864e64164c51d21dd9da19b6dc4e002\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"survival_seconds\":30,\"hold_completed\":true,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a phase cannot complete without having been attempted"
+  },
+  {
+    "name": "reachability-trial/mapping-contradicts-bind",
+    "layer": "verify",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"bind_observations\":[{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"3ec58a303136a70578ef11c501776e3bb72d906b6e52d0aede21b48eb7908a1d59003a78f065d0609f17c549c2e8f65c0883779fee2047239164ac072168ad0b\"},{\"coordinator_id\":\"srv_1d04434edc4ee6f8\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"198.51.100.9:5000\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0\",\"coordinator_signature_hex\":\"69e4f51e31c43e28071d52bbb4180bbbf8030ca09612d9f6232a77d3b781750cdf7e456393af632ad4a5661f7c99c541dc060a2449c2c52662fa7b7c18851c0b\"}],\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"3677eae1900e07d53c4bf66645b765c1d5a2beed71fb2f67a036cadcf921a1c3e859de6f9e13040ee5ad6017f4373de1723f3ac62a91934ecd4a02e09879f209\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a declared endpoint-independent mapping contradicted by reflections from two coordinators at differing addresses is refuted by the signed evidence"
+  },
+  {
+    "name": "reachability-trial/missing-manifest-digest",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"aed341fb4ccb5fdd63e32d5040cdfd16deeeeb2820807f8a0e21f4e5c8b4913bec62f2400f47926d0e9c42b2fd1cb8906864e64164c51d21dd9da19b6dc4e002\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a trial without its own collector manifest digest cannot say which build produced it"
+  },
+  {
+    "name": "reachability-trial/reconnect-success-without-latency",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"aed341fb4ccb5fdd63e32d5040cdfd16deeeeb2820807f8a0e21f4e5c8b4913bec62f2400f47926d0e9c42b2fd1cb8906864e64164c51d21dd9da19b6dc4e002\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"reconnect_attempted\":true,\"reconnect_succeeded\":true,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a reconnect success and its measured latency imply each other, so a success without one is a claim without its measurement"
+  },
+  {
+    "name": "reachability-trial/short-manifest-digest",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"aed341fb4ccb5fdd63e32d5040cdfd16deeeeb2820807f8a0e21f4e5c8b4913bec62f2400f47926d0e9c42b2fd1cb8906864e64164c51d21dd9da19b6dc4e002\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:abc\"}",
+    "reason": "a truncated manifest digest is not a commitment to any build"
+  },
+  {
+    "name": "reachability-trial/sized-echo-success-without-latency",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"adnl\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"ad8bda398a6b269c8964ed16a255052429f6df43d005721677b3e916197cf045c5c090c29a51f5d1a88edc4c696a2171c86416396e626f7da0a58bee41d0e20c\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"f60d933f9f73c8f48f44f7b67b76df99516a49017fdbb0041384d0433559eac7e91c80db43fcef683dea0c30c0ed3414d6af7de78d839a0b3bef3e01e01fa30f\",\"probe\":\"adnl\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"sized_echoes\":[{\"payload_bytes\":1024,\"succeeded\":true},{\"payload_bytes\":8176,\"succeeded\":true,\"round_trip_millis\":9}],\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a successful sized echo without a measured round trip is an outcome without evidence"
+  },
+  {
+    "name": "reachability-trial/tampered-endpoint-signature",
+    "layer": "verify",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"51d341fb4ccb5fdd63e32d5040cdfd16deeeeb2820807f8a0e21f4e5c8b4913bec62f2400f47926d0e9c42b2fd1cb8906864e64164c51d21dd9da19b6dc4e002\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a trial whose endpoint signature does not verify is rewritable after the fact and is not the measurement it claims"
+  },
+  {
+    "name": "reachability-trial/tampered-sized-echo",
+    "layer": "verify",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"adnl\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"ad8bda398a6b269c8964ed16a255052429f6df43d005721677b3e916197cf045c5c090c29a51f5d1a88edc4c696a2171c86416396e626f7da0a58bee41d0e20c\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"f60d933f9f73c8f48f44f7b67b76df99516a49017fdbb0041384d0433559eac7e91c80db43fcef683dea0c30c0ed3414d6af7de78d839a0b3bef3e01e01fa30f\",\"probe\":\"adnl\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"sized_echoes\":[{\"payload_bytes\":1024,\"succeeded\":true,\"round_trip_millis\":5},{\"payload_bytes\":8176,\"succeeded\":true,\"round_trip_millis\":9}],\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a sized-echo result is route evidence only when the endpoint signature covers its exact payload, outcome, and latency"
+  },
+  {
+    "name": "reachability-trial/tunnel-hold-on-direct-outcome",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"udp\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"29927bebe37c399586f983386cc94d8f15b715e5ba20985d6ff559fb721b144988f0804bbaba5f9d9335211add863fecc5c6960a435a705a034fc38ce9ead905\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"aed341fb4ccb5fdd63e32d5040cdfd16deeeeb2820807f8a0e21f4e5c8b4913bec62f2400f47926d0e9c42b2fd1cb8906864e64164c51d21dd9da19b6dc4e002\",\"probe\":\"udp\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"tunnel_hold_attempted\":true,\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "a tunnel hold belongs to a proxy fallback; on a direct outcome there was no tunneled session to hold"
+  },
+  {
+    "name": "reachability-trial/unordered-sized-echo-payloads",
+    "layer": "decode",
+    "target": "reachability-trial",
+    "wire": "{\"schema\":\"tos.messaging.reachability-trial.v4\",\"endpoint\":{\"address_family\":\"ipv4\",\"public_reachability\":\"behind-nat\",\"nat_behavior\":\"endpoint-independent\",\"carrier\":\"consumer-isp\",\"udp_policy\":\"allowed\",\"mobility\":\"stationary\",\"endpoint_class\":\"desktop\",\"mapping_assistance\":\"none\"},\"pair_id\":\"pair_0f87dbc147f30f511a9482f461767259\",\"site_id\":\"site_69eda36f1ebe8798\",\"operator_id\":\"op_c2b1ad60c273381d\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"observation\":{\"coordinator_id\":\"srv_390a5952762cbee4\",\"session_id\":\"ses-trial-1\",\"role\":\"a\",\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"probe\":\"adnl\",\"observed\":\"203.0.113.7:41234\",\"peer_public\":\"no\",\"at_unix\":1800000000,\"coordinator_public_key_hex\":\"3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29\",\"coordinator_signature_hex\":\"ad8bda398a6b269c8964ed16a255052429f6df43d005721677b3e916197cf045c5c090c29a51f5d1a88edc4c696a2171c86416396e626f7da0a58bee41d0e20c\"},\"endpoint_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"endpoint_signature_hex\":\"f60d933f9f73c8f48f44f7b67b76df99516a49017fdbb0041384d0433559eac7e91c80db43fcef683dea0c30c0ed3414d6af7de78d839a0b3bef3e01e01fa30f\",\"probe\":\"adnl\",\"outcome\":\"direct-established\",\"failure_class\":\"none\",\"establish_millis\":42,\"sized_echoes\":[{\"payload_bytes\":8176,\"succeeded\":true,\"round_trip_millis\":9},{\"payload_bytes\":1024,\"succeeded\":true,\"round_trip_millis\":4}],\"started_at_unix\":1800000000,\"local_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"peer_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"local_collector_manifest_digest\":\"sha256:20f004c711189c14ba9513de9d5316f1f90be6e7ef1e5231828f2086cd975641\",\"peer_collector_manifest_digest\":\"sha256:b63aa51fe37b5a0be80759ea0fc3c536c2db97f62824313bf34191a1842262d1\"}",
+    "reason": "sized echo measurements have one canonical ascending order so signatures cannot cover alternate representations"
+  },
+  {
+    "name": "stored-ack/empty",
+    "layer": "decode",
+    "target": "stored-ack",
+    "wire": "",
+    "reason": "an empty document is not an object"
+  },
+  {
+    "name": "stored-ack/trailing-json",
+    "layer": "decode",
+    "target": "stored-ack",
+    "wire": "{\"schema\":\"tos.messaging.stored-ack.v1\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"message_id\":\"msg_6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b\",\"ciphertext_digest\":\"sha256:7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c\",\"stored_at_unix\":1800000001,\"expires_at_unix\":1800003600,\"relay_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"relay_signature_hex\":\"96072c7e89a2741ac8016946a7af1e2c3293d7dc404ecf77c0e380717efbba03d4f701785ee91ce18c9d68642455f99825073141230b809ba442f6f9117c7904\"}{\"x\":1}",
+    "reason": "trailing data lets two byte streams decode to one object"
+  },
+  {
+    "name": "stored-ack/truncated",
+    "layer": "decode",
+    "target": "stored-ack",
+    "wire": "{\"schema\":\"tos.messaging.stored-ack.v1\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"message_id\":\"msg_6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b\",\"ciphertext_digest\":\"sha256:7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c\",\"stored_at_unix\":1800000001,\"expires_at_unix\":1800003600,\"relay_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"relay_signature_hex\":\"96072c7e89a2741ac8016946a7af1e2c3293d7dc404ecf77c0e380717efbba03d4f701785ee91ce18c9d68642455f99825073141230b809ba442f6f9117c7904\"",
+    "reason": "a truncated document is not the object it was cut from"
+  },
+  {
+    "name": "stored-ack/unknown-field",
+    "layer": "decode",
+    "target": "stored-ack",
+    "wire": "{\"unknown_field\":1,\"schema\":\"tos.messaging.stored-ack.v1\",\"opaque_mailbox_id\":\"mbx_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",\"message_id\":\"msg_6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b\",\"ciphertext_digest\":\"sha256:7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c\",\"stored_at_unix\":1800000001,\"expires_at_unix\":1800003600,\"relay_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"relay_signature_hex\":\"96072c7e89a2741ac8016946a7af1e2c3293d7dc404ecf77c0e380717efbba03d4f701785ee91ce18c9d68642455f99825073141230b809ba442f6f9117c7904\"}",
+    "reason": "an unknown field means the sender and receiver disagree about the object's shape"
+  }
+]

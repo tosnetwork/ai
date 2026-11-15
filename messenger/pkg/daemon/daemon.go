@@ -1,0 +1,1273 @@
+package daemon
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"math"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
+	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
+	"github.com/tosnetwork/ai/protocol/pkg/nativeclient"
+	"github.com/tosnetwork/tos-messenger/internal/canon"
+	"github.com/tosnetwork/tos-messenger/internal/securefile"
+	"github.com/tosnetwork/tos-messenger/pkg/admission"
+	"github.com/tosnetwork/tos-messenger/pkg/agentpacketbridge"
+	"github.com/tosnetwork/tos-messenger/pkg/attachmentadmission"
+	"github.com/tosnetwork/tos-messenger/pkg/attachmentops"
+	"github.com/tosnetwork/tos-messenger/pkg/contact"
+	"github.com/tosnetwork/tos-messenger/pkg/directory"
+	"github.com/tosnetwork/tos-messenger/pkg/dispatch"
+	"github.com/tosnetwork/tos-messenger/pkg/e2ee"
+	"github.com/tosnetwork/tos-messenger/pkg/economicaction"
+	"github.com/tosnetwork/tos-messenger/pkg/envelope"
+	"github.com/tosnetwork/tos-messenger/pkg/eventlog"
+	"github.com/tosnetwork/tos-messenger/pkg/fault"
+	"github.com/tosnetwork/tos-messenger/pkg/localapi"
+	"github.com/tosnetwork/tos-messenger/pkg/payload"
+	"github.com/tosnetwork/tos-messenger/pkg/prekeyapi"
+)
+
+const (
+	// SaltFile holds the per-install value that keeps decision records from
+	// correlating across installations.
+	SaltFile = "install.salt"
+	// SaltBytes is its length.
+	SaltBytes = 32
+)
+
+// Observer receives what the daemon did. It exists so a caller can watch
+// without the daemon deciding how logs are formatted or where they go.
+type Observer interface {
+	Swept(dispatch.Summary)
+	Maintained(expired int, report eventlog.PruneReport)
+	Failed(stage string, err error)
+}
+
+// Daemon is one running installation.
+type Daemon struct {
+	config       Config
+	journal      *eventlog.Journal
+	dispatch     *dispatch.Dispatcher
+	server       *localapi.Server
+	listener     net.Listener
+	owner        net.Listener
+	salt         []byte
+	observer     Observer
+	discovery    *discoveryRuntime
+	prekeys      *prekeyRuntime
+	admission    *admission.Gate
+	agentPackets *agentpacketbridge.Bridge
+	contactDNS   *nativeclient.Client
+	now          func() time.Time
+
+	closeOnce sync.Once
+}
+
+type contactResolveFunc func(context.Context, string) (contact.Result, error)
+
+func (f contactResolveFunc) Resolve(ctx context.Context, input string) (contact.Result, error) {
+	return f(ctx, input)
+}
+
+type directConversationEnsureFunc func(context.Context, string) (localapi.DirectConversationResult, error)
+
+func (f directConversationEnsureFunc) EnsureDirectConversation(
+	ctx context.Context, input string,
+) (localapi.DirectConversationResult, error) {
+	return f(ctx, input)
+}
+
+type daemonDirectMessenger struct{ daemon *Daemon }
+
+func (m daemonDirectMessenger) SendDirectMessage(ctx context.Context, recipient, mediaType, body,
+	idempotencyKey string, expiresAt uint64) (localapi.DirectMessageResult, error) {
+	return m.daemon.SendDirectMessage(ctx, recipient, mediaType, body, idempotencyKey, expiresAt)
+}
+
+func (m daemonDirectMessenger) SendDirectApplication(ctx context.Context, recipient, kind string,
+	canonical []byte, idempotencyKey string, expiresAt uint64) (localapi.DirectMessageResult, error) {
+	return m.daemon.SendDirectApplication(ctx, recipient, kind, canonical, idempotencyKey, expiresAt)
+}
+
+func (m daemonDirectMessenger) ReplyDirectMessage(ctx context.Context, eventID, mediaType, body,
+	idempotencyKey string, expiresAt uint64) (localapi.DirectMessageResult, error) {
+	return m.daemon.ReplyDirectMessage(ctx, eventID, mediaType, body, idempotencyKey, expiresAt)
+}
+
+// ResolveContact accepts a human contact input at the daemon boundary. A .tos
+// name is reduced to a quorum-finalized Agent identifier and immediately run
+// through the same delegation, DHT, Contact Descriptor, and prekey verification
+// chain as an explicit Agent ID. The returned CanonicalName is display metadata;
+// callers must persist and authorize only Result.AgentID.
+//
+// DNS transport credentials are operator-owned. The service-protocol
+// nativeclient.Client satisfies the interface. Discovery must be enabled
+// because there is no safe contact result without the existing directory chain.
+func (d *Daemon) ResolveContact(ctx context.Context, input string, dns contact.DNSAliasClient) (contact.Result, error) {
+	if d == nil || d.discovery == nil || d.discovery.contacts == nil {
+		return contact.Result{}, errors.New("contact discovery is not enabled")
+	}
+	now := time.Now
+	if d.now != nil {
+		now = d.now
+	}
+	resolver := &contact.Resolver{
+		DNS: dns, Directory: d.discovery.contacts, Network: d.config.Network(),
+		Chain: d.discovery.chain, CallerID: d.config.AgentID, Now: now,
+	}
+	return resolver.Resolve(ctx, input)
+}
+
+// EnsureDirectConversation resolves human input to AgentID and atomically
+// creates or reloads the daemon's route-independent direct-conversation record.
+// This first slice records discovery only: it creates no session and claims no
+// transport readiness.
+func (d *Daemon) EnsureDirectConversation(
+	ctx context.Context, input string, dns contact.DNSAliasClient,
+) (localapi.DirectConversationResult, error) {
+	resolved, err := d.ResolveContact(ctx, input, dns)
+	if err != nil {
+		return localapi.DirectConversationResult{}, err
+	}
+	var entropy [32]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return localapi.DirectConversationResult{}, errors.New("create direct conversation identity")
+	}
+	now := time.Now()
+	if d.now != nil {
+		now = d.now()
+	}
+	record, _, err := d.journal.EnsureDirectConversation(
+		d.config.AgentID, resolved.AgentID, resolved.Directory.Descriptor.EndpointID,
+		resolved.Directory.FinalizedCheckpoint, now, entropy,
+	)
+	if err != nil {
+		return localapi.DirectConversationResult{}, err
+	}
+	if d.prekeys != nil && d.prekeys.signer != nil {
+		if _, err := d.ensureDirectSessions(resolved, record.ConversationID, now); err != nil {
+			return localapi.DirectConversationResult{}, err
+		}
+	}
+	return localapi.DirectConversationResult{
+		AgentID: resolved.AgentID, CanonicalName: resolved.CanonicalName,
+		ConversationID: record.ConversationID, Readiness: "transport-pending",
+	}, nil
+}
+
+// SendDirectMessage turns human recipient intent into one AgentID-bound Event
+// and daemon-selected per-device copies. The caller cannot name Endpoint,
+// Device, Session, relay or transport authority.
+func (d *Daemon) SendDirectMessage(ctx context.Context, input, mediaType, body,
+	idempotencyKey string, expiresAt uint64) (localapi.DirectMessageResult, error) {
+	content, err := payload.Encode(payload.Text{MediaType: mediaType, Body: body})
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	return d.sendDirectApplication(ctx, input, "text", content, idempotencyKey, expiresAt)
+}
+
+// SendDirectApplication carries one already-canonical private application
+// object through daemon-owned contact resolution, established E2EE sessions,
+// durable Events and device fan-out. Only frozen typed application kinds are
+// exposed; callers cannot supply an outer Event or route metadata.
+func (d *Daemon) SendDirectApplication(ctx context.Context, input, kind string, canonical []byte,
+	idempotencyKey string, expiresAt uint64) (localapi.DirectMessageResult, error) {
+	var value payload.Payload
+	switch kind {
+	case "agent.gift.address-request":
+		value = payload.GiftAddressRequest{CanonicalRequest: canonical}
+	case "agent.gift.address-response":
+		value = payload.GiftAddressResponse{CanonicalResponse: canonical}
+	case "agent.gift.signed-boc-offer":
+		value = payload.GiftSignedBOCOffer{CanonicalOffer: canonical}
+	case "agent.packet":
+		packet, err := agentpacket.DecodeJSON(canonical)
+		if err != nil {
+			return localapi.DirectMessageResult{}, errors.New("Agent Packet does not decode")
+		}
+		if packet.SenderAgentID != d.config.AgentID {
+			return localapi.DirectMessageResult{}, errors.New("Agent Packet does not name the sending Agent")
+		}
+		reencoded, err := agentpacket.EncodeJSON(packet)
+		if err != nil || !bytes.Equal(reencoded, canonical) {
+			return localapi.DirectMessageResult{}, errors.New("Agent Packet is not canonical JSON")
+		}
+		value = payload.AgentPacketMessage{Foreign: payload.Foreign{Protocol: "agentpacket", Version: "1", Body: canonical}}
+	case "intent.application":
+		application, err := commerce.DecodeIntentApplication(canonical)
+		if err != nil || application.ApplicantAgentID != d.config.AgentID {
+			return localapi.DirectMessageResult{}, errors.New("Intent application does not match the sending Agent")
+		}
+		value = payload.IntentApplication{CanonicalApplication: canonical}
+	case "agreement.propose":
+		var body commerce.AgentAgreementBody
+		if err := protocolcodec.Unmarshal(canonical, &body); err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		digest, err := commerce.AgreementBodyDigest(body)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		value = payload.AgreementPropose{AgreementBodyDigest: digest, CanonicalBody: canonical}
+	case "agreement.accept":
+		acceptance, err := commerce.DecodeSignedAgreementAcceptance(canonical)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		value = payload.AgreementAccept{AgreementBodyDigest: acceptance.Body.AgreementBodyDigest, CanonicalAcceptance: canonical}
+	case "agreement.evidence":
+		var evidence commerce.AgreementAuthorizationEvidence
+		if err := protocolcodec.Unmarshal(canonical, &evidence); err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		digest, err := protocolcodec.Digest("tos.agreement-authorization-evidence.v1", evidence)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		value = payload.AgreementEvidence{AgreementBodyDigest: evidence.AgreementBodyDigest,
+			EvidenceDigest: digest, CanonicalEvidence: canonical}
+	case "commerce.profile-event":
+		var event commerce.CommerceProfileEventV1
+		if err := protocolcodec.Unmarshal(canonical, &event); err != nil || event.CreatedAtUnix == 0 ||
+			event.CreatedAtUnix > math.MaxInt64 {
+			return localapi.DirectMessageResult{}, errors.New("invalid commerce profile event")
+		}
+		canonicalEvent, err := commerce.CanonicalCommerceProfileEventV1(event,
+			time.Unix(int64(event.CreatedAtUnix), 0).UTC())
+		if err != nil || !bytes.Equal(canonicalEvent, canonical) {
+			return localapi.DirectMessageResult{}, errors.New("commerce profile event is not canonical")
+		}
+		value = payload.CommerceProfileEvent{ObjectDigest: event.ObjectDigest, CanonicalEvent: canonical}
+	case "operation.outcome":
+		var request commerce.OperationPrivateRequestV1
+		if err := protocolcodec.Unmarshal(canonical, &request); err != nil || commerce.ValidateOperationPrivateRequestV1(request) != nil {
+			return localapi.DirectMessageResult{}, errors.New("invalid operation outcome private request")
+		}
+		value = payload.OperationOutcome{OperationID: request.OperationID,
+			OperationEnvelopeDigest: request.OperationEnvelopeDigest, CanonicalRequest: canonical}
+	case "agreement.withdraw", "agreement.delivery", "private.handoff.status", "private.handoff.delete":
+		decoded, err := payload.Decode(kind, canonical)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		value = decoded
+	case "private.handoff.challenge":
+		var challenge commerce.SignedPrivateHandoffChallenge
+		if err := protocolcodec.Unmarshal(canonical, &challenge); err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		digest, err := commerce.PrivateHandoffChallengeDigest(challenge.Body)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		value = payload.PrivateHandoffChallenge{ChallengeDigest: digest, CanonicalChallenge: canonical}
+	case "private.handoff.authorization":
+		var authorization commerce.SignedPrivateHandoffAuthorization
+		if err := protocolcodec.Unmarshal(canonical, &authorization); err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		digest, err := commerce.PrivateHandoffAuthorizationDigest(authorization.Body)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		value = payload.PrivateHandoffAuthorization{ChallengeDigest: authorization.Body.ChallengeDigest,
+			AuthorizationDigest: digest, CanonicalAuthorization: canonical}
+	case "private.handoff.acknowledgement":
+		var acknowledgement commerce.SignedPrivateHandoffAcknowledgement
+		if err := protocolcodec.Unmarshal(canonical, &acknowledgement); err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		digest, err := commerce.PrivateHandoffAcknowledgementDigest(acknowledgement)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+		value = payload.PrivateHandoffAcknowledgement{ChallengeDigest: acknowledgement.Record.ChallengeDigest,
+			AcknowledgementDigest: digest, CanonicalAcknowledgement: canonical}
+	default:
+		return localapi.DirectMessageResult{}, errors.New("unsupported direct application kind")
+	}
+	content, err := payload.Encode(value)
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	return d.sendDirectApplication(ctx, input, kind, content, idempotencyKey, expiresAt)
+}
+
+func (d *Daemon) sendDirectApplication(ctx context.Context, input, kind string, content []byte,
+	idempotencyKey string, expiresAt uint64) (localapi.DirectMessageResult, error) {
+	resolved, err := d.ResolveContact(ctx, input, d.contactDNS)
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	now := time.Now()
+	if d.now != nil {
+		now = d.now()
+	}
+	if expiresAt <= uint64(now.Unix()) {
+		return localapi.DirectMessageResult{}, errors.New("direct message expiry is not in the future")
+	}
+	var entropy [32]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return localapi.DirectMessageResult{}, errors.New("create direct conversation identity")
+	}
+	record, _, err := d.journal.EnsureDirectConversation(d.config.AgentID, resolved.AgentID,
+		resolved.Directory.Descriptor.EndpointID, resolved.Directory.FinalizedCheckpoint, now, entropy)
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	if d.prekeys == nil || d.prekeys.signer == nil {
+		return localapi.DirectMessageResult{}, errors.New("direct session bootstrap is not configured")
+	}
+	targets, err := d.ensureDirectSessions(resolved, record.ConversationID, now)
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	if len(targets) == 0 {
+		return localapi.DirectMessageResult{}, errors.New("direct message has no verified device target")
+	}
+	event, err := envelope.NewEvent(envelope.Event{Network: d.config.Network(),
+		ConversationID: record.ConversationID, SenderAgentID: d.config.AgentID,
+		SenderEndpointID: d.config.EndpointID, SenderDeviceID: d.config.DeviceID,
+		CreatedAtUnix: uint64(now.Unix()), ExpiresAtUnix: expiresAt, Kind: kind,
+		IdempotencyKey: strings.TrimPrefix(idempotencyKey, "idem_"), Content: content})
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	encoded, err := envelope.EncodeEventJSON(event)
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	intent := bytes.NewBufferString(canon.DomainOutboundIntent)
+	for _, value := range []string{d.config.AgentID, resolved.AgentID, record.ConversationID,
+		kind, idempotencyKey} {
+		canon.Text(intent, value)
+	}
+	canon.Bytes(intent, content)
+	canon.Uint64(intent, expiresAt)
+	chosen, _, err := d.journal.ClaimOutboundComposition(idempotencyKey, canon.Digest(intent.Bytes()),
+		eventlog.Outbound{EventID: event.EventID, SessionID: targets[0].SessionID,
+			RecipientEndpointID: targets[0].RecipientEndpointID, ConversationID: record.ConversationID,
+			Payload: encoded, CreatedAtUnix: uint64(now.Unix()), ExpiresAtUnix: expiresAt})
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	if chosen.EventID != event.EventID {
+		event, err = envelope.DecodeEventJSON(chosen.Payload)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+	}
+	if _, err := d.dispatch.QueueCopies(event, targets, chosen.ExpiresAtUnix); err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	return localapi.DirectMessageResult{AgentID: resolved.AgentID, CanonicalName: resolved.CanonicalName,
+		ConversationID: record.ConversationID, EventID: event.EventID, Readiness: "queued"}, nil
+}
+
+// ReplyDirectMessage derives the counterparty and all routing authority from
+// one durably authenticated inbound Event and its verified device session.
+func (d *Daemon) ReplyDirectMessage(ctx context.Context, replyToEventID, mediaType, body,
+	idempotencyKey string, expiresAt uint64) (localapi.DirectMessageResult, error) {
+	inbound, found, err := d.journal.Lookup(replyToEventID)
+	if err != nil || !found {
+		return localapi.DirectMessageResult{}, errors.New("direct reply source Event is not durable")
+	}
+	if inbound.Admission != eventlog.AdmissionAdmitted || inbound.Crypto != eventlog.CryptoCommitted ||
+		inbound.SessionID == "" {
+		return localapi.DirectMessageResult{}, errors.New("direct reply source Event is not authenticated and admitted")
+	}
+	raw, err := inbound.Payload()
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	source, err := envelope.DecodeEventJSON(raw)
+	if err != nil || source.RoomID != "" {
+		return localapi.DirectMessageResult{}, errors.New("direct reply source is not a direct Messenger Event")
+	}
+	session, found, err := d.journal.SessionState(inbound.SessionID)
+	if err != nil || !found || session.Authority == nil {
+		return localapi.DirectMessageResult{}, errors.New("direct reply source has no verified session authority")
+	}
+	authority := session.Authority
+	if authority.LocalAgentID != d.config.AgentID || authority.LocalEndpointID != d.config.EndpointID ||
+		authority.LocalDeviceID != d.config.DeviceID || authority.PeerAgentID != source.SenderAgentID ||
+		authority.PeerEndpointID != source.SenderEndpointID || authority.PeerDeviceID != source.SenderDeviceID {
+		return localapi.DirectMessageResult{}, errors.New("direct reply source conflicts with session authority")
+	}
+	now := time.Now()
+	if d.now != nil {
+		now = d.now()
+	}
+	if expiresAt <= uint64(now.Unix()) {
+		return localapi.DirectMessageResult{}, errors.New("direct reply expiry is not in the future")
+	}
+	resolved, err := d.discovery.contacts.Ensure(ctx, authority.PeerAgentID)
+	if err != nil || resolved.Delegation.AgentID != authority.PeerAgentID ||
+		resolved.Descriptor.EndpointID != authority.PeerEndpointID {
+		return localapi.DirectMessageResult{}, errors.New("direct reply peer Endpoint is no longer verified")
+	}
+	targets, err := d.ensureDirectSessions(contact.Result{AgentID: authority.PeerAgentID, Directory: resolved},
+		source.ConversationID, now)
+	if err != nil || len(targets) == 0 {
+		return localapi.DirectMessageResult{}, errors.New("direct reply has no verified device target")
+	}
+	content, err := payload.Encode(payload.Text{MediaType: mediaType, Body: body})
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	event, err := envelope.NewEvent(envelope.Event{Network: d.config.Network(),
+		ConversationID: source.ConversationID, SenderAgentID: d.config.AgentID,
+		SenderEndpointID: d.config.EndpointID, SenderDeviceID: d.config.DeviceID,
+		ReplyToEventID: source.EventID, CreatedAtUnix: uint64(now.Unix()), ExpiresAtUnix: expiresAt,
+		Kind: "text", IdempotencyKey: strings.TrimPrefix(idempotencyKey, "idem_"), Content: content})
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	encoded, err := envelope.EncodeEventJSON(event)
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	intent := bytes.NewBufferString(canon.DomainOutboundIntent)
+	for _, value := range []string{d.config.AgentID, authority.PeerAgentID, source.ConversationID,
+		source.EventID, mediaType, body, idempotencyKey} {
+		canon.Text(intent, value)
+	}
+	canon.Uint64(intent, expiresAt)
+	chosen, _, err := d.journal.ClaimOutboundComposition(idempotencyKey, canon.Digest(intent.Bytes()),
+		eventlog.Outbound{EventID: event.EventID, SessionID: targets[0].SessionID,
+			RecipientEndpointID: targets[0].RecipientEndpointID, ConversationID: source.ConversationID,
+			Payload: encoded, CreatedAtUnix: uint64(now.Unix()), ExpiresAtUnix: expiresAt})
+	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	if chosen.EventID != event.EventID {
+		event, err = envelope.DecodeEventJSON(chosen.Payload)
+		if err != nil {
+			return localapi.DirectMessageResult{}, err
+		}
+	}
+	if _, err := d.dispatch.QueueCopies(event, targets, chosen.ExpiresAtUnix); err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	return localapi.DirectMessageResult{AgentID: authority.PeerAgentID, ConversationID: source.ConversationID,
+		EventID: event.EventID, Readiness: "queued"}, nil
+}
+
+// ensureDirectSessions establishes every reachable recipient-device session
+// from verified directory bundles. Endpoint, Device and session choices remain
+// daemon-owned; neither the local API nor OpenFox can supply them.
+func (d *Daemon) ensureDirectSessions(resolved contact.Result, conversationID string, now time.Time) ([]dispatch.CopyTarget, error) {
+	localBundle, private, err := d.prekeys.localBootstrapMaterial(now)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		for index := range private {
+			private[index] = 0
+		}
+	}()
+	if len(resolved.Directory.Bundles) == 0 {
+		return nil, errors.New("verified recipient directory has no device prekeys")
+	}
+	sessions := make(map[string]bool)
+	for _, bundle := range append(append([]e2ee.Bundle(nil), resolved.Directory.Bundles...),
+		d.prekeysCurrentBundles(now)...) {
+		sessionID, sessionErr := e2ee.DeviceSessionID(d.config.DeviceID, bundle.DeviceID)
+		if sessionErr != nil {
+			continue
+		}
+		_, found, lookupErr := d.journal.SessionState(sessionID)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		sessions[sessionID] = found
+	}
+	senderSet := d.prekeysCurrentBundles(now)
+	plan, err := e2ee.FanOut(e2ee.PlanInput{SenderDeviceID: d.config.DeviceID,
+		SenderSet: senderSet, RecipientSet: resolved.Directory.Bundles, Now: now,
+		SessionExists: func(sessionID string) bool { return sessions[sessionID] }})
+	if err != nil {
+		return nil, err
+	}
+	if len(plan.Unreachable) != 0 {
+		return nil, errors.New("one or more verified recipient devices have no live session bootstrap")
+	}
+	bundles := make(map[string]e2ee.Bundle, len(senderSet)+len(resolved.Directory.Bundles))
+	for _, bundle := range senderSet {
+		bundles[bundle.DeviceID] = bundle
+	}
+	for _, bundle := range resolved.Directory.Bundles {
+		bundles[bundle.DeviceID] = bundle
+	}
+	targets := append(append([]e2ee.Target(nil), plan.Recipients...), plan.SelfCopies...)
+	deliveryTargets := make([]dispatch.CopyTarget, 0, len(targets))
+	for _, target := range targets {
+		peer, found := bundles[target.DeviceID]
+		if !found {
+			return nil, errors.New("fan-out selected a device without verified prekey material")
+		}
+		deliveryTargets = append(deliveryTargets, dispatch.CopyTarget{SessionID: target.SessionID,
+			RecipientEndpointID: peer.EndpointID, RecipientDeviceID: peer.DeviceID})
+		if !target.Bootstrap {
+			continue
+		}
+		binding := e2ee.Binding{Network: d.config.Network(), AlgorithmID: localBundle.AlgorithmID,
+			ConversationID: conversationID, SenderAgentID: d.config.AgentID,
+			SenderEndpointID: d.config.EndpointID, SenderDeviceID: d.config.DeviceID,
+			RecipientAgentID: peer.AgentID, RecipientEndpointID: peer.EndpointID,
+			RecipientDeviceID: peer.DeviceID}
+		bindingBytes, err := binding.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		state, initial, err := d.prekeys.suite.Initiate(private, peer.Material, bindingBytes)
+		if err != nil {
+			return nil, errors.New("initiate device session: " + err.Error())
+		}
+		err = d.journal.PutBootstrappedSessionState(target.SessionID, state, e2ee.FirstContact{
+			Binding: binding, SenderBundle: localBundle,
+			RecipientBundleDigest: target.BundleDigest, Initial: initial,
+		}, now)
+		if errors.Is(err, eventlog.ErrSessionConflict) {
+			// A concurrent exact ensure won. Its deterministic session identity is
+			// authoritative; reload validates that a usable record exists.
+			if _, found, reloadErr := d.journal.SessionState(target.SessionID); reloadErr == nil && found {
+				continue
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return deliveryTargets, nil
+}
+
+func (d *Daemon) prekeysCurrentBundles(now time.Time) []e2ee.Bundle {
+	if d == nil || d.prekeys == nil || d.prekeys.planner == nil {
+		return nil
+	}
+	collection, found, err := d.prekeys.planner.contributions.CurrentPrekeyCollection(
+		d.prekeys.planner.delegation, now)
+	if err != nil || !found {
+		return nil
+	}
+	return collection.Contributions
+}
+
+// Open assembles a daemon and takes ownership of its state.
+//
+// Ownership is taken before anything else: the journal's directory lock is
+// what makes a second daemon on the same state fail immediately rather than
+// two of them interleaving writes for a while first.
+func Open(config Config, observer Observer) (*Daemon, error) {
+	return openWithDiscoveryAndPublisher(config, observer, finalizedVerifier{}, productionDiscoveryBuilder{}, nil, nil)
+}
+
+// OpenWithGenerationPublisher assembles the daemon with an externally
+// custodied Endpoint signer and explicit public sinks. The daemon never
+// accepts private-key bytes through this boundary.
+func OpenWithGenerationPublisher(config Config, observer Observer, publisher *directory.GenerationPublisher) (*Daemon, error) {
+	if publisher == nil {
+		return nil, errors.New("no public generation publisher")
+	}
+	return openWithDiscoveryAndPublisher(config, observer, finalizedVerifier{}, productionDiscoveryBuilder{}, publisher, nil)
+}
+
+// OpenWithOperatorResources assembles optional public-generation and outbound
+// attachment resources after the command has pinned them to live finalized
+// authority. Private Endpoint key bytes cross neither boundary.
+func OpenWithOperatorResources(config Config, observer Observer, publisher *directory.GenerationPublisher,
+	attachment *attachmentops.Resources) (*Daemon, error) {
+	if publisher == nil && attachment == nil {
+		return nil, errors.New("no operator resources")
+	}
+	return openWithDiscoveryAndPublisher(config, observer, finalizedVerifier{}, productionDiscoveryBuilder{}, publisher, attachment)
+}
+
+func open(config Config, observer Observer, verifier delegationVerifier) (*Daemon, error) {
+	return openWithDiscoveryAndPublisher(config, observer, verifier, productionDiscoveryBuilder{}, nil, nil)
+}
+
+func openWithDiscovery(config Config, observer Observer, verifier delegationVerifier, builder discoveryBuilder) (*Daemon, error) {
+	return openWithDiscoveryAndPublisher(config, observer, verifier, builder, nil, nil)
+}
+
+func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier delegationVerifier,
+	builder discoveryBuilder, publisher *directory.GenerationPublisher, attachmentResources *attachmentops.Resources) (*Daemon, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	config.Publication.DeviceIDs = append([]string(nil), config.Publication.DeviceIDs...)
+	if verifier == nil {
+		return nil, errors.New("no finalized delegation verifier")
+	}
+	if builder == nil {
+		return nil, errors.New("no directory discovery builder")
+	}
+	journal, err := eventlog.Open(config.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	instance := &Daemon{config: config, journal: journal, observer: observer, now: time.Now}
+	assembled := false
+	defer func() {
+		if !assembled && instance.contactDNS != nil {
+			_ = instance.contactDNS.Close()
+		}
+	}()
+	delegation, err := verifier.Verify(config, time.Now())
+	if err != nil {
+		_ = journal.Close()
+		return nil, errors.New("verify finalized endpoint delegation: " + err.Error())
+	}
+	if delegation.AgentID != config.AgentID || delegation.EndpointID != config.EndpointID {
+		_ = journal.Close()
+		return nil, errors.New("finalized delegation does not authorize the configured endpoint")
+	}
+	policy, err := config.AdmissionPolicy()
+	if err != nil {
+		_ = journal.Close()
+		return nil, err
+	}
+	if delegation.InboxAdmissionPolicyDigest != policy.Digest() {
+		_ = journal.Close()
+		return nil, errors.New("finalized delegation commits another inbox admission policy")
+	}
+
+	salt, err := loadOrCreateSalt(filepath.Join(config.StateDir, SaltFile))
+	if err != nil {
+		_ = journal.Close()
+		return nil, err
+	}
+	instance.salt = salt
+
+	// With no transport the dispatcher can queue and not send, which is what
+	// this installation can honestly do.
+	dispatcher, err := dispatch.New(dispatch.Config{
+		Journal: journal, Identity: config.Identity(),
+		Network:             config.Network(),
+		AllowedEventClasses: append([]string(nil), delegation.AllowedOutboundEventClasses...),
+	})
+	if err != nil {
+		_ = journal.Close()
+		return nil, err
+	}
+	instance.dispatch = dispatcher
+
+	ownerKey, err := config.OwnerKey()
+	if err != nil {
+		_ = journal.Close()
+		return nil, err
+	}
+	serverConfig := localapi.Config{
+		Policy: config.FirewallPolicy(), OwnerKey: ownerKey,
+		Journal: journal, Dispatcher: dispatcher, LocalEndpointID: config.EndpointID,
+		DeviceIDs: append([]string(nil), config.Publication.DeviceIDs...),
+	}
+	if attachmentResources != nil {
+		emitter, emitterErr := attachmentResources.NewEmitter(config.StateDir, dispatcher)
+		if emitterErr != nil {
+			_ = journal.Close()
+			return nil, errors.New("build outbound attachment emitter: " + emitterErr.Error())
+		}
+		serverConfig.AttachmentEmitter = emitter
+	}
+	if config.AttachmentAdmission != nil {
+		openPolicy, contentPolicy, httpsConfig, policyErr := config.AttachmentAdmission.Policies()
+		if policyErr != nil {
+			_ = journal.Close()
+			return nil, policyErr
+		}
+		admitter, admissionErr := attachmentadmission.New(attachmentadmission.Config{
+			OpenPolicy: openPolicy, ContentPolicy: contentPolicy, HTTPS: httpsConfig, Now: instance.now,
+		})
+		if admissionErr != nil {
+			_ = journal.Close()
+			return nil, errors.New("build attachment admission: " + admissionErr.Error())
+		}
+		serverConfig.AttachmentAdmitter = admitter
+	}
+	var contactDNS contact.DNSAliasClient
+	if config.ContactDNS != nil {
+		client, clientErr := config.ContactDNS.Client()
+		if clientErr != nil {
+			_ = journal.Close()
+			return nil, clientErr
+		}
+		instance.contactDNS = client
+		contactDNS = client
+	}
+	serverConfig.ContactResolver = contactResolveFunc(func(ctx context.Context, input string) (contact.Result, error) {
+		return instance.ResolveContact(ctx, input, contactDNS)
+	})
+	serverConfig.DirectConversationEnsurer = directConversationEnsureFunc(
+		func(ctx context.Context, input string) (localapi.DirectConversationResult, error) {
+			return instance.EnsureDirectConversation(ctx, input, contactDNS)
+		},
+	)
+	serverConfig.DirectMessageSender = daemonDirectMessenger{daemon: instance}
+	economicKeys, err := config.EconomicAuthorityKeys()
+	if err != nil {
+		_ = journal.Close()
+		return nil, err
+	}
+	if len(economicKeys) != 0 {
+		verifier, verifierErr := config.MLDSA44VerifierHelper()
+		if verifierErr != nil {
+			_ = journal.Close()
+			return nil, errors.New("build Action Authority verifier: " + verifierErr.Error())
+		}
+		economicStore, storeErr := economicaction.Open(config.StateDir, economicKeys, verifier)
+		if storeErr != nil {
+			_ = journal.Close()
+			return nil, errors.New("open economic action store: " + storeErr.Error())
+		}
+		serverConfig.EconomicActionAdmitter = economicStore
+	}
+	server, err := localapi.NewServer(serverConfig)
+	if err != nil {
+		_ = journal.Close()
+		return nil, err
+	}
+	instance.server = server
+	if config.AgentPacketReceiverSocket != "" {
+		resolver, resolverErr := newFinalizedPacketResolver(config)
+		if resolverErr != nil {
+			_ = journal.Close()
+			return nil, errors.New("build Agent Packet resolver: " + resolverErr.Error())
+		}
+		receiver, receiverErr := agentpacketbridge.NewUnixReceiver(
+			config.AgentPacketReceiverSocket, config.AgentPacketReceiverTimeout())
+		if receiverErr != nil {
+			_ = journal.Close()
+			return nil, receiverErr
+		}
+		verifier, verifierErr := config.MLDSA44VerifierHelper()
+		if verifierErr != nil {
+			_ = journal.Close()
+			return nil, errors.New("build Agent Packet verifier: " + verifierErr.Error())
+		}
+		bridge, bridgeErr := agentpacketbridge.New(agentpacketbridge.Config{
+			Resolver: resolver, Verifier: verifier, Journal: journal, Receiver: receiver, RecipientAgentID: config.AgentID,
+		})
+		if bridgeErr != nil {
+			_ = journal.Close()
+			return nil, bridgeErr
+		}
+		instance.agentPackets = bridge
+	}
+	discovery, err := builder.Build(config, journal, observer)
+	if err != nil {
+		_ = journal.Close()
+		return nil, errors.New("build peer discovery: " + err.Error())
+	}
+	instance.discovery = discovery
+	if discovery != nil && discovery.resolver != nil && discovery.devices != nil {
+		localDelegation, readErr := securefile.ReadBoundedRegular(config.DelegationPath, maxDelegationFileBytes)
+		if readErr != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("read local admission delegation: " + readErr.Error())
+		}
+		rooms, roomsErr := journal.OpenRooms()
+		if roomsErr != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("open room admission ledger: " + roomsErr.Error())
+		}
+		gate, gateErr := admission.New(admission.Config{Network: config.Network(), Chain: discovery.chain,
+			Resolver: discovery.resolver, Journal: journal, Policy: policy, Devices: discovery.devices, Rooms: rooms,
+			LocalDelegationJSON: localDelegation, LocalAgentID: config.AgentID, LocalEndpointID: config.EndpointID,
+			Now: instance.now, InstallSalt: instance.salt})
+		if gateErr != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("build inbound admission gate: " + gateErr.Error())
+		}
+		instance.admission = gate
+	}
+	prekeys, err := newPrekeyRuntime(config, delegation, journal, time.Now)
+	if err != nil {
+		_ = discovery.Close()
+		_ = journal.Close()
+		return nil, err
+	}
+	if publisher != nil {
+		if prekeys == nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("public generation publisher requires prekey publication mode")
+		}
+		owned := *publisher
+		owned.Delegation = delegation
+		if err := owned.Validate(); err != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("configure public generation publisher: " + err.Error())
+		}
+		prekeys.publisher = &owned
+		if err := prekeys.configureLocalDevice(config.DeviceID, owned.Signer); err != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("configure local device prekeys: " + err.Error())
+		}
+	}
+	instance.prekeys = prekeys
+	if config.Transport == TransportHTTPSBootstrap {
+		if err := instance.configureHTTPSBootstrap(); err != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("configure HTTPS bootstrap transport: " + err.Error())
+		}
+	}
+
+	listener, err := localapi.Listen(config.SocketPath)
+	if err != nil {
+		_ = discovery.Close()
+		_ = journal.Close()
+		return nil, err
+	}
+	instance.listener = listener
+
+	owner, err := localapi.Listen(config.OwnerSocketPath)
+	if err != nil {
+		_ = listener.Close()
+		_ = os.Remove(config.SocketPath)
+		_ = discovery.Close()
+		_ = journal.Close()
+		return nil, err
+	}
+	instance.owner = owner
+	if prekeys != nil {
+		device, err := prekeyapi.Listen(config.Publication.DeviceSocketPath)
+		if err != nil {
+			_ = owner.Close()
+			_ = listener.Close()
+			_ = os.Remove(config.OwnerSocketPath)
+			_ = os.Remove(config.SocketPath)
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, err
+		}
+		prekeys.listener = device
+	}
+	assembled = true
+	return instance, nil
+}
+
+// InstallSalt returns the per-install value used for decision records.
+func (d *Daemon) InstallSalt() []byte {
+	if d == nil {
+		return nil
+	}
+	return append([]byte(nil), d.salt...)
+}
+
+// SocketPath returns where the Agent runtime connects.
+func (d *Daemon) SocketPath() string {
+	if d == nil {
+		return ""
+	}
+	return d.config.SocketPath
+}
+
+// OwnerSocketPath returns where the owner decides.
+func (d *Daemon) OwnerSocketPath() string {
+	if d == nil {
+		return ""
+	}
+	return d.config.OwnerSocketPath
+}
+
+// PrekeySocketPath returns the public-only device contribution socket, or an
+// empty string when publication is disabled.
+func (d *Daemon) PrekeySocketPath() string {
+	if d == nil || d.prekeys == nil {
+		return ""
+	}
+	return d.config.Publication.DeviceSocketPath
+}
+
+// Run serves the local API and keeps the schedule until the context ends.
+//
+// It returns when everything has stopped, so a caller that waits on Run knows
+// the state directory is released rather than merely no longer in use.
+func (d *Daemon) Run(ctx context.Context) error {
+	if d == nil {
+		return errors.New("no daemon")
+	}
+	var group sync.WaitGroup
+	if d.discovery != nil {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if err := d.discovery.runner.Run(ctx, d.discovery.peers, d.config.Discovery.RefreshInterval()); err != nil && ctx.Err() == nil {
+				d.report("directory", err)
+			}
+		}()
+	}
+	for _, endpoint := range []struct {
+		listener  net.Listener
+		principal localapi.Principal
+	}{
+		{d.listener, localapi.PrincipalRuntime},
+		{d.owner, localapi.PrincipalOwner},
+	} {
+		group.Add(1)
+		go func(listener net.Listener, principal localapi.Principal) {
+			defer group.Done()
+			if err := d.server.Serve(ctx, listener, principal); err != nil && !isClosed(err) {
+				d.report("serve", err)
+			}
+		}(endpoint.listener, endpoint.principal)
+	}
+	if d.prekeys != nil {
+		group.Add(2)
+		go func() {
+			defer group.Done()
+			if err := d.prekeys.server.Serve(ctx, d.prekeys.listener); err != nil && !isClosed(err) {
+				d.report("serve prekey devices", err)
+			}
+		}()
+		go func() {
+			defer group.Done()
+			d.prekeys.runPlanner(ctx, func(err error) { d.report("plan prekeys", err) })
+		}()
+		if d.prekeys.publisher != nil {
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				d.prekeys.runPublisher(ctx, func(err error) { d.report("publish prekeys", err) })
+			}()
+		}
+	}
+	if d.agentPackets != nil {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			d.runAgentPackets(ctx)
+		}()
+	}
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		d.runHistorySync(ctx)
+	}()
+
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		d.schedule(ctx)
+	}()
+
+	<-ctx.Done()
+	// Closing the listeners is what unblocks Accept; the schedule stops on the
+	// same context.
+	_ = d.listener.Close()
+	_ = d.owner.Close()
+	if d.prekeys != nil {
+		_ = d.prekeys.listener.Close()
+	}
+	group.Wait()
+	return d.Close()
+}
+
+func (d *Daemon) runHistorySync(ctx context.Context) {
+	ticker := time.NewTicker(d.config.SweepInterval())
+	defer ticker.Stop()
+	for {
+		d.sweepHistorySync(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (d *Daemon) sweepHistorySync(ctx context.Context) {
+	nowFn := d.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	records, err := d.journal.ListPending(nowFn(), 0)
+	if err != nil {
+		d.report("list device history", err)
+		return
+	}
+	for _, record := range records {
+		if ctx.Err() != nil {
+			return
+		}
+		raw, err := record.Payload()
+		if err != nil {
+			continue
+		}
+		event, err := envelope.DecodeEventJSON(raw)
+		if err != nil || event.Kind != "device.history.segment" {
+			continue
+		}
+		decoded, err := payload.Decode(event.Kind, event.Content)
+		segment, ok := decoded.(payload.DeviceHistorySegment)
+		if err != nil || !ok {
+			d.report("decode device history", errors.New("invalid admitted device history payload"))
+			continue
+		}
+		var entropy [32]byte
+		if _, err := rand.Read(entropy[:]); err != nil {
+			d.report("claim device history", err)
+			return
+		}
+		leaseID, err := eventlog.NewLeaseID(entropy[:])
+		if err != nil {
+			d.report("claim device history", err)
+			return
+		}
+		now := nowFn()
+		if _, err := d.journal.ClaimForApplicationKind(record.EventID, leaseID, now, time.Minute, "device.history.segment"); err != nil {
+			if !errors.Is(err, eventlog.ErrLeaseMismatch) && !errors.Is(err, eventlog.ErrNotPending) {
+				d.report("claim device history", err)
+			}
+			continue
+		}
+		_, applyErr := d.journal.ApplyHistorySegment(event, segment, d.config.AgentID, d.config.EndpointID,
+			d.config.DeviceID, d.config.Publication.DeviceIDs, now)
+		if applyErr == nil {
+			if _, err := d.journal.CompleteApplication(record.EventID, leaseID, nowFn()); err != nil {
+				d.report("complete device history", err)
+			}
+			continue
+		}
+		if errors.Is(applyErr, eventlog.ErrHistorySequence) {
+			d.report("await prior device history", applyErr)
+			continue
+		}
+		code := fault.CodePayloadMalformed
+		if errors.Is(applyErr, eventlog.ErrHistoryDevice) {
+			code = fault.CodeDeviceRevoked
+		}
+		if errors.Is(applyErr, eventlog.ErrHistoryContent) || errors.Is(applyErr, eventlog.ErrHistoryRoute) ||
+			errors.Is(applyErr, eventlog.ErrHistoryDevice) {
+			if _, err := d.journal.RejectApplication(record.EventID, leaseID, code, nowFn()); err != nil {
+				d.report("reject device history", err)
+			}
+			continue
+		}
+		d.report("apply device history", applyErr)
+	}
+}
+
+func (d *Daemon) runAgentPackets(ctx context.Context) {
+	ticker := time.NewTicker(d.config.SweepInterval())
+	defer ticker.Stop()
+	for {
+		d.sweepAgentPackets(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// sweepAgentPackets consumes only the typed daemon-owned application class.
+// The kind check and lease acquisition are one journal operation, so a stale
+// listing cannot make this adapter take ordinary runtime work.
+func (d *Daemon) sweepAgentPackets(ctx context.Context) {
+	nowFn := d.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	records, err := d.journal.ListPending(nowFn(), 0)
+	if err != nil {
+		d.report("list Agent Packets", err)
+		return
+	}
+	for _, record := range records {
+		if ctx.Err() != nil {
+			return
+		}
+		raw, err := record.Payload()
+		if err != nil {
+			continue
+		}
+		event, err := envelope.DecodeEventJSON(raw)
+		if err != nil || event.Kind != "agent.packet" {
+			continue
+		}
+		decoded, err := payload.Decode(event.Kind, event.Content)
+		body, ok := decoded.(payload.AgentPacketMessage)
+		if err != nil || !ok {
+			d.report("decode Agent Packet", errors.New("invalid admitted Agent Packet payload"))
+			continue
+		}
+		var entropy [32]byte
+		if _, err := rand.Read(entropy[:]); err != nil {
+			d.report("claim Agent Packet", err)
+			return
+		}
+		leaseID, err := eventlog.NewLeaseID(entropy[:])
+		if err != nil {
+			d.report("claim Agent Packet", err)
+			return
+		}
+		now := nowFn()
+		lease := d.config.AgentPacketReceiverTimeout() + 5*time.Second
+		if _, err := d.journal.ClaimForApplicationKind(record.EventID, leaseID, now, lease, "agent.packet"); err != nil {
+			if !errors.Is(err, eventlog.ErrLeaseMismatch) && !errors.Is(err, eventlog.ErrNotPending) {
+				d.report("claim Agent Packet", err)
+			}
+			continue
+		}
+		if err := d.agentPackets.Handle(ctx, event.SenderAgentID, body, now); err != nil {
+			d.report("deliver Agent Packet", err)
+			continue
+		}
+		if _, err := d.journal.CompleteApplication(record.EventID, leaseID, nowFn()); err != nil {
+			d.report("complete Agent Packet", err)
+		}
+	}
+}
+
+// Close releases the state directory and removes the socket.
+func (d *Daemon) Close() error {
+	if d == nil {
+		return nil
+	}
+	var err error
+	d.closeOnce.Do(func() {
+		_ = d.listener.Close()
+		_ = d.owner.Close()
+		if d.prekeys != nil && d.prekeys.listener != nil {
+			_ = d.prekeys.listener.Close()
+		}
+		// The sockets are removed only by the daemon that created them, and
+		// only once it is done with the state it was serving.
+		_ = os.Remove(d.config.SocketPath)
+		_ = os.Remove(d.config.OwnerSocketPath)
+		if d.prekeys != nil {
+			_ = os.Remove(d.config.Publication.DeviceSocketPath)
+		}
+		_ = d.discovery.Close()
+		if d.contactDNS != nil {
+			_ = d.contactDNS.Close()
+		}
+		err = d.journal.Close()
+	})
+	return err
+}
+
+func (d *Daemon) schedule(ctx context.Context) {
+	sweep := time.NewTicker(d.config.SweepInterval())
+	defer sweep.Stop()
+	maintenance := time.NewTicker(d.config.MaintenanceInterval())
+	defer maintenance.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sweep.C:
+			d.Sweep(ctx)
+		case <-maintenance.C:
+			d.Maintain()
+		}
+	}
+}
+
+// Sweep attempts every due delivery. With no transport it does nothing and
+// says so once rather than reporting an empty success on every tick.
+func (d *Daemon) Sweep(ctx context.Context) {
+	if !d.dispatch.CanSend() {
+		return
+	}
+	summary, err := d.dispatch.Sweep(ctx, 0)
+	if err != nil {
+		d.report("sweep", err)
+		return
+	}
+	if d.observer != nil {
+		d.observer.Swept(summary)
+	}
+}
+
+// Maintain settles what has expired and removes what is finished.
+//
+// Expiry runs before pruning, because an event that has just expired is
+// finished work and the sweep that removes finished work should see it in the
+// same pass rather than a maintenance interval later.
+func (d *Daemon) Maintain() {
+	now := time.Now()
+	expired, err := d.journal.ExpireDeliveries(now)
+	if err != nil {
+		d.report("expire", err)
+		return
+	}
+	// Questions nobody answered are retired in the same pass. A queue only a
+	// person can drain would otherwise grow until the disk decided for them.
+	undecided, err := d.journal.ExpirePendingAdmissions(now)
+	if err != nil {
+		d.report("expire admissions", err)
+		return
+	}
+	unanswered, err := d.journal.ExpirePendingApprovals(now)
+	if err != nil {
+		d.report("expire approvals", err)
+		return
+	}
+	expired += undecided + unanswered
+	report, err := d.journal.Prune(now, d.config.Retention())
+	if err != nil {
+		d.report("prune", err)
+		return
+	}
+	if d.observer != nil {
+		d.observer.Maintained(expired, report)
+	}
+}
+
+func (d *Daemon) report(stage string, err error) {
+	if d.observer != nil {
+		d.observer.Failed(stage, err)
+	}
+}
+
+// loadOrCreateSalt keeps decision records correlatable within one install and
+// meaningless outside it. A salt regenerated on every start would make a
+// node's own logs uncorrelatable with themselves.
+func loadOrCreateSalt(path string) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		decoded, err := hex.DecodeString(strings.TrimSpace(string(raw)))
+		if err != nil || len(decoded) < SaltBytes {
+			return nil, errors.New("install salt file is unusable")
+		}
+		return decoded, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, errors.New("read install salt")
+	}
+	salt := make([]byte, SaltBytes)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, errors.New("generate install salt")
+	}
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(salt)+"\n"), 0o600); err != nil {
+		return nil, errors.New("write install salt")
+	}
+	return salt, nil
+}
+
+func isClosed(err error) bool {
+	return errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled)
+}

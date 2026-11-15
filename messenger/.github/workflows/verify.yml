@@ -1,0 +1,157 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # The tosctl build that verifies ML-DSA-44 Action Authority and Agent Packet
+  # signatures and, for the context-separation tests, signs custody
+  # authorizations. Tests that check real ML-DSA-44 bytes fail, rather than
+  # skip, without it. Repin when the helper lands on the tos main branch.
+  TOS_HELPER_REPOSITORY: tosnetwork/tos
+  TOS_HELPER_COMMIT: c41331dd3103c0eac719d7e5f368079f0a40e64f
+
+jobs:
+  verify:
+    # Pinned: the attachment scanner sandbox depends on the image (bubblewrap,
+    # the user systemd manager, AppArmor policy), and an unannounced image
+    # change must not silently change what the sandbox tests cover.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      # The helper is built outside the workspace so the repository's own
+      # format and vet checks never walk its source tree.
+      - name: Fetch the pinned tosctl helper source
+        run: |
+          git init -q "$RUNNER_TEMP/tos"
+          git -C "$RUNNER_TEMP/tos" fetch -q --depth 1 "https://github.com/$TOS_HELPER_REPOSITORY" "$TOS_HELPER_COMMIT"
+          git -C "$RUNNER_TEMP/tos" checkout -q FETCH_HEAD
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build and pin the tosctl helper
+        run: |
+          cd "$RUNNER_TEMP/tos/tosctl/src"
+          cargo build -p tosctl --bin tosctl --locked
+          helper="$RUNNER_TEMP/tos/tosctl/src/target/debug/tosctl"
+          chmod 0755 "$helper"
+          echo "TOS_SERVICE_TOSCTL=$helper" >> "$GITHUB_ENV"
+          echo "TOS_SERVICE_TOSCTL_SHA256=$(sha256sum "$helper" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # Formatting is checked rather than applied, so a difference is a failure
+      # and not a commit made by the pipeline.
+      - name: format
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      # The attachment scanner runs a pinned, staged copy of bubblewrap in an
+      # unprivileged user namespace. The runner restricts such namespaces
+      # through AppArmor (kernel.apparmor_restrict_unprivileged_userns=1) and
+      # no profile covers the staged copy, so bwrap cannot configure the
+      # sandbox ("loopback: Failed RTM_NEWADDR: Operation not permitted").
+      # Lift the restriction for this job, and install bubblewrap where an
+      # image lacks it, so the sandbox tests run instead of skipping.
+      - name: Provide the attachment scanner sandbox
+        run: |
+          command -v bwrap >/dev/null || { sudo apt-get update && sudo apt-get install -y bubblewrap; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # The race detector is the point of running tests here. Most of what this
+      # repository gets wrong under concurrency is invisible without it.
+      - name: test
+        run: go test -race -count=1 ./...
+      # The sandbox tests skip when a sandbox executable or the user systemd
+      # manager is missing. Here they must run: fail on a skip.
+      - name: Attachment scanner sandbox tests ran
+        run: |
+          out=$(go test -count=1 -v -run '^(TestOpenForAgentRequiresPinnedSandboxedScanner|TestScannerResourcesAreCopiedReadOnlyAndVerdictBound|TestScannerCgroupHardLimitsLive|TestScannerSandboxCannotReadUnboundHostFile)$' ./pkg/attachments 2>&1 &&
+            go test -count=1 -v -run '^TestAdmitFetchesAuthenticatesAndScansBeforeReturningText$' ./pkg/attachmentadmission 2>&1) ||
+            { printf '%s\n' "$out"; exit 1; }
+          printf '%s\n' "$out" | grep -E '^(--- |ok|FAIL)'
+          if printf '%s\n' "$out" | grep -q -- '--- SKIP'; then echo "an attachment sandbox test skipped" >&2; exit 1; fi
+          test "$(printf '%s\n' "$out" | grep -cE '^--- PASS')" = 5
+      - name: Test ADNL gateway paths (no race detector)
+        # tonutils-go's TL serializer trips checkptr, so the ADNL gateway
+        # cannot run under -race; these tests skip there and run here.
+        run: go test -count=1 -run ADNL ./pkg/probe ./cmd/tos-reachability
+
+  # A single-writer journal, a UDP probe, and a binary DHT value all have
+  # assumptions about word size and endianness that only another architecture
+  # can disprove.
+  cross-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { os: linux, arch: amd64 }
+          - { os: linux, arch: arm64 }
+          - { os: linux, arch: arm }
+          - { os: linux, arch: riscv64 }
+          - { os: darwin, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: build ${{ matrix.target.os }}/${{ matrix.target.arch }}
+        env:
+          GOOS: ${{ matrix.target.os }}
+          GOARCH: ${{ matrix.target.arch }}
+        run: go build ./...
+
+  # Seed corpora run on every change; a longer campaign is a separate concern.
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - ./pkg/identity
+          - ./pkg/directory
+          - ./pkg/envelope
+          - ./pkg/probe
+          - ./pkg/fault
+          - ./pkg/attachments
+          - ./pkg/attachmentapi
+          - ./pkg/attachmentops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: fuzz ${{ matrix.package }}
+        run: |
+          for target in $(go test ${{ matrix.package }} -list 'Fuzz.*' | grep '^Fuzz' || true); do
+            echo "== $target"
+            go test ${{ matrix.package }} -run "$target" -fuzz "$target" -fuzztime 60s
+          done
+
+  # Vectors are what a second implementation checks itself against, so a change
+  # to one has to be deliberate rather than incidental.
+  vectors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: vectors are unchanged
+        run: |
+          go test ./internal/vectors -count=1
+          git diff --exit-code internal/vectors/testdata
