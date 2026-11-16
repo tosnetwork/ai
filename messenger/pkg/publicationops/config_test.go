@@ -134,3 +134,20 @@ func validDelegation(t *testing.T) identity.Delegation {
 		InboxAdmissionPolicyDigest: digest("5"),
 	}
 }
+
+func TestRelayModeAdvertisesNoHTTPSEndpoint(t *testing.T) {
+	config := validConfig()
+	config.Mode = ModeRelay
+	config.HTTPSPublicationRoot, config.DHTGlobalConfigPath = "", ""
+	if err := config.Validate(); err == nil {
+		t.Fatal("relay mode accepted an HTTPS endpoint")
+	}
+	config.HTTPSEndpoint = ""
+	if err := config.Validate(); err != nil {
+		t.Fatalf("relay mode without an HTTPS endpoint: %v", err)
+	}
+	config.DHTGlobalConfigPath = "/etc/global.json"
+	if err := config.Validate(); err == nil {
+		t.Fatal("relay mode accepted a DHT configuration")
+	}
+}

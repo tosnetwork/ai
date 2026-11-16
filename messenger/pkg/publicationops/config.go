@@ -98,8 +98,10 @@ func (c Config) Validate() error {
 	switch c.Mode {
 	case "", ModeNetwork:
 	case ModeRelay:
-		if c.HTTPSPublicationRoot != "" || c.DHTGlobalConfigPath != "" {
-			return errors.New("relay publication has no HTTPS root and no DHT")
+		if c.HTTPSPublicationRoot != "" || c.DHTGlobalConfigPath != "" || c.HTTPSEndpoint != "" {
+			// The relay-only descriptor's route is the delegation's ADNL
+			// identity; no HTTPS endpoint is advertised.
+			return errors.New("relay publication has no HTTPS root, no DHT and no HTTPS endpoint")
 		}
 		paths = []string{c.DescriptorPolicyPath, c.EndpointSignerSocket}
 	default:
@@ -128,6 +130,10 @@ func (c Config) Validate() error {
 		MailboxRelaySetDigest: c.MailboxRelaySetDigest, InboxAdmissionPolicyDigest: digest("5"),
 		AttachmentServiceDigest: c.AttachmentServiceDigest, MaximumEnvelopeBytes: c.MaximumEnvelopeBytes,
 		IssuedAtUnix: 1, ExpiresAtUnix: 2,
+	}
+	if c.Mode == ModeRelay {
+		// Assemble requires the delegation's ADNL identity as the route.
+		descriptor.ADNLID = "adnl:" + strings.Repeat("6", 64)
 	}
 	if err := directory.ValidateDescriptor(descriptor, false); err != nil {
 		return errors.New("invalid publication descriptor template: " + err.Error())
@@ -166,6 +172,9 @@ func Assemble(config Config, delegation identity.Delegation) (*Runtime, error) {
 	policyDigest, err := policy.Digest()
 	if err != nil || policyDigest != delegation.ContactDescriptorPolicyDigest {
 		return nil, errors.New("publication descriptor policy does not match finalized delegation")
+	}
+	if config.Mode == ModeRelay && delegation.ADNLID == "" {
+		return nil, errors.New("relay publication needs a delegation that commits an ADNL identity as its route")
 	}
 	descriptor, err := descriptorFor(config, delegation)
 	if err != nil {

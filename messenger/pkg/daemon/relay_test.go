@@ -101,7 +101,11 @@ func newRelayNodes(t *testing.T, now time.Time, digits ...[2]string) []*relayNod
 	t.Helper()
 	daemons := make([]*Daemon, 0, len(digits))
 	for _, pair := range digits {
-		daemons = append(daemons, newPhaseADaemon(t, now, pair[0], pair[1]))
+		d := newPhaseADaemon(t, now, pair[0], pair[1])
+		// A relay-only node's descriptor route is its delegation's ADNL
+		// identity, so the delegation commits one.
+		d.prekeys.planner.delegation.ADNLID = "adnl:" + strings.Repeat(pair[1]+pair[0], 32)
+		daemons = append(daemons, d)
 	}
 	resolver := relayResolver(daemons...)
 	chain := identity.ChainPolicy{RegistryCodeHashes: []string{registryCode}, Locator: phaseALocator{}}
@@ -148,7 +152,7 @@ func newRelayNodes(t *testing.T, now time.Time, digits ...[2]string) []*relayNod
 			Policy: relayTestPolicy, PublishInterval: time.Minute, Relay: sink,
 			Descriptor: directory.Descriptor{Network: delegation.Network, AgentID: delegation.AgentID,
 				EndpointID: delegation.EndpointID, DelegationDigest: delegationDigest, SupportedMessagingVersions: []uint32{1},
-				HTTPSEndpoint:      "https://relay-only.example" + "/v1/tos-messenger/messages",
+				ADNLID:             delegation.ADNLID,
 				PrekeyBundleDigest: "sha256:" + strings.Repeat("1", 64), InboxAdmissionPolicyDigest: delegation.InboxAdmissionPolicyDigest,
 				MaximumEnvelopeBytes: 64 << 10, IssuedAtUnix: 1, ExpiresAtUnix: 2}}
 		if err := publisher.Validate(); err != nil {
@@ -569,7 +573,7 @@ func oldEvidence(t *testing.T, node *relayNode, now time.Time) []byte {
 	delegationDigest, _ := identity.Digest(delegation)
 	descriptor, err := directory.SignDescriptor(directory.Descriptor{Network: delegation.Network, AgentID: delegation.AgentID,
 		EndpointID: delegation.EndpointID, DelegationDigest: delegationDigest, SupportedMessagingVersions: []uint32{1},
-		HTTPSEndpoint: "https://relay-only.example/v1/tos-messenger/messages", PrekeyBundleDigest: setDigest,
+		ADNLID: delegation.ADNLID, PrekeyBundleDigest: setDigest,
 		InboxAdmissionPolicyDigest: delegation.InboxAdmissionPolicyDigest, MaximumEnvelopeBytes: 64 << 10,
 		IssuedAtUnix: issued, ExpiresAtUnix: expires}, node.key)
 	if err != nil {

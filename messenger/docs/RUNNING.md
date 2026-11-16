@@ -525,10 +525,11 @@ tos-messengerd -config /etc/tos-messengerd/config.json \
 
 The publication operator configuration sets `"mode": "relay"` and names no
 HTTPS root and no DHT configuration: the descriptor and prekey set are
-published only as this node's relay identity evidence. The descriptor must
-still advertise a route (the delegation's ADNL identity, or an HTTPS
-endpoint), because the Contact Descriptor validator requires one. The daemon
-configuration adds:
+published only as this node's relay identity evidence. It also names no
+`https_endpoint`: the descriptor's advertised route is the delegation's ADNL
+identity, so the finalized delegation must commit one, and the Contact
+Descriptor format is unchanged. No placeholder HTTPS endpoint is published.
+The daemon configuration adds:
 
 ```json
 "transport": "agent-packet-relay",
@@ -571,6 +572,10 @@ configuration adds:
   600 s or more) until its own expiry, then abandoned with
   `retention-exceeded`. A `descriptor-expired` ack is retried at once only
   with newer own evidence, otherwise after 30 s to 5 min.
+- **In-flight cap.** At most 24 chat envelopes per peer at a relay. The
+  daemon counts its carried copies (and a previous generation not yet
+  withdrawn) and its kind-4 envelopes, and defers copies at the cap; the
+  carrier counts its stored kind-2 acks as well and answers `peer-cap`.
 - **Refusals.** `agent.packet` Events are refused on this route in both
   directions. The relay route's largest Event payload is computed from the
   worst-case frame before sealing (139,547 bytes); a larger one is refused

@@ -7,6 +7,8 @@ transport, no relay change and no new authority.
 **Status: ⬜ Design only.** No code implements it. Section 8 states what each
 phase's live record must prove; section 9 lists the M-R1 changes.
 
+**Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
+
 MUST, MUST NOT, SHOULD and MAY are normative. Citations are `path:line` in this
 repository at the commit this document lands on, and `openfox path:line` in
 `tosnetwork/openfox` `main` `3e26dc24`.
@@ -260,6 +262,13 @@ and a separate commit that runs only after admission.
   `refresh.go:136`);
 - the locator's term in the refresh time.
 
+**The descriptor's route on a relay-only node.** The Contact Descriptor
+format is unchanged and stays vector-frozen, and its validator requires an
+advertised route (`messenger/pkg/directory/descriptor.go`). A relay-only node
+advertises the delegation's ADNL identity (which `Bind` requires the
+descriptor to repeat) and no HTTPS endpoint; it MUST NOT publish a placeholder
+HTTPS endpoint. Its delegation therefore commits an ADNL identity.
+
 **Relay identity evidence** is the four remaining objects of the refresh
 chain, under schema `tos.messaging.relay-evidence.v1`:
 
@@ -435,13 +444,19 @@ keys are independent (2.2).
 ## 4. Size and fan-out
 
 **One-to-one copies are never split.** A Messenger payload is at most 160 KiB
-and its ciphertext 165 KiB (`messenger/pkg/eventlog/journal.go:65-69`). A
-first-contact bootstrap carries one sender bundle, whose material is at most
-4 KiB (`messenger/pkg/e2ee/bundle.go:27`), plus an initial message of at most
-4 KiB (`bootstrap.go:19`), in JSON. Every frame also carries up to 18,432
-bytes of evidence (2.5) and possibly a card, so the relay route's largest
-payload is below Messenger's own: the frame codec derives the exact worst case
-from the maximal card, evidence and bootstrap. The daemon MUST compute the worst-case frame
+and its ciphertext 164 KiB (`messenger/pkg/eventlog/journal.go:65-69`), so
+sealing adds at most 4,096 bytes. A first-contact bootstrap carries one
+sender bundle, whose material is at most 4 KiB (`messenger/pkg/e2ee/bundle.go:27`),
+plus an initial message of at most 4 KiB (`bootstrap.go:19`), in JSON; with
+the longest network identifier in its most-escaped JSON form the measured
+worst case is 16,951 bytes, so a copy's bootstrap is bounded at **18 KiB**
+(18,432 bytes). Every frame also carries up to 18,432 bytes of evidence (2.5)
+and possibly a card, so the relay route's largest payload is below
+Messenger's own. The frame codec derives the exact worst case from the
+maximal card (9,216), evidence (18,432), bootstrap (18,432) and admission
+token (256), the copy object's 413 fixed bytes, the frame's 72 fixed bytes
+and the 4,096-byte seal overhead: 190,464 − 50,917 = **139,547 bytes** is
+the largest Event payload the relay route carries. The daemon MUST compute the worst-case frame
 size from it **before sealing** and refuse an oversize delivery with
 `content-too-large` (`messenger/pkg/fault/fault.go:123`), so no message key is
 spent.
@@ -663,7 +678,13 @@ Recipient protections, strongest first:
    envelopes per peer Agent at any relay. The count includes every envelope
    still stored, including earlier generations not yet withdrawn and the
    node's own kind-2 ack and kind-4 evidence envelopes to that peer, which
-   share the same relay bound; the rest stay `pending` and are not deposited. The relay caps one client address at 64
+   share the same relay bound; the rest stay `pending` and are not deposited.
+   The count is split by who can see each envelope: the Messenger daemon
+   counts its carried copies (with a previous generation that may not yet be
+   withdrawn) and its kind-4 envelopes, and defers a copy at the cap; the
+   carrier (OpenFox), which alone sees its stored kind-2 ack envelopes, counts
+   those as well and answers `carrier.carry` with the fixed refusal `peer-cap`
+   when the full count would exceed 24. The relay caps one client address at 64
    envelopes per recipient (`:641`). On shared relays, 24 chat envelopes leave
    at least 40 of that 64 for the same sender's rail deposits (tasks, results,
    acks) to the same peer.
@@ -816,6 +837,8 @@ imports `messenger/`; OpenFox imports both.
    - `CommitPeer` stores evidence and calls `AdmitPublishedSet`
      (`refresh.go:26-28`) only when it is newer than the stored one, and only
      under the admission rule.
+   - Relay-only publication signs a descriptor whose route is the
+     delegation's ADNL identity, with no HTTPS endpoint (2.5).
 
    `CheckPeer` replaces `Manager.Ensure` on `RouteRelay` in three places:
    - on receive, at `inbound.go:70` and `:160`;

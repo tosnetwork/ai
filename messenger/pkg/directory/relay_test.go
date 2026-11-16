@@ -80,6 +80,8 @@ func (f *relayFixture) evidence(deviceID, material string, issued, lifetime uint
 	}
 	descriptor := testDescriptor(f.t, f.delegation)
 	descriptor.PrekeyBundleDigest = setDigest
+	// A relay-only descriptor's route is the delegation's ADNL identity.
+	descriptor.HTTPSEndpoint = ""
 	descriptor.IssuedAtUnix = issued
 	descriptor.ExpiresAtUnix = issued + lifetime
 	if mutate != nil {
@@ -481,4 +483,36 @@ func TestRelayEvidenceSinkKeepsIssueTimesStrictlyIncreasing(t *testing.T) {
 		MaxLifetimeSeconds: 3600, AllowHTTPSEndpoint: true}); err == nil {
 		t.Fatal("sink accepted an uncommitted policy")
 	}
+}
+
+func TestRelayOnlyPublicationAdvertisesTheADNLIdentityOnly(t *testing.T) {
+	f := newRelayFixture(t)
+	sink, err := NewRelayEvidenceSink(filepath.Join(t.TempDir(), "export"), filepath.Join(t.TempDir(), "card.json"),
+		mustDelegationJSON(t, f.delegation), testPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher := &GenerationPublisher{Signer: endpointKey(t, 0x11), Delegation: f.delegation, Policy: testPolicy(),
+		Descriptor: testDescriptor(t, f.delegation), PublishInterval: time.Minute, Relay: sink}
+	if err := publisher.Validate(); err == nil {
+		t.Fatal("a relay-only publisher advertised a placeholder HTTPS endpoint")
+	}
+	publisher.Descriptor.HTTPSEndpoint = ""
+	if err := publisher.Validate(); err != nil {
+		t.Fatalf("ADNL-only relay publisher: %v", err)
+	}
+	publisher.Delegation.ADNLID = ""
+	publisher.Descriptor.ADNLID = ""
+	if err := publisher.Validate(); err == nil {
+		t.Fatal("a relay-only publisher without an ADNL identity was accepted")
+	}
+}
+
+func mustDelegationJSON(t *testing.T, delegation identity.Delegation) []byte {
+	t.Helper()
+	raw, err := identity.EncodeJSON(delegation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

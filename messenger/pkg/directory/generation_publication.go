@@ -58,6 +58,11 @@ func (p *GenerationPublisher) Validate() error {
 		p.Objects == nil && p.Relay == nil {
 		return errors.New("generation publication is not configured")
 	}
+	if p.Objects == nil && (p.Descriptor.HTTPSEndpoint != "" || p.Delegation.ADNLID == "") {
+		// A relay-only descriptor's route is the delegation's ADNL identity;
+		// a placeholder HTTPS endpoint would advertise a route nobody serves.
+		return errors.New("relay-only publication advertises the delegation's ADNL identity and no HTTPS endpoint")
+	}
 	if p.PublishInterval < time.Minute || p.PublishInterval > time.Hour {
 		return errors.New("generation publication interval is outside its bound")
 	}
