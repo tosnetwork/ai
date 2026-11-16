@@ -43,7 +43,8 @@ What exists:
   relays (`AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md:370-424`).
 
 This document fixes the route for the OpenFox chat profile by owner decision,
-not by the study: in V1 the packet relay is the only cross-host route (Q1).
+not by the study: in V1 the packet relay is the only cross-host route, and the study and Messenger's own Mailbox Relay are retired
+for this profile (D1).
 
 ## 1. Layering
 
@@ -89,7 +90,11 @@ so M-R1 measures it.
 
 **No loop.** A node using this carriage MUST NOT also send rail packets through
 `MessengerTransport` (openfox `transport.go:47-70`); a packet in a copy in a
-packet buys nothing and halves every bound.
+packet buys nothing and halves every bound. The receiving side is closed too:
+on `admission.RouteRelay` the daemon MUST refuse `agent.packet` Events and any
+other Event class that carries an Agent Packet
+(`messenger/docs/AGENT_PACKET_BRIDGE.md:1-9`). Otherwise a rail packet could
+reach the rail inbox inside a chat copy, bypassing the key-purpose rule of 2.2.
 
 ### 1.1 Frame
 
@@ -110,9 +115,9 @@ relay_frame =
 `D(x)` and big-endian integers as in relay spec section 4. Decoders reject
 unknown kinds, non-zero padding, a total that is not a bucket size, and
 trailing bytes. A frame is at most **190,464 bytes**: base64 makes it 253,952,
-plus 5,424 bytes of fixed packet fields (hex ML-DSA-44 signature, IDs, key ID)
-gives 259,376, under the 260,771-byte packet bound
-(`protocol/pkg/agentpacketseal/seal.go:64-74`).
+plus at most 5,432 bytes of fixed packet fields (hex ML-DSA-44 signature, IDs,
+key ID, maximal integers) gives 259,384, under the 260,771-byte packet bound
+(`protocol/pkg/agentpacketseal/seal.go:64-74`) with 1,387 bytes spare.
 
 A kind-1 object is the canonical length-prefixed encoding of exactly the
 `dispatch.Message` fields (`dispatch.go:34-46`), schema
@@ -174,6 +179,16 @@ Cards travel only inside objects the counterparty verifies (`:267-270`):
   A card packet is at most 9,216 bytes (a 2,346-byte body, `:170`, in base64
   plus packet fields).
 
+**Cards are stored only for admitted peers.** OpenFox's peer-card store holds
+cards of at most 1,024 peers and does not evict valid cards to admit a new one
+(openfox `relay_cards.go:34`, `:353-385`), so cards learned from strangers
+could block new contacts for up to a card lifetime. An in-band card is
+therefore stored only after `carrier.deliver` answers `accepted`, `duplicate`
+or `held` for the frame that carried it (never `rejected`), or when it comes
+from a peer with an established Messenger session. A contact-file card goes
+into the same admitted store, because importing the file is the owner's
+decision. A refused stranger's card is never stored.
+
 Chat and rail cards live in separate peer-card stores and are never learned
 from the other's objects: `PeerCards` keeps the newest card per Agent
 (openfox `relay_cards.go:509-553`), so one store would mix purposes.
@@ -195,7 +210,7 @@ be the same Agent, checked at startup.
 
 V1 carries **one Messenger device per Agent**: mailbox and card belong to the
 Agent, so a second device with its own chat key would get envelopes it cannot
-open, and a shared chat key would break device separation (Q3).
+open, and a shared chat key would break device separation (D3).
 
 ## 3. Double encryption
 
@@ -220,18 +235,29 @@ keys are independent (2.2).
 ## 4. Size and fan-out
 
 **One-to-one copies are never split.** A Messenger payload is at most 160 KiB
-and its ciphertext 165 KiB (`messenger/pkg/eventlog/journal.go:65-69`); a copy
-with a card exceeds one frame only if a first-contact bootstrap above about
-11 KiB (bounded by `messenger/pkg/e2ee/bundle_set.go:19`, `bootstrap.go:19`)
-meets a maximal ciphertext. The daemon MUST compute the worst-case frame size
-**before sealing** and refuse an oversize delivery with `content-too-large`
-(`messenger/pkg/fault/fault.go:123`), so no message key is spent.
+and its ciphertext 165 KiB (`messenger/pkg/eventlog/journal.go:65-69`). A
+first-contact bootstrap carries one sender bundle, whose material is at most
+4 KiB (`messenger/pkg/e2ee/bundle.go:27`), plus an initial message of at most
+4 KiB (`bootstrap.go:19`), in JSON; a copy with a card exceeds one frame only
+when a near-maximal ciphertext meets a near-maximal bootstrap. The frame codec
+derives the exact worst case. The daemon MUST compute the worst-case frame
+size from it **before sealing** and refuse an oversize delivery with
+`content-too-large` (`messenger/pkg/fault/fault.go:123`), so no message key is
+spent.
 
 **Room handshake objects are split (M-R2).** MLS objects reach 1 MiB
 (`messenger/pkg/group/openmls_sidecar.go:28`). A kind-3 object above one frame
-is split into at most 8 parts, one packet each, sharing `object_digest`; the
-receiver holds at most 8 incomplete objects per peer for at most 24 h 5 min and
-releases an object only when its digest matches.
+is split into at most 8 parts, one packet each, sharing `object_digest`. The
+receiver:
+
+- holds parts only from admitted room members;
+- caps one object at 1 MiB (the sidecar bound), refusing a part whose declared
+  or accumulated size exceeds it;
+- holds at most 8 incomplete objects per peer and at most 16 MiB of
+  incomplete parts in total, refusing (and relay-acknowledging) parts beyond
+  either cap;
+- drops an incomplete object after 24 h 5 min;
+- releases an object only when its digest matches.
 
 **Attachments stay out of band (M-R3)** in the existing encrypted attachment
 store (`messenger/docs/ENCRYPTED_ATTACHMENTS.md:1-40`; up to 2,048 chunks of
@@ -308,7 +334,9 @@ code, time) under schema `tos.messaging.relay-delivery-ack.v1` and a new
 signing domain beside `DomainHTTPSDeliveryAck`
 (`messenger/internal/canon/domains.go:205-207`), so no ack verifies on the
 other route. The sender verifies it under the peer's finalized Endpoint key as
-`directhttps/transport.go:214-229` does; `accepted`, `duplicate` and `held`
+`directhttps/transport.go:214-229` does, and the ack packet's sender Agent
+MUST equal the Agent of the Endpoint that signed the ack (otherwise it is
+refused and relay-acknowledged); `accepted`, `duplicate` and `held`
 mean `delivered`, `rejected` applies its code (`:230-239`). Acks are not
 acknowledged: a lost ack costs one re-deposit, answered `duplicate` with a new
 ack. The acking node's idempotency key binds the copy packet's nonce, so each
@@ -321,6 +349,15 @@ generation gets a fresh ack envelope that no tombstone (`410`) suppresses.
   re-deposit time: `pending → carried` when the carrier answers `carried`,
   `carried → delivered` only on a verified kind-2 ack, and a `carried` copy
   past its re-deposit time is due again. The ciphertext stays until settled.
+  Re-deposit works within the relay spec: a fresh ack secret gives a fresh
+  envelope ID, a withdrawn generation's tombstone cannot block the next one,
+  and 20 h stays under the 24 h minus 5 min packet lifetime.
+- **Generation withdrawal.** When generation N+1 is accepted at a relay,
+  `carrier.carry` withdraws generation N there (9.5) through
+  `RelayTransport.Withdraw(idempotencyKey)`. The withdrawal is journaled and
+  retried with the same bounds and backoff as the existing withdrawal after a
+  card revocation, which today is the only path that withdraws (openfox
+  `relay_transport.go:733-780`).
 - **Sender OpenFox chat outbox** (`RelayTransport` record, openfox
   `relay_transport.go:54-104`): envelope bytes, ack secret and signed packet per
   idempotency key `idem_` + SHA-256 of (`delivery_id`, generation) for copies
@@ -339,9 +376,16 @@ and chat key ID (which, with a separate chat card, tells chat from task
 traffic to someone who has seen both cards); the padded size bucket; deposit,
 listing, download and ack times. The operator also sees sender and recipient
 IP addresses, kept per stored envelope for quota (`:688-689`), and can infer
-room fan-out from one address depositing to N mailboxes at once. Nobody learns
-the sender Agent, Endpoint, device, conversation, room, Event ID, frame kind,
-content or attachment bytes. Keying mailboxes by Agent ID instead of the
+room fan-out from one address depositing to N mailboxes at once.
+
+**Sender unlinkability is not provided in V1.** The sender Agent is not in any
+envelope, but an operator can usually infer it: the address that deposits a
+chat envelope is normally the address that polls the sender's own mailbox
+(listing names the Agent). Because the listing is open, anyone polling it also
+sees when a recipient acknowledges and so learns that recipient's online
+times. No observer learns, from the envelope alone, the sender Agent,
+Endpoint, device, conversation, room, Event ID, frame kind, content or
+attachment bytes. Keying mailboxes by Agent ID instead of the
 opaque mailbox IDs Messenger planned (`AGENT_NATIVE_MESSENGER_V1.md:2105`) is a
 privacy regression accepted to reuse the relay unchanged.
 
@@ -353,16 +397,20 @@ Mitigations in V1, none touching the relay:
   as an ordinary sealed `ReadAck` event.
 - **Prompt relay ack** (15 s poll, openfox `relay_inbound.go:18-37`), so
   envelopes and their stored address live seconds while the peer is online.
-- Hiding IP addresses is the node's own network-layer matter.
+  The price is the online-time exposure above.
+- Hiding IP addresses, and polling and depositing over separate network paths
+  so the two cannot be matched, is the node's own network-layer measure.
 
 **Privacy statement** (consistent with the test-relay statement):
 
 > Chat between OpenFox Agents crosses the relays sealed twice. The relays
 > cannot read, alter, forge or delete it. The operator, and anyone who knows
 > your Agent ID, can see the recipient Agent ID and key ID, padded envelope
-> sizes, counts and times; the operator also sees IP addresses. No relay sees
-> who sent a message, which conversation it belongs to, or any content.
-> Envelopes are kept until acknowledged or at most 24 hours; an unacknowledged
+> sizes, counts and times, and from the acknowledgement times when you are
+> online; the operator also sees IP addresses, and by matching the address
+> that deposits a message with the address that polls a mailbox it can
+> usually tell which Agent sent it. No relay sees which conversation a message
+> belongs to, or any content. Envelopes are kept until acknowledged or at most 24 hours; an unacknowledged
 > one-to-one message is re-deposited by its sender for up to 7 days.
 
 ## 7. Abuse and task traffic
@@ -370,12 +418,12 @@ Mitigations in V1, none touching the relay:
 Chat and paid task or result traffic would share one mailbox per Agent per
 relay: 256 envelopes, 16 MiB, 64 per (client, recipient) (`:636-646`).
 
-**Decision.** Chat uses a **separate card and key**. A node that sells
-services SHOULD name chat relays that are other relay instances than its rail
-relays (own stores, so own per-recipient quotas), so chat volume and spam can
-never take task quota; this needs more instances, not relay changes. A
-chat-only node MAY name its rail relays. M-R1 MAY use the two test relays for
-both, with quota isolation listed as not proven (Q2).
+**Decision.** Chat uses a **separate card and key**. Before any production use,
+a node that sells services MUST name chat relays that are other relay
+instances than its rail relays (own stores, so own per-recipient quotas), so
+chat volume and spam can never take task quota. This needs more instances,
+not relay changes. A chat-only node MAY name its rail relays. M-R1 uses the
+two test relays for both, and quota isolation is not proven there (D2).
 
 Recipient protections, strongest first:
 
@@ -389,11 +437,17 @@ Recipient protections, strongest first:
    route (`messenger/docs/OPEN_DECISIONS.md:148`), as `admission.RouteRelay`
    (`messenger/pkg/admission/admit.go:41`). An unresolvable sender is refused
    before anything is stored.
-3. **Sender in-flight cap.** An honest sender keeps at most 32 `carried`
-   deliveries per peer Agent and holds the rest `pending`, so an offline
-   recipient holds at most 32 (briefly 64) envelopes per relay from one peer.
-4. A peer that ignores the cap is the open-deposit flood the relay spec
-   already bounds as an availability attack.
+3. **Sender in-flight cap.** An honest sender holds at most **24** chat
+   envelopes per peer Agent at any relay. The count includes every envelope
+   still stored, including earlier generations not yet withdrawn; the rest stay
+   `pending` and are not deposited. The relay caps one client address at 64
+   envelopes per recipient (`:641`). On shared relays, 24 chat envelopes leave
+   at least 40 of that 64 for the same sender's rail deposits (tasks, results,
+   acks) to the same peer.
+4. **A malicious sender ignores its own cap.** Four IPv6 /64s at 64 envelopes
+   each fill a 256-envelope mailbox. That is the open-deposit exposure the rail
+   already has (`:790-800`): an availability attack that grants no authority.
+   Separate chat relays (above) keep it away from task traffic.
 
 **Rejected: per-purpose mailboxes at the relay** (`/v1/mailboxes/{agent}/{purpose}`):
 a relay API and storage change that still cannot stop spam, since anyone may
@@ -422,24 +476,34 @@ Record `messenger-relay-one-to-one-<date>.json`, schema
 3. **First contact** over the relay with an admission invite, and B learning
    A's card in band, not only from the contact file.
 4. **Relay outage.** relay-1 down for the whole conversation; relay-2 carries it.
-5. **Offline peer.** B stopped beyond the re-deposit interval; A deposits
-   generation 2 and withdraws generation 1; B applies the message once and
-   answers the other generation `duplicate`.
+5. **Offline peer and duplicates.** B is stopped beyond the re-deposit
+   interval. A deposits generation 2, and generation 1 is withdrawn at every
+   relay that held it (the relay answers it `404` or `410` afterwards). B
+   applies the message once and answers any other generation `duplicate`.
+   An older duplicate that arrives after a newer Event of the same session gets
+   a `duplicate` ack and never reaches the ratchet (the `inbound.go:45-47`
+   gap).
 6. **Crash windows.** B killed between Messenger commit and relay ack; A killed
    between `carried` and its journal write. One runtime application; on
    restart the same envelope (`200`).
 7. **Refusals.** A rail packet sealed to the chat key and a frame sealed to
    the rail key are refused and relay-acknowledged; a packet sender differing
-   from the Event sender is refused; an oversize payload is refused before
-   sealing.
-8. **Nothing readable at the relays.** Relay state copied while each held a
+   from the Event sender is refused; a kind-2 ack whose packet sender is not
+   the signing Endpoint's Agent is refused; an `agent.packet` Event arriving
+   over the relay is refused; an oversize payload is refused before sealing;
+   a refused stranger's in-band card is not stored.
+8. **Public-ID race.** An observer pre-deposits junk under a chat envelope's ID
+   at one relay. The honest deposit there gets `409` and is abandoned at that
+   relay, while delivery succeeds through the other relay.
+9. **Nothing readable at the relays.** Relay state copied while each held a
    copy and an ack contains no message text, conversation, Event, Endpoint or
    device ID and no sender Agent ID (a control file proves the search finds
    each); every envelope size is a bucket size.
-9. **Cost.** `tosctl` sign-to-deposit time per frame.
+10. **Cost.** `tosctl` sign-to-deposit time per frame.
 
-Not proven: third-party relays or hosts, a public chain, quota isolation under
-flood, multi-device, M0 freeze evidence (independent review and a second E2EE
+Not proven: third-party relays or hosts, a public chain, quota isolation
+between chat and task traffic (it must be shown before production, D2),
+sender unlinkability (section 6), multi-device, M0 freeze evidence (independent review and a second E2EE
 implementation, `messenger/docs/ROADMAP.md:25`), any Gate O claim.
 
 ### M-R2: private rooms
@@ -483,8 +547,9 @@ imports `messenger/`; OpenFox imports both.
 5. `pkg/daemon`: `TransportAgentPacketRelay` (`config.go:65-68`) with carry and
    listen socket paths; `configureRelayCarriage` beside `configureHTTPSBootstrap`
    (`direct_https.go:61-75`); `ReceiveSealed(…, admission.RouteRelay)` with the
-   duplicate lookup before `Open` (`inbound.go:41-51`) and the sender check of
-   2.4; the same-Agent startup check.
+   duplicate lookup before `Open` (`inbound.go:41-51`), the sender check of
+   2.4, and refusal of Agent-Packet-carrying Event classes on that route; the
+   same-Agent startup check.
 6. `pkg/directory` and daemon config: `contact-files` discovery, a
    `RefreshSource` (`refresh.go:16-22`) over per-peer files verified exactly as
    the network source, and a publication sink writing the node's own objects
@@ -502,11 +567,18 @@ this document.
    `relay_cards.go:292-345`), a chat `RelayTransport` (`relay/chat-outbox`),
    one shared relay pool; and the `carrier.carry` server: validate the frame,
    sign (zero Capability, expiry = min(copy expiry, now + `PacketLifetime`),
-   `transport.go:25-27`), `Send`, answer `carried` only on acceptance.
+   `transport.go:25-27`), `Send`, answer `carried` only on acceptance; and
+   once generation N+1 is accepted, call the new
+   `RelayTransport.Withdraw(idempotencyKey)` for generation N. That call is
+   journaled and retried with the bounds and backoff of the revocation path
+   (`relay_transport.go:733-780`), and is tested: generation N is withdrawn and
+   N+1 is delivered. The chat store keeps a card only under the admission rule
+   of 2.3.
 2. `relay_inbound.go`: one poll loop over rail and chat relays, dispatching by
    key ID. Rail keys: unchanged `acceptPacket` (`receiver.go:105-140`). Chat
    keys: decode, recipient, zero Capability, frame domain, `agentpacket.Verify`,
-   frame decode, card learning, `carrier.deliver` or `carrier.delivery-ack`;
+   frame decode, `carrier.deliver` or `carrier.delivery-ack`, then card
+   learning only if the answer admits the sender (2.3);
    `retry` and finalized-state failures leave the envelope unacknowledged,
    every other outcome is relay-acknowledged; a copy's returned ack goes out
    as a kind-2 frame.
@@ -519,15 +591,19 @@ this document.
    `MessengerTransport` with this carriage.
 5. `scripts/messenger-relay-two-host-e2e.{sh,py}` producing the M-R1 record.
 
-## 10. Owner questions
+## 10. Owner decisions
 
-- **Q1.** For the OpenFox profile this replaces M0-R's route decision and
-  Messenger's own Mailbox Relay. Retire the study and
-  `tos-mailboxd`/`pkg/mailbox`, or keep them for a possible later direct route?
-- **Q2.** Run a second relay instance per test host now to prove quota
-  isolation in M-R1, or accept shared quota until production?
-- **Q3.** V1 allows one Messenger device per Agent. Multi-device needs
-  per-device cards and a device selector the Agent-keyed mailbox lacks. Defer?
-- **Q4.** M-R1 discovery is out-of-band contact files, because `tos-dht-https`
-  needs a DHT (down with the stopped testnet) and a public HTTPS origin per
-  peer. Accept files for M-R1 and decide in-band or DHT discovery later?
+- **D1. M0-R and Messenger's own Mailbox Relay are retired for the OpenFox
+  profile.** This covers `tos-mailboxd`, `pkg/mailbox` and the M0-R study.
+  The code is removed in a separate PR after M-R1 passes. Reason: one relay
+  infrastructure, as the owner decided.
+- **D2. No second relay instance now.** M-R1 shares the two test relays
+  between chat and rail. Quota isolation is listed as not proven in M-R1, and
+  it must be shown before production (section 7).
+- **D3. Multi-device over the relay is deferred.** V1 is one Messenger device
+  per Agent (2.4). Multi-device needs per-device cards and a device selector
+  that the Agent-keyed mailbox lacks.
+- **D4. The out-of-band contact file is accepted for M-R1.** Its authenticity
+  comes from the signatures of the objects inside it and their binding to the
+  finalized Agent, not from the channel. DHT discovery would need the stopped
+  testnet.
