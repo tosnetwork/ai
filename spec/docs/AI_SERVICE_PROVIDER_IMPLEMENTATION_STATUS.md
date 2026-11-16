@@ -381,9 +381,12 @@ independent acceptance and is not Gate O evidence (relay spec section 12).
 
 Both runs use `tos` `5af405dcb`. Both relays run the daemon built from `ai`
 `01488fff` (`CGO_ENABLED=0`, `-trimpath`, sha256 `f8ff662f…`, byte-identical
-on both relay hosts) as the shipped systemd unit with a limits drop-in, a
-dynamic non-root user (uid 64434) and the TLS key as a systemd credential;
-the unit cannot read `/opt`, `/root` or `/home`. Public addresses, SSH
+on both relay hosts) as a dynamic non-root user (uid 64434, recorded in both
+files) with the TLS key as a systemd credential. Two deployment facts are
+not in these records but were checked when the relays were installed (gate
+G1 of the memo plan `relay-official`): the unit is the shipped one plus a
+limits drop-in, and inside its sandbox `/opt`, `/root` and `/home` are
+unreadable (`InaccessiblePaths`). Public addresses, SSH
 targets and key paths are replaced by labels in the records.
 
 Proven by these records, in addition to everything the single-relay
