@@ -985,9 +985,17 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
 18. **Roster to an already-joined member (live, 11.2 case b).** B has
     joined; A adds C; B applies the Add Commit, accepts the roster of added
     members, learns C's card and evidence from it, and exchanges a room
-    message with C (no contact between them). A roster naming an Agent that
-    is not in the committed membership, one from a non-authority, and one
-    for another epoch are refused (unit).
+    message with C (no contact between them); the roster is answered
+    `accepted`, not `room-fork`. Unit: a roster naming an Agent not in the
+    committed membership, one from a non-authority, one for an epoch above
+    current, and a second different roster for the same epoch are refused;
+    a late roster for current − 1 or current − 2 is accepted and teaches only
+    entries still members now; a roster with one stale entry (failing
+    `VerifyKeyCard` or `CheckPeer`) skips it, learns the rest and answers
+    `accepted`; an MLS-only refresh Commit (room epoch unchanged) is applied,
+    not refused as a fork; an authority crash between staging and the fused
+    write, and right after it, leaves the Add's rosters delivered once, after
+    their Commit or Welcome.
 
 Not proven: more than 3 live members (32 is a unit bound), multi-device
 (D3), concurrent authorities, authority transfer over the relay, fork
@@ -1141,14 +1149,19 @@ seal already carry any frame; nothing new is resolved on chain).
 4. `pkg/eventlog`: the fused room and MLS record (≤ 8,192 bytes, digests
    only) with exact-repeat no-op (11.3, replacing the two writes for MLS
    rooms) and its bound test; staged MLS state chunks (≤ 2 of 262,144 bytes)
-   and delegation records by digest; a room outbox of chunk records, staged
-   under the `CommitRef` before the fused record (11.7); the fused record's
+   and delegation records by digest; a room outbox of chunk records, with
+   the Commit, Welcome and an Add's rosters staged under the `CommitRef`
+   before the fused record and queues rebuilt as (Commit or Welcome, then
+   roster) on restart (11.7); the fused record's
    KeyPackage and Welcome refs and retained epoch authenticators, chunk and
    state digest verification on read; garbage collection rooted at every
    fused record and room-outbox head, failing closed, plus deletion of
    superseded state chunks after each fused write; a durable part store and a future-epoch buffer with the
    bounds of section 4 and 11.3 (per-sender share, k = 4); the committed
-   membership of the last 3 epochs; applied handshake digests (last 64) and
+   membership of the last 3 epochs; applied Commit and Welcome digests by
+   MLS epoch (last 64) and applied roster digests by room epoch (last 64),
+   with the roster window [current − 2, current] and per-entry skipping
+   (11.2, 11.3); and
    received application digests (24 h 5 min); per (room, sender) sequence
    state and `room.gap` records; pending joins; presented invites with
    `AdmissionToken` on `Delivery` (`delivery.go:109-144`); the unswept
@@ -1372,13 +1385,18 @@ with a pending join.
 **Accepting a roster** for room R, in both cases below, requires that its
 packet sender is R's authority, that its header carries a valid
 MembershipAuthorization (relay-route window, 11.3) for room epoch E, that E
-is exactly the receiver's current committed room epoch (the epoch of the
-Commit or Welcome it follows, which the in-order queue delivers first; an
-older E takes the receive order of 11.3, a newer one `room-epoch-gap`), that
-the header's membership digest matches the committed membership of E, and
-that every entry names a member of E other than the receiver, so a roster
-can never add an Agent the Commits did not. Cards and evidence from it are
-learned under D11.
+lies in [current − 2, current] of the receiver's committed room epochs (the
+memberships it retains for D11; normally E is current, because the in-order
+queue delivers the Commit or Welcome first; a newer E answers
+`room-epoch-gap`, an older one is dropped silently and relay-acknowledged),
+that the header's membership digest matches the committed membership of E,
+and that every entry names a member of E other than the receiver, so a
+roster can never add an Agent the Commits did not. Only entries that are
+still members now are learned, under D11, so a late roster degrades
+gracefully. An entry whose card fails `VerifyKeyCard` or whose evidence
+fails `CheckPeer` is skipped (the kind-4 pull repairs it later); the rest are
+learned and the roster is answered `accepted`, so one stale entry cannot
+freeze the queue.
 
 - (a) **During a pending join:** R's authority is the one named in the
   `room.invite`; the roster is accepted once the Welcome has been applied
@@ -1390,7 +1408,10 @@ learned under D11.
 **Senders.** Only the authority sends Commits, Welcomes and rosters (11.5):
 a Commit to every member but itself, and once to a removed member (11.4); a
 Welcome to each joiner, then a full roster; after an Add, a roster of the
-added members to the others. Any member sends application objects to every
+added members to the others. The rosters of an Add are built before the
+authority's fused write and staged with its Commit and Welcome under the
+`CommitRef` (11.7), and the authority never queues a roster for epoch E
+after a Commit for E + 1. Any member sends application objects to every
 other member of the epoch it seals in.
 
 **One envelope per member per part**, each signed and sealed separately.
@@ -1493,9 +1514,7 @@ build MAY shorten the retention (`room_handshake_retention_seconds`;
 production 7 days) and the expiry the authority signs
 (`room_authorization_seconds`; production 24 h); the record states both.
 
-**Receiver, handshake.** A roster is checked as in 11.2 and then takes the
-numbered receive order below (its digest joins the 64 applied). For a
-Commit or Welcome the daemon checks the
+**Receiver, handshake.** For a Commit or Welcome the daemon checks the
 sender (11.5) and the authorization as above, then advances the room epoch
 and the MLS state in **one journal write**, the fused room record, which is
 the single commit point. Large values never live in it; they are staged
@@ -1526,16 +1545,24 @@ retained authenticators, which is why the record keeps them. Today they are two
 writes that refuse a repeat (`eventlog/rooms.go:139-141` `ErrRoomRollback`,
 `mls_controller.go:108-110` `ErrMLSFork`), so a crash between them would
 strand the room. An exact repeat (same membership digest, authorization and
-`CommitRef`) is a no-op answered `duplicate`. Then, in order:
+`CommitRef`) is a no-op answered `duplicate`.
 
-1. a digest among the last 64 applied answers `duplicate`;
-2. another digest for an epoch within that window answers `room-fork`
-   (11.5);
-3. an object older than the window is dropped silently and
-   relay-acknowledged;
-4. an epoch above current + 1 answers `rejected` with `room-epoch-gap`.
+**Receive order, keyed by object class.** Commits and Welcomes are ordered
+and fork-checked by **MLS epoch** (every Commit advances it, including an
+MLS-only refresh that leaves the room epoch unchanged), in order:
 
-Welcome replay stays refused (`eventlog/mls.go:98`). On any `rejected` room
+1. a digest among the last 64 applied Commits and Welcomes answers
+   `duplicate`;
+2. another Commit or Welcome for an MLS epoch within that window answers
+   `room-fork` (11.5);
+3. one older than the window is dropped silently and relay-acknowledged;
+4. an MLS epoch above current + 1 answers `rejected` with `room-epoch-gap`.
+
+Rosters are keyed by (roster, room epoch E) and checked as in 11.2: a digest
+among the last 64 applied rosters answers `duplicate`; a second, different
+roster for the same E to the same receiver answers `rejected` with an owner
+notice (a roster conflict, not `room-fork`, since a roster carries no MLS
+state). Welcome replay stays refused (`eventlog/mls.go:98`). On any `rejected` room
 ack the authority stops that member's queue with an owner notice.
 
 **Receiver, application.** Let e be the object's MLS epoch and r the
@@ -1732,15 +1759,19 @@ and the ack outcome and code.
 `MLSController.Commit` makes the next state durable before the caller can
 record the Commit (`mls_controller.go:64-95`); an authority crash in between
 would leave it in an epoch no member can reach. Instead the driver's output
-is first staged: the next state as state chunks under its digest (11.3) and
-the Commit and Welcome as object chunks under the `CommitRef`; then the fused
-room record of 11.3, naming both, is the single commit point; a named entry
-without per-member queues gets them rebuilt from the membership on restart.
+is first staged: the next state as state chunks under its digest (11.3), and
+the Commit, the Welcome and, for an Add, the rosters (a full one for each
+joiner, one of the added members for the others, built before the write) as
+object chunks under the `CommitRef`; then the fused room record of 11.3,
+naming both, is the single commit point, so a crash can lose no roster. On
+restart each member's queue is rebuilt from the membership as (that epoch's
+Commit or Welcome, then its roster), ahead of any later object; the
+authority never queues a roster for E after a Commit for E + 1.
 
 **Garbage collection.** The roots are every fused record and every
 room-outbox head record: an older Commit stays re-depositable for up to
-7 days after the authority has moved on, and rosters are under no
-`CommitRef`. A staged state, delegation or object chunk that no root names is
+7 days after the authority has moved on, and a roster or Commit whose fused
+record has been superseded is named only by its outbox head. A staged state, delegation or object chunk that no root names is
 deleted at restart (nothing was published from it and the old state stands);
 the state chunks a successful fused write supersedes are deleted right after
 that write. Collection fails closed: if any root record is unreadable,
