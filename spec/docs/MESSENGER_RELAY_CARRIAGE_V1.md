@@ -538,7 +538,7 @@ production relays.
   16 generations of a delivery. That is a bound on the record, not on what
   the relays store: every generation carries the same ciphertext, and a
   delivery ack matches the Event, session, device and ciphertext digest
-  (5.3), not a generation, so an older generation still held at a relay is
+  (5.2), not a generation, so an older generation still held at a relay is
   answered like any other.
 - **How many generations a relay holds.** Let d be the re-deposit interval
   (80 % of the smallest TTL of the card, within the 10-minute floor and the
@@ -748,9 +748,10 @@ Recipient protections, strongest first:
    relay: its outbox holds every envelope it deposited and has not seen
    expire, including kind-2 acks, earlier generations whose withdrawal is
    still pending or failed, and envelopes kept longer by a relay with a
-   longer TTL than the card's smallest. It counts all of them, per relay, and
+   longer TTL than the card's smallest. It counts all of them per peer across
+   its relays (at least each relay's count, so the bound is conservative) and
    answers `carrier.carry` with the fixed refusal `peer-cap` when the deposit
-   would take any relay's count for that peer above 24. The Messenger daemon
+   would take that count above 24. The Messenger daemon
    counts what it can see (its carried copies, each with a previous
    generation that may not yet be withdrawn, and its kind-4 envelopes) and
    defers a copy at the cap before asking. That early deferral saves a round
