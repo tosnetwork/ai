@@ -534,4 +534,29 @@ runs as an ordinary user.
   `--allow-provider`; a command that closes a purchase whose call never
   landed.
 - A command that exports a bought artifact from the buyer's state directory.
+- A dedicated card-signing controller for key cards (the relay spec's
+  SHOULD, `AGENT_PACKET_RELAY_V1.md` 6.3). OpenFox signs its rail, offer and
+  chat cards with its packet controller by choice. Off-chain verification
+  (`VerifyKeyCard`, `agentpacket.VerifyContact`,
+  `agentpacket.VerifySender`) accepts any controller of the finalized policy
+  without a purpose or weight check, so a separate controller would add an
+  impersonation key with little isolation. The follow-up is a protocol
+  change, decided in outline (least privilege):
+  - two positive off-chain purpose bits in the Agent policy: a
+    packet-signing bit that `agentpacket.VerifySender` and `Verify` require,
+    and a card-signing bit that `VerifyKeyCard` requires, which then stops
+    delegating to the packet path. Whether `agentpacket.VerifyContact`
+    requires the packet-signing bit or contact cards get their own bit is
+    left open;
+  - one controller may hold both bits, so single-key Agents stay valid;
+  - off-chain verifiers check the bit and ignore weight, since these are
+    single-signature artifacts;
+  - the registry admits the bits but leaves them out of per-purpose
+    threshold reachability and never lets them authorize an on-chain action,
+    so a card-only controller is a valid controller and needs no on-chain
+    purpose as a workaround;
+  - it touches the registry contract (its known purpose mask), `nativecore`
+    `validatePolicy`, tosctl `validate_policy`, the reference codec, the
+    transition vectors and the RTOS conformance cases. The registry code hash
+    changes, which is acceptable before launch.
 - Gate F/G operation, independent operators, and production controls.

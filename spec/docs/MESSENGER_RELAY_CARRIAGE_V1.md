@@ -171,8 +171,14 @@ No key serves two purposes and none is derived from another:
 
 The controller signs rail and chat packets under the one Agent Packet context;
 the payload domain (`OFR1` or the frame domain) separates them under the
-signature. As the relay spec recommends (`:197-204`), the chat card SHOULD be
-signed by a dedicated card-signing controller.
+signature. The relay spec recommends a dedicated card-signing controller
+(`:197-204`). OpenFox signs the chat card with its packet controller by
+choice, as it does its rail and offer cards. The verifiers
+(`VerifyKeyCard`, `agentpacket.VerifyContact`, `agentpacket.VerifySender`)
+accept any controller of the finalized policy and check no purpose or weight,
+so a second controller in the same custody would only add a key that can sign
+any packet or card as the Agent. The recommendation is worth meeting only
+once off-chain verification checks a signing purpose (relay spec section 11).
 
 **Purpose is enforced at the key.** An envelope that opens under the chat key
 MUST carry a relay frame, and one under the rail key an `OFR1` frame; anything
