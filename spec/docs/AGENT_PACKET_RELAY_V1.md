@@ -614,6 +614,21 @@ It is advisory and grants nothing. `max_ttl_seconds` and the per-recipient
 values report the operator's configured bounds, which MAY be lower than the
 V1 ceilings.
 
+`max_ttl_seconds` is the one value a client acts on: it is how long the relay
+keeps an envelope that nobody acknowledges (section 9.8, Retention). A client
+MUST refuse a description whose `max_ttl_seconds` is 0 or above 86,400, and a
+client that re-deposits unacknowledged envelopes (section 10) MUST schedule
+the next deposit from the advertised values, not from the V1 ceiling.
+
+**Retention per environment.** The relay TTL is an operator ceiling set per
+deployment, at most the V1 bound of 24 hours. The project's test relays run
+1 hour, so expiry can be observed quickly; its production relays run 3 hours,
+which covers routine outages (a reboot, a lost network) while bounding how
+long ciphertext and its metadata, and junk nobody acknowledges, stay stored.
+Acknowledged envelopes are deleted at once, so the TTL governs only envelopes
+for an offline recipient and unacknowledged junk; longer absences are covered
+by sender re-deposit (section 10) and by the application's own redelivery.
+
 ### 9.7 Errors
 
 Error responses are `application/json`
@@ -728,6 +743,34 @@ minutes while pending; provider result from 1 minute backing off to 1 hour)
 creates new packet generations, hence new envelopes; the receiver's inbox
 deduplicates them.
 
+**Packet expiry follows the business deadline.** A relay stores an envelope
+until the earlier of its `expires_at_unix` and its receipt plus the relay TTL,
+fixed at receipt. A sender SHOULD therefore sign each packet to expire when it
+stops being useful, not after a fixed maximum lifetime: a task packet at the
+Accepted Quote's response deadline, a result packet at the end of the result's
+retention, a delivery acknowledgement or an evidence request or response after
+a short fixed lifetime, and a chat copy at its own per-copy expiry. Every
+expiry is still capped by the packet lifetime and by the V1 bound of step 2. A
+packet whose deadline has already passed is not sent.
+
+**Re-deposit before the relay TTL.** A sender that keeps an unacknowledged
+packet for longer than the relays keep its envelope (its expiry is later than
+the relays' retention) MUST deposit it again, in a new envelope, before the
+relays may have dropped the last one. It schedules the next deposit at most
+80 % of the smallest `max_ttl_seconds` among the relays of the recipient's card
+after the last accepted deposit: 48 minutes against 1-hour test relays, 2 hours
+24 minutes against 3-hour production relays, 19 hours 12 minutes at the V1
+bound. The 20 % margin absorbs the delay between the relay's receipt time and
+the sender's, clock skew and one failed attempt. A client reads each relay's
+description (section 9.6) and caches it for a bounded time. A relay whose
+description cannot be read counts as the V1 bound of 86,400 seconds until it
+is read, so the readable relays of the card set the schedule; when none is
+readable the schedule falls back to 80 % of the V1 bound, which delays an
+offline recipient's delivery but loses nothing the application's own
+redelivery does not already cover. A client MAY re-deposit sooner; it MUST NOT
+re-deposit more often than every 10 minutes, so a relay that advertises a tiny
+TTL cannot turn its senders into a deposit flood.
+
 **Poll:**
 
 - List each relay of each held key every 15 seconds while the node runs
@@ -789,7 +832,7 @@ secret-bound. A later version MAY add a key-possession challenge for listing.
 
 **Spam and denial of service.** Anyone can deposit for any Agent ID. Junk is
 bounded by the envelope size, the per-recipient and per-(client, recipient)
-quotas, the deposit rate limit, the global limit and the 24-hour TTL. Junk sealed
+quotas, the deposit rate limit, the global limit and the relay TTL (at most 24 hours). Junk sealed
 to the recipient's real key is acknowledged and removed on the next poll
 (8.5); junk naming an unknown key ID or failing decryption cannot be removed and
 holds quota until it expires. Residual risk: a distributed flood can keep a
@@ -828,7 +871,7 @@ packet payload; the relay supplies only the authenticated-encryption transport.
 - Recipient HPKE private key: past and pending envelopes to that key (as far
   as anyone harvested them; open download makes harvesting easy) become
   readable, but nothing can be forged. Exposure is bounded by the card lifetime
-  (at most 30 days, 7 recommended), the 24-hour envelope TTL and prompt
+  (at most 30 days, 7 recommended), the relay TTL (at most 24 hours) and prompt
   acknowledgement. V1 offers no forward secrecy within one key's lifetime.
   **A new card does not revoke the old key.** A stale or tampered offer file
   (it is unsigned) can keep handing senders the old, still validly signed card

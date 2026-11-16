@@ -63,6 +63,13 @@ A base path is supported with `-base-path /relay` (the key card then names
 The shares must satisfy per client ≤ per /48 ≤ total; a share left unset
 takes its default, lowered to the total when the total is smaller.
 
+`-ttl` is set per environment: the project's test relays run `-ttl 1h`, its
+production relays `-ttl 3h`. The relay advertises it as `max_ttl_seconds` in
+`GET /v1/relay`, and clients re-deposit unacknowledged envelopes at 80 % of
+the smallest value among a card's relays
+(`spec/docs/AGENT_PACKET_RELAY_V1.md` sections 9.6 and 10), so a value below
+24 h is safe only for clients that do so.
+
 A deposit body must arrive within 5 s plus its declared length at
 32 KiB/s (13 s for a maximal 256 KiB envelope); a slower body is answered
 `408` (the sender retries) and frees its slot.

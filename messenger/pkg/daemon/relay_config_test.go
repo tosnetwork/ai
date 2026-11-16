@@ -42,7 +42,10 @@ func TestRelayCarriageConfigurationIsCheckedAsAWhole(t *testing.T) {
 		"export inside contacts":   func(c *Config) { c.RelayCarriage.EvidenceExportDir = filepath.Join(c.Discovery.ContactDir, "x") },
 		"short re-deposit":         func(c *Config) { c.RelayCarriage.RedepositIntervalSeconds = 599 },
 		"long re-deposit":          func(c *Config) { c.RelayCarriage.RedepositIntervalSeconds = 20*3600 + 1 },
-		"long timeout":             func(c *Config) { c.RelayCarriage.TimeoutSeconds = 301 },
+		// Its nanosecond product wraps to about 11.6 minutes, which must not
+		// pass as an interval.
+		"wrapping re-deposit": func(c *Config) { c.RelayCarriage.RedepositIntervalSeconds = 18_446_744_073 + 700 },
+		"long timeout":        func(c *Config) { c.RelayCarriage.TimeoutSeconds = 301 },
 		"dns contacts": func(c *Config) {
 			c.ContactDNS = &ContactDNSConfig{BaseURL: "https://dns.example", BearerTokenFile: "/run/token"}
 		},

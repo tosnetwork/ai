@@ -27,6 +27,7 @@ func FuzzDecodeRequest(f *testing.F) {
 
 func FuzzDecodeResponse(f *testing.F) {
 	f.Add([]byte(`{"schema":"tos.messaging.carrier-response.v1","result":"carried"}`))
+	f.Add([]byte(`{"schema":"tos.messaging.carrier-response.v1","result":"carried","relay_ttl_seconds":3600}`))
 	f.Add([]byte(`{"schema":"tos.messaging.carrier-response.v1","result":"refused","code":"peer-cap"}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		for _, op := range []Op{OpCarry, OpDeliver, OpDeliveryAck} {

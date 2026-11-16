@@ -568,8 +568,12 @@ The daemon configuration adds:
 - **Delivery states.** A copy a relay accepted is `carried`; it becomes
   `delivered` only on an Endpoint-signed kind-2 ack whose packet sender is the
   signing Endpoint's Agent. A carried copy is deposited again, with the same
-  ciphertext, every `redeposit_interval_seconds` (default 20 h; a test may set
-  600 s or more) until its own expiry, then abandoned with
+  ciphertext, at 80 % of the relay TTL the carrier reports with each `carried`
+  answer (the smallest `max_ttl_seconds` among the recipient card's relays:
+  48 min against 1 h test relays, 2 h 24 min against 3 h production relays),
+  never sooner than 600 s and never later than `redeposit_interval_seconds`
+  (default and maximum 20 h; a test may set 600 s or more), until its own
+  expiry, then abandoned with
   `retention-exceeded`. A `descriptor-expired` ack is retried at once only
   with newer own evidence, otherwise after 30 s to 5 min.
 - **In-flight cap.** At most 24 chat envelopes per peer at a relay. The
