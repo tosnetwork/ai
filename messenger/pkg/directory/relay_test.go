@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -515,4 +516,51 @@ func mustDelegationJSON(t *testing.T, delegation identity.Delegation) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestConcurrentCommitsLeaveEvidenceAndBoundaryInAgreement(t *testing.T) {
+	for round := 0; round < 20; round++ {
+		f := newRelayFixture(t)
+		now := at(baseUnix + 1000)
+		check := func(raw []byte) RelayPeer {
+			peer, err := f.verifier.CheckContact(agentID, raw, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return peer
+		}
+		first := check(f.evidence(relayDeviceOne, "material one", baseUnix+100, 3600, nil))
+		if _, err := f.verifier.CommitPeer(first, now); err != nil {
+			t.Fatal(err)
+		}
+		second := check(f.evidence(relayDeviceOne, "material two", baseUnix+200, 3600, nil))
+		third := check(f.evidence(relayDeviceOne, "material three", baseUnix+300, 3600, nil))
+		var group sync.WaitGroup
+		errs := make(chan error, 2)
+		for _, peer := range []RelayPeer{second, third} {
+			group.Add(1)
+			go func(peer RelayPeer) {
+				defer group.Done()
+				if _, err := f.verifier.CommitPeer(peer, now); err != nil {
+					errs <- err
+				}
+			}(peer)
+		}
+		group.Wait()
+		close(errs)
+		for err := range errs {
+			// The older one may find the newer already committed; that is a
+			// no-op, never an error.
+			t.Fatalf("round %d: concurrent commit: %v", round, err)
+		}
+		stored, _, err := f.journal.LoadRelayEvidence(agentID)
+		if err != nil || !bytes.Equal(stored, third.Evidence) {
+			t.Fatalf("round %d: stored evidence is not the newest", round)
+		}
+		record, _, err := f.devices.Record(f.delegation.EndpointID)
+		if err != nil || record.SetDigest != third.Descriptor.PrekeyBundleDigest {
+			t.Fatalf("round %d: rollback boundary %s, stored evidence commits %s", round, record.SetDigest,
+				third.Descriptor.PrekeyBundleDigest)
+		}
+	}
 }

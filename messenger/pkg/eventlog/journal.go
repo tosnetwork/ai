@@ -321,6 +321,9 @@ func openJournalAt(root string, quota Quota) (*Journal, error) {
 			return nil, errors.New("create event journal directory")
 		}
 	}
+	if err := refusePreRelayDeliveries(filepath.Join(root, outboundDir)); err != nil {
+		return nil, err
+	}
 	ownership, err := dirlock.Acquire(root, lockName)
 	if err != nil {
 		return nil, err

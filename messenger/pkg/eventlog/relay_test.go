@@ -3,6 +3,8 @@ package eventlog
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -275,5 +277,62 @@ func TestRelayPullRecordRoundTrips(t *testing.T) {
 	}
 	if listed, err := journal.ListRelayPulls(); err != nil || len(listed) != 0 {
 		t.Fatalf("an ended request is still listed: %+v %v", listed, err)
+	}
+}
+
+func TestAPreRelayDeliveryJournalIsRefused(t *testing.T) {
+	journal, root := openJournal(t)
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte(`{"schema":"tos.messaging.delivery-journal.v1","event_id":"` + eventA + `"}`)
+	if err := os.WriteFile(filepath.Join(root, outboundDir, "legacy.json"), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(root); !errors.Is(err, ErrPreRelayDeliveryJournal) || err.Error() != "pre-relay delivery journal; reset state" {
+		t.Fatalf("open over a v1 delivery record: %v", err)
+	}
+}
+
+func TestAnAckForASealedCopyNotYetRecordedAsCarriedSettlesIt(t *testing.T) {
+	journal, _ := openJournal(t)
+	now := time.Unix(int64(acceptAt), 0)
+	copyID, ciphertext := relayCopy(t, journal, now)
+	match := RelayAckMatch{SessionID: session(0x11), DeviceID: relayPeerDevice, CiphertextDigest: canon.Digest(ciphertext)}
+	settled, changed, err := journal.DeliveredByAck(copyID, match, now)
+	if err != nil || !changed || settled.State != StateDelivered || settled.Generation != 0 {
+		t.Fatalf("ack before Carried: %+v %v", settled, err)
+	}
+	// The attempt that was carrying it then finds nothing to record.
+	if _, err := journal.Carried(copyID, "send_"+strings.Repeat("c", 64), generation(1, acceptAt), now.Add(time.Hour), now); !errors.Is(err, ErrNotPending) {
+		t.Fatalf("Carried after the ack: %v", err)
+	}
+	// An unsealed copy has no ciphertext an ack could bind, and is refused.
+	unsealed, err := NewDeliveryCopyID(eventB, endpoint, relayPeerDevice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := outbound(eventB)
+	request.DeliveryID, request.RecipientDeviceID = unsealed, relayPeerDevice
+	if _, _, err := journal.Enqueue(request); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := journal.DeliveredByAck(unsealed, match, now); !errors.Is(err, ErrAckMismatch) {
+		t.Fatalf("ack for an unsealed copy: %v", err)
+	}
+}
+
+func TestDescriptorExpiredPastTheCopysExpiryIsRetentionExceeded(t *testing.T) {
+	journal, _ := openJournal(t)
+	now := time.Unix(int64(acceptAt), 0)
+	copyID, ciphertext := relayCopy(t, journal, now)
+	if _, err := journal.Carried(copyID, "send_"+strings.Repeat("c", 64), generation(1, acceptAt), now.Add(time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	match := RelayAckMatch{SessionID: session(0x11), DeviceID: relayPeerDevice, CiphertextDigest: canon.Digest(ciphertext)}
+	abandoned, err := journal.RelayRejected(copyID, match, fault.CodeDescriptorExpired, "sha256:"+strings.Repeat("7", 64),
+		now.Add(48*time.Hour), now)
+	if err != nil || abandoned.State != StateAbandoned || abandoned.LastCode != fault.CodeRetentionExceeded {
+		t.Fatalf("descriptor-expired past expiry: %+v %v", abandoned, err)
 	}
 }

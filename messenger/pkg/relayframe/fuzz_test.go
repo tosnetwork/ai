@@ -13,9 +13,8 @@ func fuzzEvidence() []byte {
 	return raw
 }
 
-// Every frame a decoder accepts re-encodes, and its content is unchanged: the
-// encoder pads to the smallest bucket, so its output is a prefix of the
-// accepted frame whose remainder is zero padding.
+// Every frame a decoder accepts is canonical: re-encoding it gives exactly
+// the accepted bytes.
 func FuzzDecodeFrame(f *testing.F) {
 	if seed, err := Encode(Frame{Kind: KindEvidence, PartCount: 1, Card: []byte("card"), Evidence: fuzzEvidence(),
 		Part: []byte{EvidenceRequest}}); err == nil {
@@ -32,8 +31,8 @@ func FuzzDecodeFrame(f *testing.F) {
 		if err != nil {
 			t.Fatalf("a decoded frame did not re-encode: %v", err)
 		}
-		if len(encoded) > len(raw) || !bytes.Equal(encoded, raw[:len(encoded)]) {
-			t.Fatal("re-encoding a decoded frame changed its content")
+		if !bytes.Equal(encoded, raw) {
+			t.Fatal("a decoded frame is not canonical")
 		}
 	})
 }

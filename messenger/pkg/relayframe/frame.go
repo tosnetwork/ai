@@ -95,6 +95,7 @@ var (
 	ErrEvidenceRequired      = errors.New("relay frame must carry relay identity evidence")
 	ErrRelayEvidenceTooLarge = errors.New("relay-evidence-too-large")
 	ErrContentTooLarge       = errors.New("relay frame content exceeds the largest bucket")
+	ErrFrameNotMinimal       = errors.New("relay frame is not padded to its smallest bucket")
 )
 
 // Buckets returns the frame size buckets, ascending.
@@ -258,6 +259,11 @@ func Decode(raw []byte) (Frame, error) {
 	part := reader.take(int(partLength))
 	if reader.err != nil {
 		return Frame{}, ErrFrameMalformed
+	}
+	// One content has one encoding: padding beyond the smallest bucket that
+	// holds it would let two frames of different sizes mean the same thing.
+	if bucket, err := BucketFor(reader.offset); err != nil || bucket != len(raw) {
+		return Frame{}, ErrFrameNotMinimal
 	}
 	for _, value := range raw[reader.offset:] {
 		if value != 0 {

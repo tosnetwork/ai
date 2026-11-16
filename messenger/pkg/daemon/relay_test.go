@@ -40,14 +40,23 @@ type carried struct {
 type recordingCarrier struct {
 	mutex  sync.Mutex
 	frames []carried
+	// onCarry, when set, runs inside Carry, as a carrier whose deposit is
+	// answered before Carry returns.
+	onCarry func(carried)
 }
 
 func (c *recordingCarrier) Carry(_ context.Context, recipient, key, withdraw string, _ uint64,
 	frame []byte) (carrierapi.Response, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.frames = append(c.frames, carried{recipient: recipient, key: key, withdraw: withdraw,
-		frame: append([]byte(nil), frame...)})
+	record := carried{recipient: recipient, key: key, withdraw: withdraw, frame: append([]byte(nil), frame...)}
+	c.frames = append(c.frames, record)
+	hook := c.onCarry
+	c.mutex.Unlock()
+	if hook != nil {
+		hook(record)
+	}
+	c.mutex.Lock()
 	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultCarried}, nil
 }
 
@@ -60,10 +69,11 @@ func (c *recordingCarrier) take() []carried {
 }
 
 type relayNode struct {
-	d       *Daemon
-	carrier *recordingCarrier
-	key     ed25519.PrivateKey
-	export  string
+	d        *Daemon
+	carrier  *recordingCarrier
+	key      ed25519.PrivateKey
+	export   string
+	cardPath string
 }
 
 var relayTestPolicy = directory.DescriptorPolicy{MaxEnvelopeBytes: 64 << 10, MaxLifetimeSeconds: 3600, AllowHTTPSEndpoint: true}
@@ -99,13 +109,54 @@ func relayResolver(nodes ...*Daemon) phaseAResolver {
 // finalized view, each exporting its own relay evidence.
 func newRelayNodes(t *testing.T, now time.Time, digits ...[2]string) []*relayNode {
 	t.Helper()
+	return newRelayNodesWith(t, now, nil, digits...)
+}
+
+// relayDaemon is newPhaseADaemon with prekey generations that outlive a
+// re-deposit interval, an ADNL identity as the relay-only descriptor route,
+// and an optional configuration change made before the delegation commits
+// the inbox policy.
+func relayDaemon(t *testing.T, now time.Time, agentDigit, deviceDigit string, configure func(*Config)) *Daemon {
+	t.Helper()
+	config := testConfig(t)
+	config.AgentID = "agent_" + strings.Repeat(agentDigit, 64)
+	config.DeviceID = "dev_" + strings.Repeat(deviceDigit, 64)
+	if configure != nil {
+		configure(&config)
+	}
+	delegation, key := publicationFixture(t, &config, now)
+	key = ed25519.NewKeyFromSeed(bytes.Repeat([]byte(agentDigit), ed25519.SeedSize))
+	endpoint, err := identity.DeriveEndpointID(config.Network(), config.AgentID, key.Public().(ed25519.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.EndpointID = endpoint
+	delegation.EndpointID = endpoint
+	delegation.IdentityPublicKey = key.Public().(ed25519.PublicKey)
+	delegation.ADNLID = "adnl:" + strings.Repeat(deviceDigit+agentDigit, 32)
+	config.Publication.GenerationLifetimeSeconds = 3600
+	config.Publication.ReplenishBeforeSeconds = 600
+	config.Publication.CheckIntervalSeconds = 60
+	journal, err := eventlog.Open(config.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = journal.Close() })
+	prekeys, err := newPrekeyRuntime(config, delegation, journal, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("prekeys: %v", err)
+	}
+	if err := prekeys.configureLocalDevice(config.DeviceID, key); err != nil {
+		t.Fatalf("configure prekeys: %v", err)
+	}
+	return &Daemon{config: config, journal: journal, prekeys: prekeys, now: func() time.Time { return now }}
+}
+
+func newRelayNodesWith(t *testing.T, now time.Time, configure func(*Config), digits ...[2]string) []*relayNode {
+	t.Helper()
 	daemons := make([]*Daemon, 0, len(digits))
 	for _, pair := range digits {
-		d := newPhaseADaemon(t, now, pair[0], pair[1])
-		// A relay-only node's descriptor route is its delegation's ADNL
-		// identity, so the delegation commits one.
-		d.prekeys.planner.delegation.ADNLID = "adnl:" + strings.Repeat(pair[1]+pair[0], 32)
-		daemons = append(daemons, d)
+		daemons = append(daemons, relayDaemon(t, now, pair[0], pair[1], configure))
 	}
 	resolver := relayResolver(daemons...)
 	chain := identity.ChainPolicy{RegistryCodeHashes: []string{registryCode}, Locator: phaseALocator{}}
@@ -170,7 +221,7 @@ func newRelayNodes(t *testing.T, now time.Time, digits ...[2]string) []*relayNod
 		if !ok {
 			t.Fatal("test signer is not an Ed25519 key")
 		}
-		nodes = append(nodes, &relayNode{d: d, carrier: carrier, key: key, export: export})
+		nodes = append(nodes, &relayNode{d: d, carrier: carrier, key: key, export: export, cardPath: cardPath})
 	}
 	return nodes
 }
@@ -555,15 +606,21 @@ func TestNetworkRouteOlderDuplicateAfterANewerEventIsADuplicate(t *testing.T) {
 // a different bundle, signed by the node's own Endpoint key.
 func oldEvidence(t *testing.T, node *relayNode, now time.Time) []byte {
 	t.Helper()
+	return evidenceFor(t, node, node.d.config.DeviceID, uint64(now.Add(-50*time.Second).Unix()),
+		uint64(now.Add(-10*time.Second).Unix()))
+}
+
+// evidenceFor builds evidence for node's Agent naming one device, with a
+// fresh bundle, issued and expiring at the given times.
+func evidenceFor(t *testing.T, node *relayNode, deviceID string, issued, expires uint64) []byte {
+	t.Helper()
 	delegation := node.d.prekeys.planner.delegation
 	public, _, err := e2ee.NewDefaultSuite().NewPrekeyMaterial()
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued := uint64(now.Add(-50 * time.Second).Unix())
-	expires := uint64(now.Add(-10 * time.Second).Unix())
 	bundle, err := e2ee.SignBundle(e2ee.Bundle{Network: delegation.Network, AgentID: delegation.AgentID,
-		EndpointID: delegation.EndpointID, DeviceID: node.d.config.DeviceID, AlgorithmID: e2ee.DefaultCandidateAlgorithmID,
+		EndpointID: delegation.EndpointID, DeviceID: deviceID, AlgorithmID: e2ee.DefaultCandidateAlgorithmID,
 		Material: public, IssuedAtUnix: issued, ExpiresAtUnix: expires}, node.key)
 	if err != nil {
 		t.Fatal(err)

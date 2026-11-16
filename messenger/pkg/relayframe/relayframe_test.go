@@ -196,6 +196,8 @@ func TestDecodeRefusesEveryMalformation(t *testing.T) {
 			return b
 		}), nil},
 		{"non-zero padding", mutate(func(b []byte) []byte { b[len(b)-1] = 1; return b }), relayframe.ErrFramePadding},
+		{"padded past its smallest bucket", append(append([]byte(nil), good...), make([]byte, len(good))...),
+			relayframe.ErrFrameNotMinimal},
 	}
 	for _, test := range cases {
 		_, err := relayframe.Decode(test.raw)

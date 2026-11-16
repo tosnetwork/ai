@@ -118,8 +118,8 @@ relay_frame =
 ```
 
 `D(x)` and big-endian integers as in relay spec section 4. Decoders reject
-unknown kinds, non-zero padding, a total that is not a bucket size, and
-trailing bytes. A frame is at most **190,464 bytes**: base64 makes it 253,952,
+unknown kinds, non-zero padding, a total that is not a bucket size or not
+the smallest bucket that holds the frame, and trailing bytes. A frame is at most **190,464 bytes**: base64 makes it 253,952,
 plus at most 5,432 bytes of fixed packet fields (hex ML-DSA-44 signature, IDs,
 key ID, maximal integers) gives 259,384, under the 260,771-byte packet bound
 (`protocol/pkg/agentpacketseal/seal.go:64-74`) with 1,387 bytes spare.
@@ -383,7 +383,11 @@ On the network route it is noticed within the cached refresh window, at most
     answers with one kind-4 response carrying its own current evidence and
     card. It sends at most one response per (peer, own
     descriptor digest) per hour. A stranger gets the relay ack only: no
-    response and no write.
+    response and no write. Kind-4 evidence is checked against its own pin
+    (the Endpoint and single device it names), not a session's pin, because
+    its purpose includes learning a newer descriptor that removed a device;
+    it still has to be a live finalized delegation committed by the sender
+    Agent itself, and content copies keep their session pin.
   - **Receiving a response.** It is checked and committed the same way, and is
     never answered.
 
@@ -411,7 +415,10 @@ On the network route it is noticed within the cached refresh window, at most
   message if the frame's evidence passes `CheckPeer`. Otherwise it answers a
   signed `rejected` delivery ack with `descriptor-expired`
   (`messenger/pkg/fault/fault.go:72`) and relay-acknowledges the frame. The
-  sender's journal records the code and the descriptor digest of the evidence
+  signed `descriptor-expired` ack goes only to the session's peer or an
+  admitted peer (one with committed evidence); a stranger whose evidence
+  fails, like a stranger's kind-4 request, gets the relay ack only: no
+  Endpoint-signed answer and no write. The sender's journal records the code and the descriptor digest of the evidence
   it had sent.
   - It retries at once only if its current evidence is newer than the one
     rejected, in the single sense defined above (a different digest and a

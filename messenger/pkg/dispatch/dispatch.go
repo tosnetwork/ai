@@ -97,6 +97,13 @@ type SealGate interface {
 	CheckCopy(ctx context.Context, delivery eventlog.Delivery, sealing bool) error
 }
 
+// SweepPreparer is an optional SealGate extension called once at the start
+// of each sweep that has due deliveries, so a gate can index what it reads
+// once per sweep instead of once per copy.
+type SweepPreparer interface {
+	PrepareSweep(ctx context.Context, now time.Time) error
+}
+
 // BindingResolver supplies the associated data one delivery is bound to.
 //
 // This package cannot construct it: the binding names both devices, and which
@@ -787,6 +794,11 @@ func (d *Dispatcher) Sweep(ctx context.Context, limit int) (Summary, error) {
 		due = due[:limit]
 	}
 	summary := Summary{}
+	if preparer, ok := d.gate.(SweepPreparer); ok && len(due) != 0 {
+		if err := preparer.PrepareSweep(ctx, now); err != nil {
+			return summary, err
+		}
+	}
 	for _, delivery := range due {
 		if err := ctx.Err(); err != nil {
 			return summary, err
@@ -815,8 +827,15 @@ func (d *Dispatcher) Sweep(ctx context.Context, limit int) (Summary, error) {
 		}
 		var carried *Carried
 		if errors.As(err, &carried) {
-			if _, carryErr := d.config.Journal.Carried(delivery.Key(), attemptID, carried.Generation,
-				carried.RedepositAt, d.config.Now()); carryErr != nil {
+			_, carryErr := d.config.Journal.Carried(delivery.Key(), attemptID, carried.Generation,
+				carried.RedepositAt, d.config.Now())
+			if errors.Is(carryErr, eventlog.ErrNotPending) {
+				// A verified ack settled the copy while it was being carried;
+				// nothing is left for this attempt to record.
+				summary.Sent++
+				continue
+			}
+			if carryErr != nil {
 				return summary, carryErr
 			}
 			summary.Carried++
@@ -824,8 +843,14 @@ func (d *Dispatcher) Sweep(ctx context.Context, limit int) (Summary, error) {
 		}
 		var deferred *Deferred
 		if errors.As(err, &deferred) {
-			if _, deferErr := d.config.Journal.Defer(delivery.Key(), attemptID, deferred.Code,
-				deferred.Until, d.config.Now()); deferErr != nil {
+			_, deferErr := d.config.Journal.Defer(delivery.Key(), attemptID, deferred.Code,
+				deferred.Until, d.config.Now())
+			if errors.Is(deferErr, eventlog.ErrNotPending) {
+				// Settled meanwhile by a verified ack; the batch goes on.
+				summary.Sent++
+				continue
+			}
+			if deferErr != nil {
 				return summary, deferErr
 			}
 			summary.Deferred++

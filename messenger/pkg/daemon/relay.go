@@ -66,6 +66,10 @@ type relayRuntime struct {
 
 	// pulls serializes read-modify-write of evidence pull records.
 	pulls sync.Mutex
+
+	// index is the open-delivery index of the sweep in progress.
+	indexMutex sync.Mutex
+	index      *peerIndex
 }
 
 // configureRelayCarriage installs the relay route: the carrier client, the
@@ -272,45 +276,114 @@ func (g relayGate) CheckCopy(ctx context.Context, delivery eventlog.Delivery, se
 		}
 		return &dispatch.Deferred{Code: code, Until: now.Add(relayEvidenceRetry)}
 	}
-	count, err := r.inFlight(peer, now)
+	index, err := r.sweepIndex(now)
 	if err != nil {
 		return fault.Wrap(fault.CodeInternal, err)
 	}
-	if count >= MaxRelayPeerEnvelopes {
+	pull, _, err := r.daemon.journal.LoadRelayPull(peer)
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, err)
+	}
+	if index.envelopes[peer]+pullEnvelopes(pull, now) >= MaxRelayPeerEnvelopes {
 		return &dispatch.Deferred{Code: fault.CodeRateLimited, Until: now.Add(relayCapRetry)}
 	}
+	// This copy is about to deposit one more envelope; later copies of the
+	// same sweep see it.
+	r.indexMutex.Lock()
+	index.envelopes[peer]++
+	r.indexMutex.Unlock()
 	return nil
 }
 
-// inFlight counts this node's chat envelopes a relay may still hold for a
-// peer: each carried copy, its previous generation while that may still be
-// stored, the outstanding evidence request and a recent evidence response.
-// Delivery acks are counted by the carrier, which alone sees them stored.
-func (r *relayRuntime) inFlight(peer string, now time.Time) (int, error) {
+// peerIndex is one pass over the open deliveries, grouped by peer Agent.
+type peerIndex struct {
+	// envelopes counts this node's copy envelopes a relay may still hold for
+	// each peer: a carried copy, a copy moved back to pending whose last
+	// deposit may still be stored, and a previous generation that may not be
+	// withdrawn yet. Delivery acks are counted by the carrier, which alone
+	// sees them stored.
+	envelopes map[string]int
+	// onEvidence lists the pending copies held because the peer's stored
+	// evidence failed CheckPeer.
+	onEvidence map[string][]string
+}
+
+// PrepareSweep indexes the open deliveries once for the sweep about to run.
+func (g relayGate) PrepareSweep(ctx context.Context, now time.Time) error {
+	if g.relay == nil || ctx == nil {
+		return errors.New("relay gate is not configured")
+	}
+	index, err := g.relay.buildIndex(now)
+	if err != nil {
+		return err
+	}
+	g.relay.indexMutex.Lock()
+	g.relay.index = &index
+	g.relay.indexMutex.Unlock()
+	return nil
+}
+
+// sweepIndex returns the current sweep's index, building one when the gate
+// is consulted outside a prepared sweep.
+func (r *relayRuntime) sweepIndex(now time.Time) (peerIndex, error) {
+	r.indexMutex.Lock()
+	current := r.index
+	r.indexMutex.Unlock()
+	if current != nil {
+		return *current, nil
+	}
+	index, err := r.buildIndex(now)
+	if err != nil {
+		return peerIndex{}, err
+	}
+	r.indexMutex.Lock()
+	r.index = &index
+	r.indexMutex.Unlock()
+	return index, nil
+}
+
+func (r *relayRuntime) buildIndex(now time.Time) (peerIndex, error) {
 	open, err := r.daemon.journal.OpenDeliveries()
 	if err != nil {
-		return 0, err
+		return peerIndex{}, err
 	}
 	seconds := uint64(now.Unix())
 	window := uint64(relayRetentionWindow / time.Second)
-	count := 0
+	index := peerIndex{envelopes: map[string]int{}, onEvidence: map[string][]string{}}
+	owners := map[string]string{}
 	for _, delivery := range open {
-		if delivery.State != eventlog.StateCarried {
-			continue
+		owner, known := owners[delivery.SessionID]
+		if !known {
+			peer, err := r.peerOf(delivery.SessionID)
+			if err != nil {
+				continue
+			}
+			owner = peer
+			owners[delivery.SessionID] = peer
 		}
-		owner, err := r.peerOf(delivery.SessionID)
-		if err != nil || owner != peer {
-			continue
+		stored := delivery.State == eventlog.StateCarried ||
+			delivery.State == eventlog.StatePending && delivery.Generation != 0 && delivery.LastDepositAtUnix+window > seconds
+		if stored {
+			index.envelopes[owner]++
+			if delivery.Generation > 1 && delivery.LastDepositAtUnix+window > seconds {
+				index.envelopes[owner]++
+			}
 		}
-		count++
-		if delivery.Generation > 1 && delivery.LastDepositAtUnix+window > seconds {
-			count++
+		if delivery.State == eventlog.StatePending {
+			if _, evidence := evidenceCodes[delivery.LastCode]; evidence {
+				index.onEvidence[owner] = append(index.onEvidence[owner], delivery.Key())
+			}
 		}
 	}
-	pull, _, err := r.daemon.journal.LoadRelayPull(peer)
-	if err != nil {
-		return 0, err
-	}
+	return index, nil
+}
+
+// pullEnvelopes counts the evidence envelopes a relay may still hold for a
+// peer: the outstanding request, its previous generation, a recent response.
+func pullEnvelopes(pull eventlog.RelayPull, now time.Time) int {
+	seconds := uint64(now.Unix())
+	window := uint64(relayRetentionWindow / time.Second)
+	count := 0
 	if pull.Requested && pull.RequestGeneration > 0 {
 		count++
 		if pull.RequestGeneration > 1 && pull.RequestLastAtUnix+window > seconds {
@@ -320,7 +393,7 @@ func (r *relayRuntime) inFlight(peer string, now time.Time) (int, error) {
 	if pull.ResponseAtUnix != 0 && pull.ResponseAtUnix+window > seconds {
 		count++
 	}
-	return count, nil
+	return count
 }
 
 // requestEvidence opens the single outstanding evidence request to a peer;
@@ -365,27 +438,6 @@ func (r *relayRuntime) sweepPulls(ctx context.Context) {
 	}
 }
 
-// pendingOnEvidence reports whether any copy for a peer is pending because
-// its stored evidence failed CheckPeer.
-func (r *relayRuntime) pendingOnEvidence(peer string) (bool, error) {
-	open, err := r.daemon.journal.OpenDeliveries()
-	if err != nil {
-		return false, err
-	}
-	for _, delivery := range open {
-		if delivery.State != eventlog.StatePending {
-			continue
-		}
-		if _, evidence := evidenceCodes[delivery.LastCode]; !evidence {
-			continue
-		}
-		if owner, err := r.peerOf(delivery.SessionID); err == nil && owner == peer {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 	r.pulls.Lock()
 	defer r.pulls.Unlock()
@@ -394,11 +446,11 @@ func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 	if err != nil || !pull.Requested {
 		return err
 	}
-	pending, err := r.pendingOnEvidence(peer)
+	index, err := r.buildIndex(now)
 	if err != nil {
 		return err
 	}
-	if !pending {
+	if len(index.onEvidence[peer]) == 0 {
 		// No kind-4 request is sent, or kept outstanding, without a copy
 		// waiting on the peer's evidence.
 		pull.Requested, pull.RequestNextAtUnix = false, 0
@@ -622,6 +674,11 @@ func (r *relayRuntime) deliverEvidence(sender string, frame relayframe.Frame) ca
 		return carrierapi.Refusal(carrierapi.CodeSenderMismatch)
 	}
 	now := r.now()
+	// Pulled evidence is checked against its own pin, not a session's: its
+	// purpose includes learning a newer descriptor that removed a device, which
+	// a session pin would refuse. It must still be a live finalized delegation
+	// committed by the sender Agent itself (CheckPeer refuses evidence that
+	// names another Agent), and content copies keep their session pin.
 	peer, err := r.verifier.CheckContact(sender, frame.Evidence, now)
 	if err != nil {
 		if fault.CodeOf(err) == fault.CodeInternal {
@@ -657,27 +714,15 @@ func (r *relayRuntime) deliverEvidence(sender string, frame relayframe.Frame) ca
 
 // wake makes copies for a peer that were waiting on its evidence due now.
 func (r *relayRuntime) wake(peer string) {
-	open, err := r.daemon.journal.OpenDeliveries()
+	index, err := r.buildIndex(r.now())
 	if err != nil {
 		r.daemon.report("relay wake", err)
 		return
 	}
-	var selected []string
-	for _, delivery := range open {
-		if delivery.State != eventlog.StatePending {
-			continue
-		}
-		if _, evidence := evidenceCodes[delivery.LastCode]; !evidence {
-			continue
-		}
-		if owner, err := r.peerOf(delivery.SessionID); err == nil && owner == peer {
-			selected = append(selected, delivery.Key())
-		}
-	}
-	if len(selected) == 0 {
+	if len(index.onEvidence[peer]) == 0 {
 		return
 	}
-	if _, err := r.daemon.journal.WakeDeliveries(selected, r.now()); err != nil {
+	if _, err := r.daemon.journal.WakeDeliveries(index.onEvidence[peer], r.now()); err != nil {
 		r.daemon.report("relay wake", err)
 	}
 }
@@ -796,14 +841,12 @@ func (r *relayRuntime) applyAck(deliveryID string, delivery eventlog.Delivery, a
 }
 
 // recordAckedCard notes that the peer acknowledged a frame that carried this
-// node's card, so later frames to it no longer carry the card.
+// node's card, so later frames to it no longer carry the card. An ack binds
+// the session, device and ciphertext, not the generation it answers, so it
+// proves the peer saw a card only when every recorded generation of the copy
+// carried that same card; otherwise the card keeps riding.
 func (r *relayRuntime) recordAckedCard(delivery eventlog.Delivery, now time.Time) error {
-	digest := ""
-	for _, generation := range delivery.Generations {
-		if generation.CardDigest != "" {
-			digest = generation.CardDigest
-		}
-	}
+	digest := ackedCardDigest(delivery)
 	if digest == "" {
 		return nil
 	}
@@ -822,6 +865,19 @@ func (r *relayRuntime) recordAckedCard(delivery eventlog.Delivery, now time.Time
 	}
 	pull.AckedCardDigest = digest
 	return r.daemon.journal.PutRelayPull(pull, now)
+}
+
+// ackedCardDigest is the card an ack of this copy proves the peer received,
+// or empty when its generations did not all carry one same card.
+func ackedCardDigest(delivery eventlog.Delivery) string {
+	digest := ""
+	for index, generation := range delivery.Generations {
+		if generation.CardDigest == "" || index > 0 && generation.CardDigest != digest {
+			return ""
+		}
+		digest = generation.CardDigest
+	}
+	return digest
 }
 
 func latestGeneration(delivery eventlog.Delivery) eventlog.RelayGeneration {
@@ -898,8 +954,24 @@ func (d *Daemon) ReceiveRelay(ctx context.Context, message dispatch.Message, pac
 	}
 	peer, err := d.discovery.relay.CheckPeer(packetSender, evidence, pin, now)
 	if err != nil {
-		if fault.CodeOf(err) == fault.CodeDescriptorExpired || fault.CodeOf(err) == fault.CodeInternal {
+		if fault.CodeOf(err) == fault.CodeInternal {
 			return ReceiveResult{}, nil, err
+		}
+		if fault.CodeOf(err) == fault.CodeDescriptorExpired {
+			// A signed descriptor-expired ack goes only to the session's peer
+			// or an admitted peer. A stranger whose evidence fails gets the
+			// relay ack only: no Endpoint signature and no write.
+			known := found // the session's peer is packetSender, checked above
+			if !known {
+				admitted, admittedErr := d.discovery.relay.Admitted(packetSender)
+				if admittedErr != nil {
+					return ReceiveResult{}, nil, fault.Wrap(fault.CodeInternal, admittedErr)
+				}
+				known = admitted
+			}
+			if known {
+				return ReceiveResult{}, nil, err
+			}
 		}
 		return ReceiveResult{}, nil, &relayRefusal{code: carrierapi.CodeEvidenceRefused, detail: err.Error()}
 	}

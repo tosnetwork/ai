@@ -3,10 +3,12 @@ package directory
 import (
 	"bytes"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/ids"
 	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
@@ -265,6 +267,23 @@ func (v RelayVerifier) CommitPeer(peer RelayPeer, now time.Time) (bool, error) {
 	if now.IsZero() || now.Unix() < 0 {
 		return false, fault.New(fault.CodeInternal, "invalid relay evidence commit time")
 	}
+	// Load, compare, admit and store are one critical section per peer, so
+	// two commits cannot leave the rollback boundary at one evidence and the
+	// stored evidence at another.
+	unlock := lockPeer(peer.AgentID)
+	defer unlock()
+	for attempt := 0; ; attempt++ {
+		committed, err := v.commitLocked(peer, now)
+		if errors.Is(err, eventlog.ErrRelayEvidenceConflict) && attempt == 0 {
+			// Another writer outside this process changed the store; read it
+			// again and judge "newer" against what is there now.
+			continue
+		}
+		return committed, err
+	}
+}
+
+func (v RelayVerifier) commitLocked(peer RelayPeer, now time.Time) (bool, error) {
 	previous, found, err := v.Store.LoadRelayEvidence(peer.AgentID)
 	if err != nil {
 		return false, fault.Wrap(fault.CodeInternal, err)
@@ -284,9 +303,25 @@ func (v RelayVerifier) CommitPeer(peer RelayPeer, now time.Time) (bool, error) {
 		return false, fault.Wrap(fault.CodeDescriptorUnbound, err)
 	}
 	if err := v.Store.StoreRelayEvidence(peer.AgentID, peer.Evidence, previousDigest, now); err != nil {
+		if errors.Is(err, eventlog.ErrRelayEvidenceConflict) {
+			return false, err
+		}
 		return false, fault.Wrap(fault.CodeInternal, err)
 	}
 	return true, nil
+}
+
+// peerLocks serializes commits per peer Agent within this process.
+var peerLocks sync.Map
+
+func lockPeer(agentID string) func() {
+	value, _ := peerLocks.LoadOrStore(agentID, &sync.Mutex{})
+	mutex, ok := value.(*sync.Mutex)
+	if !ok {
+		return func() {}
+	}
+	mutex.Lock()
+	return mutex.Unlock
 }
 
 // NewerEvidence is the single definition of "newer": a different descriptor

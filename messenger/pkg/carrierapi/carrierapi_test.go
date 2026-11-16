@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -143,5 +144,78 @@ func TestSocketRoundTripIsBoundedAndChecked(t *testing.T) {
 	}
 	if _, response := server.Handle(ctx, []byte(`{"schema":"x"}`)); response.Code != CodeInvalidRequest {
 		t.Fatalf("invalid request body: %+v", response)
+	}
+}
+
+// slowHandler records how many handlers run at once and whether each saw
+// the per-connection deadline.
+type slowHandler struct {
+	mutex      sync.Mutex
+	running    int
+	maximum    int
+	noDeadline int
+}
+
+func (h *slowHandler) Carry(ctx context.Context, _ Request, _ []byte) Response {
+	h.mutex.Lock()
+	h.running++
+	if h.running > h.maximum {
+		h.maximum = h.running
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		h.noDeadline++
+	}
+	h.mutex.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	h.mutex.Lock()
+	h.running--
+	h.mutex.Unlock()
+	return Response{Result: ResultCarried}
+}
+
+func (h *slowHandler) Deliver(context.Context, string, []byte) Response     { return NotServed() }
+func (h *slowHandler) DeliveryAck(context.Context, string, []byte) Response { return NotServed() }
+
+func TestServerBoundsConcurrentHandlersAndTheirTime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run", "carrier.sock")
+	listener, err := Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	handler := &slowHandler{}
+	server, err := NewServer(handler, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = server.Serve(ctx, listener) }()
+	client, err := NewClient(path, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var group sync.WaitGroup
+	failures := make(chan error, 3*MaxConcurrentHandlers)
+	for index := 0; index < 3*MaxConcurrentHandlers; index++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			response, err := client.Carry(ctx, agentA, keyOne, "", 10, []byte("frame"))
+			if err != nil || response.Result != ResultCarried {
+				failures <- err
+			}
+		}()
+	}
+	group.Wait()
+	close(failures)
+	for err := range failures {
+		t.Fatalf("a queued request failed: %v", err)
+	}
+	if handler.maximum > MaxConcurrentHandlers || handler.maximum == 0 {
+		t.Fatalf("%d handlers ran at once, cap %d", handler.maximum, MaxConcurrentHandlers)
+	}
+	if handler.noDeadline != 0 {
+		t.Fatalf("%d handlers ran without the connection deadline", handler.noDeadline)
 	}
 }

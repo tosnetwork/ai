@@ -94,10 +94,17 @@ type Handler interface {
 	DeliveryAck(ctx context.Context, packetSenderAgentID string, frame []byte) Response
 }
 
+// MaxConcurrentHandlers bounds the requests one server handles at once. A
+// carrier and a daemon exchange a few frames per peer at a time; further
+// connections wait in the listener backlog rather than each holding a
+// goroutine and a frame buffer.
+const MaxConcurrentHandlers = 16
+
 // Server serves one carrier socket.
 type Server struct {
 	handler Handler
 	timeout time.Duration
+	slots   chan struct{}
 }
 
 // NewServer returns a server for a handler.
@@ -111,7 +118,7 @@ func NewServer(handler Handler, timeout time.Duration) (*Server, error) {
 	if timeout < time.Second || timeout > 5*time.Minute {
 		return nil, errors.New("carrier timeout is outside 1s..5m")
 	}
-	return &Server{handler: handler, timeout: timeout}, nil
+	return &Server{handler: handler, timeout: timeout, slots: make(chan struct{}, MaxConcurrentHandlers)}, nil
 }
 
 // Listen creates the private mode-0600 socket.
@@ -124,11 +131,20 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		return errors.New("carrier server needs a context and listener")
 	}
 	for {
+		select {
+		case s.slots <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		connection, err := listener.Accept()
 		if err != nil {
+			<-s.slots
 			return err
 		}
-		go s.serveConnection(ctx, connection)
+		go func() {
+			defer func() { <-s.slots }()
+			s.serveConnection(ctx, connection)
+		}()
 	}
 }
 
@@ -144,7 +160,10 @@ func (s *Server) serveConnection(ctx context.Context, connection net.Conn) {
 	if err != nil {
 		return
 	}
-	op, response := s.Handle(ctx, body)
+	// The handler's work is bounded by the same budget as the connection.
+	bounded, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	op, response := s.Handle(bounded, body)
 	encoded, err := encodeResponse(op, response)
 	if err != nil {
 		encoded, err = encodeResponse(op, Retry())

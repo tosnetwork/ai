@@ -1,8 +1,10 @@
 package eventlog
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -112,7 +114,11 @@ func (j *Journal) DeliveredByAck(deliveryID string, match RelayAckMatch, now tim
 	if delivery.State == StateDelivered {
 		return delivery, false, nil
 	}
-	if delivery.State != StateCarried && !(delivery.State == StatePending && delivery.Generation != 0) {
+	// A sealed pending copy is accepted too: the carrier may have deposited it
+	// and its ack arrived before Carried was recorded, or the process died in
+	// between. The signed ack binds the ciphertext digest, which exists only
+	// once the copy is sealed, so this settles nothing that was not sent.
+	if delivery.State != StateCarried && delivery.State != StatePending {
 		return Delivery{}, false, ErrNotPending
 	}
 	delivery.State = StateDelivered
@@ -143,7 +149,11 @@ func (j *Journal) RelayRejected(deliveryID string, match RelayAckMatch, code fau
 		return Delivery{}, err
 	}
 	defer j.mutex.Unlock()
-	if delivery.State != StateCarried && !(delivery.State == StatePending && delivery.Generation != 0) {
+	// A sealed pending copy is accepted too: the carrier may have deposited it
+	// and its ack arrived before Carried was recorded, or the process died in
+	// between. The signed ack binds the ciphertext digest, which exists only
+	// once the copy is sealed, so this settles nothing that was not sent.
+	if delivery.State != StateCarried && delivery.State != StatePending {
 		return Delivery{}, ErrNotPending
 	}
 	delivery.AttemptID = ""
@@ -161,7 +171,10 @@ func (j *Journal) RelayRejected(deliveryID string, match RelayAckMatch, code fau
 	delivery.NextRedepositAtUnix = 0
 	next := uint64(retryAt.Unix())
 	if next >= delivery.ExpiresAtUnix {
+		// Its own lifetime ends before a retry: a relay held it and no
+		// device accepted it, which the owner surface reports as such.
 		delivery.State = StateAbandoned
+		delivery.LastCode = fault.CodeRetentionExceeded
 		delivery.NextAttemptAtUnix = 0
 		delivery.SettledAtUnix = seconds
 	} else {
@@ -308,4 +321,39 @@ func (j *Journal) OpenDeliveries() ([]Delivery, error) {
 		}
 	}
 	return open, nil
+}
+
+// previousDeliverySchema is the delivery record schema before relay
+// carriage.
+const previousDeliverySchema = "tos.messaging.delivery-journal.v1"
+
+// ErrPreRelayDeliveryJournal reports a state directory written before the
+// delivery schema gained relay carriage. The project is pre-launch and does
+// not migrate: the state is reset rather than read as something it is not.
+var ErrPreRelayDeliveryJournal = errors.New("pre-relay delivery journal; reset state")
+
+// refusePreRelayDeliveries refuses a store holding any v1 delivery record.
+// Such records would otherwise be skipped as unreadable, and their events
+// silently never sent.
+func refusePreRelayDeliveries(outbound string) error {
+	entries, err := os.ReadDir(outbound)
+	if err != nil {
+		return errors.New("read delivery journal")
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		raw, err := readRecordBytes(filepath.Join(outbound, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var header struct {
+			Schema string `json:"schema"`
+		}
+		if json.Unmarshal(raw, &header) == nil && header.Schema == previousDeliverySchema {
+			return ErrPreRelayDeliveryJournal
+		}
+	}
+	return nil
 }
