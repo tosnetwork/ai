@@ -130,6 +130,7 @@ var eventKinds = map[string]kindSpec{
 	"device.history.segment": {class: "device.sync"},
 
 	"room.invite":            {class: "room"},
+	"room.key-package":       {class: "room"},
 	"room.membership.commit": {class: "room"},
 	"room.message":           {class: "room"},
 	"room.moderation":        {class: "room"},

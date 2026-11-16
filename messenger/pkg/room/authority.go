@@ -100,6 +100,48 @@ func VerifyMembershipAuthorization(membership Membership, value MembershipAuthor
 	return nil
 }
 
+// RoomHandshakeRetention is how long a room handshake object is re-deposited
+// to a member that has not acknowledged it, and so how long after issue an
+// authorization must still verify on the relay route.
+const RoomHandshakeRetention = 7 * 24 * time.Hour
+
+// MaxRoomAuthorizationSkew bounds the clock skew a receiver adds to the relay
+// window.
+const MaxRoomAuthorizationSkew = time.Hour
+
+// VerifyMembershipAuthorizationRelay is the relay route's check. A member
+// catching up may receive a Commit days after it was made, long after the
+// authorization's own 24 h expiry, and the object must not be re-signed per
+// re-deposit (its bytes and digest stay fixed). So the signature is checked
+// against the authority's delegation as finalized now, and the window is
+// issued <= now < issued + retention + skew instead of the authorization's
+// own expiry. retention is RoomHandshakeRetention in production; a test MAY
+// shorten it.
+func VerifyMembershipAuthorizationRelay(membership Membership, value MembershipAuthorization, delegation identity.Delegation,
+	now time.Time, retention, skew time.Duration) error {
+	if now.IsZero() || now.Unix() < 0 {
+		return errors.New("invalid room membership verification time")
+	}
+	if retention <= 0 || retention > RoomHandshakeRetention || skew < 0 || skew > MaxRoomAuthorizationSkew {
+		return errors.New("invalid relay authorization window")
+	}
+	if err := VerifyMembershipAuthorizationBinding(membership, value, delegation); err != nil {
+		return err
+	}
+	if err := identity.CheckWindow(delegation, now); err != nil {
+		return err
+	}
+	window := uint64((retention + skew) / time.Second)
+	if value.IssuedAtUnix > ^uint64(0)-window {
+		return errors.New("room membership authorization window overflows")
+	}
+	seconds := uint64(now.Unix())
+	if seconds < value.IssuedAtUnix || seconds >= value.IssuedAtUnix+window {
+		return errors.New("room membership authorization is outside the relay window")
+	}
+	return nil
+}
+
 // VerifyMembershipAuthorizationBinding checks everything about an
 // authorization that does not depend on the time it is checked at: its shape,
 // that it names exactly this membership, that its authority is a member and

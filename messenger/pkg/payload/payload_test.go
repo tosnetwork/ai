@@ -252,7 +252,9 @@ func sample(kind string) Payload {
 			MembershipDigest: "sha256:" + strings.Repeat("b", 64), MemberCount: 4}
 	case "room.message":
 		return RoomMessage{RoomID: "room_" + strings.Repeat("9", 64), Epoch: 3,
-			MediaType: "text/markdown", Body: "agenda"}
+			MediaType: "text/markdown", Body: "agenda", Sequence: 7}
+	case "room.key-package":
+		return RoomKeyPackage{RoomID: "room_" + strings.Repeat("9", 64), DeviceCredentialJSON: []byte(`{"schema":"credential"}`)}
 	case "room.moderation":
 		return RoomModeration{RoomID: "room_" + strings.Repeat("9", 64), MembershipEpoch: 3,
 			RolePolicyRevision: 2, TargetEventID: "evt_" + strings.Repeat("8", 64),

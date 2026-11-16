@@ -160,3 +160,51 @@ func TestMembershipAuthorizationBindsExactMembershipAndEndpoint(t *testing.T) {
 		t.Fatal("a caller-supplied key that does not derive the Endpoint authorized membership")
 	}
 }
+
+// On the relay route an authorization verifies against the delegation as
+// finalized now, for issued <= now < issued + retention + skew, long after its
+// own expiry; never before issue, nor after the window, nor under a
+// delegation that is no longer live.
+func TestMembershipAuthorizationRelayWindow(t *testing.T) {
+	delegation, key := authorityDelegation(t, agent(1), 0x41)
+	delegation.ExpiresAtUnix = 10_000_000
+	membership := mustFound(t, agent(1), agent(2))
+	value, err := SignMembershipAuthorization(MembershipAuthorization{
+		Network: authorityNetwork(), RoomID: membership.RoomID, Epoch: membership.Epoch,
+		MembershipDigest: membership.Digest,
+		Authority:        Authority{AgentID: delegation.AgentID, EndpointID: delegation.EndpointID},
+		IssuedAtUnix:     200, ExpiresAtUnix: 300,
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retention, skew := 1000*time.Second, 10*time.Second
+	cases := []struct {
+		at   int64
+		pass bool
+	}{{199, false}, {200, true}, {400, true}, {1209, true}, {1210, false}}
+	for _, test := range cases {
+		err := VerifyMembershipAuthorizationRelay(membership, value, delegation, time.Unix(test.at, 0), retention, skew)
+		if (err == nil) != test.pass {
+			t.Fatalf("at %d: %v, want pass=%v", test.at, err, test.pass)
+		}
+	}
+	// The authorization's own expiry is what the ordinary check enforces.
+	if err := VerifyMembershipAuthorization(membership, value, delegation, time.Unix(400, 0)); err == nil {
+		t.Fatal("the ordinary check accepted an expired authorization")
+	}
+	ended := delegation
+	ended.ExpiresAtUnix = 350
+	if err := VerifyMembershipAuthorizationRelay(membership, value, ended, time.Unix(400, 0), retention, skew); err == nil {
+		t.Fatal("a delegation no longer live verified")
+	}
+	if err := VerifyMembershipAuthorizationRelay(membership, value, delegation, time.Unix(400, 0), RoomHandshakeRetention+time.Second, skew); err == nil {
+		t.Fatal("a retention above the production bound was accepted")
+	}
+	tampered := value
+	tampered.EndpointSignature = append([]byte(nil), value.EndpointSignature...)
+	tampered.EndpointSignature[0] ^= 1
+	if err := VerifyMembershipAuthorizationRelay(membership, tampered, delegation, time.Unix(400, 0), retention, skew); err == nil {
+		t.Fatal("a tampered authorization verified on the relay route")
+	}
+}

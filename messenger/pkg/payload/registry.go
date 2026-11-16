@@ -69,6 +69,7 @@ var codecs = map[string]codec{
 	"device.history.segment": {schema: DeviceHistorySegment{}.Schema(), decode: decodeDeviceHistorySegment},
 
 	"room.invite":            {schema: RoomInvite{}.Schema(), decode: decodeRoomInvite},
+	"room.key-package":       {schema: RoomKeyPackage{}.Schema(), decode: decodeRoomKeyPackage},
 	"room.membership.commit": {schema: RoomMembershipCommit{}.Schema(), decode: decodeRoomMembershipCommit},
 	"room.message":           {schema: RoomMessage{}.Schema(), decode: decodeRoomMessage},
 	"room.moderation":        {schema: RoomModeration{}.Schema(), decode: decodeRoomModeration},
