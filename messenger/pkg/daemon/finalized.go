@@ -6,6 +6,7 @@ import (
 
 	"github.com/tosnetwork/ai/messenger/internal/securefile"
 	"github.com/tosnetwork/ai/messenger/pkg/chainagent"
+	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
@@ -69,7 +70,23 @@ func VerifyFinalizedDelegation(config Config, now time.Time) (identity.Delegatio
 	if err := config.Validate(); err != nil {
 		return identity.Delegation{}, err
 	}
+	if err := prepareStateDir(config.StateDir); err != nil {
+		return identity.Delegation{}, err
+	}
 	return finalizedVerifier{}.Verify(config, now)
+}
+
+// prepareStateDir initializes the event journal root before anything else
+// writes into it. The finalized read stores the rollback checkpoint inside
+// state_dir, and the journal refuses to adopt a non-empty root it did not
+// mark, so verifying first on a fresh directory would leave the daemon
+// unable to open it.
+func prepareStateDir(stateDir string) error {
+	journal, err := eventlog.Open(stateDir)
+	if err != nil {
+		return errors.New("prepare state directory: " + err.Error())
+	}
+	return journal.Close()
 }
 
 func finalizedResolver(config Config) (*chainagent.Resolver, identity.ChainPolicy, error) {
