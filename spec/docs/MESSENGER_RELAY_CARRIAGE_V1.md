@@ -713,6 +713,15 @@ team's) and described in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`.
 
 ### M-R1: one-to-one text, two OpenFox, two hosts
 
+**Status: accepted** by `messenger-relay-one-to-one-20261116.json` (four
+machines, the two deployed test relays) and
+`local-messenger-relay-one-to-one-20261116.json` (one host, namespaces), both
+described in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`. Item 3 was met
+by allow-list admission through contact-file import; invite-based first
+contact moved to M-R2 (decision of 2026-11-16: an invite cannot yet be
+attached to an outbound copy, and contact-file import is itself an explicit
+admission).
+
 Record `messenger-relay-one-to-one-<date>.json`, schema
 `tos.messaging.relay-carriage.acceptance.v1`. A run MUST show:
 
@@ -724,8 +733,9 @@ Record `messenger-relay-one-to-one-<date>.json`, schema
 2. **Conversation.** A texts B; B's runtime answers via `messages.reply-direct`.
    Each delivery becomes `delivered` only on a verified kind-2 ack; the record
    shows `carried → delivered` times.
-3. **First contact** over the relay with an admission invite, and B learning
-   A's card in band, not only from the contact file.
+3. **First contact** over the relay, admitted by the recipient's allow-list
+   (contact-file import), and B learning A's card in band, not only from the
+   contact file. (Invite-based first contact is part of M-R2.)
 4. **Relay outage.** relay-1 down for the whole conversation; relay-2 carries it.
 5. **Offline peer and duplicates.** B is stopped beyond the re-deposit
    interval. A deposits generation 2, and generation 1 is withdrawn at every
@@ -788,6 +798,11 @@ sender unlinkability (section 6), multi-device, M0 freeze evidence
 `messenger/docs/ROADMAP.md:25`), any Gate O claim.
 
 ### M-R2: private rooms
+
+Invite-based first contact: an admission invite attached to an outbound copy
+(no runtime operation sets it today) admits a stranger's first frame over the
+relay; the record shows the invite checked on receipt and refused when reused
+or expired.
 
 Three OpenFox on three hosts: room creation, two Welcomes (one split) and a
 Remove Commit over the relay; a member offline across a Commit catches up in

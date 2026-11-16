@@ -1,0 +1,2236 @@
+{
+  "schema": "tos.messaging.relay-carriage.acceptance.v1",
+  "milestone": "M-R1",
+  "mode": "local: one host, network namespaces",
+  "qualifies_as_public_acceptance": false,
+  "reason": "one physical host: the nodes, the relays and the chain are separated by Linux network namespaces and firewall rules, not by machines; the relays and the chain are operated by the run itself; no internet path exists",
+  "started_utc": "2026-11-16T12:13:44.361192+00:00",
+  "openfox_commit": "40a107203d65887f8d5514e4a534795f0cda1f21",
+  "openfox_tree_status": [],
+  "openfox_tree_dirty": false,
+  "tos_commit": "5af405dcb1f523be0ff3b812e9f6945275c4945b",
+  "ai_commit": "658bc429fe0545c846856db6b898fc5b8ad223a1",
+  "ai_tree_status": [],
+  "builds": {
+    "openfox": "GOWORK=off CGO_ENABLED=0 go build -trimpath -tags goolm,stdjson ./cmd/openfox",
+    "ai": "GOWORK=off CGO_ENABLED=0 go build -trimpath ./messenger/cmd/tos-messengerd ./messenger/cmd/tos-messenger-owner ./protocol/cmd/tos-service-packet-relay",
+    "tool": "GOWORK=off CGO_ENABLED=0 go build -trimpath ./scripts/messenger-relay-e2e-tool"
+  },
+  "relays": {
+    "relay1": {
+      "url": "https://10.231.78.20:8443",
+      "argv": [
+        "<workdir>/bin/tos-service-packet-relay",
+        "-listen",
+        "10.231.78.20:8443",
+        "-tls-cert",
+        "<workdir>/tls/relay1-cert.pem",
+        "-tls-key",
+        "<workdir>/relay1/tls-key.pem",
+        "-state-dir",
+        "<workdir>/relay1/state",
+        "-global-max-entries",
+        "10000",
+        "-global-max-bytes",
+        "268435456",
+        "-sweep-interval",
+        "10s"
+      ]
+    },
+    "relay2": {
+      "url": "https://10.231.78.21:8443",
+      "argv": [
+        "<workdir>/bin/tos-service-packet-relay",
+        "-listen",
+        "10.231.78.21:8443",
+        "-tls-cert",
+        "<workdir>/tls/relay2-cert.pem",
+        "-tls-key",
+        "<workdir>/relay2/tls-key.pem",
+        "-state-dir",
+        "<workdir>/relay2/state",
+        "-global-max-entries",
+        "10000",
+        "-global-max-bytes",
+        "268435456",
+        "-sweep-interval",
+        "10s"
+      ]
+    }
+  },
+  "topology": {
+    "bridge": "tosmr-br0 10.231.78.0/24, host end 10.231.78.1, no default route in any namespace",
+    "namespaces": {
+      "tosmr-a": "10.231.78.10",
+      "tosmr-b": "10.231.78.11",
+      "tosmr-c": "10.231.78.12",
+      "tosmr-relay1": "10.231.78.20",
+      "tosmr-relay2": "10.231.78.21"
+    },
+    "chain": "three validators in the host namespace on 127.0.0.1, JSON-RPC ports [49880, 49881, 49882]",
+    "firewall": "node namespaces: outgoing only to the relays' port 8443 and 10.231.78.1 JSON-RPC ports, no incoming connection; relay namespaces: incoming only to port 8443, no outgoing connection; host bridge table: every node-to-node frame dropped",
+    "files": "each namespace process runs with empty read-only tmpfs mounts over the other parties' directories and the run's private files",
+    "thermal_guard": "pauses and resumes the run and the validators (their process group); the node, relay and forwarder processes run in their own sessions, so a guard resume never continues a process the run paused for a crash window"
+  },
+  "network_label": "tos:global-id:3",
+  "not_openfox": [
+    "booting the three-validator network (tostester)",
+    "creating, funding and activating the three wallets with tosctl and the zerostate faucet",
+    "each node's Messaging Endpoint identity: Endpoint and owner keys, the delegation and descriptor policy (scripts/messenger-relay-e2e-tool identity), and its commitment on chain (tosctl agent native-registry action --kind delegate, then tosctl wallet send)",
+    "the test Endpoint signer (scripts/messenger-relay-e2e-tool signer): the Messenger ships only the signer client",
+    "the Agent revocation at the end (tosctl agent native-registry action --kind revoke-agent)",
+    "the network namespaces, firewall rules, forwarders and the relay daemons",
+    "the Messenger runtime calls (scripts/messenger-relay-e2e-tool call): this script is the Agent runtime of both nodes",
+    "the adversarial envelopes (scripts/messenger-relay-e2e-tool craft) and this script's relay reads, deposits and chain reads"
+  ],
+  "network": {
+    "network_id": "tos:global-id:3",
+    "genesis_root_hash": "sha256:1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a",
+    "genesis_file_hash": "sha256:1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515",
+    "validators": 3,
+    "json_rpc": [
+      "http://127.0.0.1:49880/jsonRPC",
+      "http://127.0.0.1:49881/jsonRPC",
+      "http://127.0.0.1:49882/jsonRPC"
+    ]
+  },
+  "wallets": {
+    "a": "0:97b9665c028dc3d4e583f3e1324c4b90f410ab7a8e3b9e56b83a74a5de9da7da",
+    "b": "0:0d2bf6e88917c039a3628d4cde8c17eea0db756c2b0ae423f42920589dfc5aed",
+    "c": "0:3f450cbb8b32613ada8279ca7b4ed46aa49074b035fe0e3c17e2a62619eda504"
+  },
+  "binaries": {
+    "openfox": {
+      "sha256": "7e95136d6cbc84c248c0d92e5b852ee69031fced0a1f27fcbfc444f9bb5394c4"
+    },
+    "tosctl": {
+      "sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b"
+    },
+    "tos-messengerd": {
+      "sha256": "c56b01af9e053750a1fbc789c1e97c687a7a7c11135a196a46a8f604fcd0320f"
+    },
+    "tos-messenger-owner": {
+      "sha256": "ac8dda35705ddffd35dbc78358c7a32ece12ac68d57cd1945346da141e53b310"
+    },
+    "tos-service-packet-relay": {
+      "sha256": "89ff5732bc629ce0835d8d68c7eba05c1eb6cc775e8cbf971677140a80a5f702"
+    },
+    "messenger-relay-e2e-tool": {
+      "sha256": "294e4fda65732bc9fa3074fa1da6da64281d0e84d7843da5394e52b453cbbafe"
+    }
+  },
+  "isolation_probe": {
+    "before_rules": {
+      "a to b": "connected",
+      "b to a": "connected",
+      "c to b": "connected",
+      "a to c": "connected"
+    },
+    "after_rules": {
+      "a to b": "refused or unreachable: TimeoutError",
+      "b to a": "refused or unreachable: TimeoutError",
+      "c to b": "refused or unreachable: TimeoutError",
+      "a to c": "refused or unreachable: TimeoutError",
+      "b to its own listener": "connected"
+    },
+    "other_paths": {
+      "a to host ssh 10.231.78.1:22": "refused or unreachable: TimeoutError",
+      "b to host ssh 10.231.78.1:22": "refused or unreachable: TimeoutError",
+      "relay1 to the chain forwarder": "refused or unreachable: TimeoutError",
+      "relay2 to node a's listener": "refused or unreachable: TimeoutError",
+      "a to an internet address 1.1.1.1:443": "refused or unreachable: OSError"
+    },
+    "listeners_started": true,
+    "relay_reachability": {
+      "a to relay1": "connected",
+      "a to relay2": "connected",
+      "b to relay1": "connected",
+      "b to relay2": "connected",
+      "c to relay1": "connected",
+      "c to relay2": "connected"
+    }
+  },
+  "file_isolation": {
+    "a": [
+      "/tos/mr1-live/k13/private: []",
+      "/tos/mr1-live/k13/nodes/k13/b: []",
+      "/tos/mr1-live/k13/nodes/k13/c: []",
+      "/tos/mr1-live/k13/relay1: []",
+      "/tos/mr1-live/k13/relay2: []"
+    ],
+    "b": [
+      "/tos/mr1-live/k13/private: []",
+      "/tos/mr1-live/k13/nodes/k13/a: []",
+      "/tos/mr1-live/k13/nodes/k13/c: []",
+      "/tos/mr1-live/k13/relay1: []",
+      "/tos/mr1-live/k13/relay2: []"
+    ],
+    "c": [
+      "/tos/mr1-live/k13/private: []",
+      "/tos/mr1-live/k13/nodes/k13/a: []",
+      "/tos/mr1-live/k13/nodes/k13/b: []",
+      "/tos/mr1-live/k13/relay1: []",
+      "/tos/mr1-live/k13/relay2: []"
+    ],
+    "relay1": [
+      "/tos/mr1-live/k13/private: []",
+      "/tos/mr1-live/k13/nodes: []",
+      "/tos/mr1-live/k13/relay2: []"
+    ],
+    "relay2": [
+      "/tos/mr1-live/k13/private: []",
+      "/tos/mr1-live/k13/nodes: []",
+      "/tos/mr1-live/k13/relay1: []"
+    ]
+  },
+  "tls_negative_control": {
+    "system trust store": "refused: SSLCertVerificationError",
+    "unrelated CA": "refused: SSLCertVerificationError",
+    "run CA": "verified"
+  },
+  "objects": {
+    "a": {
+      "agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485",
+      "agent_address": "0:e8b88c53c9c841507a8c3290fa512c45a26f5d42875c1cedd8bc539a2d4d7dab"
+    },
+    "b": {
+      "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+      "agent_address": "0:f34e1d09769bae779e602cd433c390c0a9f6ed58ef8adf893a7ca44923acf975"
+    },
+    "c": {
+      "agent_id": "agent_99470b2df9562f611d9f216d47dc19dafe524861484305a6682f68ea22b8c21a",
+      "agent_address": "0:4c41aad3ed784388a83d4c0aaf4b4d7b8641bdc20aa45c5d99637a2cf9cebcd5"
+    }
+  },
+  "messenger_identities": {
+    "a": {
+      "endpoint_id": "mep_37f482686b0ab45390a3bf443e1b938592c8145d986d355c02e0fdb6b4d6367d",
+      "device_id": "dev_604959bf13ab33e7b94a4d9cd0f1a9bda89e2c651147fefc8d989e3edf65985b",
+      "delegation_digest": "sha256:7706b487c4c15ac5ff46faaeedd17b9d83eb69c8dc0f0f0a96ffb67732c5eedc",
+      "descriptor_policy_digest": "sha256:d362ffb2c7af5e8a941c605479f8fe660e885c2d0bddecd0bc3b86e0ec22d450",
+      "inbox_policy_digest": "sha256:3265d1133e7ee6309adb156d91b5e49b1ae1b3eced32e36da7b937ff0e44fd6f"
+    },
+    "b": {
+      "endpoint_id": "mep_7799f8453bd7d6bb5dfe414a9395b3f2677bbcd95bf49dad2ce9dd8570b22bfa",
+      "device_id": "dev_ade07b6c2e75b92202241f4c6665968ee412a98526df307306f55275c815ffdd",
+      "delegation_digest": "sha256:b6ce5d20db8f79225128b5bd74945d592bbce99895889c4d8f0b5541e83ce1ae",
+      "descriptor_policy_digest": "sha256:d362ffb2c7af5e8a941c605479f8fe660e885c2d0bddecd0bc3b86e0ec22d450",
+      "inbox_policy_digest": "sha256:3265d1133e7ee6309adb156d91b5e49b1ae1b3eced32e36da7b937ff0e44fd6f"
+    },
+    "c": {
+      "endpoint_id": "mep_123ef64128a6a46cccc2fc41984abd0b166a89f00fb6aa1ede5033d12865a5be",
+      "device_id": "dev_410834ed47a112c114f328e27d737dc9b74b2e91dee9295fc3fc14ecddaf0832",
+      "delegation_digest": "sha256:36b6b0f4c49646d229742d64613976bd7d4210f4ee95061b9dc7862fd7f55a4a",
+      "descriptor_policy_digest": "sha256:d362ffb2c7af5e8a941c605479f8fe660e885c2d0bddecd0bc3b86e0ec22d450",
+      "inbox_policy_digest": "sha256:3265d1133e7ee6309adb156d91b5e49b1ae1b3eced32e36da7b937ff0e44fd6f"
+    }
+  },
+  "daemon_configuration": {
+    "transport": "agent-packet-relay",
+    "discovery": "contact-files",
+    "publication": "prekeys, relay-only descriptor",
+    "admission": {
+      "a": "allow-list: B",
+      "b": "allow-list: A (C unknown, require-admission)",
+      "c": "allow-list: B"
+    },
+    "redeposit_interval_seconds": 600,
+    "descriptor_max_lifetime_seconds": 1800,
+    "publish_interval_seconds": 300,
+    "carrier_timeout_seconds": 60,
+    "note": "the re-deposit interval is the shortest the daemon accepts (a test MAY set 10 min to 20 h, spec 4); the descriptor lifetime is short so the evidence pull and the descriptor-expired retry run live"
+  },
+  "contact_exchange": {
+    "imports": {
+      "a<-b": {
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "key_id": "hpke:3c19f544ba4ffa18880eea3711e993a2729e08c56711cf9057fad7aaf405bf25",
+        "contact_file": "/tos/mr1-live/k13/nodes/k13/a/m/contacts/d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef.json"
+      },
+      "c<-b": {
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "key_id": "hpke:3c19f544ba4ffa18880eea3711e993a2729e08c56711cf9057fad7aaf405bf25",
+        "contact_file": "/tos/mr1-live/k13/nodes/k13/c/m/contacts/d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef.json"
+      }
+    },
+    "handed": [
+      "b -> a",
+      "b -> c (public)"
+    ],
+    "not_handed": "a -> b: B learns A in band",
+    "out_of_band_exchanges": 1
+  },
+  "conversation": {
+    "carried_to_delivered": {
+      "m1": {
+        "created_at_unix": 1794831364,
+        "last_deposit_at_unix": 1794831365,
+        "settled_at_unix": 1794831419
+      },
+      "r1": {
+        "created_at_unix": 1794831421,
+        "last_deposit_at_unix": 1794831422,
+        "settled_at_unix": 1794831436
+      },
+      "m2": {
+        "created_at_unix": 1794831437,
+        "last_deposit_at_unix": 1794831439,
+        "settled_at_unix": 1794831468
+      }
+    },
+    "envelopes": [
+      {
+        "from": "agent_e2c5b908",
+        "kind": 1,
+        "accepted_by": [
+          "https://10.231.78.21:8443"
+        ]
+      },
+      {
+        "from": "agent_e2c5b908",
+        "kind": 2,
+        "accepted_by": [
+          "https://10.231.78.21:8443"
+        ]
+      },
+      {
+        "from": "agent_e2c5b908",
+        "kind": 1,
+        "accepted_by": [
+          "https://10.231.78.21:8443"
+        ]
+      },
+      {
+        "from": "agent_d91e4d94",
+        "kind": 2,
+        "accepted_by": [
+          "https://10.231.78.21:8443"
+        ]
+      },
+      {
+        "from": "agent_d91e4d94",
+        "kind": 2,
+        "accepted_by": [
+          "https://10.231.78.21:8443"
+        ]
+      },
+      {
+        "from": "agent_d91e4d94",
+        "kind": 1,
+        "accepted_by": [
+          "https://10.231.78.21:8443"
+        ]
+      }
+    ]
+  },
+  "sizes": {
+    "frame_buckets_seen": [
+      4096,
+      8192,
+      16384,
+      190464
+    ],
+    "stored_envelope_sizes": [
+      28638
+    ]
+  },
+  "signing_cost": {
+    "note": "sign_seconds is the tosctl sign time of one chat packet, measured by the harness's craft helper signing as a node's own controller through its tosctl custody (the controller and context OpenFox's carrier uses). It is sign only; the deposit is a separate TLS round trip.",
+    "samples": 4,
+    "sign_seconds_min": 0.034986512,
+    "sign_seconds_max": 0.055342159,
+    "sign_seconds_mean": 0.04335532275
+  },
+  "ran_as_root": {
+    "network_setup_and_teardown": [
+      "ip -n tosmr-a addr add 10.231.78.10/24 dev eth0",
+      "ip -n tosmr-a link set eth0 up",
+      "ip -n tosmr-a link set lo up",
+      "ip -n tosmr-b addr add 10.231.78.11/24 dev eth0",
+      "ip -n tosmr-b link set eth0 up",
+      "ip -n tosmr-b link set lo up",
+      "ip -n tosmr-c addr add 10.231.78.12/24 dev eth0",
+      "ip -n tosmr-c link set eth0 up",
+      "ip -n tosmr-c link set lo up",
+      "ip -n tosmr-relay1 addr add 10.231.78.20/24 dev eth0",
+      "ip -n tosmr-relay1 link set eth0 up",
+      "ip -n tosmr-relay1 link set lo up",
+      "ip -n tosmr-relay2 addr add 10.231.78.21/24 dev eth0",
+      "ip -n tosmr-relay2 link set eth0 up",
+      "ip -n tosmr-relay2 link set lo up",
+      "ip addr add 10.231.78.1/24 dev tosmr-br0",
+      "ip link add tmv-a type veth peer name eth0 netns tosmr-a",
+      "ip link add tmv-b type veth peer name eth0 netns tosmr-b",
+      "ip link add tmv-c type veth peer name eth0 netns tosmr-c",
+      "ip link add tmv-relay1 type veth peer name eth0 netns tosmr-relay1",
+      "ip link add tmv-relay2 type veth peer name eth0 netns tosmr-relay2",
+      "ip link add tosmr-br0 type bridge",
+      "ip link delete tosmr-br0",
+      "ip link set tmv-a master tosmr-br0 up",
+      "ip link set tmv-b master tosmr-br0 up",
+      "ip link set tmv-c master tosmr-br0 up",
+      "ip link set tmv-relay1 master tosmr-br0 up",
+      "ip link set tmv-relay2 master tosmr-br0 up",
+      "ip link set tosmr-br0 up",
+      "ip netns add tosmr-a",
+      "ip netns add tosmr-b",
+      "ip netns add tosmr-c",
+      "ip netns add tosmr-relay1",
+      "ip netns add tosmr-relay2",
+      "ip netns delete tosmr-a",
+      "ip netns delete tosmr-b",
+      "ip netns delete tosmr-c",
+      "ip netns delete tosmr-relay1",
+      "ip netns delete tosmr-relay2",
+      "ip netns exec tosmr-a nft -f <workdir>/net/a.nft",
+      "ip netns exec tosmr-a nft delete rule inet tosmr output handle 11",
+      "ip netns exec tosmr-a nft delete rule inet tosmr output handle 12",
+      "ip netns exec tosmr-a nft delete rule inet tosmr output handle 13",
+      "ip netns exec tosmr-a nft insert rule inet tosmr output ip daddr 10.231.78.20 tcp dport 8443 reject with tcp reset",
+      "ip netns exec tosmr-a nft insert rule inet tosmr output ip daddr 10.231.78.21 tcp dport 8443 reject with tcp reset",
+      "ip netns exec tosmr-b nft -f <workdir>/net/b.nft",
+      "ip netns exec tosmr-b nft delete rule inet tosmr output handle 11",
+      "ip netns exec tosmr-b nft delete rule inet tosmr output handle 12",
+      "ip netns exec tosmr-b nft delete rule inet tosmr output handle 13",
+      "ip netns exec tosmr-b nft delete rule inet tosmr output handle 14",
+      "ip netns exec tosmr-b nft insert rule inet tosmr output ip daddr 10.231.78.20 tcp dport 8443 reject with tcp reset",
+      "ip netns exec tosmr-b nft insert rule inet tosmr output ip daddr 10.231.78.21 tcp dport 8443 reject with tcp reset",
+      "ip netns exec tosmr-c nft -f <workdir>/net/c.nft",
+      "ip netns exec tosmr-relay1 nft -f <workdir>/net/relay1.nft",
+      "ip netns exec tosmr-relay2 nft -f <workdir>/net/relay2.nft",
+      "ip netns pids tosmr-a",
+      "ip netns pids tosmr-b",
+      "ip netns pids tosmr-c",
+      "ip netns pids tosmr-relay1",
+      "ip netns pids tosmr-relay2",
+      "nft -f <workdir>/net/host.nft",
+      "nft delete table bridge tosmr",
+      "nft list table bridge tosmr"
+    ],
+    "namespace_entry": [
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): the chain RPC forwarder",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): the chain RPC forwarder",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): the chain RPC forwarder",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): probe listener",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): probe listener",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): probe listener",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): connection probe",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): connection probe",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): connection probe",
+      "ip netns exec tosmr-relay1 (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): connection probe",
+      "ip netns exec tosmr-relay2 (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): connection probe",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): file visibility probe",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): file visibility probe",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): file visibility probe",
+      "ip netns exec tosmr-relay1 (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): file visibility probe",
+      "ip netns exec tosmr-relay2 (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): file visibility probe",
+      "ip netns exec tosmr-relay1 (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-service-packet-relay",
+      "ip netns exec tosmr-relay2 (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-service-packet-relay",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning service init",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning chat init",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning service init",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning chat init",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning service init",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning chat init",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): messenger-relay-e2e-tool identity",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): messenger-relay-e2e-tool identity",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): messenger-relay-e2e-tool identity",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-messengerd -check",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-messengerd -check",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-messengerd -check",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): test Endpoint signer",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-messengerd",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning service serve",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): test Endpoint signer",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-messengerd",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning service serve",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): test Endpoint signer",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): tos-messengerd",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning service serve",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning chat contact",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning chat contact",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning chat contact",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call messages.send-direct",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call inbox.pending",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call inbox.claim",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call inbox.complete",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): openfox earning chat status",
+      "ip netns exec tosmr-b (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call messages.reply-direct",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call inbox.pending",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call inbox.claim",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call inbox.complete",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): messenger-relay-e2e-tool craft",
+      "ip netns exec tosmr-a (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call messages.send-direct-application",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): messenger-relay-e2e-tool craft",
+      "ip netns exec tosmr-c (tmpfs over the other parties' directories, then setpriv --reuid=1000 --regid=1000 --init-groups): Messenger runtime call messages.send-direct"
+    ],
+    "launcher_signals": [
+      "kill -CONT <the messengerd-b launcher>",
+      "kill -CONT <the relay1 launcher>",
+      "kill -CONT <the relay2 launcher>",
+      "kill -CONT <the serve-a launcher>",
+      "kill -CONT <the messengerd-a launcher>",
+      "kill -CONT <the serve-b launcher>",
+      "kill -CONT <the serve-c launcher>",
+      "kill -CONT <the messengerd-c launcher>",
+      "kill -CONT <the forward-host launcher>",
+      "kill -CONT <the forward-a launcher>",
+      "kill -CONT <the forward-b launcher>",
+      "kill -CONT <the forward-c launcher>",
+      "kill -CONT <the signer-a launcher>",
+      "kill -CONT <the signer-b launcher>",
+      "kill -CONT <the signer-c launcher>"
+    ],
+    "note": "Only the namespace, firewall and teardown commands, the namespace entry and a SIGCONT/SIGKILL to a paused process's sudo launcher run as root; every node, relay, forwarder and probe process runs as uid 1000 (setpriv) and the run itself runs as uid 1000."
+  },
+  "gate_items": {
+    "1": [
+      "no direct path: before the rules each node reaches a listener in another node's namespace; after them every node-to-node connection is dropped both ways, while B still reaches its own listener",
+      "a node reaches neither other host services nor the internet, and a relay reaches neither the chain nor a node",
+      "no shared file or socket: each node sees the other nodes' directories, the run's private files and the relays' state as empty, and each relay sees neither the nodes nor the other relay",
+      "TLS is verified: the relays verify only under the run's CA, which both nodes pin with --relay-ca-file; the system trust store and an unrelated CA refuse them",
+      "relay only: every node names both relays for rail and chat, pins the run's CA and names no direct peer and no Messenger packet socket"
+    ],
+    "2": [
+      "A's copy of m1 is `carried` once relay 2 accepted it, and not yet delivered while B cannot answer",
+      "m1 becomes `delivered` only on B's verified kind-2 ack: carried, then delivered later",
+      "B's runtime lists m1 and applies it once",
+      "B's runtime answers with messages.reply-direct; the reply is sealed to the card B learned in band and becomes `delivered` on A's ack",
+      "A's runtime receives the reply once",
+      "A's second message m2 is delivered and applied once"
+    ],
+    "9": [
+      "relay state is copied while relay 2 held A's copy for B and B's delivery ack for A",
+      "a large text (98,304 bytes) is carried in one padded frame bucket and delivered, and applied once",
+      "nothing readable at the relays: no live relay state, no snapshot taken while a relay held a copy and an ack, and no relay log contains any message text, conversation, Event, Endpoint or device id or the sender Agent id (the control proves the search works)",
+      "every decoded frame is exactly its smallest padded bucket, every stored envelope equals 1,373 + F + 4\u00b7\u2308B/3\u2309 with F in 5,394..5,432, and the snapshots' stored envelope sizes match the formula"
+    ],
+    "3": [
+      "first contact over the relay: B had no contact file of A, admitted A's first frame and learned A's chat card and relay evidence in band from it"
+    ],
+    "4": [
+      "relay 1 was down for the whole conversation: every copy and ack of it was accepted by relay 2 only"
+    ],
+    "5": [
+      "an older duplicate (a fresh generation of A's m1 copy, deposited after B applied m2) reaches B's daemon, is answered `duplicate` with a signed ack, relay-acknowledged, and not listed to B's runtime again",
+      "B is stopped; A's copy is carried as generation 1 and both relays hold it",
+      "after the re-deposit interval (600 s, the test setting the spec allows) A deposits generation 2 with the same ciphertext and fresh evidence, and generation 1 is withdrawn at every relay that held it (404 or 410 afterwards)",
+      "B, restarted, receives the retained message once (generation 2 only) and A's copy is delivered",
+      "B and then A are stopped with A's copy carried; the run waits until every descriptor either holds of the other has expired (descriptor lifetime 1800 s)",
+      "with B's evidence expired, A seals and deposits no new generation of its copy: it holds it pending and deposits one kind-4 evidence request for B instead",
+      "descriptor expiry: B receives the retained copy whose frame evidence expired and answers a signed `rejected` ack with descriptor-expired (A is admitted); the copy does not reach B's runtime",
+      "mutual staleness: one kind-4 request (A) and one response (B), each carrying its sender's card and fresh evidence, make both views fresh; A retries the copy only with newer evidence and it is delivered and applied once",
+      "a stranger's evidence request (C held a pending copy for B and B's evidence expired) gets the relay ack only: no response and no write at B",
+      "no kind-4 request is sent to a peer without a pending copy, none is repeated before the re-deposit schedule, and the descriptors each node published during the run sent none",
+      "a copy A carried to B (generation 1 at the relays) before B's Agent is revoked",
+      "after B's Endpoint delegation is withdrawn on chain, A's runtime answers a new send and refuses it with a revocation code (CheckPeer reads finalized state); no copy is sealed or carried",
+      "the copy carried before the revocation is not re-deposited after it: past its re-deposit time A seals no new generation, the copy stays at generation 1, undelivered, and its last code is a revocation code (so the re-deposit was attempted and refused, not merely not scheduled)"
+    ],
+    "7": [
+      "an oversize payload is refused with `content-too-large` before sealing (the daemon computes the worst-case frame size, 190,464 bytes, before any key is spent): no delivery is journaled",
+      "a rail (OFR1) packet sealed to B's chat key is refused and relay-acknowledged, with no daemon call",
+      "an agent.packet Event is refused on the relay route (a valid signed packet; the delegation grants agent.packet)",
+      "a packet whose sender (C) is not the Event sender of the copy it carries (A) is refused and relay-acknowledged; nothing reaches B's runtime and B sends no ack to C",
+      "a kind-2 ack whose packet sender (C) is not the Agent of the signing Endpoint (B) is refused and relay-acknowledged; A's journal is unchanged",
+      "a refused stranger: B downloaded C's copy (its envelope id relay-acknowledged at both relays) and refused it; C's in-band card and evidence are not stored (so it was refused, not held), no Messenger file of B names C (its rollback boundary is unchanged), B sent C no ack, and C's delivery stays carried"
+    ],
+    "6": [
+      "B's serve is killed while its daemon commits the copy: the Event is committed and the envelope is still listed at the relays (no relay ack)",
+      "after the restart B finds the same envelope again, answers it `duplicate` and the runtime applies it once",
+      "A's daemon is killed while its carrier deposits: the relays accept the envelope after the kill and A's journal never recorded `carried`",
+      "after the restart A retries the same generation key and gets `carried` with no new deposit: one envelope, delivered, applied once"
+    ],
+    "8": [
+      "an observer deposits junk under the public id of A's envelope at relay 1 first; A's deposit there gets 409 and is abandoned at relay 1",
+      "the copy is delivered through relay 2"
+    ],
+    "10": [
+      "`tosctl` sign-to-deposit cost: the per-frame signing time is recorded"
+    ]
+  },
+  "not_verified": [
+    {
+      "item": "5 (offline beyond 24 h across a re-deposit, past every locator lifetime)",
+      "reason": "the relay route reads no locator at all, so there is no locator lifetime to outlast; the offline-across-a-re-deposit case is proven live with the test-shortened re-deposit interval (spec section 4 permits 10 min..20 h), and the run never reads a locator on RouteRelay. The >24 h wall-clock duration itself is not reproduced.",
+      "unit_tests": [
+        "ai messenger/pkg/daemon TestRelayCopyIsCarriedAndDeliveredOnlyOnAVerifiedAck",
+        "ai messenger/pkg/directory TestCheckPeerAcceptsCurrentLocatorFreeEvidence",
+        "openfox pkg/servicebridge TestGenerationNIsWithdrawnOnceGenerationNPlusOneIsAccepted"
+      ]
+    },
+    {
+      "item": "5 (descriptor expiry, >7-day default)",
+      "reason": "proven live with a test-shortened descriptor (MR1_DESCRIPTOR_LIFETIME); the >7-day default lifetime is not waited out.",
+      "unit_tests": [
+        "ai messenger/pkg/daemon TestDescriptorExpiredRetriesAtOnceOnlyWithNewerEvidence",
+        "ai messenger/pkg/daemon TestRelayEvidencePullRepairsStaleEvidenceInOneRoundTrip",
+        "ai messenger/pkg/directory TestCheckPeerRefusesExpiredEvidence"
+      ]
+    },
+    {
+      "item": "quota isolation between chat and task traffic (D2)",
+      "reason": "M-R1 shares the relays between chat and rail; separate chat relays are a production requirement (spec section 7), not shown here.",
+      "unit_tests": []
+    },
+    {
+      "item": "3 (first contact with an admission invite)",
+      "reason": "product gap: an invite can be created (invites.create) and is checked on receipt, but no runtime operation attaches the bearer to an outbound copy (dispatch never sets Message.AdmissionToken), so no route can present one. First contact here is admitted by B's allow-list roster instead; B still learns A's card and evidence in band.",
+      "unit_tests": []
+    },
+    {
+      "item": "7 (a relay frame sealed to the rail key)",
+      "reason": "needs B's rail key card, which OpenFox keeps only inside its private key files; the run reads no key file. The rail packet sealed to the chat key is proven live.",
+      "unit_tests": [
+        "openfox pkg/servicebridge TestPurposeIsEnforcedAtTheKeyBeforeAnySideEffect"
+      ]
+    },
+    {
+      "item": "7 (an agent.packet Event arriving over the relay)",
+      "reason": "the sender's daemon refuses to compose it on this route (proven live), so a receive-side case needs a hand-built E2EE copy.",
+      "unit_tests": [
+        "ai messenger/pkg/daemon TestRelayRefusesAgentPacketEventsAndSenderSubstitution"
+      ]
+    },
+    {
+      "item": "5 (device removed through a newer descriptor)",
+      "reason": "V1 has one device per Agent and the publication roster must include it; the Agent revocation case is proven live.",
+      "unit_tests": [
+        "ai messenger/pkg/daemon TestRelayRevocationHoldsTheCopyUnsealed",
+        "ai messenger/pkg/directory TestCheckPeerFailsOnceTheDeviceIsRevoked"
+      ]
+    },
+    {
+      "item": "5 (evidence pull with the responder offline > 24 h)",
+      "reason": "the request re-deposit is proven only within the run's duration; the 24 h relay TTL is not waited out.",
+      "unit_tests": [
+        "ai messenger/pkg/daemon TestRelayEvidencePullRepairsStaleEvidenceInOneRoundTrip"
+      ]
+    },
+    {
+      "item": "multi-device over the relay (D3), and M0 freeze evidence",
+      "reason": "V1 is one Messenger device per Agent; M0 freeze (independent review and a second E2EE implementation) is out of scope.",
+      "unit_tests": []
+    }
+  ],
+  "hold_at": null,
+  "dev_scripts_executed": [],
+  "finished_utc": "2026-11-16T13:12:37.141888+00:00",
+  "steps": [
+    {
+      "name": "the OpenFox tree is clean at the commit the evidence names",
+      "pass": true,
+      "detail": "clean",
+      "at": "2026-11-16T12:13:44.368883+00:00"
+    },
+    {
+      "name": "the Messenger and relay binaries are built from a clean ai tree at the commit the evidence names",
+      "pass": true,
+      "detail": "clean",
+      "at": "2026-11-16T12:13:44.368938+00:00"
+    },
+    {
+      "name": "every validator serves finalized JSON-RPC",
+      "pass": true,
+      "detail": null,
+      "at": "2026-11-16T12:13:54.630579+00:00"
+    },
+    {
+      "name": "not OpenFox: the a wallet is created, funded from the faucet and activated with tosctl",
+      "pass": true,
+      "detail": "0:97b9665c028dc3d4e583f3e1324c4b90f410ab7a8e3b9e56b83a74a5de9da7da",
+      "at": "2026-11-16T12:13:59.096828+00:00"
+    },
+    {
+      "name": "not OpenFox: the b wallet is created, funded from the faucet and activated with tosctl",
+      "pass": true,
+      "detail": "0:0d2bf6e88917c039a3628d4cde8c17eea0db756c2b0ae423f42920589dfc5aed",
+      "at": "2026-11-16T12:14:03.548998+00:00"
+    },
+    {
+      "name": "not OpenFox: the c wallet is created, funded from the faucet and activated with tosctl",
+      "pass": true,
+      "detail": "0:3f450cbb8b32613ada8279ca7b4ed46aa49074b035fe0e3c17e2a62619eda504",
+      "at": "2026-11-16T12:14:08.001694+00:00"
+    },
+    {
+      "name": "every node's files are staged as the invoking user (uid 1000), one private directory per node",
+      "pass": true,
+      "detail": [
+        "1000:1000 700 /tos/mr1-live/k13/nodes/k13",
+        "1000:1000 700 /tos/mr1-live/k13/nodes/k13/a",
+        "1000:1000 700 /tos/mr1-live/k13/nodes/k13/b",
+        "1000:1000 700 /tos/mr1-live/k13/nodes/k13/c",
+        ""
+      ],
+      "at": "2026-11-16T12:14:09.347467+00:00"
+    },
+    {
+      "name": "the chain RPC is forwarded: host 10.231.78.1 to the validators on 127.0.0.1, and in each node namespace 127.0.0.1 to 10.231.78.1, for the JSON-RPC ports only",
+      "pass": true,
+      "detail": {
+        "forward-host": "ready\n",
+        "forward-a": "ready\n",
+        "forward-b": "ready\n",
+        "forward-c": "ready\n"
+      },
+      "at": "2026-11-16T12:14:11.357946+00:00"
+    },
+    {
+      "name": "[M-R1 1] no direct path: before the rules each node reaches a listener in another node's namespace; after them every node-to-node connection is dropped both ways, while B still reaches its own listener",
+      "pass": true,
+      "detail": {
+        "before_rules": {
+          "a to b": "connected",
+          "b to a": "connected",
+          "c to b": "connected",
+          "a to c": "connected"
+        },
+        "after_rules": {
+          "a to b": "refused or unreachable: TimeoutError",
+          "b to a": "refused or unreachable: TimeoutError",
+          "c to b": "refused or unreachable: TimeoutError",
+          "a to c": "refused or unreachable: TimeoutError",
+          "b to its own listener": "connected"
+        },
+        "other_paths": {
+          "a to host ssh 10.231.78.1:22": "refused or unreachable: TimeoutError",
+          "b to host ssh 10.231.78.1:22": "refused or unreachable: TimeoutError",
+          "relay1 to the chain forwarder": "refused or unreachable: TimeoutError",
+          "relay2 to node a's listener": "refused or unreachable: TimeoutError",
+          "a to an internet address 1.1.1.1:443": "refused or unreachable: OSError"
+        },
+        "listeners_started": true
+      },
+      "at": "2026-11-16T12:14:36.989161+00:00"
+    },
+    {
+      "name": "[M-R1 1] a node reaches neither other host services nor the internet, and a relay reaches neither the chain nor a node",
+      "pass": true,
+      "detail": {
+        "a to host ssh 10.231.78.1:22": "refused or unreachable: TimeoutError",
+        "b to host ssh 10.231.78.1:22": "refused or unreachable: TimeoutError",
+        "relay1 to the chain forwarder": "refused or unreachable: TimeoutError",
+        "relay2 to node a's listener": "refused or unreachable: TimeoutError",
+        "a to an internet address 1.1.1.1:443": "refused or unreachable: OSError"
+      },
+      "at": "2026-11-16T12:14:36.989303+00:00"
+    },
+    {
+      "name": "[M-R1 1] no shared file or socket: each node sees the other nodes' directories, the run's private files and the relays' state as empty, and each relay sees neither the nodes nor the other relay",
+      "pass": true,
+      "detail": {
+        "a": [
+          "/tos/mr1-live/k13/private: []",
+          "/tos/mr1-live/k13/nodes/k13/b: []",
+          "/tos/mr1-live/k13/nodes/k13/c: []",
+          "/tos/mr1-live/k13/relay1: []",
+          "/tos/mr1-live/k13/relay2: []"
+        ],
+        "b": [
+          "/tos/mr1-live/k13/private: []",
+          "/tos/mr1-live/k13/nodes/k13/a: []",
+          "/tos/mr1-live/k13/nodes/k13/c: []",
+          "/tos/mr1-live/k13/relay1: []",
+          "/tos/mr1-live/k13/relay2: []"
+        ],
+        "c": [
+          "/tos/mr1-live/k13/private: []",
+          "/tos/mr1-live/k13/nodes/k13/a: []",
+          "/tos/mr1-live/k13/nodes/k13/b: []",
+          "/tos/mr1-live/k13/relay1: []",
+          "/tos/mr1-live/k13/relay2: []"
+        ],
+        "relay1": [
+          "/tos/mr1-live/k13/private: []",
+          "/tos/mr1-live/k13/nodes: []",
+          "/tos/mr1-live/k13/relay2: []"
+        ],
+        "relay2": [
+          "/tos/mr1-live/k13/private: []",
+          "/tos/mr1-live/k13/nodes: []",
+          "/tos/mr1-live/k13/relay1: []"
+        ]
+      },
+      "at": "2026-11-16T12:14:37.221009+00:00"
+    },
+    {
+      "name": "start: relay1 serves TLS on 10.231.78.20:8443 (verified against the run's certificate authority)",
+      "pass": true,
+      "detail": "{\"time\":\"2026-11-16T12:14:37.258289195Z\",\"level\":\"INFO\",\"msg\":\"agent packet relay listening\",\"address\":\"10.231.78.20:8443\",\"tls\":true,\"usage\":{\"Envelopes\":0,\"Tombstones\":0,\"Bytes\":0}}\n",
+      "at": "2026-11-16T12:14:37.730655+00:00"
+    },
+    {
+      "name": "start: relay2 serves TLS on 10.231.78.21:8443 (verified against the run's certificate authority)",
+      "pass": true,
+      "detail": "{\"time\":\"2026-11-16T12:14:37.768011087Z\",\"level\":\"INFO\",\"msg\":\"agent packet relay listening\",\"address\":\"10.231.78.21:8443\",\"tls\":true,\"usage\":{\"Envelopes\":0,\"Tombstones\":0,\"Bytes\":0}}\n",
+      "at": "2026-11-16T12:14:38.238614+00:00"
+    },
+    {
+      "name": "each node reaches both relays' TLS port",
+      "pass": true,
+      "detail": {
+        "a to relay1": "connected",
+        "a to relay2": "connected",
+        "b to relay1": "connected",
+        "b to relay2": "connected",
+        "c to relay1": "connected",
+        "c to relay2": "connected"
+      },
+      "at": "2026-11-16T12:14:38.583398+00:00"
+    },
+    {
+      "name": "[M-R1 1] TLS is verified: the relays verify only under the run's CA, which both nodes pin with --relay-ca-file; the system trust store and an unrelated CA refuse them",
+      "pass": true,
+      "detail": {
+        "system trust store": "refused: SSLCertVerificationError",
+        "unrelated CA": "refused: SSLCertVerificationError",
+        "run CA": "verified"
+      },
+      "at": "2026-11-16T12:14:38.592434+00:00"
+    },
+    {
+      "name": "a: `openfox earning service init` registered the node's Agent and wrote a chat section",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-init.v1",
+        "confirmed": true,
+        "rail_config": "/tos/mr1-live/k13/nodes/k13/a/rail.json",
+        "state_dir": "/tos/mr1-live/k13/nodes/k13/a/state",
+        "network": {
+          "network_id": "tos:global-id:3",
+          "genesis_root_hash": "sha256:1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a",
+          "genesis_file_hash": "sha256:1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515"
+        },
+        "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+        "tosctl_sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+        "tosctl_pin": "trust_on_first_use",
+        "tosctl_pin_note": "trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256",
+        "wallet_name": "a",
+        "wallet_address": "0:97b9665c028dc3d4e583f3e1324c4b90f410ab7a8e3b9e56b83a74a5de9da7da",
+        "packet_controller": "openfox-packet",
+        "packet_key_id": "mldsa44:a2854149715fc46177d97ffd9c23db1930f2837a4d3cc6699771e0fefa1d97b0",
+        "agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485",
+        "agent_address": "0:e8b88c53c9c841507a8c3290fa512c45a26f5d42875c1cedd8bc539a2d4d7dab",
+        "registration_attached_nanotos": "2000000000",
+        "steps": [
+          {
+            "id": "tosctl.pin",
+            "status": "done",
+            "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)"
+          },
+          {
+            "id": "network.domain",
+            "status": "done",
+            "detail": "network \"tos:global-id:3\" with genesis root sha256:1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a and file sha256:1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+          },
+          {
+            "id": "wallet.address",
+            "status": "done",
+            "detail": "wallet \"a\" is 0:97b9665c028dc3d4e583f3e1324c4b90f410ab7a8e3b9e56b83a74a5de9da7da"
+          },
+          {
+            "id": "controller.packet",
+            "status": "done",
+            "detail": "created controller \"openfox-packet\" in the vault with key id mldsa44:a2854149715fc46177d97ffd9c23db1930f2837a4d3cc6699771e0fefa1d97b0"
+          },
+          {
+            "id": "agent.register",
+            "status": "done",
+            "detail": "the registration of Agent agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485 is in finalized state at checkpoint 131"
+          },
+          {
+            "id": "relay.trust",
+            "status": "done",
+            "detail": "this node's https relays are verified against the 1 pinned certificate authorities in /tos/mr1-live/k13/nodes/k13/a/state/relay/relay-ca-a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0.pem (SHA-256 a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0) only, not the system trust store; relays only a peer's card names use the system trust store"
+          },
+          {
+            "id": "config.write",
+            "status": "done",
+            "detail": "wrote the rail configuration /tos/mr1-live/k13/nodes/k13/a/rail.json (0600); it reads back strictly"
+          }
+        ],
+        "next_steps": [
+          "provider: openfox earning service offer --rail-config /tos/mr1-live/k13/nodes/k13/a/rail.json --price <TOS> ...",
+          "buyer: openfox earning service buy --rail-config /tos/mr1-live/k13/nodes/k13/a/rail.json --offer <file> --source <archive>",
+          "chat: openfox earning chat init --rail-config /tos/mr1-live/k13/nodes/k13/a/rail.json (issues the chat key and card)"
+        ]
+      },
+      "at": "2026-11-16T12:14:41.890586+00:00"
+    },
+    {
+      "name": "a: `openfox earning chat init` issued the chat key and published a card naming both relays",
+      "pass": true,
+      "detail": {
+        "agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485",
+        "key_id": "hpke:ab5e2be4212dce729adfca4383d03407d86fffde791f575935314c85eb6b23f5",
+        "not_before_unix": 1794831282,
+        "not_after_unix": 1797423282,
+        "relays": [
+          "https://10.231.78.20:8443",
+          "https://10.231.78.21:8443"
+        ],
+        "card_path": "/tos/mr1-live/k13/nodes/k13/a/state/relay/chat-card.json",
+        "next_steps": [
+          "set the Messenger daemon's relay_carriage.card_path to /tos/mr1-live/k13/nodes/k13/a/state/relay/chat-card.json, carry_socket_path to /tos/mr1-live/k13/nodes/k13/a/s/chat-carrier.sock and listen_socket_path to /tos/mr1-live/k13/nodes/k13/a/s/carrier.sock",
+          "openfox earning chat contact export --rail-config /tos/mr1-live/k13/nodes/k13/a/rail.json --out <file>, once the daemon published its relay evidence"
+        ]
+      },
+      "at": "2026-11-16T12:14:42.127995+00:00"
+    },
+    {
+      "name": "b: `openfox earning service init` registered the node's Agent and wrote a chat section",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-init.v1",
+        "confirmed": true,
+        "rail_config": "/tos/mr1-live/k13/nodes/k13/b/rail.json",
+        "state_dir": "/tos/mr1-live/k13/nodes/k13/b/state",
+        "network": {
+          "network_id": "tos:global-id:3",
+          "genesis_root_hash": "sha256:1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a",
+          "genesis_file_hash": "sha256:1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515"
+        },
+        "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+        "tosctl_sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+        "tosctl_pin": "trust_on_first_use",
+        "tosctl_pin_note": "trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256",
+        "wallet_name": "b",
+        "wallet_address": "0:0d2bf6e88917c039a3628d4cde8c17eea0db756c2b0ae423f42920589dfc5aed",
+        "packet_controller": "openfox-packet",
+        "packet_key_id": "mldsa44:b51c9ee843c35ccbdb61e13ec13b0b72e0c224da80c35d7224247a00640359ba",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "agent_address": "0:f34e1d09769bae779e602cd433c390c0a9f6ed58ef8adf893a7ca44923acf975",
+        "registration_attached_nanotos": "2000000000",
+        "steps": [
+          {
+            "id": "tosctl.pin",
+            "status": "done",
+            "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)"
+          },
+          {
+            "id": "network.domain",
+            "status": "done",
+            "detail": "network \"tos:global-id:3\" with genesis root sha256:1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a and file sha256:1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+          },
+          {
+            "id": "wallet.address",
+            "status": "done",
+            "detail": "wallet \"b\" is 0:0d2bf6e88917c039a3628d4cde8c17eea0db756c2b0ae423f42920589dfc5aed"
+          },
+          {
+            "id": "controller.packet",
+            "status": "done",
+            "detail": "created controller \"openfox-packet\" in the vault with key id mldsa44:b51c9ee843c35ccbdb61e13ec13b0b72e0c224da80c35d7224247a00640359ba"
+          },
+          {
+            "id": "agent.register",
+            "status": "done",
+            "detail": "the registration of Agent agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef is in finalized state at checkpoint 140"
+          },
+          {
+            "id": "relay.trust",
+            "status": "done",
+            "detail": "this node's https relays are verified against the 1 pinned certificate authorities in /tos/mr1-live/k13/nodes/k13/b/state/relay/relay-ca-a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0.pem (SHA-256 a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0) only, not the system trust store; relays only a peer's card names use the system trust store"
+          },
+          {
+            "id": "config.write",
+            "status": "done",
+            "detail": "wrote the rail configuration /tos/mr1-live/k13/nodes/k13/b/rail.json (0600); it reads back strictly"
+          }
+        ],
+        "next_steps": [
+          "provider: openfox earning service offer --rail-config /tos/mr1-live/k13/nodes/k13/b/rail.json --price <TOS> ...",
+          "buyer: openfox earning service buy --rail-config /tos/mr1-live/k13/nodes/k13/b/rail.json --offer <file> --source <archive>",
+          "chat: openfox earning chat init --rail-config /tos/mr1-live/k13/nodes/k13/b/rail.json (issues the chat key and card)"
+        ]
+      },
+      "at": "2026-11-16T12:14:45.433227+00:00"
+    },
+    {
+      "name": "b: `openfox earning chat init` issued the chat key and published a card naming both relays",
+      "pass": true,
+      "detail": {
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "key_id": "hpke:3c19f544ba4ffa18880eea3711e993a2729e08c56711cf9057fad7aaf405bf25",
+        "not_before_unix": 1794831285,
+        "not_after_unix": 1797423285,
+        "relays": [
+          "https://10.231.78.20:8443",
+          "https://10.231.78.21:8443"
+        ],
+        "card_path": "/tos/mr1-live/k13/nodes/k13/b/state/relay/chat-card.json",
+        "next_steps": [
+          "set the Messenger daemon's relay_carriage.card_path to /tos/mr1-live/k13/nodes/k13/b/state/relay/chat-card.json, carry_socket_path to /tos/mr1-live/k13/nodes/k13/b/s/chat-carrier.sock and listen_socket_path to /tos/mr1-live/k13/nodes/k13/b/s/carrier.sock",
+          "openfox earning chat contact export --rail-config /tos/mr1-live/k13/nodes/k13/b/rail.json --out <file>, once the daemon published its relay evidence"
+        ]
+      },
+      "at": "2026-11-16T12:14:45.749943+00:00"
+    },
+    {
+      "name": "c: `openfox earning service init` registered the node's Agent and wrote a chat section",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-init.v1",
+        "confirmed": true,
+        "rail_config": "/tos/mr1-live/k13/nodes/k13/c/rail.json",
+        "state_dir": "/tos/mr1-live/k13/nodes/k13/c/state",
+        "network": {
+          "network_id": "tos:global-id:3",
+          "genesis_root_hash": "sha256:1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a",
+          "genesis_file_hash": "sha256:1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515"
+        },
+        "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+        "tosctl_sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+        "tosctl_pin": "trust_on_first_use",
+        "tosctl_pin_note": "trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256",
+        "wallet_name": "c",
+        "wallet_address": "0:3f450cbb8b32613ada8279ca7b4ed46aa49074b035fe0e3c17e2a62619eda504",
+        "packet_controller": "openfox-packet",
+        "packet_key_id": "mldsa44:1becff202fd84ef9312a0fc6d25271291b383b9d29899760ba8e7357ccac3cac",
+        "agent_id": "agent_99470b2df9562f611d9f216d47dc19dafe524861484305a6682f68ea22b8c21a",
+        "agent_address": "0:4c41aad3ed784388a83d4c0aaf4b4d7b8641bdc20aa45c5d99637a2cf9cebcd5",
+        "registration_attached_nanotos": "2000000000",
+        "steps": [
+          {
+            "id": "tosctl.pin",
+            "status": "done",
+            "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)"
+          },
+          {
+            "id": "network.domain",
+            "status": "done",
+            "detail": "network \"tos:global-id:3\" with genesis root sha256:1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a and file sha256:1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+          },
+          {
+            "id": "wallet.address",
+            "status": "done",
+            "detail": "wallet \"c\" is 0:3f450cbb8b32613ada8279ca7b4ed46aa49074b035fe0e3c17e2a62619eda504"
+          },
+          {
+            "id": "controller.packet",
+            "status": "done",
+            "detail": "created controller \"openfox-packet\" in the vault with key id mldsa44:1becff202fd84ef9312a0fc6d25271291b383b9d29899760ba8e7357ccac3cac"
+          },
+          {
+            "id": "agent.register",
+            "status": "done",
+            "detail": "the registration of Agent agent_99470b2df9562f611d9f216d47dc19dafe524861484305a6682f68ea22b8c21a is in finalized state at checkpoint 149"
+          },
+          {
+            "id": "relay.trust",
+            "status": "done",
+            "detail": "this node's https relays are verified against the 1 pinned certificate authorities in /tos/mr1-live/k13/nodes/k13/c/state/relay/relay-ca-a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0.pem (SHA-256 a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0) only, not the system trust store; relays only a peer's card names use the system trust store"
+          },
+          {
+            "id": "config.write",
+            "status": "done",
+            "detail": "wrote the rail configuration /tos/mr1-live/k13/nodes/k13/c/rail.json (0600); it reads back strictly"
+          }
+        ],
+        "next_steps": [
+          "provider: openfox earning service offer --rail-config /tos/mr1-live/k13/nodes/k13/c/rail.json --price <TOS> ...",
+          "buyer: openfox earning service buy --rail-config /tos/mr1-live/k13/nodes/k13/c/rail.json --offer <file> --source <archive>",
+          "chat: openfox earning chat init --rail-config /tos/mr1-live/k13/nodes/k13/c/rail.json (issues the chat key and card)"
+        ]
+      },
+      "at": "2026-11-16T12:14:49.328310+00:00"
+    },
+    {
+      "name": "c: `openfox earning chat init` issued the chat key and published a card naming both relays",
+      "pass": true,
+      "detail": {
+        "agent_id": "agent_99470b2df9562f611d9f216d47dc19dafe524861484305a6682f68ea22b8c21a",
+        "key_id": "hpke:d4a645fc6c5119cf810d0e9ddf8c09a9716fc0ffdaf7cf7a10a4f102f1336a1d",
+        "not_before_unix": 1794831289,
+        "not_after_unix": 1797423289,
+        "relays": [
+          "https://10.231.78.20:8443",
+          "https://10.231.78.21:8443"
+        ],
+        "card_path": "/tos/mr1-live/k13/nodes/k13/c/state/relay/chat-card.json",
+        "next_steps": [
+          "set the Messenger daemon's relay_carriage.card_path to /tos/mr1-live/k13/nodes/k13/c/state/relay/chat-card.json, carry_socket_path to /tos/mr1-live/k13/nodes/k13/c/s/chat-carrier.sock and listen_socket_path to /tos/mr1-live/k13/nodes/k13/c/s/carrier.sock",
+          "openfox earning chat contact export --rail-config /tos/mr1-live/k13/nodes/k13/c/rail.json --out <file>, once the daemon published its relay evidence"
+        ]
+      },
+      "at": "2026-11-16T12:14:49.645467+00:00"
+    },
+    {
+      "name": "three distinct Agents",
+      "pass": true,
+      "detail": {
+        "a": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485",
+        "b": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "c": "agent_99470b2df9562f611d9f216d47dc19dafe524861484305a6682f68ea22b8c21a"
+      },
+      "at": "2026-11-16T12:14:49.645585+00:00"
+    },
+    {
+      "name": "[M-R1 1] relay only: every node names both relays for rail and chat, pins the run's CA and names no direct peer and no Messenger packet socket",
+      "pass": true,
+      "detail": {
+        "a": {
+          "relay_urls": [
+            "https://10.231.78.20:8443",
+            "https://10.231.78.21:8443"
+          ],
+          "direct_peers": null,
+          "messenger_socket": null,
+          "relay_ca_sha256": "a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0"
+        },
+        "b": {
+          "relay_urls": [
+            "https://10.231.78.20:8443",
+            "https://10.231.78.21:8443"
+          ],
+          "direct_peers": null,
+          "messenger_socket": null,
+          "relay_ca_sha256": "a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0"
+        },
+        "c": {
+          "relay_urls": [
+            "https://10.231.78.20:8443",
+            "https://10.231.78.21:8443"
+          ],
+          "direct_peers": null,
+          "messenger_socket": null,
+          "relay_ca_sha256": "a9477de769f658d5ca3a00fa99f47a759f5069b4f0f28ad295c328f109630ab0"
+        }
+      },
+      "at": "2026-11-16T12:14:49.646297+00:00"
+    },
+    {
+      "name": "not OpenFox: the registry domain (genesis anchors and registry code hash) is read with tosctl",
+      "pass": true,
+      "detail": {
+        "network_id": "tos:global-id:3",
+        "genesis_root": "1fbf88425c1589379c4d807064a63a4bcbfd9e13fae762466f4bb1562610a44a",
+        "genesis_file": "1d9b2c4b4b9b0bf3163d62dabe6a799665e2c7770f236e3d5f4b63b1b9742515",
+        "code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a"
+      },
+      "at": "2026-11-16T12:14:49.660103+00:00"
+    },
+    {
+      "name": "not OpenFox: a's Messaging Endpoint delegation (relay-only, an ADNL route, allow-list inbox) is committed by its Agent on chain (tosctl agent native-registry action --kind delegate, sent from its wallet)",
+      "pass": true,
+      "detail": {
+        "identity": {
+          "adnl_id": "adnl:dd955a9d43c53829dc28f6687b065e1c9f5f3c16714610d89deb16a81249e6d6",
+          "agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485",
+          "delegation_digest": "sha256:7706b487c4c15ac5ff46faaeedd17b9d83eb69c8dc0f0f0a96ffb67732c5eedc",
+          "delegation_digest_hex": "7706b487c4c15ac5ff46faaeedd17b9d83eb69c8dc0f0f0a96ffb67732c5eedc",
+          "descriptor_policy_digest": "sha256:d362ffb2c7af5e8a941c605479f8fe660e885c2d0bddecd0bc3b86e0ec22d450",
+          "device_id": "dev_604959bf13ab33e7b94a4d9cd0f1a9bda89e2c651147fefc8d989e3edf65985b",
+          "endpoint_id": "mep_37f482686b0ab45390a3bf443e1b938592c8145d986d355c02e0fdb6b4d6367d",
+          "endpoint_public_key": "cb3d1c678f351a7529f34324b743c23f044ef9ceed4925e511636f32a2eb90ed",
+          "expires_at_unix": 1795004029,
+          "inbox_policy_digest": "sha256:3265d1133e7ee6309adb156d91b5e49b1ae1b3eced32e36da7b937ff0e44fd6f",
+          "not_before_unix": 1794831229,
+          "owner_public_key": "cf21227a00da707ce356275972b517b17e4e6db2614e572ba7d32d6843b1fbe4"
+        },
+        "action": {
+          "kind": "delegate",
+          "action_hash": "728e2d9442fec1c10562fa39395803699adf25af9971faea643d404da4557aaa",
+          "landed": [
+            {
+              "lt": 154000003,
+              "hash": "EqmmOYXzKIwKAtczZDR+iqCga0A2Twr/U5gpoIX0Xfw=",
+              "in_source": "0:97b9665c028dc3d4e583f3e1324c4b90f410ab7a8e3b9e56b83a74a5de9da7da",
+              "in_value": 2000000000,
+              "op": 1314258945,
+              "query_id": 1,
+              "outs": [],
+              "aborted": false,
+              "compute_success": true
+            }
+          ]
+        }
+      },
+      "at": "2026-11-16T12:14:52.153507+00:00"
+    },
+    {
+      "name": "not OpenFox: b's Messaging Endpoint delegation (relay-only, an ADNL route, allow-list inbox) is committed by its Agent on chain (tosctl agent native-registry action --kind delegate, sent from its wallet)",
+      "pass": true,
+      "detail": {
+        "identity": {
+          "adnl_id": "adnl:7224ab404df48f4f872eb317cd7ea706374cad1368ac61a31d7dcdfa3f3cc0d2",
+          "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+          "delegation_digest": "sha256:b6ce5d20db8f79225128b5bd74945d592bbce99895889c4d8f0b5541e83ce1ae",
+          "delegation_digest_hex": "b6ce5d20db8f79225128b5bd74945d592bbce99895889c4d8f0b5541e83ce1ae",
+          "descriptor_policy_digest": "sha256:d362ffb2c7af5e8a941c605479f8fe660e885c2d0bddecd0bc3b86e0ec22d450",
+          "device_id": "dev_ade07b6c2e75b92202241f4c6665968ee412a98526df307306f55275c815ffdd",
+          "endpoint_id": "mep_7799f8453bd7d6bb5dfe414a9395b3f2677bbcd95bf49dad2ce9dd8570b22bfa",
+          "endpoint_public_key": "28b93ea0aaee487b3d3e8e65c73c18fc8af03a0b862539347151fc14b1d20e4c",
+          "expires_at_unix": 1795004032,
+          "inbox_policy_digest": "sha256:3265d1133e7ee6309adb156d91b5e49b1ae1b3eced32e36da7b937ff0e44fd6f",
+          "not_before_unix": 1794831232,
+          "owner_public_key": "af8e7edb2b2f8a108fda49892be3fabeb9f9d62c4652aba67b575da6b6542ef9"
+        },
+        "action": {
+          "kind": "delegate",
+          "action_hash": "6c00f4245c97374a5988ddd18e896ccc7f89db5454a1d8e04e0d0ef469e6c5b4",
+          "landed": [
+            {
+              "lt": 160000003,
+              "hash": "F30NArNA2MnmOF1oX5hrqeHPNgkNDI4iFzQEStVwHms=",
+              "in_source": "0:0d2bf6e88917c039a3628d4cde8c17eea0db756c2b0ae423f42920589dfc5aed",
+              "in_value": 2000000000,
+              "op": 1314258945,
+              "query_id": 1,
+              "outs": [],
+              "aborted": false,
+              "compute_success": true
+            }
+          ]
+        }
+      },
+      "at": "2026-11-16T12:14:54.608735+00:00"
+    },
+    {
+      "name": "not OpenFox: c's Messaging Endpoint delegation (relay-only, an ADNL route, allow-list inbox) is committed by its Agent on chain (tosctl agent native-registry action --kind delegate, sent from its wallet)",
+      "pass": true,
+      "detail": {
+        "identity": {
+          "adnl_id": "adnl:05129ab25da2dc2e6bb427f68c7260f4e792cedfe337dd3fa80ba506247a8c86",
+          "agent_id": "agent_99470b2df9562f611d9f216d47dc19dafe524861484305a6682f68ea22b8c21a",
+          "delegation_digest": "sha256:36b6b0f4c49646d229742d64613976bd7d4210f4ee95061b9dc7862fd7f55a4a",
+          "delegation_digest_hex": "36b6b0f4c49646d229742d64613976bd7d4210f4ee95061b9dc7862fd7f55a4a",
+          "descriptor_policy_digest": "sha256:d362ffb2c7af5e8a941c605479f8fe660e885c2d0bddecd0bc3b86e0ec22d450",
+          "device_id": "dev_410834ed47a112c114f328e27d737dc9b74b2e91dee9295fc3fc14ecddaf0832",
+          "endpoint_id": "mep_123ef64128a6a46cccc2fc41984abd0b166a89f00fb6aa1ede5033d12865a5be",
+          "endpoint_public_key": "03c747b16b512132e259c136ef53690ad1929d99a15b0d04327c27494801a305",
+          "expires_at_unix": 1795004034,
+          "inbox_policy_digest": "sha256:3265d1133e7ee6309adb156d91b5e49b1ae1b3eced32e36da7b937ff0e44fd6f",
+          "not_before_unix": 1794831234,
+          "owner_public_key": "6eba63a6e838914f8f876108fb689fb49195a9f30ab2f5805ade461a9ee3bcfa"
+        },
+        "action": {
+          "kind": "delegate",
+          "action_hash": "049d071bdd0d13793ed00f4f7723cf01848650b873abedaca63dc852b2a8322a",
+          "landed": [
+            {
+              "lt": 166000003,
+              "hash": "xDIvU5uNmx6aF4sdcJnmV/qQcM1vLbMhv+ZoJ9MsLtM=",
+              "in_source": "0:3f450cbb8b32613ada8279ca7b4ed46aa49074b035fe0e3c17e2a62619eda504",
+              "in_value": 2000000000,
+              "op": 1314258945,
+              "query_id": 1,
+              "outs": [],
+              "aborted": false,
+              "compute_success": true
+            }
+          ]
+        }
+      },
+      "at": "2026-11-16T12:14:57.068171+00:00"
+    },
+    {
+      "name": "a: tos-messengerd accepts its configuration (-check)",
+      "pass": true,
+      "detail": "configuration is valid: state_dir=/tos/mr1-live/k13/nodes/k13/a/m/state runtime_socket=/tos/mr1-live/k13/nodes/k13/a/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/a/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/a/s/device.sock transport=agent-packet-relay\npublication operator configuration is structurally valid; live delegation, DHT, HTTPS root, and signer are checked at startup\n",
+      "at": "2026-11-16T12:14:57.122821+00:00"
+    },
+    {
+      "name": "b: tos-messengerd accepts its configuration (-check)",
+      "pass": true,
+      "detail": "configuration is valid: state_dir=/tos/mr1-live/k13/nodes/k13/b/m/state runtime_socket=/tos/mr1-live/k13/nodes/k13/b/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/b/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/b/s/device.sock transport=agent-packet-relay\npublication operator configuration is structurally valid; live delegation, DHT, HTTPS root, and signer are checked at startup\n",
+      "at": "2026-11-16T12:14:57.178874+00:00"
+    },
+    {
+      "name": "c: tos-messengerd accepts its configuration (-check)",
+      "pass": true,
+      "detail": "configuration is valid: state_dir=/tos/mr1-live/k13/nodes/k13/c/m/state runtime_socket=/tos/mr1-live/k13/nodes/k13/c/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/c/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/c/s/device.sock transport=agent-packet-relay\npublication operator configuration is structurally valid; live delegation, DHT, HTTPS root, and signer are checked at startup\n",
+      "at": "2026-11-16T12:14:57.231083+00:00"
+    },
+    {
+      "name": "a: the test Endpoint signer serves its socket",
+      "pass": true,
+      "detail": "ready\n",
+      "at": "2026-11-16T12:14:57.733656+00:00"
+    },
+    {
+      "name": "a (start): tos-messengerd verified its finalized delegation, serves its sockets and exported its relay evidence",
+      "pass": true,
+      "detail": "runtime_socket=/tos/mr1-live/k13/nodes/k13/a/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/a/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/a/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/a/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/a/s/carrier.sock\n",
+      "at": "2026-11-16T12:14:58.736395+00:00"
+    },
+    {
+      "name": "a (start): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-16T12:14:59.739187+00:00"
+    },
+    {
+      "name": "b: the test Endpoint signer serves its socket",
+      "pass": true,
+      "detail": "ready\n",
+      "at": "2026-11-16T12:15:00.241722+00:00"
+    },
+    {
+      "name": "b (start): tos-messengerd verified its finalized delegation, serves its sockets and exported its relay evidence",
+      "pass": true,
+      "detail": "runtime_socket=/tos/mr1-live/k13/nodes/k13/b/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/b/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/b/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/b/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/b/s/carrier.sock\n",
+      "at": "2026-11-16T12:15:01.244706+00:00"
+    },
+    {
+      "name": "b (start): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-16T12:15:02.247839+00:00"
+    },
+    {
+      "name": "c: the test Endpoint signer serves its socket",
+      "pass": true,
+      "detail": "ready\n",
+      "at": "2026-11-16T12:15:02.750925+00:00"
+    },
+    {
+      "name": "c (start): tos-messengerd verified its finalized delegation, serves its sockets and exported its relay evidence",
+      "pass": true,
+      "detail": "runtime_socket=/tos/mr1-live/k13/nodes/k13/c/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/c/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/c/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/c/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/c/s/carrier.sock\n",
+      "at": "2026-11-16T12:15:03.753794+00:00"
+    },
+    {
+      "name": "c (start): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-16T12:15:04.756855+00:00"
+    },
+    {
+      "name": "the contact file is the daemon's relay contact (evidence, no locator) wrapped with the current chat card",
+      "pass": true,
+      "detail": [
+        "relay_contact",
+        "schema"
+      ],
+      "at": "2026-11-16T12:15:04.948776+00:00"
+    },
+    {
+      "name": "A imports B's contact file (its owner's admission decision) and the stranger C imports the same public file; B imports nothing",
+      "pass": true,
+      "detail": {
+        "a<-b": {
+          "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+          "key_id": "hpke:3c19f544ba4ffa18880eea3711e993a2729e08c56711cf9057fad7aaf405bf25",
+          "contact_file": "/tos/mr1-live/k13/nodes/k13/a/m/contacts/d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef.json"
+        },
+        "c<-b": {
+          "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+          "key_id": "hpke:3c19f544ba4ffa18880eea3711e993a2729e08c56711cf9057fad7aaf405bf25",
+          "contact_file": "/tos/mr1-live/k13/nodes/k13/c/m/contacts/d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef.json"
+        }
+      },
+      "at": "2026-11-16T12:15:05.386802+00:00"
+    },
+    {
+      "name": "A's and C's daemons verified and committed B's relay evidence from the imported contact file",
+      "pass": true,
+      "detail": {
+        "a": [
+          "d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef.json"
+        ],
+        "c": [
+          "d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef.json"
+        ]
+      },
+      "at": "2026-11-16T12:16:03.437177+00:00"
+    },
+    {
+      "name": "item 4: relay 1 is stopped before the conversation: relay1 stopped on SIGTERM and no longer answers",
+      "pass": true,
+      "detail": {
+        "exit": 0,
+        "answers": false
+      },
+      "at": "2026-11-16T12:16:04.562102+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'm1'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_3ed4e5941196093817b1a015078abf9b275f2c21abee441f9d26ceb89831bf9b",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:16:04.694963+00:00"
+    },
+    {
+      "name": "[M-R1 2] A's copy of m1 is `carried` once relay 2 accepted it, and not yet delivered while B cannot answer",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.delivery-journal.v2",
+        "delivery_id": "cpy_77fa88f641d0234f756afe0902efdbb2f39d089575070cdfd69d1013bf0d32ba",
+        "event_id": "evt_3ed4e5941196093817b1a015078abf9b275f2c21abee441f9d26ceb89831bf9b",
+        "session_id": "ses_6a8f6ea1eadba70d1d9d5063cd922e6462379ff0535ecd148defc94e2f77d9d1",
+        "payload_base64": "eyJzY2hlbWEiOiJ0b3MubWVzc2FnaW5nLmV2ZW50LnYyIiwibmV0d29ya19pZCI6InRvczpnbG9iYWwtaWQ6MyIsImdlbmVzaXNfcm9vdF9oYXNoIjoiMWZiZjg4NDI1YzE1ODkzNzljNGQ4MDcwNjRhNjNhNGJjYmZkOWUxM2ZhZTc2MjQ2NmY0YmIxNTYyNjEwYTQ0YSIsImdlbmVzaXNfZmlsZV9oYXNoIjoiMWQ5YjJjNGI0YjliMGJmMzE2M2Q2MmRhYmU2YTc5OTY2NWUyYzc3NzBmMjM2ZTNkNWY0YjYzYjFiOTc0MjUxNSIsImNvbnZlcnNhdGlvbl9pZCI6ImNvbnZfODdlNWE2NjE1NzMxMmFmYmUxNzk5ZGM2OTA3YjQ5ZGMwZGU1ZTE5OTk0Zjg5MDc0NTk3MDQ1OWEzOWQwYzRjYSIsImV2ZW50X2lkIjoiZXZ0XzNlZDRlNTk0MTE5NjA5MzgxN2IxYTAxNTA3OGFiZjliMjc1ZjJjMjFhYmVlNDQxZjlkMjZjZWI4OTgzMWJmOWIiLCJzZW5kZXJfYWdlbnRfaWQiOiJhZ2VudF9lMmM1YjkwOGIzZDZhN2RjMGFmMzI2NmQ3N2I1OTk0NDY3NDM3OGUwYzFhYmQ2MGFkNjJlODJkNjA4NWVhNDg1Iiwic2VuZGVyX21lc3NhZ2luZ19lbmRwb2ludF9pZCI6Im1lcF8zN2Y0ODI2ODZiMGFiNDUzOTBhM2JmNDQzZTFiOTM4NTkyYzgxNDVkOTg2ZDM1NWMwMmUwZmRiNmI0ZDYzNjdkIiwic2VuZGVyX2RldmljZV9pZCI6ImRldl82MDQ5NTliZjEzYWIzM2U3Yjk0YTRkOWNkMGYxYTliZGE4OWUyYzY1MTE0N2ZlZmM4ZDk4OWUzZWRmNjU5ODViIiwiY3JlYXRlZF9hdF91bml4IjoxNzk0ODMxMzY0LCJleHBpcmVzX2F0X3VuaXgiOjE3OTU0MzYxNjQsImV2ZW50X2tpbmQiOiJ0ZXh0IiwicGF5bG9hZF9zY2hlbWEiOiJ0b3MubWVzc2FnaW5nLnBheWxvYWQudGV4dC52MSIsImlkZW1wb3RlbmN5X2tleSI6IjJiOWE0MzdjOWI1NDllNzJiZDE3NTFhOGVkNDIxZTE0MTdhYmIwY2M1Zjc3MGNiMGEwZTVjZjcyNDdlNTM5NTAiLCJjb250ZW50X2Jhc2U2NCI6ImRHOXpMbTFsYzNOaFoybHVaeTV3WVhsc2IyRmtMbll4QUhSdmN5NXRaWE56WVdkcGJtY3VjR0Y1Ykc5aFpDNTBaWGgwTG5ZeEFBQUFBQmwwWlhoMEwzQnNZV2x1T3lCamFHRnljMlYwUFhWMFppMDRBQUFBSUUwdFVqRWdiVEVnTmpZeE9UQm1NelkzTlRoak9UTTJNekkyTlRJM1pqbGxBQUFBQUE9PSJ9",
+        "payload_digest": "sha256:2632184dc7e42d2c3922dc7005fb3703e714a7a6ce93b073b8bafecccb73eab6",
+        "ciphertext_base64": "AdGVavtFPwvc7GHUm5wYj31g7pKxw/mGUs663clDtAtLAAAAAAAAAACcHyGiWnyuR/sas9MsyF8sD0v+Uhs1t6lLHpF89KfdSqeUJam/r19IIOQLxYViVWcKWJbqGRbQVhJHQ2E/SVvHUMqAXoflIzIP4HBmlyFig5hBNBW7IDZomfLuj9qiYYFxTnu6SVOD5hV1jX/N1KguQm+bnitAc6PLhVgW4bN3GkVPzg4oU3f6BKpX5OfP71vdRalbzGoUMfQ4GCJTBXrc9CSzSTBCPuByc7Dwr1RIDdTiFUCyUIHwIfCb3imqlMDxQgnF7EUS+QkMw7EYPuT+KBUqVhdpMz9kd/l+WoKxrloIFHrrcXY13O5n+76mWbp/kMtZrK86TxrSHVlHnxBdnDjQ1w5mm4fbbd3i5f1GWwqZv2IHMkd7r1YKO3woN7SFroE/izGCwUv6D1uCTNstQTOIX5keqh3E0/bqvJc7ZkX8APozo3ZjfOHXo5IDEfEnrH0W2xjD/YAr8/zri9wYs0jI6WlWT3sX9nkc3caqNjm3xL9Z3HDHw5PSGszlrNUd5U4LR0HOqU8WnX4TeXrnN85PnLld+Kv3wzdNw3cMT/46GR+dE38StK9nMAhUgl/hy+L3J8zFOfkRlBCCQZqkxz2SVritBc+UZWkrg1fW7dbq4SdvOS8STkHPqT/qt6ZcdysBBAPV1NXiSaVgLsaZamSBwqsW2wn1B1Bz7/0L18QcKMh2VUrAA5f6cZ/x0V92FkjA5AnrPQe3a0yP+7ddlggGd2swjMtPe3b5YvIES+Ft1S/Rz7yQsejRrnI0TV3hYPj6fNj1IAGFxE7jPo046C+2BmzwwUs/cb+Jd/k+p4CODor0nueum7b2GYFmAiF3Z147rOAf/HOwg+p6Lqg9kltngMuQiZoMgROV8oBtEDJ6OsenjLRu7NSAQ7bZ6gcPeavjTAsQ9sPsK29WSChXgkVPBS0YOwGsFyB3SLuBgaa7ilpLbapBjfJ5Q8s8MAveMp3XHMJDZddmAOzkS1JVaZvlLt8QDb30LVV+o1/ZoFvXA1tyLPsqJn2iyC/HDmRC7aBS0phpgIT/ubz8fSdBzckege3Leg7p+ztyDaMHMbwqtVc7d/syMFHhacjVhbWOFr8q2ID6gQPyc98/tij/Zd8L5hxdyN2nP/Vty7wRxv8NN54VJ8pU4FGT2AnB8RBbp58iSS8fHc4DePqUMY6LouTebZ+rdvslifsasz5XQoXAFhIzHQ3GlLXY1FzDTm+LwTIfvyrPxFUPfd1NCMGbko0PTOFeBC6EWtjmh092L5vyB3H9H5dF+zDVug/Q1ZnO7UxMNWiPHNvuSo0GVKUV1YMr9++SjJe3kaVT9bNqBZv6eIZUOE7fDW0xNqztwq97pKWMp3AOXWtbj3efU0MEBPIKyKye8XDnaCXsyzA2nyekcXqNKwqiULKpN7IaWZ5oknxbiFByH6Zy+LUKeaBVMRyx8xpymc8ifwADA/4FRHH0HADc6GaEYebWOBb/8jH4VlDCqNHN",
+        "ciphertext_digest": "sha256:145b3228d4ccb351ac8753962efb463a0a4d1d68c02761a03d2670bf38a69584",
+        "recipient_messaging_endpoint_id": "mep_7799f8453bd7d6bb5dfe414a9395b3f2677bbcd95bf49dad2ce9dd8570b22bfa",
+        "recipient_device_id": "dev_ade07b6c2e75b92202241f4c6665968ee412a98526df307306f55275c815ffdd",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "state": "carried",
+        "attempts": 0,
+        "created_at_unix": 1794831364,
+        "expires_at_unix": 1795436164,
+        "relay_generation": 1,
+        "last_deposit_at_unix": 1794831365,
+        "next_redeposit_at_unix": 1794831965,
+        "relay_generations": [
+          {
+            "generation": 1,
+            "descriptor_digest": "sha256:5b1904437b3a3965ca4f29bd16bac1ea0f68bf20a407c1fe1c3c67f394f7984d",
+            "descriptor_issued_at_unix": 1794831297,
+            "card_digest": "sha256:2f3cda7fd288be9549633245f372f5197a1e3ea5e7786d2eba34f62d5be07196",
+            "deposited_at_unix": 1794831365
+          }
+        ]
+      },
+      "at": "2026-11-16T12:16:06.697587+00:00"
+    },
+    {
+      "name": "[M-R1 9] relay state is copied while relay 2 held A's copy for B and B's delivery ack for A",
+      "pass": true,
+      "detail": {
+        "copy-held": {
+          "relay1": {
+            "files": 1,
+            "envelope_files": 0,
+            "envelope_bytes": []
+          },
+          "relay2": {
+            "files": 2,
+            "envelope_files": 1,
+            "envelope_bytes": [
+              28711
+            ]
+          }
+        },
+        "ack-held": {
+          "relay1": {
+            "files": 1,
+            "envelope_files": 0,
+            "envelope_bytes": []
+          },
+          "relay2": {
+            "files": 3,
+            "envelope_files": 1,
+            "envelope_bytes": [
+              28711
+            ]
+          }
+        }
+      },
+      "at": "2026-11-16T12:16:25.073451+00:00"
+    },
+    {
+      "name": "[M-R1 2] m1 becomes `delivered` only on B's verified kind-2 ack: carried, then delivered later",
+      "pass": true,
+      "detail": {
+        "state": "delivered",
+        "created_at_unix": 1794831364,
+        "last_deposit_at_unix": 1794831365,
+        "settled_at_unix": 1794831419
+      },
+      "at": "2026-11-16T12:17:01.086216+00:00"
+    },
+    {
+      "name": "[M-R1 2] B's runtime lists m1 and applies it once",
+      "pass": true,
+      "detail": {
+        "listed": true,
+        "content_matches": true,
+        "applied": true,
+        "received": {
+          "media_type": "text/plain; charset=utf-8",
+          "body_bytes": 32,
+          "body_sha256": "d49ceb45c8efc9e9447eb906862cb17a76c15355d94dd7208c434a2a6eeb1b4c",
+          "reply_to": "",
+          "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+        },
+        "expected": {
+          "media_type": "text/plain; charset=utf-8",
+          "body_bytes": 32,
+          "body_sha256": "d49ceb45c8efc9e9447eb906862cb17a76c15355d94dd7208c434a2a6eeb1b4c",
+          "reply_to": "",
+          "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+        },
+        "listed_again_after": false
+      },
+      "at": "2026-11-16T12:17:01.334588+00:00"
+    },
+    {
+      "name": "[M-R1 3] first contact over the relay: B had no contact file of A, admitted A's first frame and learned A's chat card and relay evidence in band from it",
+      "pass": true,
+      "detail": {
+        "b_contact_dir": [],
+        "held_card": {
+          "agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485",
+          "key_id": "hpke:ab5e2be4212dce729adfca4383d03407d86fffde791f575935314c85eb6b23f5",
+          "not_before_unix": 1794831282,
+          "not_after_unix": 1797423282,
+          "relays": [
+            "https://10.231.78.20:8443",
+            "https://10.231.78.21:8443"
+          ]
+        },
+        "a_chat_key": "hpke:ab5e2be4212dce729adfca4383d03407d86fffde791f575935314c85eb6b23f5",
+        "frame": {
+          "card_bytes": 7241,
+          "evidence_bytes": 3261,
+          "bootstrap_bytes": 2541
+        }
+      },
+      "at": "2026-11-16T12:17:01.427005+00:00"
+    },
+    {
+      "name": "the runtime of b queued 'r1'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_96abd2f133976131f915748525b3de9d771addfe1b8a59c865c1946c58b756ee",
+        "agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:17:01.504836+00:00"
+    },
+    {
+      "name": "[M-R1 2] B's runtime answers with messages.reply-direct; the reply is sealed to the card B learned in band and becomes `delivered` on A's ack",
+      "pass": true,
+      "detail": {
+        "state": "delivered",
+        "created_at_unix": 1794831421,
+        "last_deposit_at_unix": 1794831422,
+        "settled_at_unix": 1794831436
+      },
+      "at": "2026-11-16T12:17:17.555133+00:00"
+    },
+    {
+      "name": "[M-R1 2] A's runtime receives the reply once",
+      "pass": true,
+      "detail": "evt_96abd2f133976131f915748525b3de9d771addfe1b8a59c865c1946c58b756ee",
+      "at": "2026-11-16T12:17:17.804670+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'm2'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_62bf5e919aa7ed08f5cb28e6175f1488a79e3003e0f08aa38382f287312e9232",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:17:17.898646+00:00"
+    },
+    {
+      "name": "[M-R1 2] A's second message m2 is delivered and applied once",
+      "pass": true,
+      "detail": {
+        "listed": true,
+        "content_matches": true,
+        "applied": true,
+        "received": {
+          "media_type": "text/plain; charset=utf-8",
+          "body_bytes": 32,
+          "body_sha256": "fca62d4f0f08f0f21c866ae0f40d18570aa8ba44050b4b3c6d37017045cbe5cc",
+          "reply_to": "",
+          "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+        },
+        "expected": {
+          "media_type": "text/plain; charset=utf-8",
+          "body_bytes": 32,
+          "body_sha256": "fca62d4f0f08f0f21c866ae0f40d18570aa8ba44050b4b3c6d37017045cbe5cc",
+          "reply_to": "",
+          "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+        },
+        "listed_again_after": false
+      },
+      "at": "2026-11-16T12:17:49.046360+00:00"
+    },
+    {
+      "name": "[M-R1 4] relay 1 was down for the whole conversation: every copy and ack of it was accepted by relay 2 only",
+      "pass": true,
+      "detail": [
+        {
+          "from": "agent_e2c5b908",
+          "kind": 1,
+          "accepted_by": [
+            "https://10.231.78.21:8443"
+          ]
+        },
+        {
+          "from": "agent_e2c5b908",
+          "kind": 2,
+          "accepted_by": [
+            "https://10.231.78.21:8443"
+          ]
+        },
+        {
+          "from": "agent_e2c5b908",
+          "kind": 1,
+          "accepted_by": [
+            "https://10.231.78.21:8443"
+          ]
+        },
+        {
+          "from": "agent_d91e4d94",
+          "kind": 2,
+          "accepted_by": [
+            "https://10.231.78.21:8443"
+          ]
+        },
+        {
+          "from": "agent_d91e4d94",
+          "kind": 2,
+          "accepted_by": [
+            "https://10.231.78.21:8443"
+          ]
+        },
+        {
+          "from": "agent_d91e4d94",
+          "kind": 1,
+          "accepted_by": [
+            "https://10.231.78.21:8443"
+          ]
+        }
+      ],
+      "at": "2026-11-16T12:17:49.111663+00:00"
+    },
+    {
+      "name": "item 4: relay 1 restarts after the conversation: relay1 serves TLS on 10.231.78.20:8443 (verified against the run's certificate authority)",
+      "pass": true,
+      "detail": "{\"time\":\"2026-11-16T12:14:37.258289195Z\",\"level\":\"INFO\",\"msg\":\"agent packet relay listening\",\"address\":\"10.231.78.20:8443\",\"tls\":true,\"usage\":{\"Envelopes\":0,\"Tombstones\":0,\"Bytes\":0}}\n{\"time\":\"2026-11-16T12:17:49.148141387Z\",\"level\":\"INFO\",\"msg\":\"agent packet relay listening\",\"address\":\"10.231.78.20:8443\",\"tls\":true,\"usage\":{\"Envelopes\":0,\"Tombstones\":0,\"Bytes\":0}}\n",
+      "at": "2026-11-16T12:17:49.620131+00:00"
+    },
+    {
+      "name": "[M-R1 5] an older duplicate (a fresh generation of A's m1 copy, deposited after B applied m2) reaches B's daemon, is answered `duplicate` with a signed ack, relay-acknowledged, and not listed to B's runtime again",
+      "pass": true,
+      "detail": {
+        "deposit": 201,
+        "duplicate_acks": 1,
+        "inbound_records": 2
+      },
+      "at": "2026-11-16T12:17:57.878215+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'largest'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_96f555705c1d665ec49820f8dd1ad23d4bb12cebd7eeec56198c27cfc2e23f28",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:17:57.956678+00:00"
+    },
+    {
+      "name": "[M-R1 9] a large text (98,304 bytes) is carried in one padded frame bucket and delivered, and applied once",
+      "pass": true,
+      "detail": [
+        190464
+      ],
+      "at": "2026-11-16T12:18:11.263508+00:00"
+    },
+    {
+      "name": "[M-R1 7] an oversize payload is refused with `content-too-large` before sealing (the daemon computes the worst-case frame size, 190,464 bytes, before any key is spent): no delivery is journaled",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "call_error": "messenger-relay-e2e-tool: local API refused not-authentic: content-too-large: relay copy exceeds the largest frame\n"
+      },
+      "at": "2026-11-16T12:18:11.334407+00:00"
+    },
+    {
+      "name": "[M-R1 7] a rail (OFR1) packet sealed to B's chat key is refused and relay-acknowledged, with no daemon call",
+      "pass": true,
+      "detail": {
+        "deposit": 201
+      },
+      "at": "2026-11-16T12:18:23.554428+00:00"
+    },
+    {
+      "name": "[M-R1 7] an agent.packet Event is refused on the relay route (a valid signed packet; the delegation grants agent.packet)",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "call_error": "messenger-relay-e2e-tool: local API refused not-authentic: class-not-delegated: Agent Packet events are not carried on the relay route\n"
+      },
+      "at": "2026-11-16T12:18:23.644084+00:00"
+    },
+    {
+      "name": "[M-R1 7] a packet whose sender (C) is not the Event sender of the copy it carries (A) is refused and relay-acknowledged; nothing reaches B's runtime and B sends no ack to C",
+      "pass": true,
+      "detail": {
+        "deposit": 201,
+        "frame_sender_in_packet": "agent_e2c5b908"
+      },
+      "at": "2026-11-16T12:18:37.945698+00:00"
+    },
+    {
+      "name": "[M-R1 7] a kind-2 ack whose packet sender (C) is not the Agent of the signing Endpoint (B) is refused and relay-acknowledged; A's journal is unchanged",
+      "pass": true,
+      "detail": {
+        "deposit": 201
+      },
+      "at": "2026-11-16T12:18:52.257801+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'crash-b'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_e4e58c6073df6c00386d2a2f7a0bd4a7e2e1a51e59aec4d3ab9a486d5fa37c6c",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:18:52.425224+00:00"
+    },
+    {
+      "name": "B's serve downloaded the copy and called its paused daemon (the call is queued, unanswered)",
+      "pass": true,
+      "detail": "2026-11-16T12:18:22Z: chat.receive: servicebridge: a packet opened under a chat key does not carry a relay frame for this Agent; refused and acknowledged\n2026-11-16T12:19:59Z: chat.deliver: servicebridge: the Messenger carrier socket did not answer; the envelope stays at the relay\n",
+      "at": "2026-11-16T12:19:59.830426+00:00"
+    },
+    {
+      "name": "[M-R1 6] B's serve is killed while its daemon commits the copy: the Event is committed and the envelope is still listed at the relays (no relay ack)",
+      "pass": true,
+      "detail": {
+        "listed": {
+          "relay1": true,
+          "relay2": true
+        }
+      },
+      "at": "2026-11-16T12:20:00.024951+00:00"
+    },
+    {
+      "name": "b (after the kill): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "2026-11-16T12:18:22Z: chat.receive: servicebridge: a packet opened under a chat key does not carry a relay frame for this Agent; refused and acknowledged\n2026-11-16T12:19:59Z: chat.deliver: servicebridge: the Messenger carrier socket did not answer; the envelope stays at the relay\n",
+      "at": "2026-11-16T12:20:00.026720+00:00"
+    },
+    {
+      "name": "[M-R1 6] after the restart B finds the same envelope again, answers it `duplicate` and the runtime applies it once",
+      "pass": true,
+      "detail": {
+        "acks": [
+          "duplicate"
+        ],
+        "applied": {
+          "listed": true,
+          "content_matches": true,
+          "applied": true,
+          "received": {
+            "media_type": "text/plain; charset=utf-8",
+            "body_bytes": 37,
+            "body_sha256": "2d2f098a00640729304e756a3cc7204603f93476052626539d160139cbd7dcac",
+            "reply_to": "",
+            "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+          },
+          "expected": {
+            "media_type": "text/plain; charset=utf-8",
+            "body_bytes": 37,
+            "body_sha256": "2d2f098a00640729304e756a3cc7204603f93476052626539d160139cbd7dcac",
+            "reply_to": "",
+            "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+          },
+          "listed_again_after": false
+        }
+      },
+      "at": "2026-11-16T12:20:06.333463+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'crash-a'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_2a033bea523293359d277977134a5bdf7eaa1a05cb5b4fa220d586e78a83ed10",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:20:06.540460+00:00"
+    },
+    {
+      "name": "[M-R1 6] A's daemon is killed while its carrier deposits: the relays accept the envelope after the kill and A's journal never recorded `carried`",
+      "pass": true,
+      "detail": {
+        "journal_state": "pending"
+      },
+      "at": "2026-11-16T12:20:08.830292+00:00"
+    },
+    {
+      "name": "a (after the kill): tos-messengerd verified its finalized delegation, serves its sockets and exported its relay evidence",
+      "pass": true,
+      "detail": "runtime_socket=/tos/mr1-live/k13/nodes/k13/a/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/a/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/a/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/a/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/a/s/carrier.sock\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\n",
+      "at": "2026-11-16T12:20:08.832519+00:00"
+    },
+    {
+      "name": "[M-R1 6] after the restart A retries the same generation key and gets `carried` with no new deposit: one envelope, delivered, applied once",
+      "pass": true,
+      "detail": {
+        "records": 1,
+        "generation": null
+      },
+      "at": "2026-11-16T12:20:21.205639+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'race'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_ab75de0df4b73e15626f3ef5b965eaf884a86897d88f52ccb9f5fa8b7a3b0526",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:20:21.426032+00:00"
+    },
+    {
+      "name": "[M-R1 8] an observer deposits junk under the public id of A's envelope at relay 1 first; A's deposit there gets 409 and is abandoned at relay 1",
+      "pass": true,
+      "detail": {
+        "junk_deposit": 201,
+        "record": [
+          "https://10.231.78.20:8443"
+        ]
+      },
+      "at": "2026-11-16T12:20:53.602147+00:00"
+    },
+    {
+      "name": "b (after the race): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "2026-11-16T12:18:22Z: chat.receive: servicebridge: a packet opened under a chat key does not carry a relay frame for this Agent; refused and acknowledged\n2026-11-16T12:19:59Z: chat.deliver: servicebridge: the Messenger carrier socket did not answer; the envelope stays at the relay\n",
+      "at": "2026-11-16T12:20:54.605612+00:00"
+    },
+    {
+      "name": "[M-R1 8] the copy is delivered through relay 2",
+      "pass": true,
+      "detail": "delivered",
+      "at": "2026-11-16T12:21:04.957028+00:00"
+    },
+    {
+      "name": "the runtime of c queued 'stranger'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_c8d34768de88809f76193b1ecd954a28d9a72f83f688a0406838f51ce4a145d7",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_ae3d2be0147202334a447e5fb957fda381ca9a0d2035c66c251e5a8382c5322e",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:21:05.224437+00:00"
+    },
+    {
+      "name": "the stranger C deposited its copy to B, and its envelope id is listed in B's mailbox at both relays while B is offline",
+      "pass": true,
+      "detail": {
+        "c_envelopes": [
+          "c10c3b1bd31c3260418fb264c6de638a8f0fd5d18aa325c6f5d4b4efeeb4456f"
+        ]
+      },
+      "at": "2026-11-16T12:21:07.266003+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'offline'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_d403a6837dc121cb2cae5189d718db89db4667b585279986994b7aaa4f40df47",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:21:07.355183+00:00"
+    },
+    {
+      "name": "[M-R1 5] B is stopped; A's copy is carried as generation 1 and both relays hold it",
+      "pass": true,
+      "detail": "89198dbf9e4297064a935c4bd5acc4a443291a7c35117cb04c4c2fa98d8d4d30",
+      "at": "2026-11-16T12:21:09.410811+00:00"
+    },
+    {
+      "name": "[M-R1 5] after the re-deposit interval (600 s, the test setting the spec allows) A deposits generation 2 with the same ciphertext and fresh evidence, and generation 1 is withdrawn at every relay that held it (404 or 410 afterwards)",
+      "pass": true,
+      "detail": {
+        "generations": [
+          {
+            "generation": 1,
+            "descriptor_digest": "sha256:ef5fb5f4629efc8a7b3e6bc69cde83c16291376b2e43c80dc98da26222de0266",
+            "descriptor_issued_at_unix": 1794831300,
+            "deposited_at_unix": 1794831669
+          },
+          {
+            "generation": 2,
+            "descriptor_digest": "sha256:79738af4a4699fabe2d11109514c04cfd0e81fb071b5d5cbb9bf32ecf4feaab0",
+            "descriptor_issued_at_unix": 1794832200,
+            "deposited_at_unix": 1794832271
+          }
+        ],
+        "generation_1_status": {
+          "relay1": 404,
+          "relay2": 404
+        },
+        "offline_seconds_at_generation_2": 606
+      },
+      "at": "2026-11-16T12:31:15.820889+00:00"
+    },
+    {
+      "name": "b (after the offline period): tos-messengerd verified its finalized delegation, serves its sockets and exported its relay evidence",
+      "pass": true,
+      "detail": "runtime_socket=/tos/mr1-live/k13/nodes/k13/b/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/b/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/b/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/b/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/b/s/carrier.sock\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nruntime_socket=/tos/mr1-live/k13/nodes/k13/b/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/b/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/b/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/b/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/b/s/carrier.sock\n",
+      "at": "2026-11-16T12:31:16.827237+00:00"
+    },
+    {
+      "name": "b (after the offline period): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "2026-11-16T12:18:22Z: chat.receive: servicebridge: a packet opened under a chat key does not carry a relay frame for this Agent; refused and acknowledged\n2026-11-16T12:19:59Z: chat.deliver: servicebridge: the Messenger carrier socket did not answer; the envelope stays at the relay\n2026-11-16T12:31:17Z: chat.ack: servicebridge: the chat frame can never be sent: servicebridge: no valid chat card of the peer is held\n",
+      "at": "2026-11-16T12:31:17.830929+00:00"
+    },
+    {
+      "name": "[M-R1 5] B, restarted, receives the retained message once (generation 2 only) and A's copy is delivered",
+      "pass": true,
+      "detail": {
+        "applied": {
+          "listed": true,
+          "content_matches": true,
+          "applied": true,
+          "received": {
+            "media_type": "text/plain; charset=utf-8",
+            "body_bytes": 37,
+            "body_sha256": "5155419148467f6545c3656c0b2909e85131b9e158ed3bff97547ef5aed15585",
+            "reply_to": "",
+            "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+          },
+          "expected": {
+            "media_type": "text/plain; charset=utf-8",
+            "body_bytes": 37,
+            "body_sha256": "5155419148467f6545c3656c0b2909e85131b9e158ed3bff97547ef5aed15585",
+            "reply_to": "",
+            "sender_agent_id": "agent_e2c5b908b3d6a7dc0af3266d77b59944674378e0c1abd60ad62e82d6085ea485"
+          },
+          "listed_again_after": false
+        },
+        "generation": 2
+      },
+      "at": "2026-11-16T12:31:22.184052+00:00"
+    },
+    {
+      "name": "[M-R1 7] a refused stranger: B downloaded C's copy (its envelope id relay-acknowledged at both relays) and refused it; C's in-band card and evidence are not stored (so it was refused, not held), no Messenger file of B names C (its rollback boundary is unchanged), B sent C no ack, and C's delivery stays carried",
+      "pass": true,
+      "detail": {
+        "c_envelopes_relay_acknowledged_by_b": true,
+        "b_chat_cards_naming_c": [],
+        "b_messenger_files_naming_c": [],
+        "b_openfox_files_naming_c": [],
+        "b_messenger_files_naming_c_before": [],
+        "c_kind2_from_b": []
+      },
+      "at": "2026-11-16T12:31:22.445394+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'stale'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_b67c8597dbeabb61d8d07397724b37cf290df9da62f4c48e465d946224e255db",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T12:31:22.704066+00:00"
+    },
+    {
+      "name": "[M-R1 5] B and then A are stopped with A's copy carried; the run waits until every descriptor either holds of the other has expired (descriptor lifetime 1800 s)",
+      "pass": true,
+      "detail": {
+        "wait_seconds": 1747
+      },
+      "at": "2026-11-16T12:31:23.919713+00:00"
+    },
+    {
+      "name": "a (with B's evidence expired): tos-messengerd verified its finalized delegation, serves its sockets and exported its relay evidence",
+      "pass": true,
+      "detail": "s/mr1-live/k13/nodes/k13/a/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/a/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/a/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/a/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/a/s/carrier.sock\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nruntime_socket=/tos/mr1-live/k13/nodes/k13/a/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/a/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/a/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/a/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/a/s/carrier.sock\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nswept sent=0 sealed=0 retried=0 held=0 abandoned=0\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nruntime_socket=/tos/mr1-live/k13/nodes/k13/a/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/a/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/a/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/a/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/a/s/carrier.sock\ntos-messengerd: contact import d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef.json: descriptor-expired: relay evidence descriptor is expired\n",
+      "at": "2026-11-16T13:00:31.928915+00:00"
+    },
+    {
+      "name": "a (with B's evidence expired): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-16T13:00:32.933983+00:00"
+    },
+    {
+      "name": "[M-R1 5] with B's evidence expired, A seals and deposits no new generation of its copy: it holds it pending and deposits one kind-4 evidence request for B instead",
+      "pass": true,
+      "detail": {
+        "state": "pending",
+        "generations": 1
+      },
+      "at": "2026-11-16T13:00:37.981561+00:00"
+    },
+    {
+      "name": "b (with A's evidence expired): tos-messengerd verified its finalized delegation, serves its sockets and exported its relay evidence",
+      "pass": true,
+      "detail": "runtime_socket=/tos/mr1-live/k13/nodes/k13/b/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/b/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/b/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/b/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/b/s/carrier.sock\nswept sent=0 sealed=1 retried=0 held=0 abandoned=0\nruntime_socket=/tos/mr1-live/k13/nodes/k13/b/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/b/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/b/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/b/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/b/s/carrier.sock\nruntime_socket=/tos/mr1-live/k13/nodes/k13/b/s/runtime.sock owner_socket=/tos/mr1-live/k13/nodes/k13/b/s/owner.sock prekey_socket=/tos/mr1-live/k13/nodes/k13/b/s/device.sock state_dir=/tos/mr1-live/k13/nodes/k13/b/m/state transport=agent-packet-relay\nrelay_carrier_socket=/tos/mr1-live/k13/nodes/k13/b/s/carrier.sock\n",
+      "at": "2026-11-16T13:00:38.983951+00:00"
+    },
+    {
+      "name": "b (with A's evidence expired): `openfox earning service serve` runs and serves carrier.carry",
+      "pass": true,
+      "detail": "2026-11-16T12:18:22Z: chat.receive: servicebridge: a packet opened under a chat key does not carry a relay frame for this Agent; refused and acknowledged\n2026-11-16T12:19:59Z: chat.deliver: servicebridge: the Messenger carrier socket did not answer; the envelope stays at the relay\n2026-11-16T12:31:17Z: chat.ack: servicebridge: the chat frame can never be sent: servicebridge: no valid chat card of the peer is held\n",
+      "at": "2026-11-16T13:00:39.987653+00:00"
+    },
+    {
+      "name": "[M-R1 5] descriptor expiry: B receives the retained copy whose frame evidence expired and answers a signed `rejected` ack with descriptor-expired (A is admitted); the copy does not reach B's runtime",
+      "pass": true,
+      "detail": [
+        "rejected"
+      ],
+      "at": "2026-11-16T13:00:40.093178+00:00"
+    },
+    {
+      "name": "[M-R1 5] mutual staleness: one kind-4 request (A) and one response (B), each carrying its sender's card and fresh evidence, make both views fresh; A retries the copy only with newer evidence and it is delivered and applied once",
+      "pass": true,
+      "detail": {
+        "requests": 1,
+        "responses": 1,
+        "generations": [
+          {
+            "generation": 1,
+            "descriptor_digest": "sha256:79738af4a4699fabe2d11109514c04cfd0e81fb071b5d5cbb9bf32ecf4feaab0",
+            "descriptor_issued_at_unix": 1794832200,
+            "deposited_at_unix": 1794832283
+          },
+          {
+            "generation": 2,
+            "descriptor_digest": "sha256:2661dd846992e0be28dbfe6a84a4aceb496e0bf1d17f0440c963d4a1c0d07b20",
+            "descriptor_issued_at_unix": 1794834000,
+            "deposited_at_unix": 1794834049
+          }
+        ],
+        "rejected_descriptor_digest": "sha256:79738af4a4699fabe2d11109514c04cfd0e81fb071b5d5cbb9bf32ecf4feaab0"
+      },
+      "at": "2026-11-16T13:01:04.579804+00:00"
+    },
+    {
+      "name": "[M-R1 5] a stranger's evidence request (C held a pending copy for B and B's evidence expired) gets the relay ack only: no response and no write at B",
+      "pass": true,
+      "detail": {
+        "c_requests": 1
+      },
+      "at": "2026-11-16T13:01:04.683718+00:00"
+    },
+    {
+      "name": "[M-R1 5] no kind-4 request is sent to a peer without a pending copy, none is repeated before the re-deposit schedule, and the descriptors each node published during the run sent none",
+      "pass": true,
+      "detail": {
+        "problems": [],
+        "own_descriptors_seen": {
+          "a": 4,
+          "b": 3
+        }
+      },
+      "at": "2026-11-16T13:01:04.695074+00:00"
+    },
+    {
+      "name": "the runtime of a queued 'before-revocation'",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.local-response.v5",
+        "ok": true,
+        "event_id": "evt_14f914017c89eb6e06bf6ac5e87c53e42d41db2b1dda69f2b38be616f91f5a19",
+        "agent_id": "agent_d91e4d94731285be2d762580a6aee8adb6210422082026e6131448ac063491ef",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "readiness": "queued"
+      },
+      "at": "2026-11-16T13:01:04.847407+00:00"
+    },
+    {
+      "name": "[M-R1 5] a copy A carried to B (generation 1 at the relays) before B's Agent is revoked",
+      "pass": true,
+      "detail": {
+        "schema": "tos.messaging.delivery-journal.v2",
+        "delivery_id": "cpy_527f8eec4777c32e3d0d214450886557cfe2c691be4b99ac2a721de6b837e6d4",
+        "event_id": "evt_14f914017c89eb6e06bf6ac5e87c53e42d41db2b1dda69f2b38be616f91f5a19",
+        "session_id": "ses_6a8f6ea1eadba70d1d9d5063cd922e6462379ff0535ecd148defc94e2f77d9d1",
+        "payload_base64": "eyJzY2hlbWEiOiJ0b3MubWVzc2FnaW5nLmV2ZW50LnYyIiwibmV0d29ya19pZCI6InRvczpnbG9iYWwtaWQ6MyIsImdlbmVzaXNfcm9vdF9oYXNoIjoiMWZiZjg4NDI1YzE1ODkzNzljNGQ4MDcwNjRhNjNhNGJjYmZkOWUxM2ZhZTc2MjQ2NmY0YmIxNTYyNjEwYTQ0YSIsImdlbmVzaXNfZmlsZV9oYXNoIjoiMWQ5YjJjNGI0YjliMGJmMzE2M2Q2MmRhYmU2YTc5OTY2NWUyYzc3NzBmMjM2ZTNkNWY0YjYzYjFiOTc0MjUxNSIsImNvbnZlcnNhdGlvbl9pZCI6ImNvbnZfODdlNWE2NjE1NzMxMmFmYmUxNzk5ZGM2OTA3YjQ5ZGMwZGU1ZTE5OTk0Zjg5MDc0NTk3MDQ1OWEzOWQwYzRjYSIsImV2ZW50X2lkIjoiZXZ0XzE0ZjkxNDAxN2M4OWViNmUwNmJmNmFjNWU4N2M1M2U0MmQ0MWRiMmIxZGRhNjlmMmIzOGJlNjE2ZjkxZjVhMTkiLCJzZW5kZXJfYWdlbnRfaWQiOiJhZ2VudF9lMmM1YjkwOGIzZDZhN2RjMGFmMzI2NmQ3N2I1OTk0NDY3NDM3OGUwYzFhYmQ2MGFkNjJlODJkNjA4NWVhNDg1Iiwic2VuZGVyX21lc3NhZ2luZ19lbmRwb2ludF9pZCI6Im1lcF8zN2Y0ODI2ODZiMGFiNDUzOTBhM2JmNDQzZTFiOTM4NTkyYzgxNDVkOTg2ZDM1NWMwMmUwZmRiNmI0ZDYzNjdkIiwic2VuZGVyX2RldmljZV9pZCI6ImRldl82MDQ5NTliZjEzYWIzM2U3Yjk0YTRkOWNkMGYxYTliZGE4OWUyYzY1MTE0N2ZlZmM4ZDk4OWUzZWRmNjU5ODViIiwiY3JlYXRlZF9hdF91bml4IjoxNzk0ODM0MDY0LCJleHBpcmVzX2F0X3VuaXgiOjE3OTU0Mzg4NjQsImV2ZW50X2tpbmQiOiJ0ZXh0IiwicGF5bG9hZF9zY2hlbWEiOiJ0b3MubWVzc2FnaW5nLnBheWxvYWQudGV4dC52MSIsImlkZW1wb3RlbmN5X2tleSI6IjI3NTJmZmVmZTRjMjA2ZDJjYmIxYjI5Yjk4OGI5ZmVhNmE0NDJlNmQ3ZTVlZDJkYjkyZTkxYzAyZTMzZTlmNTAiLCJjb250ZW50X2Jhc2U2NCI6ImRHOXpMbTFsYzNOaFoybHVaeTV3WVhsc2IyRmtMbll4QUhSdmN5NXRaWE56WVdkcGJtY3VjR0Y1Ykc5aFpDNTBaWGgwTG5ZeEFBQUFBQmwwWlhoMEwzQnNZV2x1T3lCamFHRnljMlYwUFhWMFppMDRBQUFBTDAwdFVqRWdZbVZtYjNKbExYSmxkbTlqWVhScGIyNGdaVEJoTldJeE1ESTVNakk1Wm1VNE5XWm1OR1V3TmpVeEFBQUFBQT09In0=",
+        "payload_digest": "sha256:ee9eb5038c1205bc07caeae91119ba6cac91b476a22fadff0cc025415125daa0",
+        "ciphertext_base64": "AfyQKysw5hWpEupSHVbXITltu6R5WcxFi2XT4OVOs4d4AAAAAQAAAAdZiOIonnQq6B5fmd+cZFDaJlemgKpBRDGKTOx4BsI90yJIsDE5ZVLZlxDSeLxFun1orffp0SrOzWwl8g3hQkcx7lZi+FM91+Lqgd65Hb7sMrW2GWX85DQTcfcKxDxALXGgHxnUi5WL2Oy0dKgJzAH9lWtol2t7luo3tYIPuf1gZXSbMr/QJ98zBTH2mfOL/Hmz0srdP0ffzoAW6wK08OuOVtul2Zlh15pdE3hgLmx6bCW2tH+eGwUtGQPpfqf4f5NAGM22mKYGH2M0Odn3yb+vLpDY5RCdPwXS5wMup1t/O/SdBMpWvlNGAhVe1jJ3vON2KrxQ38xatIo3W7ANOJpQ19a87jyQOTXGBebuCPuuUMV7/Bza/S0sk2U/hVCgF6Q1uDGX5I5swH2BuxAp11pCtaFpRagMMcNtll31LWO85e0iX+sD6WAtrAl7PCVhchkoN17nMaC3Yy3JjYYprIYiToaLliwY5Yil8s+A3UXcw+FaL7lpF5ZI2G2+htiYbbdhfKNped4/WMFafOBpKogpqRWPPkCAI/6WXO5y74/LFH6fdk6/68YBmw8zSS4VKXpE7nS6fMgEXvc8ssKJ8w6Pf1aa6MdJE0KVLV9bxT7UV5G4azfVBuXva5q7bRR33BBfeR5Ft661+Vp6MBO2yhyzFehBLL1RjMKecj0bwUE+SysYETcTV7HGb4HaYll1cHLSz1rbO4igNqrTRKA80pTDgzigRN7D3yrCcMp09ot5dMKlou+VBU4VADUtKmhbvwgZEjucD87r8AJsrTfa0/PXIBnEYD742l6IcvuN6V7hwagY303Snh8hlRBACO5j4wBrbDYY9TIJBzt6qm2Ic/NOfVL/W0/EZZevQ2G6goXMXyLTLfCxnp5rMLYXUm5pkNZNqyVk7srdDPIGgAAoHppTCmWCqHNzrAVb3sYY9v9migH+ZTuKq2yVuV6BniBj9JhSoHYMHLHsDtv+MWpp2uvsHA4yS2C9wgGyfdqUgUvvfYnaRUko4OmpuZTWRKFDcUQS+IVh//SriauapUH46jnV+dXJOBOaZfeFLfyGY/v5YmqOfg0elV6esfYyJcXZYpkxncTH7ehePq7fMy3iDm6qgpdC258IREA6er5SkzJ92rD01Yt4w+J11jmUk7Ge/3TSUthsPJUadb0Lq1gC8BHi0uEYiWPPf2cf51/mn2Kq2DD4TflLtMoHIuvWL1Pvvinzq84HqfH9PjouhCcX3JiIQatVxCytBASIeACVUQMPCzR/BYh/VUvu+ZBufaE6+1onaVUhIbLs/8CBuFnpRKmw7bgnRgziHKgEtbWRkioD3ALUgMJqIvvMJm4948JJKxysUSWgEb/lxGR9mHst1dhIvaO+Pgp4cZ0Bd2XO2fL1EPe0vEGMdrh9uGpmWzV6697xXondBcH9bjWisfU2ApDSPYk/nBT1umrmQAVGeqfhQHscK+sx909Cef3fswZ9j08wG0tIG+RhHqjGjqyBNwNfo9MJUS/aHvqa85M=",
+        "ciphertext_digest": "sha256:bfb1a3ddcfa6cb7005b17fb4f70ee84c606bb25ef1daf7ad53063e3d0395b511",
+        "recipient_messaging_endpoint_id": "mep_7799f8453bd7d6bb5dfe414a9395b3f2677bbcd95bf49dad2ce9dd8570b22bfa",
+        "recipient_device_id": "dev_ade07b6c2e75b92202241f4c6665968ee412a98526df307306f55275c815ffdd",
+        "conversation_id": "conv_87e5a66157312afbe1799dc6907b49dc0de5e19994f890745970459a39d0c4ca",
+        "state": "carried",
+        "attempts": 0,
+        "created_at_unix": 1794834064,
+        "expires_at_unix": 1795438864,
+        "relay_generation": 1,
+        "last_deposit_at_unix": 1794834065,
+        "next_redeposit_at_unix": 1794834665,
+        "relay_generations": [
+          {
+            "generation": 1,
+            "descriptor_digest": "sha256:2661dd846992e0be28dbfe6a84a4aceb496e0bf1d17f0440c963d4a1c0d07b20",
+            "descriptor_issued_at_unix": 1794834000,
+            "deposited_at_unix": 1794834065
+          }
+        ]
+      },
+      "at": "2026-11-16T13:01:06.853791+00:00"
+    },
+    {
+      "name": "not OpenFox: B's Agent is revoked on chain (tosctl agent native-registry action --kind revoke-agent), which withdraws its Endpoint delegation",
+      "pass": true,
+      "detail": {
+        "kind": "revoke-agent",
+        "action_hash": "a6cfa74424c4220d77f1087a4ac4dcebd098b8687f27d53c123726e2db44d41a",
+        "landed": [
+          {
+            "lt": 6801000003,
+            "hash": "4Xp4qNzdv9Etof6Bye/bS9DxEbwO0W5Ne/ywYENALRo=",
+            "in_source": "0:0d2bf6e88917c039a3628d4cde8c17eea0db756c2b0ae423f42920589dfc5aed",
+            "in_value": 2000000000,
+            "op": 1314258945,
+            "query_id": 1,
+            "outs": [],
+            "aborted": false,
+            "compute_success": true
+          }
+        ]
+      },
+      "at": "2026-11-16T13:01:09.289448+00:00"
+    },
+    {
+      "name": "[M-R1 5] after B's Endpoint delegation is withdrawn on chain, A's runtime answers a new send and refuses it with a revocation code (CheckPeer reads finalized state); no copy is sealed or carried",
+      "pass": true,
+      "detail": {
+        "answer": {
+          "ok": false,
+          "call_error": "messenger-relay-e2e-tool: local API refused not-authentic: contact: verify Agent directory: delegation-uncommitted: Agent is not finalized and live\n"
+        },
+        "state": null,
+        "last_code": null,
+        "added_kind1_frames": 0
+      },
+      "at": "2026-11-16T13:01:09.431613+00:00"
+    },
+    {
+      "name": "[M-R1 5] the copy carried before the revocation is not re-deposited after it: past its re-deposit time A seals no new generation, the copy stays at generation 1, undelivered, and its last code is a revocation code (so the re-deposit was attempted and refused, not merely not scheduled)",
+      "pass": true,
+      "detail": {
+        "state": "pending",
+        "generation": 1,
+        "last_code": "delegation-uncommitted",
+        "new_generations_after_revocation": 0
+      },
+      "at": "2026-11-16T13:12:35.351622+00:00"
+    },
+    {
+      "name": "the relay plaintext search finds every searched value in a control file holding one of each",
+      "pass": true,
+      "detail": [
+        "conversation id",
+        "device id",
+        "endpoint id",
+        "event id",
+        "message text",
+        "sender agent id"
+      ],
+      "at": "2026-11-16T13:12:35.496060+00:00"
+    },
+    {
+      "name": "[M-R1 9] nothing readable at the relays: no live relay state, no snapshot taken while a relay held a copy and an ack, and no relay log contains any message text, conversation, Event, Endpoint or device id or the sender Agent id (the control proves the search works)",
+      "pass": true,
+      "detail": {
+        "found": {},
+        "snapshots": {
+          "copy-held": {
+            "relay1": 0,
+            "relay2": 1
+          },
+          "ack-held": {
+            "relay1": 0,
+            "relay2": 1
+          }
+        }
+      },
+      "at": "2026-11-16T13:12:35.502260+00:00"
+    },
+    {
+      "name": "[M-R1 9] every decoded frame is exactly its smallest padded bucket, every stored envelope equals 1,373 + F + 4\u00b7\u2308B/3\u2309 with F in 5,394..5,432, and the snapshots' stored envelope sizes match the formula",
+      "pass": true,
+      "detail": {
+        "frame_buckets": {
+          "a": [
+            4096,
+            8192,
+            16384,
+            190464
+          ],
+          "b": [
+            4096,
+            16384
+          ]
+        },
+        "envelope_formula_checks": 12,
+        "stored_sizes": {
+          "copy-held": {
+            "relay1": [],
+            "relay2": [
+              28638
+            ]
+          },
+          "ack-held": {
+            "relay1": [],
+            "relay2": [
+              28638
+            ]
+          }
+        }
+      },
+      "at": "2026-11-16T13:12:35.507900+00:00"
+    },
+    {
+      "name": "[M-R1 10] `tosctl` sign-to-deposit cost: the per-frame signing time is recorded",
+      "pass": true,
+      "detail": null,
+      "at": "2026-11-16T13:12:35.508004+00:00"
+    },
+    {
+      "name": "teardown: the namespaces, the bridge and the host table are removed",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-16T13:12:36.706684+00:00"
+    },
+    {
+      "name": "no home directory path or login name in the transcripts or logs",
+      "pass": true,
+      "detail": {},
+      "at": "2026-11-16T13:12:36.722922+00:00"
+    },
+    {
+      "name": "no home directory path or login name in evidence.json",
+      "pass": true,
+      "detail": [],
+      "at": "2026-11-16T13:12:37.144879+00:00"
+    }
+  ],
+  "pass_count": 109,
+  "result": "ALL PASS"
+}

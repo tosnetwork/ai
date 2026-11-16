@@ -423,6 +423,92 @@ Not proven by these records:
   public-ID race, key expiry and rotation, and node crash windows are
   covered by unit tests only, or not at all.
 
+## Messenger relay carriage M-R1 — one-to-one chat between two OpenFox over the test relays
+
+Live acceptance of milestone M-R1 of `MESSENGER_RELAY_CARRIAGE_V1.md`
+(section 8): two OpenFox nodes, each with its own `tos-messengerd`
+(transport `agent-packet-relay`, discovery `contact-files`), chat privately
+with the Agent Packet relay as the only path between them. Operated entirely
+by the core team; it does not qualify as public or independent acceptance and
+is not Gate O evidence.
+
+| Record | What it proves | Script commit | Result |
+|---|---|---|---|
+| [`messenger-relay-one-to-one-20261116.json`](../deployments/messenger-relay-one-to-one-20261116.json) (sha256 `80ad009de50baa9146adefb45b590a4158a7f248d1bf4c25261a12fa7fb0a4ef`, copied byte for byte) | `openfox` `scripts/messenger-relay-two-host-e2e-remote.sh`, 2026-11-16 11:17 to 12:13 UTC, four machines: A (and a stranger C) on a host behind NAT, B on a separate VPS, the two deployed test relays on two further VPSs | `openfox` `40a10720` (head of tosnetwork/openfox#54, merged with a merge commit as `e0c8e968`, so it is reachable from `main`; clean tree) | ALL PASS, 121 of 121; `qualifies_as_public_acceptance: false` |
+| [`local-messenger-relay-one-to-one-20261116.json`](../deployments/local-messenger-relay-one-to-one-20261116.json) (sha256 `6c06bdb078bf63ea80626dc84c8a2283fa4b6d5ab9953a5fdeef4d662dcf8668`, copied byte for byte) | `openfox` `scripts/messenger-relay-two-host-e2e.sh`, 2026-11-16 12:13 to 13:12 UTC: the same scenario on one host, every node and both relays in separate network namespaces, with a local relay pair | `openfox` `40a10720` | ALL PASS, 109 of 109; `qualifies_as_public_acceptance: false` |
+
+Both runs use `ai` `658bc429` (main) for `tos-messengerd` and the relay
+daemon, with clean trees; no run was held and no development script ran. In
+the four-machine record the test relays run `-ttl 1h` (test environment; memo
+plan `relay-official`, D10), recorded per relay unit. Public addresses, SSH
+targets and key paths are replaced by labels.
+
+Proven by these records (section 8 gate items):
+
+- **1. Relay only.** No connection opens between the nodes on any node port
+  in either direction, A sits behind NAT, A and C are isolated from each
+  other, and both nodes reach only the relays' TLS port. Both cards name both
+  relays and pin the test CA; system trust refuses the relays.
+- **2. Conversation.** A texts B and B answers with `messages.reply-direct`.
+  Each copy goes `carried` then `delivered` only on a verified kind-2 ack and
+  is applied once. The received text is compared byte for byte with the sent
+  text, including a 98,304-byte message, together with its media type, reply
+  link and sender.
+- **3. First contact.** B admits A's first frame and learns A's card and
+  evidence in band, without a contact file of A. Admission is by B's
+  allow-list (contact-file import): an admission invite cannot yet be
+  attached to an outbound copy, so invite-based first contact moves to M-R2
+  (section 8).
+- **4. Relay outage.** relay-1's installed unit is stopped for the whole
+  conversation; relay-2 carries every copy and ack, and relay-1 is started
+  again.
+- **5. Offline peer, duplicates, evidence and revocation** (test-shortened
+  re-deposit interval and descriptor lifetime): generation 2 is deposited and
+  generation 1 withdrawn (`404`/`410` at both relays); an older duplicate is
+  answered `duplicate`; mutual staleness is repaired by one kind-4 request
+  and one response; `descriptor-expired` is retried only with newer
+  evidence; a stranger's kind-4 request gets the relay ack only; no request
+  is sent without a pending copy; after B's Agent is revoked on chain, a new
+  send is refused by A's daemon with the revocation code and a copy queued
+  before the revocation is never re-deposited.
+- **6. Crash windows.** B's serve is killed while its carrier call is queued
+  and answers `duplicate` after restart; A's daemon is killed between the
+  relay accepting a deposit and its journal write and gets `carried` with no
+  new deposit after restart. In the four-machine record A's deposit is held
+  by dropping A's packets in its own namespace rather than pausing the
+  relays.
+- **7. Refusals.** A rail packet sealed to the chat key, `agent.packet` on
+  the relay route, a packet sender differing from the Event sender, a kind-2
+  ack whose packet sender is not the signing Endpoint's Agent, an oversize
+  payload before sealing, and a refused stranger whose card and evidence are
+  not stored (B relay-acknowledges exactly the stranger's envelope).
+- **8. Public-ID race.** Junk pre-deposited under a copy's id gets the honest
+  deposit `409` at relay-1; delivery succeeds through relay-2.
+- **9. Nothing readable.** Read-only copies of both relays' state and their
+  journals contain no message text, conversation, Event, Endpoint, device or
+  sender Agent id (a control file proves the search finds each). Every frame
+  is in its smallest bucket and every stored envelope equals
+  1,373 + F + 4·⌈B/3⌉.
+- **10. Cost.** `tosctl` signing time per chat packet is recorded.
+
+Not proven by these records (each listed in the records' `not_verified`,
+with the unit tests that cover them where they exist):
+
+- **Beyond-24 h cases:** B offline more than 24 h across a re-deposit, the
+  default descriptor lifetime above 7 days, and the evidence pull with the
+  responder offline more than 24 h. The live steps use test-shortened
+  settings.
+- **Device removal through a newer descriptor:** V1 has one device per Agent;
+  the on-chain revocation case is live.
+- **A frame sealed to the rail key** and **an `agent.packet` Event arriving
+  over the relay** on the receive side: unit tests only (the sending daemon
+  refuses to compose the latter, which is live).
+- **Invite-based first contact** (moved to M-R2), **quota isolation between
+  chat and task traffic** (D2; required before production), **multi-device**
+  (D3), **M0 freeze evidence**, third-party relays or hosts, a public chain,
+  and sender unlinkability.
+- **B ran as uid 0 on its VPS** in the four-machine record.
+
 ## Not delivered by these changes
 
 - WP-07 independent commercial acceptance: a provider and buyer outside the
