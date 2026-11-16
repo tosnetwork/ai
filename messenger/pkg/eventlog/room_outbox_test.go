@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -613,5 +614,93 @@ func TestRoomFailedStagedRemovalNeverRepublishesASettledObject(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Join(root, roomStagedDir)); len(entries) != 0 {
 		t.Fatal("the staged record survived")
+	}
+}
+
+// A crash after the staged record's removal is durable but before its
+// settled heads are retired leaves heads nothing else would retire; restart
+// collection retires them, so their objects do not leak.
+func TestRoomRestartRetiresSettledHeadsOrphanedByACrash(t *testing.T) {
+	fixture := newFusedFixture(t)
+	root := t.TempDir() + "/state"
+	journal, ledger := openFused(t, root)
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	saved := removeStagedRecord
+	defer func() { removeStagedRecord = saved }()
+	// The first removal fails, so the member settles while the record exists
+	// and its head is kept.
+	removeStagedRecord = func(string) error { return errors.New("simulated removal failure") }
+	if _, _, err := ledger.Advance(RoomMLSAdvance{Transition: refreshTransition(record, canon.Digest([]byte("c"))), ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2), Output: commitOutput(fixture.now, 1, "the commit")}, fixture.now); err == nil {
+		t.Fatal("a failed removal was not reported")
+	}
+	digest := RoomObjectDigest([]byte("the commit"))
+	if _, err := journal.RoomOutboxCarried(digest, fusedAgent(1), 1, canon.Digest([]byte("e")), fixture.now.Add(time.Hour), fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Restart: the removal becomes durable, then the process dies before the
+	// retirement loop.
+	removeStagedRecord = func(path string) error {
+		if err := saved(path); err != nil {
+			return err
+		}
+		return errSimulatedCrash
+	}
+	if _, err := Open(root); err == nil {
+		t.Fatal("the simulated crash did not stop the restart")
+	}
+	headPath := filepath.Join(root, roomOutboxDir, digest+".json")
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatal("the crash point was not reached with the settled head in place")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, roomStagedDir)); len(entries) != 0 {
+		t.Fatal("the staged removal was not durable")
+	}
+	removeStagedRecord = saved
+	journal, _ = openFused(t, root)
+	defer journal.Close()
+	if _, err := os.Stat(headPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the orphaned settled head was not retired")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, roomObjectChunkDir)); len(entries) != 0 {
+		t.Fatal("the retired object's chunks leaked")
+	}
+}
+
+// When an unreadable staged output blocks rooms, the refusal and the
+// maintenance report name its path and how to resolve it.
+func TestRoomBlockedByStagedOutputNamesThePath(t *testing.T) {
+	fixture := newFusedFixture(t)
+	root := t.TempDir() + "/state"
+	journal, ledger := openFused(t, root)
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	damaged := filepath.Join(root, roomStagedDir, canon.Digest([]byte("x"))[len("sha256:"):]+".json")
+	if err := os.WriteFile(damaged, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := ledger.Advance(RoomMLSAdvance{Transition: refreshTransition(record, canon.Digest([]byte("c"))), ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2)}, fixture.now)
+	var staged *StagedOutputError
+	if !errors.As(err, &staged) || !errors.Is(err, ErrRoomStagedOutput) || len(staged.Paths) != 1 || staged.Paths[0] != damaged {
+		t.Fatalf("refusal: %v", err)
+	}
+	if !strings.Contains(err.Error(), damaged) || !strings.Contains(err.Error(), StagedRoomOutputGuidance) {
+		t.Fatalf("the refusal does not say what to do: %v", err)
+	}
+	report, err := journal.Prune(fixture.now, MinClaimRetention)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.UnresolvedStagedRoomOutputs) != 1 || report.UnresolvedStagedRoomOutputs[0] != damaged {
+		t.Fatalf("maintenance report: %+v", report.UnresolvedStagedRoomOutputs)
+	}
+	garbage, err := journal.CollectRoomGarbage()
+	if err != nil || !garbage.FailedClosed || len(garbage.Unresolved) != 1 || garbage.Unresolved[0] != damaged {
+		t.Fatalf("collection report: %+v %v", garbage, err)
 	}
 }

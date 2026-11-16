@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -323,8 +324,72 @@ func (j *Journal) requireRoomStagedResolved(roomID string) error {
 	if err != nil {
 		return err
 	}
-	if unresolved {
-		return ErrRoomStagedOutput
+	if len(unresolved) > 0 {
+		return &StagedOutputError{Paths: unresolved}
+	}
+	return nil
+}
+
+// StagedRoomOutputGuidance is what an operator does about a staged output
+// that blocks every room.
+const StagedRoomOutputGuidance = "inspect it; remove it only if no room's fused record (room-mls/*.json, accepted_commit_ref) names its CommitRef, which is sha256: and the file name without .json"
+
+// StagedOutputError names the staged Commit outputs that could not be read
+// or resolved. While any exists no room commits or answers a repeat, because
+// an unreadable output names no room and may be the one a room accepted. It
+// matches ErrRoomStagedOutput.
+type StagedOutputError struct {
+	Paths []string
+}
+
+func (e *StagedOutputError) Error() string {
+	return "room has an unresolved staged Commit output: " + strings.Join(e.Paths, ", ") + "; " + StagedRoomOutputGuidance
+}
+
+func (e *StagedOutputError) Is(target error) bool { return target == ErrRoomStagedOutput }
+
+// UnresolvedStagedRoomOutputs lists, by full path, the staged Commit outputs
+// that cannot be read or resolved, for the owner-visible maintenance report.
+func (j *Journal) UnresolvedStagedRoomOutputs() ([]string, error) {
+	if err := j.usable(); err != nil {
+		return nil, err
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	return j.resolveRoomStaged("")
+}
+
+// retireOrphanedSettledHeads retires every head that every member settled
+// and whose staged record is gone. A crash between removing the staged record
+// and retiring its settled heads leaves such heads; nothing else would retire
+// them, and as collection roots they would keep their objects forever. The
+// journal mutex is held.
+func (j *Journal) retireOrphanedSettledHeads() error {
+	entries, err := os.ReadDir(filepath.Join(j.root, roomOutboxDir))
+	if err != nil {
+		return errors.New("read room outbox")
+	}
+	removed := false
+	for _, entry := range entries {
+		if isTransitionTemp(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(j.root, roomOutboxDir, entry.Name())
+		head, err := j.readRoomHead(path)
+		if err != nil || !head.allSettled() {
+			continue
+		}
+		pending, err := j.stagedOutputPending(head.CommitRef)
+		if err != nil || pending {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.New("retire settled room object")
+		}
+		removed = true
+	}
+	if removed {
+		return syncDirectory(filepath.Join(j.root, roomOutboxDir))
 	}
 	return nil
 }
@@ -355,14 +420,14 @@ func (j *Journal) stagedOutputPending(commitRef string) (bool, error) {
 
 // resolveRoomStaged publishes or discards every staged output of a room (or
 // of every room when roomID is empty) by the fused record's accepted Commit
-// reference. It reports whether any staged output could not be read; such an
-// output is left in place. The journal mutex is held.
-func (j *Journal) resolveRoomStaged(roomID string) (bool, error) {
+// reference. It returns the paths of staged outputs that could not be read or
+// judged; those are left in place. The journal mutex is held.
+func (j *Journal) resolveRoomStaged(roomID string) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(j.root, roomStagedDir))
 	if err != nil {
-		return false, errors.New("read staged room output directory")
+		return nil, errors.New("read staged room output directory")
 	}
-	unreadable := false
+	var unreadable []string
 	for _, entry := range entries {
 		if isTransitionTemp(entry.Name()) {
 			continue
@@ -370,7 +435,7 @@ func (j *Journal) resolveRoomStaged(roomID string) (bool, error) {
 		path := filepath.Join(j.root, roomStagedDir, entry.Name())
 		staged, err := j.readRoomStaged(path)
 		if err != nil {
-			unreadable = true
+			unreadable = append(unreadable, path)
 			continue
 		}
 		if roomID != "" && staged.RoomID != roomID {
@@ -378,7 +443,7 @@ func (j *Journal) resolveRoomStaged(roomID string) (bool, error) {
 		}
 		record, found, err := j.readRoomMLS(staged.RoomID)
 		if err != nil {
-			unreadable = true
+			unreadable = append(unreadable, path)
 			continue
 		}
 		if found && record.AcceptedCommitRef == staged.CommitRef {

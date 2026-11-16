@@ -29,6 +29,8 @@ type RoomGarbageReport struct {
 	FailedClosed bool
 	// Deleted counts the unnamed staged records removed.
 	Deleted int
+	// Unresolved names the staged Commit outputs that stopped collection.
+	Unresolved []string
 }
 
 // recoverRooms runs at Open, before any room operation: it publishes or
@@ -55,8 +57,11 @@ func (j *Journal) collectRoomGarbage() (RoomGarbageReport, error) {
 	if err != nil {
 		return RoomGarbageReport{}, err
 	}
-	if unresolved {
-		return RoomGarbageReport{FailedClosed: true}, nil
+	if err := j.retireOrphanedSettledHeads(); err != nil {
+		return RoomGarbageReport{}, err
+	}
+	if len(unresolved) > 0 {
+		return RoomGarbageReport{FailedClosed: true, Unresolved: unresolved}, nil
 	}
 	named, ok, err := j.namedRoomRecords()
 	if err != nil {
