@@ -683,13 +683,25 @@ mod tests {
         handle(apply).unwrap()
     }
 
+    // The largest BasicCredential identity a relay room leaf carries: the
+    // fixed compact binding of Agent, Endpoint, device and leaf-credential
+    // digest, 4 x 32 bytes (section 11.2). The identity is replicated into
+    // the tree and every retained epoch, so the state bound is measured with
+    // it, never with a short test name.
+    const LEAF_IDENTITY_BYTES: usize = 128;
+
+    // A distinct maximal identity for member `index`.
+    fn leaf_identity(index: usize) -> Vec<u8> {
+        let mut identity = vec![0x5a; LEAF_IDENTITY_BYTES];
+        identity[..8].copy_from_slice(&(index as u64).to_be_bytes());
+        identity
+    }
+
     // Builds a group of `leaves` leaves in Add Commits of at most 32 (the Go
     // adapter caps one Commit at 32 leaf operations) and returns every
-    // member's state, founder first.
+    // member's state, founder first. Every leaf carries a maximal identity.
     fn full_group(leaves: usize) -> Vec<String> {
-        let names: Vec<Vec<u8>> = (0..leaves)
-            .map(|i| format!("member-{i:02}").into_bytes())
-            .collect();
+        let names: Vec<Vec<u8>> = (0..leaves).map(leaf_identity).collect();
         let ids: Vec<Response> = names.iter().map(|n| identity(n)).collect();
         let mut create = request("create");
         create.state = ids[0].state.clone();
@@ -779,7 +791,9 @@ mod tests {
         let mut skipping = full_group(RELAY_ROOM_LEAVES);
         let per_sender = OUT_OF_ORDER_TOLERANCE as usize + 1;
         let worst = traffic(&mut skipping, MAX_PAST_EPOCHS + 2, per_sender, true).unwrap();
-        eprintln!("32 leaves: in-order {base} bytes, maximal skipped keys {worst} bytes, bound {MAX_STATE}");
+        eprintln!(
+            "32 leaves, {LEAF_IDENTITY_BYTES}-byte identities: in-order {base} bytes, maximal skipped keys {worst} bytes, bound {MAX_STATE}"
+        );
         assert!(
             worst <= MAX_STATE * 4 / 5,
             "{worst} leaves less than 20 % of {MAX_STATE}"
