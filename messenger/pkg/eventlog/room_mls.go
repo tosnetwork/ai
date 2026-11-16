@@ -196,7 +196,7 @@ type RoomAuthorityProof struct {
 }
 
 func (p RoomAuthorityProof) verify() ([]byte, error) {
-	if err := room.VerifyMembershipAuthorizationBinding(p.Membership, p.Authorization, p.Delegation); err != nil {
+	if err := room.VerifyMembershipAuthorizationBindingTimeFree(p.Membership, p.Authorization, p.Delegation); err != nil {
 		return nil, err
 	}
 	if len(p.Membership.Members) > group.MaxPrivateRoomAgents {
@@ -821,7 +821,7 @@ func (l *RoomMLSLedger) read(roomID string) (RoomMLSRecord, bool, error) {
 	if err != nil {
 		return RoomMLSRecord{}, false, err
 	}
-	if err := room.VerifyMembershipAuthorizationBinding(record.Membership(), authorization, delegation); err != nil {
+	if err := room.VerifyMembershipAuthorizationBindingTimeFree(record.Membership(), authorization, delegation); err != nil {
 		return RoomMLSRecord{}, false, errors.New("fused room record's authorization does not verify")
 	}
 	return record, true, nil

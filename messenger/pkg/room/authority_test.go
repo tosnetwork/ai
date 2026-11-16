@@ -162,9 +162,9 @@ func TestMembershipAuthorizationBindsExactMembershipAndEndpoint(t *testing.T) {
 }
 
 // On the relay route an authorization verifies against the delegation as
-// finalized now, for issued <= now < issued + retention + skew, long after its
-// own expiry; never before issue, nor after the window, nor under a
-// delegation that is no longer live.
+// finalized now, for issued - skew <= now < issued + retention + skew, long
+// after its own expiry; never earlier than the skew before issue, nor after
+// the window, nor under a delegation that is no longer live.
 func TestMembershipAuthorizationRelayWindow(t *testing.T) {
 	delegation, key := authorityDelegation(t, agent(1), 0x41)
 	delegation.ExpiresAtUnix = 10_000_000
@@ -182,7 +182,7 @@ func TestMembershipAuthorizationRelayWindow(t *testing.T) {
 	cases := []struct {
 		at   int64
 		pass bool
-	}{{199, false}, {200, true}, {400, true}, {1209, true}, {1210, false}}
+	}{{189, false}, {190, true}, {199, true}, {200, true}, {400, true}, {1209, true}, {1210, false}}
 	for _, test := range cases {
 		err := VerifyMembershipAuthorizationRelay(membership, value, delegation, time.Unix(test.at, 0), retention, skew)
 		if (err == nil) != test.pass {

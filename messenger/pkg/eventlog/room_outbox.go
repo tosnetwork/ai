@@ -117,7 +117,10 @@ type RoomMemberDelivery struct {
 	EvidenceDigest      string            `json:"evidence_digest,omitempty"`
 	AckOutcome          RoomAckOutcome    `json:"ack_outcome,omitempty"`
 	Code                fault.Code        `json:"code,omitempty"`
-	SettledAtUnix       uint64            `json:"settled_at_unix,omitempty"`
+	// Stateless records a rejection that carried no MLS state, so a repeat of
+	// the same ack reports the same lost-state finding.
+	Stateless     bool   `json:"stateless,omitempty"`
+	SettledAtUnix uint64 `json:"settled_at_unix,omitempty"`
 }
 
 func (d RoomMemberDelivery) settled() bool {
@@ -602,7 +605,8 @@ func (j *Journal) RoomOutboxAcked(objectDigest, agentID string, outcome RoomAckO
 			return errors.New("a removed member's Commit is not acknowledged")
 		}
 		if member.settled() {
-			if member.AckOutcome == outcome && member.Code == code {
+			if member.AckOutcome == outcome && member.Code == code && member.Stateless == stateless {
+				lost = member.Stateless && head.Type != RoomObjectWelcome
 				return errRoomNoChange
 			}
 			return ErrNotPending
@@ -613,6 +617,7 @@ func (j *Journal) RoomOutboxAcked(objectDigest, agentID string, outcome RoomAckO
 		lost = stateless && head.Type != RoomObjectWelcome
 		member.AckOutcome = outcome
 		member.Code = code
+		member.Stateless = stateless
 		member.NextRedepositAtUnix = 0
 		member.SettledAtUnix = seconds
 		if outcome == RoomAckRejected {
@@ -877,6 +882,9 @@ func validateRoomHead(head RoomOutboxHead) error {
 		case "", RoomAckAccepted, RoomAckDuplicate, RoomAckRejected:
 		default:
 			return errors.New("invalid room delivery ack outcome")
+		}
+		if member.Stateless && member.AckOutcome != RoomAckRejected {
+			return errors.New("only a rejected room delivery is stateless")
 		}
 	}
 	return nil

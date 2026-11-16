@@ -87,7 +87,7 @@ func VerifyMembershipAuthorization(membership Membership, value MembershipAuthor
 	if now.IsZero() || now.Unix() < 0 {
 		return errors.New("invalid room membership verification time")
 	}
-	if err := VerifyMembershipAuthorizationBinding(membership, value, delegation); err != nil {
+	if err := VerifyMembershipAuthorizationBindingTimeFree(membership, value, delegation); err != nil {
 		return err
 	}
 	if err := identity.CheckWindow(delegation, now); err != nil {
@@ -115,8 +115,9 @@ const MaxRoomAuthorizationSkew = time.Hour
 // re-deposit (its bytes and digest stay fixed). So the signature is checked
 // against the authority's delegation as finalized now, and the window is
 // issued <= now < issued + retention + skew instead of the authorization's
-// own expiry. retention is RoomHandshakeRetention in production; a test MAY
-// shorten it.
+// own expiry. Clocks drift both ways, so the skew applies at both ends:
+// issued - skew <= now < issued + retention + skew. retention is
+// RoomHandshakeRetention in production; a test MAY shorten it.
 func VerifyMembershipAuthorizationRelay(membership Membership, value MembershipAuthorization, delegation identity.Delegation,
 	now time.Time, retention, skew time.Duration) error {
 	if now.IsZero() || now.Unix() < 0 {
@@ -125,7 +126,7 @@ func VerifyMembershipAuthorizationRelay(membership Membership, value MembershipA
 	if retention <= 0 || retention > RoomHandshakeRetention || skew < 0 || skew > MaxRoomAuthorizationSkew {
 		return errors.New("invalid relay authorization window")
 	}
-	if err := VerifyMembershipAuthorizationBinding(membership, value, delegation); err != nil {
+	if err := VerifyMembershipAuthorizationBindingTimeFree(membership, value, delegation); err != nil {
 		return err
 	}
 	if err := identity.CheckWindow(delegation, now); err != nil {
@@ -135,21 +136,24 @@ func VerifyMembershipAuthorizationRelay(membership Membership, value MembershipA
 	if value.IssuedAtUnix > ^uint64(0)-window {
 		return errors.New("room membership authorization window overflows")
 	}
+	early := uint64(skew / time.Second)
 	seconds := uint64(now.Unix())
-	if seconds < value.IssuedAtUnix || seconds >= value.IssuedAtUnix+window {
+	if seconds > ^uint64(0)-early || seconds+early < value.IssuedAtUnix || seconds >= value.IssuedAtUnix+window {
 		return errors.New("room membership authorization is outside the relay window")
 	}
 	return nil
 }
 
-// VerifyMembershipAuthorizationBinding checks everything about an
+// VerifyMembershipAuthorizationBindingTimeFree checks everything about an
 // authorization that does not depend on the time it is checked at: its shape,
 // that it names exactly this membership, that its authority is a member and
 // the delegation's Agent and Endpoint, that the delegation key derives that
 // Endpoint, the network, that it does not outlive the delegation, and the
-// Endpoint signature. A caller applies its own time window on top; the journal
-// uses this alone when it records an authorization already judged current.
-func VerifyMembershipAuthorizationBinding(membership Membership, value MembershipAuthorization, delegation identity.Delegation) error {
+// Endpoint signature. It checks no time at all: it is for an authorization a
+// caller has already judged current under its route's window, such as the
+// journal recording or re-reading one. Every receive path applies its window
+// first (VerifyMembershipAuthorization or VerifyMembershipAuthorizationRelay).
+func VerifyMembershipAuthorizationBindingTimeFree(membership Membership, value MembershipAuthorization, delegation identity.Delegation) error {
 	if err := validateMembershipAuthorization(value, true); err != nil {
 		return err
 	}

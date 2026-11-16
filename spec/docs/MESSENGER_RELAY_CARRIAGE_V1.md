@@ -1563,8 +1563,9 @@ lives at most 24 h and is refused once now ≥ its expiry
 (`eventlog/rooms.go:105`), while catch-up may take up to the 7-day handshake
 retention. On the relay route the receiver therefore verifies the header's
 signature against the authority's delegation as finalized **now**, but checks
-its window as issued ≤ now < issued + handshake retention + the daemon's
-clock-skew bound, instead of its own expiry. The authorization is never
+its window as issued − skew ≤ now < issued + handshake retention + skew, with
+skew the daemon's clock-skew bound, instead of its own expiry (clocks drift
+both ways, so the skew applies at both ends). The authorization is never
 re-signed per generation: object bytes and digest stay identical. A test
 build MAY shorten the retention (`room_handshake_retention_seconds`;
 production 7 days) and the expiry the authority signs
@@ -1783,7 +1784,9 @@ is deleted then, or at its expiry. Only a verified relay delivery ack reports
 from `duplicate` or `held`, so there the token is kept until its expiry. That
 is safe: the token is single use, and once it is spent the receiver re-runs
 its policy without it, under which the claim has already made the sender a
-contact (D12). **Rejected: an `admission_token`
+contact (D12). The token is held per recipient Agent, not per Endpoint: if
+that Agent had several Endpoints, an `accepted` ack from any of them settles
+it (a V1 limit; V1 carries one device per Agent, D3). **Rejected: an `admission_token`
 field on `messages.send-direct`,** which would hand a bearer the recipient's
 owner issued to the runtime, able to spend it on any Event. **Carried only
 sealed:** inside the kind-1 object in the sealed packet (3), never in a
@@ -1808,7 +1811,13 @@ Today the known roster is only the daemon config's
 (`admission/policy.go:181`) and no operation removes a contact, so M-R2 adds a
 journaled invited-contact list that is never swept (unlike invite records),
 that `ContactPolicy.Admits` reads beside the config roster (blocked still
-wins), and an owner `contacts.remove` that deletes an entry from it.
+wins), and an owner `contacts.remove` that deletes an entry from it. A
+removal sticks: it leaves a tombstone naming the Agent and the invite, under
+which that invite never adds the contact again, and only a fresh claim (or
+the exact retry of an Event not yet committed) runs the contact-add step, so
+re-sending the claimed Event cannot undo the owner's removal. A racing second
+Event that loses the claim meets the policy without the token, like any
+spent token.
 **On refusal nothing is stored:** admission refuses before
 any journal write (`admit.go:323-331`), the card is not stored and
 `CheckPeer` writes nothing (2.3, 2.5).
