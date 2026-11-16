@@ -908,9 +908,11 @@ steps; *unit* items MAY be named tests listed in `not_verified`.
 1. **Invites (live).** C refuses unknown senders without an invite and holds
    no allow-list entry for A or B. A presents C's unscoped invite (11.6); A's first
    copy carries it sealed, C admits it, every later generation of that Event
-   is `duplicate`. B presenting the spent token, and B presenting a second,
-   expired invite, are refused, and each refusal leaves C's journal, rollback
-   boundary and chat-card store unchanged.
+   is `duplicate`. The claim adds A to C's known contacts (journaled, D12):
+   A's later Events are admitted, and after `contacts.remove` they meet the
+   policy again. B presenting the spent token, and B presenting a second,
+   expired invite, are refused, and each refusal leaves C's journal, contacts,
+   rollback boundary and chat-card store unchanged.
 2. **Creation and two Welcomes (live).** A adds B, then C (two Commits, two
    Welcomes, KeyPackages over the 1:1 sessions); C's Welcome is split by the
    recorded test part size (11.1) and reassembled. All three exchange
@@ -939,6 +941,14 @@ steps; *unit* items MAY be named tests listed in `not_verified`.
     parts are 190,464 bytes, stored envelopes match 1,373 + F + 4·⌈B/3⌉.
 11. **Nothing readable (live).** As M-R1 item 9, also searching for the room
     ID, members, KeyPackages, roster contents and the invite token.
+12. **Room admission stays in the room (live, D11).** B, a member of the room
+    but no contact of C, sends C a 1:1 copy not naming the room; it meets C's
+    normal policy (refused), while B's room messages are admitted. A room
+    Event whose packet sender is not in the latest committed roster at its
+    epoch is refused (unit).
+13. **Owner-only management (unit, D13).** The runtime principal is refused
+    `rooms.create`, `rooms.add`, `rooms.remove`, `rooms.join` and
+    `invites.present`.
 
 Not proven: more than 3 live members (32 is a unit bound), multi-device
 (D3), concurrent authorities, authority transfer over the relay, fork
@@ -1089,10 +1099,18 @@ seal already carry any frame; nothing new is resolved on chain).
    route.
 5. `pkg/payload`: `room.key-package` (a `DeviceCredential`); a `sequence`
    field in `RoomMessage` (`kinds_more.go:795-800`).
-6. `pkg/admission`: room-scoped admission (11.2), before the contact policy
-   and after the room overlay (`admit.go:304-317`).
-7. `pkg/localapi`: owner `rooms.create`, `rooms.add`, `rooms.remove`,
-   `rooms.join`, `invites.present`; runtime `rooms.list`, `rooms.gaps`;
+6. `pkg/admission`: room-scoped admission (11.2, D11), before the contact
+   policy and after the room overlay (`admit.go:304-317`), checking the
+   packet sender against the latest committed roster at the Event's epoch;
+   a successful invite claim (`admit.go:383-392`,
+   `eventlog/admission_invite.go:144-195`) adds the verified sender to a
+   journaled invited-contact list in the same write (D12), which
+   `ContactPolicy.Admits` reads beside the config roster
+   (`admission/policy.go:174-192`; blocked still wins).
+7. `pkg/localapi`: owner-only (D13, in the principal table,
+   `api.go:229-237`) `rooms.create`, `rooms.add`, `rooms.remove`,
+   `rooms.join`, `invites.present`, `contacts.remove` (invited contacts);
+   runtime `rooms.list`, `rooms.gaps`;
    `outbox.compose` with a `room_id` of an MLS room takes the kind-3 path.
 8. `pkg/carrierapi`: `carrier.room-cards` (admit or forget chat cards learned
    from a roster) and `carrier.withdraw`; `carried` for kind-3 parts;
@@ -1138,6 +1156,29 @@ seal already carry any frame; nothing new is resolved on chain).
   comes from the signatures of the objects inside it and their binding to the
   finalized Agent, not from the channel. DHT discovery would need the stopped
   testnet.
+
+M-R2 decisions (2026-11-16, delegated by the owner):
+
+- **D11. Room-scoped admission, narrowly.** Once the owner has joined a room,
+  an Event is admitted without the allow-list only if it names that room, its
+  packet sender is a member in the authority's latest committed roster at the
+  Event's epoch, and the room and peer caps still apply. It grants no 1:1
+  admission, and a member's card is stored only under the admission and
+  roster rule (11.2). Reason: joining is the owner's explicit consent to hear
+  from that room's members; scoping it to the room leaves 1:1 admission
+  unchanged.
+- **D12. A claimed invite makes a contact.** The claim adds the sender Agent
+  verified at claim time to the known contacts, journaled and removable with
+  `contacts.remove` (11.6). Reason: an invite exists to establish a contact;
+  admitting one Event and holding the rest defeats its purpose.
+- **D13. Room management is owner-only in V1.** Create, add, remove and join
+  are owner operations; the runtime may send and read room messages only.
+  Runtime-managed rooms are a later change behind an explicit owner policy
+  (for example only existing contacts, a member cap). Reason: membership
+  changes affect privacy and the spam surface; start closed.
+- **D14. `max_past_epochs` is 2.** Reason: it covers messages in flight
+  across one Commit at little forward-secrecy cost; anything older already
+  gets a gap notice (11.3).
 
 ## 11. M-R2: rooms and invites
 
@@ -1224,8 +1265,8 @@ its Endpoint sign a `DeviceCredential` (`mls_profile.go:150-160`; KeyPackage
 ≤ 64 KiB, `:33`, within the 139,547-byte copy bound) and returns it as a new
 kind-1 event `room.key-package`. The authority checks it with
 `BindDeviceCredential` (`mls_profile.go:280`) against finalized state and
-commits the Add (its owner already decided). Joining is an owner decision
-because it opens the inbox to the other members (below). A Welcome or roster
+commits the Add (its owner already decided). Create, add, remove and join are
+owner-only (D13); the runtime only sends and reads room messages. A Welcome or roster
 is accepted only from the authority of a room with a pending join.
 
 **Senders.** Only the authority sends Commits, Welcomes and rosters (11.5):
@@ -1245,11 +1286,15 @@ learn each other's cards and evidence from rosters, checked with
 member is applied: an extension of 2.3's admission rule; a roster is
 rendezvous, not authority.
 
-**Room-scoped admission.** An Event naming a room, from a member of that
-room at the Event's epoch, is admitted for that room only, after the room
-overlay (`admission/admit.go:304-317`) and before the contact policy; the
-sender is not added to the allow-list. A room-addressed kind-1 copy is
-refused on the relay route, so room content cannot bypass MLS removal.
+**Room-scoped admission (D11).** Once the owner has joined a room, an Event
+is admitted without the allow-list only if it names that room and its packet
+sender is a member in the authority's latest committed roster at the Event's
+epoch; the room and peer caps still apply. It runs after the room overlay
+(`admission/admit.go:304-317`) and before the contact policy, grants no 1:1
+admission (a member's copy not naming the room meets the normal policy), and
+stores the member's card only under the admission and roster rule above. A
+room-addressed kind-1 copy is refused on the relay route, so room content
+cannot bypass MLS removal.
 
 **Per-peer cap.** Of the carrier's 24 chat envelopes per peer (openfox
 `pkg/servicebridge/relay_chat.go:36`, `:471-481`), kind 3 holds at most
@@ -1305,7 +1350,7 @@ member's:
   8 MiB per room, 32 MiB in total) and opened in arrival order once the
   Commits up to e are applied.
 - r − 2 ≤ e < r: opened with the retained past-epoch secrets. The driver is
-  configured with `max_past_epochs(2)`: Commit fan-out takes up to minutes
+  configured with `max_past_epochs(2)` (D14): Commit fan-out takes up to minutes
   (11.2), so messages sealed just before a Commit land after it. **Rejected:**
   0 (the driver default today, `src/main.rs:335-338`, `:432-434`), which loses
   every message in flight across a Commit, and a larger window, which keeps
@@ -1411,11 +1456,15 @@ first; the token is consulted only when it answers `require-admission` or
 `invite-or-hold` (`admit.go:333`); it must be unexpired, scoped to the
 recipient Endpoint and, if scoped, to the sender Agent; the claim binds it to
 the first Event, an exact re-deposit is idempotent (`duplicate`), and any
-other Event falls back to the policy. **Relation to M-R1's allow-list:** an
-allow-listed sender never needs one; an invite admits one Event and does not
-add the sender to the allow-list, so under `invite-or-hold` later Events are
-held for the owner, and a held answer still admits the sender's card and
-evidence (2.3). **On refusal nothing is stored:** admission refuses before
+other Event falls back to the policy. **Relation to M-R1's allow-list
+(D12):** an allow-listed sender never needs one; a successful claim adds the
+sender Agent verified at claim time to the known contacts, in the same
+journal write as the claim, so its later Events are admitted. Today the
+known roster is only the daemon config's (`admission/policy.go:181`) and no
+operation removes a contact, so M-R2 adds a journaled invited-contact list
+that `ContactPolicy.Admits` reads beside the config roster (blocked still
+wins), and an owner `contacts.remove` that deletes an entry from it.
+**On refusal nothing is stored:** admission refuses before
 any journal write (`admit.go:323-331`), the card is not stored and
 `CheckPeer` writes nothing (2.3, 2.5).
 
