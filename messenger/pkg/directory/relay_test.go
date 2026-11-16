@@ -564,3 +564,60 @@ func TestConcurrentCommitsLeaveEvidenceAndBoundaryInAgreement(t *testing.T) {
 		}
 	}
 }
+
+func heldPeerLocks() int {
+	peerLocks.Lock()
+	defer peerLocks.Unlock()
+	return len(peerLocks.entries)
+}
+
+func TestPeerLocksHoldNoEntryWithoutAHolder(t *testing.T) {
+	if held := heldPeerLocks(); held != 0 {
+		t.Fatalf("%d entries before any commit", held)
+	}
+	release := make(chan struct{})
+	var group sync.WaitGroup
+	for index := 0; index < 64; index++ {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			unlock := lockPeer("agent_" + strings.Repeat(string(rune('a'+index%4)), 64))
+			<-release
+			unlock()
+		}(index)
+	}
+	// Wait until every goroutine holds or waits on its lock.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		peerLocks.Lock()
+		holders := 0
+		for _, entry := range peerLocks.entries {
+			holders += entry.holders
+		}
+		entries := len(peerLocks.entries)
+		peerLocks.Unlock()
+		if holders == 64 {
+			if entries != 4 {
+				t.Fatalf("%d entries for 4 peers", entries)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d holders registered", holders)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	group.Wait()
+	if held := heldPeerLocks(); held != 0 {
+		t.Fatalf("%d entries remain after every holder released", held)
+	}
+	// Many sequential commits to distinct peers leave nothing behind.
+	for index := 0; index < 1000; index++ {
+		unlock := lockPeer("agent_" + strings.Repeat("0", 60) + string(rune('a'+index%26)) + "000")
+		unlock()
+	}
+	if held := heldPeerLocks(); held != 0 {
+		t.Fatalf("%d entries after sequential commits", held)
+	}
+}

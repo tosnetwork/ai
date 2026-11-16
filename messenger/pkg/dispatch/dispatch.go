@@ -99,9 +99,10 @@ type SealGate interface {
 
 // SweepPreparer is an optional SealGate extension called once at the start
 // of each sweep that has due deliveries, so a gate can index what it reads
-// once per sweep instead of once per copy.
+// once per sweep instead of once per copy. The returned function ends the
+// sweep and is called when the sweep returns.
 type SweepPreparer interface {
-	PrepareSweep(ctx context.Context, now time.Time) error
+	PrepareSweep(ctx context.Context, now time.Time) (func(), error)
 }
 
 // BindingResolver supplies the associated data one delivery is bound to.
@@ -795,9 +796,11 @@ func (d *Dispatcher) Sweep(ctx context.Context, limit int) (Summary, error) {
 	}
 	summary := Summary{}
 	if preparer, ok := d.gate.(SweepPreparer); ok && len(due) != 0 {
-		if err := preparer.PrepareSweep(ctx, now); err != nil {
+		finish, err := preparer.PrepareSweep(ctx, now)
+		if err != nil {
 			return summary, err
 		}
+		defer finish()
 	}
 	for _, delivery := range due {
 		if err := ctx.Err(); err != nil {
@@ -857,6 +860,12 @@ func (d *Dispatcher) Sweep(ctx context.Context, limit int) (Summary, error) {
 			continue
 		}
 		settled, failErr := d.config.Journal.Failed(delivery.Key(), attemptID, fault.CodeOf(err), d.config.Now())
+		if errors.Is(failErr, eventlog.ErrNotPending) {
+			// A verified ack settled the copy while this attempt was failing;
+			// the failure no longer applies and the batch goes on.
+			summary.Sent++
+			continue
+		}
 		if failErr != nil {
 			return summary, failErr
 		}

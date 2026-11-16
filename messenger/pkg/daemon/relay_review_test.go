@@ -273,3 +273,54 @@ func TestARejectedFirstContactCommitsNoEvidence(t *testing.T) {
 		t.Fatal("a rejected sender's set reached the rollback boundary")
 	}
 }
+
+func TestAnAckThatSettlesACopyWhoseAttemptFailsDoesNotStopTheSweep(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0)
+	nodes := newRelayNodes(t, now, [2]string{"2", "4"}, [2]string{"7", "9"})
+	a, b := nodes[0], nodes[1]
+	importContact(t, a, b)
+	importContact(t, b, a)
+	// The deposit is delivered and acknowledged, but the carrier's answer to
+	// this attempt is retry: the attempt's failure meets a settled copy.
+	a.carrier.answer = &carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultRetry}
+	a.carrier.onCarry = func(record carried) {
+		answer := b.d.relay.Deliver(context.Background(), a.d.config.AgentID, record.frame)
+		if answer.Result == carrierapi.ResultAck {
+			a.d.relay.DeliveryAck(context.Background(), b.d.config.AgentID, ackFrameOf(t, answer))
+		}
+	}
+	first := sendText(t, a, b, "one", "a", now)
+	second := sendText(t, a, b, "two", "b", now)
+	summary, err := a.d.dispatch.Sweep(context.Background(), 0)
+	if err != nil || summary.Sent != 2 || summary.Retried != 0 {
+		t.Fatalf("sweep: %+v %v", summary, err)
+	}
+	for _, eventID := range []string{first, second} {
+		if state := copyState(t, a, eventID, b.d.config.EndpointID, b.d.config.DeviceID); state.State != eventlog.StateDelivered {
+			t.Fatalf("copy %s: %s", eventID, state.State)
+		}
+	}
+}
+
+func TestTheGateOutsideASweepKeepsNoIndex(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0)
+	nodes := newRelayNodes(t, now, [2]string{"2", "4"}, [2]string{"7", "9"})
+	a, b := nodes[0], nodes[1]
+	importContact(t, a, b)
+	importContact(t, b, a)
+	eventID := sendText(t, a, b, "one", "a", now)
+	if _, err := a.d.dispatch.Sweep(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if a.d.relay.index != nil {
+		t.Fatal("a finished sweep left its index behind")
+	}
+	delivery := copyState(t, a, eventID, b.d.config.EndpointID, b.d.config.DeviceID)
+	gate := relayGate{relay: a.d.relay}
+	if err := gate.CheckCopy(context.Background(), delivery, false); err != nil {
+		t.Fatal(err)
+	}
+	if a.d.relay.index != nil {
+		t.Fatal("a check outside a sweep cached an index")
+	}
+}

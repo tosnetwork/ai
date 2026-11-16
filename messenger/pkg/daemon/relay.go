@@ -284,14 +284,16 @@ func (g relayGate) CheckCopy(ctx context.Context, delivery eventlog.Delivery, se
 	if err != nil {
 		return fault.Wrap(fault.CodeInternal, err)
 	}
+	// Reading the count and claiming this copy's envelope are one step, so
+	// two copies of a sweep cannot both take the last slot.
+	r.indexMutex.Lock()
+	defer r.indexMutex.Unlock()
 	if index.envelopes[peer]+pullEnvelopes(pull, now) >= MaxRelayPeerEnvelopes {
 		return &dispatch.Deferred{Code: fault.CodeRateLimited, Until: now.Add(relayCapRetry)}
 	}
 	// This copy is about to deposit one more envelope; later copies of the
 	// same sweep see it.
-	r.indexMutex.Lock()
 	index.envelopes[peer]++
-	r.indexMutex.Unlock()
 	return nil
 }
 
@@ -309,22 +311,27 @@ type peerIndex struct {
 }
 
 // PrepareSweep indexes the open deliveries once for the sweep about to run.
-func (g relayGate) PrepareSweep(ctx context.Context, now time.Time) error {
+func (g relayGate) PrepareSweep(ctx context.Context, now time.Time) (func(), error) {
 	if g.relay == nil || ctx == nil {
-		return errors.New("relay gate is not configured")
+		return nil, errors.New("relay gate is not configured")
 	}
 	index, err := g.relay.buildIndex(now)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	g.relay.indexMutex.Lock()
 	g.relay.index = &index
 	g.relay.indexMutex.Unlock()
-	return nil
+	return func() {
+		g.relay.indexMutex.Lock()
+		g.relay.index = nil
+		g.relay.indexMutex.Unlock()
+	}, nil
 }
 
-// sweepIndex returns the current sweep's index, building one when the gate
-// is consulted outside a prepared sweep.
+// sweepIndex returns the index of the sweep in progress. Outside a prepared
+// sweep it builds a fresh index for this one call and keeps nothing, so no
+// later check reads a stale count.
 func (r *relayRuntime) sweepIndex(now time.Time) (peerIndex, error) {
 	r.indexMutex.Lock()
 	current := r.index
@@ -332,14 +339,7 @@ func (r *relayRuntime) sweepIndex(now time.Time) (peerIndex, error) {
 	if current != nil {
 		return *current, nil
 	}
-	index, err := r.buildIndex(now)
-	if err != nil {
-		return peerIndex{}, err
-	}
-	r.indexMutex.Lock()
-	r.index = &index
-	r.indexMutex.Unlock()
-	return index, nil
+	return r.buildIndex(now)
 }
 
 func (r *relayRuntime) buildIndex(now time.Time) (peerIndex, error) {
@@ -549,6 +549,12 @@ func (r *relayRuntime) Carry(context.Context, carrierapi.Request, []byte) carrie
 }
 
 // Deliver handles a verified packet's frame of kind 1 or 4.
+//
+// The carrier handler's per-connection deadline does not bound CheckPeer's
+// finalized-state reads: identity.AgentResolver takes no context. Each read
+// is bounded instead by the finalized-state client's own per-query timeout,
+// the daemon's chain_query_timeout_seconds (toschain.DefaultQueryTimeout,
+// 5 s, when unset; at most 30 s).
 func (r *relayRuntime) Deliver(ctx context.Context, sender string, raw []byte) carrierapi.Response {
 	if sender == r.daemon.config.AgentID {
 		return carrierapi.Refusal(carrierapi.CodeSenderMismatch)

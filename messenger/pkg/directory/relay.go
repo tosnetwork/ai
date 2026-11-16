@@ -311,17 +311,38 @@ func (v RelayVerifier) commitLocked(peer RelayPeer, now time.Time) (bool, error)
 	return true, nil
 }
 
-// peerLocks serializes commits per peer Agent within this process.
-var peerLocks sync.Map
+// peerLocks serializes commits per peer Agent within this process. An entry
+// lives only while some commit holds or waits for it, so the map never holds
+// more entries than there are concurrent commits.
+var peerLocks = struct {
+	sync.Mutex
+	entries map[string]*peerLock
+}{entries: map[string]*peerLock{}}
+
+type peerLock struct {
+	sync.Mutex
+	holders int
+}
 
 func lockPeer(agentID string) func() {
-	value, _ := peerLocks.LoadOrStore(agentID, &sync.Mutex{})
-	mutex, ok := value.(*sync.Mutex)
-	if !ok {
-		return func() {}
+	peerLocks.Lock()
+	entry, found := peerLocks.entries[agentID]
+	if !found {
+		entry = &peerLock{}
+		peerLocks.entries[agentID] = entry
 	}
-	mutex.Lock()
-	return mutex.Unlock
+	entry.holders++
+	peerLocks.Unlock()
+	entry.Lock()
+	return func() {
+		entry.Unlock()
+		peerLocks.Lock()
+		entry.holders--
+		if entry.holders == 0 {
+			delete(peerLocks.entries, agentID)
+		}
+		peerLocks.Unlock()
+	}
 }
 
 // NewerEvidence is the single definition of "newer": a different descriptor

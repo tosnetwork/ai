@@ -43,6 +43,8 @@ type recordingCarrier struct {
 	// onCarry, when set, runs inside Carry, as a carrier whose deposit is
 	// answered before Carry returns.
 	onCarry func(carried)
+	// answer, when set, replaces the carried answer.
+	answer *carrierapi.Response
 }
 
 func (c *recordingCarrier) Carry(_ context.Context, recipient, key, withdraw string, _ uint64,
@@ -57,6 +59,9 @@ func (c *recordingCarrier) Carry(_ context.Context, recipient, key, withdraw str
 		hook(record)
 	}
 	c.mutex.Lock()
+	if c.answer != nil {
+		return *c.answer, nil
+	}
 	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultCarried}, nil
 }
 
