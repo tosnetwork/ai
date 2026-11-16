@@ -35,6 +35,10 @@ var deciding = map[Operation]struct{}{
 	OpPresentInvite:         {},
 	OpRemoveContact:         {},
 	OpExportDeviceHistory:   {},
+	OpCreateRoom:            {},
+	OpAddRoomMember:         {},
+	OpRemoveRoomMember:      {},
+	OpJoinRoom:              {},
 }
 
 // Deciding reports whether an operation needs the owner's signature.
@@ -132,6 +136,11 @@ func DecisionBytes(request Request, challenge string) ([]byte, error) {
 		canon.Text(buffer, request.InviteToken)
 	case OpRemoveContact:
 		canon.Text(buffer, request.ContactAgentID)
+	case OpCreateRoom, OpJoinRoom:
+		canon.Text(buffer, request.RoomID)
+	case OpAddRoomMember, OpRemoveRoomMember:
+		canon.Text(buffer, request.RoomID)
+		canon.Text(buffer, request.RoomMemberAgentID)
 	}
 	if request.Op == OpExportDeviceHistory {
 		canon.Text(buffer, request.TargetDeviceID)

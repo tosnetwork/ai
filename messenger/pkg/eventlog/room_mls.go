@@ -23,6 +23,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -982,4 +983,33 @@ func containsString(values []string, want string) bool {
 
 func sameGroupState(a, b group.State) bool {
 	return a.RoomID == b.RoomID && a.Clock == b.Clock && a.MembershipDigest == b.MembershipDigest && a.AcceptedCommitRef == b.AcceptedCommitRef
+}
+
+// List returns the verified fused record of every private room held here,
+// by room ID. An unreadable record fails the listing.
+func (l *RoomMLSLedger) List() ([]RoomMLSRecord, error) {
+	if l == nil {
+		return nil, errors.New("no fused room ledger")
+	}
+	if err := l.journal.usable(); err != nil {
+		return nil, err
+	}
+	l.journal.mutex.Lock()
+	defer l.journal.mutex.Unlock()
+	roomIDs, err := l.journal.fusedRoomIDs()
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(roomIDs)
+	records := make([]RoomMLSRecord, 0, len(roomIDs))
+	for _, roomID := range roomIDs {
+		record, found, err := l.read(roomID)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			records = append(records, record)
+		}
+	}
+	return records, nil
 }

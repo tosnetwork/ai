@@ -206,6 +206,29 @@ const (
 	// OpListDeviceHistory reads checkpoint-reachable display history. It is
 	// owner-side observability, not an application queue or execution trigger.
 	OpListDeviceHistory Operation = "device-history.list"
+
+	// Private rooms over the relay. Membership is the owner's (D13): creating
+	// a room, adding or removing a member and joining a room are owner
+	// decisions, because they decide who may reach this inbox and who reads
+	// the room. The runtime may only send and read room messages, list the
+	// rooms and read their gap records.
+	//
+	// OpCreateRoom founds a private room with this installation as its
+	// authority, under an owner-chosen room ID.
+	OpCreateRoom Operation = "rooms.create"
+	// OpAddRoomMember adds an Agent to a room this installation is the
+	// authority of: it sends the room.invite over the 1:1 session.
+	OpAddRoomMember Operation = "rooms.add"
+	// OpRemoveRoomMember removes a member from a room this installation is
+	// the authority of.
+	OpRemoveRoomMember Operation = "rooms.remove"
+	// OpJoinRoom joins a room a pending room.invite names: it sends this
+	// installation's KeyPackage to the invite's authority.
+	OpJoinRoom Operation = "rooms.join"
+	// OpListRooms lists the private rooms held here and the pending joins.
+	OpListRooms Operation = "rooms.list"
+	// OpRoomGaps reads the room.gap records of one room, newest first.
+	OpRoomGaps Operation = "rooms.gaps"
 )
 
 // Principal is which side of the boundary a connection speaks for.
@@ -233,6 +256,7 @@ var permitted = map[Principal]map[Operation]struct{}{
 		OpPendingAttachments: {}, OpClaimAttachment: {},
 		OpBeginOutboundAttachment: {}, OpAppendOutboundAttachment: {}, OpCommitOutboundAttachment: {},
 		OpRequestAction: {}, OpActionStatus: {}, OpClaimAction: {}, OpListMandates: {},
+		OpListRooms: {}, OpRoomGaps: {},
 	},
 	PrincipalOwner: {
 		OpAwaitingAdmission: {}, OpAdmit: {}, OpRefuse: {},
@@ -244,6 +268,12 @@ var permitted = map[Principal]map[Operation]struct{}{
 		OpRemoveContact:         {},
 		OpExportDeviceHistory:   {},
 		OpListDeviceHistory:     {},
+		OpCreateRoom:            {},
+		OpAddRoomMember:         {},
+		OpRemoveRoomMember:      {},
+		OpJoinRoom:              {},
+		OpListRooms:             {},
+		OpRoomGaps:              {},
 	},
 }
 
@@ -273,6 +303,12 @@ var operations = map[Operation]struct{}{
 	OpRemoveContact:         {},
 	OpExportDeviceHistory:   {},
 	OpListDeviceHistory:     {},
+	OpCreateRoom:            {},
+	OpAddRoomMember:         {},
+	OpRemoveRoomMember:      {},
+	OpJoinRoom:              {},
+	OpListRooms:             {},
+	OpRoomGaps:              {},
 }
 
 var (
@@ -376,6 +412,9 @@ type Request struct {
 	InviteToken            string `json:"invite_token,omitempty"`
 	// ContactAgentID names the invited contact contacts.remove deletes.
 	ContactAgentID string `json:"contact_agent_id,omitempty"`
+	// RoomMemberAgentID names the Agent rooms.add adds or rooms.remove
+	// removes; RoomID names the room of every rooms.* operation.
+	RoomMemberAgentID string `json:"room_member_agent_id,omitempty"`
 
 	// Device-history export terms are all owner-signed. The source device,
 	// recipient Endpoint and pair-session identifier are daemon-derived.
@@ -601,6 +640,38 @@ type Response struct {
 	HistorySegmentDigest string `json:"history_segment_digest,omitempty"`
 	LastEventCreatedAt   uint64 `json:"last_event_created_at_unix,omitempty"`
 	LastEventID          string `json:"last_event_id,omitempty"`
+	// RoomID is the room a rooms.* operation acted on.
+	RoomID string `json:"room_id,omitempty"`
+	// Rooms lists the private rooms held here and the pending joins.
+	Rooms []RoomSummary `json:"rooms,omitempty"`
+	// RoomGaps lists one room's gap records, newest first.
+	RoomGaps []RoomGap `json:"room_gaps,omitempty"`
+}
+
+// RoomSummary is one private room, joined or pending.
+type RoomSummary struct {
+	RoomID string `json:"room_id"`
+	// State is "joined", or a pending join's "invited" or "key-package-sent".
+	State            string   `json:"state"`
+	AuthorityAgentID string   `json:"authority_agent_id"`
+	IsAuthority      bool     `json:"is_authority,omitempty"`
+	RoomEpoch        uint64   `json:"room_epoch,omitempty"`
+	MLSEpoch         uint64   `json:"mls_epoch,omitempty"`
+	Members          []string `json:"members,omitempty"`
+	// InviteExpiresAtUnix is a pending join's invite expiry.
+	InviteExpiresAtUnix uint64 `json:"invite_expires_at_unix,omitempty"`
+}
+
+// RoomGap is one room.gap record: messages of a sender declared lost.
+// First and last are zero while the range is unknown.
+type RoomGap struct {
+	GapID          string `json:"gap_id"`
+	SenderAgentID  string `json:"sender_agent_id"`
+	FirstSequence  uint64 `json:"first_missing_sequence,omitempty"`
+	LastSequence   uint64 `json:"last_missing_sequence,omitempty"`
+	Reason         string `json:"reason"`
+	Dropped        uint32 `json:"dropped_objects,omitempty"`
+	DeclaredAtUnix uint64 `json:"declared_at_unix"`
 }
 
 // WaitingAction is one decision the owner has not made yet.
@@ -774,9 +845,16 @@ func ValidateRequest(request Request) error {
 	if request.Op == OpListDeviceHistory && request.IdempotencyKey != "" {
 		return errors.New("a history listing has no idempotency key")
 	}
-	if request.Op != OpCompose && request.Op != OpSendDirect && request.Op != OpReplyDirect && request.Op != OpComposeProtocolResult && request.Op != OpBeginOutboundAttachment && (request.RoomID != "" || request.ReplyToEventID != "" ||
+	if request.Op != OpCompose && request.Op != OpSendDirect && request.Op != OpReplyDirect && request.Op != OpComposeProtocolResult && request.Op != OpBeginOutboundAttachment && (request.ReplyToEventID != "" ||
 		request.MembershipEpoch != 0 || request.MediaType != "" || request.Body != "") {
 		return errors.New("only message composition carries message body semantics")
+	}
+	if request.Op != OpCompose && request.Op != OpSendDirect && request.Op != OpReplyDirect && request.Op != OpComposeProtocolResult &&
+		request.Op != OpBeginOutboundAttachment && !roomOperation(request.Op) && request.RoomID != "" {
+		return errors.New("only message composition and room operations name a room")
+	}
+	if request.Op != OpAddRoomMember && request.Op != OpRemoveRoomMember && request.RoomMemberAgentID != "" {
+		return errors.New("only adding or removing a room member names a member")
 	}
 	if request.Op == OpBeginOutboundAttachment && request.Body != "" {
 		return errors.New("outbound attachment begin does not carry an inline body")
@@ -912,6 +990,22 @@ func ValidateRequest(request Request) error {
 		}
 		return nil
 	case OpCompose:
+		// A room-wide composition names a room and no route: the daemon seals
+		// it to the room (a private room's kind-3 path) and fans it out to the
+		// members of the epoch it seals in.
+		if RoomWideComposition(request) {
+			if !conversationPattern.MatchString(request.ConversationID) || !roomPattern.MatchString(request.RoomID) ||
+				request.MembershipEpoch == 0 || !idempotencyPattern.MatchString(request.IdempotencyKey) || request.ExpiresAtUnix == 0 {
+				return errors.New("a room composition needs canonical conversation, room, membership epoch, expiry and idempotency")
+			}
+			if request.ReplyToEventID != "" && !eventPattern.MatchString(request.ReplyToEventID) {
+				return errors.New("invalid reply event identifier")
+			}
+			if request.MediaType == "" || request.Body == "" {
+				return errors.New("a composition needs media type and body")
+			}
+			return requireEmpty(request, "a room composition", request.EventID, request.LeaseID)
+		}
 		if !conversationPattern.MatchString(request.ConversationID) ||
 			!sessionPattern.MatchString(request.SessionID) || !endpointPattern.MatchString(request.RecipientEndpointID) ||
 			!idempotencyPattern.MatchString(request.IdempotencyKey) || request.ExpiresAtUnix == 0 {
@@ -1055,6 +1149,30 @@ func ValidateRequest(request Request) error {
 			return errors.New("removing a contact needs its Agent")
 		}
 		return requireEmpty(request, "contact removal", request.EventID, request.LeaseID, request.SessionID)
+	case OpCreateRoom, OpJoinRoom:
+		if !roomPattern.MatchString(request.RoomID) {
+			return errors.New("a room operation needs a canonical room")
+		}
+		return requireEmpty(request, "a room operation", request.EventID, request.LeaseID, request.SessionID,
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
+	case OpAddRoomMember, OpRemoveRoomMember:
+		if !roomPattern.MatchString(request.RoomID) || !agentPattern.MatchString(request.RoomMemberAgentID) {
+			return errors.New("changing a room member needs a canonical room and member Agent")
+		}
+		return requireEmpty(request, "a room membership change", request.EventID, request.LeaseID, request.SessionID,
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
+	case OpListRooms:
+		if request.Limit != 0 || request.RoomID != "" {
+			return errors.New("a room listing takes no terms")
+		}
+		return requireEmpty(request, "a room listing", request.EventID, request.LeaseID, request.SessionID,
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
+	case OpRoomGaps:
+		if !roomPattern.MatchString(request.RoomID) || request.Limit < 0 || request.Limit > MaxRoomGapsPerResponse {
+			return errors.New("a room gap listing needs a canonical room and a bounded limit")
+		}
+		return requireEmpty(request, "a room gap listing", request.EventID, request.LeaseID, request.SessionID,
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
 	case OpExportDeviceHistory:
 		validCursor := (request.HistorySequence == 1 && request.PreviousSegmentDigest == "" &&
 			request.AfterCreatedAtUnix == 0 && request.AfterEventID == "") ||
@@ -1107,6 +1225,25 @@ func ValidateRequest(request Request) error {
 		return requireEmpty(request, "an owner decision", request.LeaseID, request.SessionID)
 	}
 	return errors.New("unknown local operation")
+}
+
+// MaxRoomGapsPerResponse bounds one rooms.gaps listing.
+const MaxRoomGapsPerResponse = 64
+
+// roomOperation reports the rooms.* operations, which name a room.
+func roomOperation(operation Operation) bool {
+	switch operation {
+	case OpCreateRoom, OpAddRoomMember, OpRemoveRoomMember, OpJoinRoom, OpRoomGaps:
+		return true
+	}
+	return false
+}
+
+// RoomWideComposition reports an outbox.compose that names a room and no
+// route: one addressed to a room, not to one device.
+func RoomWideComposition(request Request) bool {
+	return request.Op == OpCompose && request.RoomID != "" && request.SessionID == "" &&
+		request.RecipientEndpointID == "" && request.RecipientAgentID == ""
 }
 
 func requireEmpty(request Request, operation string, fields ...string) error {
