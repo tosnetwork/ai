@@ -311,6 +311,30 @@ func TestClientStrictList(t *testing.T) {
 	}
 }
 
+// A description's max_ttl_seconds drives clients' re-deposit schedule, so
+// only a value a V1 relay can have is accepted.
+func TestClientDescribeBoundsTTL(t *testing.T) {
+	describe := func(ttl string) (RelayDescription, error) {
+		client, _ := fakeRelay(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", ContentTypeJSON)
+			fmt.Fprintf(w, `{"schema":%q,"max_envelope_bytes":262144,"max_ttl_seconds":%s,`+
+				`"per_recipient_max_envelopes":256,"per_recipient_max_bytes":16777216}`, SchemaRelay, ttl)
+		})
+		return client.Describe(context.Background())
+	}
+	for _, ttl := range []uint64{1, 3600, 10800, 86400} {
+		description, err := describe(fmt.Sprint(ttl))
+		if err != nil || description.MaxTTLSeconds != ttl {
+			t.Fatalf("ttl %d: %+v, %v", ttl, description, err)
+		}
+	}
+	for _, ttl := range []string{"0", "86401", "18446744073709551615", "-1", `"3600"`} {
+		if _, err := describe(ttl); !errors.Is(err, ErrInvalidResponse) {
+			t.Errorf("ttl %s: err = %v", ttl, err)
+		}
+	}
+}
+
 func manyEntries(n int, key string) []string {
 	out := make([]string, n)
 	for index := range n {

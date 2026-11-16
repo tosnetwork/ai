@@ -12,6 +12,7 @@ import (
 
 var (
 	agentA = "agent_" + strings.Repeat("a", 64)
+	agentB = "agent_" + strings.Repeat("b", 64)
 	keyOne = "idem_" + strings.Repeat("1", 64)
 	keyTwo = "idem_" + strings.Repeat("2", 64)
 )
@@ -60,7 +61,20 @@ func TestResponseValidationIsPerOperation(t *testing.T) {
 		response Response
 		valid    bool
 	}{
-		{OpCarry, Response{Schema: ResponseSchema, Result: ResultCarried}, true},
+		{OpCarry, Carried(3600), true},
+		{OpCarry, Carried(1), true},
+		{OpCarry, Carried(MaxRelayTTLSeconds), true},
+		// A carried answer must report the card's relay TTL, within V1.
+		{OpCarry, Response{Schema: ResponseSchema, Result: ResultCarried}, false},
+		{OpCarry, Carried(MaxRelayTTLSeconds + 1), false},
+		{OpCarry, Response{Schema: ResponseSchema, Result: ResultCarried, RelayTTLSeconds: 3600, Code: CodePeerCap}, false},
+		{OpCarry, Response{Schema: ResponseSchema, Result: ResultCarried, RelayTTLSeconds: 3600,
+			AckFrameBase64: frameBase64(), AckOutcome: "accepted"}, false},
+		// Only a carried answer reports one.
+		{OpCarry, Response{Schema: ResponseSchema, Result: ResultRetry, RelayTTLSeconds: 3600}, false},
+		{OpCarry, Response{Schema: ResponseSchema, Result: ResultRefused, Code: CodePeerCap, RelayTTLSeconds: 3600}, false},
+		{OpDeliver, Response{Schema: ResponseSchema, Result: ResultAdmitted, RelayTTLSeconds: 3600}, false},
+		{OpDeliver, Carried(3600), false},
 		{OpCarry, Retry(), true},
 		{OpCarry, Refusal(CodePeerCap), true},
 		{OpCarry, ack, false},
@@ -91,7 +105,11 @@ func (h *recordingHandler) Carry(_ context.Context, request Request, frame []byt
 	if string(frame) != "frame" {
 		return Refusal(CodeFrameMalformed)
 	}
-	return Response{Result: ResultCarried}
+	if request.RecipientAgentID == agentB {
+		// A carrier that omits the TTL is answered retry, not carried.
+		return Response{Result: ResultCarried}
+	}
+	return Carried(3600)
 }
 
 func (h *recordingHandler) Deliver(context.Context, string, []byte) Response { return NotServed() }
@@ -120,11 +138,15 @@ func TestSocketRoundTripIsBoundedAndChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	response, err := client.Carry(ctx, agentA, keyTwo, keyOne, 10, []byte("frame"))
-	if err != nil || response.Result != ResultCarried {
+	if err != nil || response.Result != ResultCarried || response.RelayTTLSeconds != 3600 {
 		t.Fatalf("carry: %+v %v", response, err)
 	}
 	if len(handler.carried) != 1 || handler.carried[0].WithdrawIdempotencyKey != keyOne {
 		t.Fatalf("carried: %+v", handler.carried)
+	}
+	if response, err := client.Carry(ctx, agentB, keyOne, "", 10, []byte("frame")); err != nil ||
+		response.Result != ResultRetry {
+		t.Fatalf("carried without a relay TTL: %+v %v", response, err)
 	}
 	if response, err := client.Deliver(ctx, agentA, []byte("frame")); err != nil || response.Code != CodeOperationNotServedHere {
 		t.Fatalf("deliver on a carrier: %+v %v", response, err)
@@ -170,7 +192,7 @@ func (h *slowHandler) Carry(ctx context.Context, _ Request, _ []byte) Response {
 	h.mutex.Lock()
 	h.running--
 	h.mutex.Unlock()
-	return Response{Result: ResultCarried}
+	return Carried(3600)
 }
 
 func (h *slowHandler) Deliver(context.Context, string, []byte) Response     { return NotServed() }

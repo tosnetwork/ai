@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -27,8 +28,13 @@ const (
 	relayEvidenceRetry = time.Minute
 	// relayCapRetry is how long a copy over the in-flight cap waits.
 	relayCapRetry = 30 * time.Second
-	// relayRetentionWindow is how long a relay may still hold an envelope.
+	// relayRetentionWindow is how long a relay may still hold an envelope:
+	// the protocol ceiling, whatever a relay advertises, so the in-flight
+	// count never undercounts.
 	relayRetentionWindow = 24 * time.Hour
+	// relayRedepositPercent is the share of the reported relay TTL after
+	// which a carried envelope is deposited again.
+	relayRedepositPercent = 80
 	// relayResponseWindow is the per (peer, own descriptor) response limit.
 	relayResponseWindow = time.Hour
 	// descriptorExpiredBase and descriptorExpiredCap bound the wait after a
@@ -63,6 +69,11 @@ type relayRuntime struct {
 	listener net.Listener
 	signer   crypto.Signer
 	interval time.Duration
+
+	// ttlReported is set once a carried answer without a valid relay TTL
+	// has been reported, so a carrier built against an older API shows on
+	// the owner surface once per process rather than only as unreachable.
+	ttlReported atomic.Bool
 
 	// pulls serializes read-modify-write of evidence pull records.
 	pulls sync.Mutex
@@ -216,13 +227,45 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 	now := r.now()
 	switch response.Result {
 	case carrierapi.ResultCarried:
+		delay, err := r.redepositDelay(response.RelayTTLSeconds)
+		if err != nil {
+			if errors.Is(err, carrierapi.ErrRelayTTL) && r.ttlReported.CompareAndSwap(false, true) {
+				r.daemon.report("relay carrier reported no valid relay TTL", err)
+			}
+			// The same generation key is retried; the carrier answers carried
+			// again without a new deposit.
+			return fault.Wrap(fault.CodeUnreachable, err)
+		}
 		generation.Generation = message.Generation
-		return &dispatch.Carried{Generation: generation, RedepositAt: now.Add(r.interval)}
+		return &dispatch.Carried{Generation: generation, RedepositAt: now.Add(delay)}
 	case carrierapi.ResultRetry:
 		return fault.New(fault.CodeUnreachable, "the carrier asked for a retry")
 	default:
 		return carryRefusal(response.Code, now)
 	}
+}
+
+// redepositDelay is how long an envelope a relay accepted waits before its
+// next generation is deposited. It is 80 % of ttlSeconds, the smallest
+// retention the relays of the recipient's card advertise (as the carrier
+// reported it), so the next generation is stored before every relay drops
+// this one. It is never below MinRelayRedepositInterval, so a relay that
+// advertises a tiny TTL cannot drive a re-deposit storm (below a 12.5-minute
+// TTL the copy is then absent for part of each interval), and never above the
+// configured interval.
+func (r *relayRuntime) redepositDelay(ttlSeconds uint64) (time.Duration, error) {
+	if err := carrierapi.ValidateRelayTTL(ttlSeconds); err != nil {
+		return 0, err
+	}
+	// ttlSeconds is at most 86,400, so neither product can overflow.
+	delay := time.Duration(ttlSeconds*relayRedepositPercent/100) * time.Second
+	if delay < MinRelayRedepositInterval {
+		delay = MinRelayRedepositInterval
+	}
+	if delay > r.interval {
+		delay = r.interval
+	}
+	return delay, nil
 }
 
 // carryRefusal maps a carrier refusal to what the copy does next. A missing
@@ -302,8 +345,10 @@ type peerIndex struct {
 	// envelopes counts this node's copy envelopes a relay may still hold for
 	// each peer: a carried copy, a copy moved back to pending whose last
 	// deposit may still be stored, and a previous generation that may not be
-	// withdrawn yet. Delivery acks are counted by the carrier, which alone
-	// sees them stored.
+	// withdrawn yet. It is an early deferral, not the bound: the carrier,
+	// which alone sees what each relay still stores (delivery acks, and older
+	// generations a longer-TTL relay keeps after a failed withdrawal),
+	// enforces the cap with peer-cap.
 	envelopes map[string]int
 	// onEvidence lists the pending copies held because the peer's stored
 	// evidence failed CheckPeer.
@@ -479,10 +524,14 @@ func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 	}
 	expires := uint64(now.Add(relayRetentionWindow).Unix())
 	response, err := r.carrier.Carry(ctx, peer, key, withdraw, expires, frame)
+	var delay time.Duration
+	if err == nil && response.Result == carrierapi.ResultCarried {
+		delay, err = r.redepositDelay(response.RelayTTLSeconds)
+	}
 	if err == nil && response.Result == carrierapi.ResultCarried {
 		pull.RequestGeneration = generation
 		pull.RequestLastAtUnix = uint64(now.Unix())
-		pull.RequestNextAtUnix = uint64(now.Add(r.interval).Unix())
+		pull.RequestNextAtUnix = uint64(now.Add(delay).Unix())
 	} else {
 		pull.RequestNextAtUnix = uint64(now.Add(relayEvidenceRetry).Unix())
 	}

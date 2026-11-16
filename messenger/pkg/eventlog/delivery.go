@@ -75,8 +75,10 @@ const (
 )
 
 // MaxRelayGenerations bounds the deposit generations one delivery records.
-// Older generations are dropped from the record; their envelopes are already
-// withdrawn or expired at the relays.
+// Older generations are dropped from the record. This bounds the record, not
+// the relays: a relay with a longer TTL than the card's smallest may still
+// hold an older generation whose withdrawal failed, which carries the same
+// ciphertext and is acknowledged like any other.
 const MaxRelayGenerations = 16
 
 // RelayGeneration is one accepted relay deposit of a delivery: the own

@@ -682,11 +682,14 @@ func (d DiscoveryConfig) Validate(localAgentID string) error {
 
 // Relay carriage bounds.
 const (
-	// DefaultRelayRedepositInterval is how long a carried copy waits for a
-	// device ack before it is deposited again: under the relay's 24 h TTL less
-	// the packet lifetime margin.
+	// DefaultRelayRedepositInterval is the longest a carried copy waits for a
+	// device ack before it is deposited again: under the protocol's 24 h
+	// relay TTL less the packet lifetime margin. The wait actually used is
+	// 80 % of the relay TTL the carrier reports for the recipient's card,
+	// capped by the configured interval (this value by default).
 	DefaultRelayRedepositInterval = 20 * time.Hour
-	// MinRelayRedepositInterval is the shortest interval a test may set.
+	// MinRelayRedepositInterval is the shortest interval a test may set, and
+	// the floor of the TTL-derived wait.
 	MinRelayRedepositInterval = 10 * time.Minute
 	// MaxRelayPeerEnvelopes is the honest sender's in-flight cap per peer.
 	MaxRelayPeerEnvelopes = 24
@@ -705,8 +708,11 @@ type RelayCarriageConfig struct {
 	CardPath string `json:"card_path"`
 	// EvidenceExportDir receives this node's own relay evidence and contact
 	// file on every publication.
-	EvidenceExportDir        string `json:"evidence_export_dir"`
-	TimeoutSeconds           uint64 `json:"timeout_seconds,omitempty"`
+	EvidenceExportDir string `json:"evidence_export_dir"`
+	TimeoutSeconds    uint64 `json:"timeout_seconds,omitempty"`
+	// RedepositIntervalSeconds caps the wait before a carried copy or an
+	// outstanding evidence request is deposited again; the wait itself
+	// follows the relay TTL the carrier reports.
 	RedepositIntervalSeconds uint64 `json:"redeposit_interval_seconds,omitempty"`
 }
 
@@ -718,10 +724,15 @@ func (r RelayCarriageConfig) Timeout() time.Duration {
 	return time.Duration(r.TimeoutSeconds) * time.Second
 }
 
-// RedepositInterval is how long a carried copy waits before its next deposit.
+// RedepositInterval is the longest a carried copy waits before its next
+// deposit. A value beyond the default saturates just past it, so Validate
+// refuses it instead of a wrapped multiplication passing.
 func (r RelayCarriageConfig) RedepositInterval() time.Duration {
 	if r.RedepositIntervalSeconds == 0 {
 		return DefaultRelayRedepositInterval
+	}
+	if r.RedepositIntervalSeconds > uint64(DefaultRelayRedepositInterval/time.Second) {
+		return DefaultRelayRedepositInterval + time.Second
 	}
 	return time.Duration(r.RedepositIntervalSeconds) * time.Second
 }

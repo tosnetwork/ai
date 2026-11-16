@@ -45,6 +45,10 @@ type recordingCarrier struct {
 	onCarry func(carried)
 	// answer, when set, replaces the carried answer.
 	answer *carrierapi.Response
+	// ttl is the relay TTL a carried answer reports for each recipient, as
+	// the smallest of its card's relays; a recipient not listed reports the
+	// protocol maximum.
+	ttl map[string]uint64
 }
 
 func (c *recordingCarrier) Carry(_ context.Context, recipient, key, withdraw string, _ uint64,
@@ -62,7 +66,11 @@ func (c *recordingCarrier) Carry(_ context.Context, recipient, key, withdraw str
 	if c.answer != nil {
 		return *c.answer, nil
 	}
-	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultCarried}, nil
+	ttl, listed := c.ttl[recipient]
+	if !listed {
+		ttl = carrierapi.MaxRelayTTLSeconds
+	}
+	return carrierapi.Carried(ttl), nil
 }
 
 func (c *recordingCarrier) take() []carried {

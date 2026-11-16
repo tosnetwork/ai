@@ -373,8 +373,8 @@ On the network route it is noticed within the cached refresh window, at most
   requester's expired card can therefore still answer.
   - **Request.** A node holds at most one outstanding kind-4 request per peer,
     however many content copies (kinds 1 and 3) it holds `pending` for that
-    peer because the stored evidence fails `CheckPeer`. It follows the
-    earliest pending copy's 20 h re-deposit schedule, and ends when no copy is
+    peer because the stored evidence fails `CheckPeer`. It is re-deposited on
+    the copies' TTL-derived schedule (section 4), and ends when no copy is
     pending any more, or when it is answered. No kind-4 *request* is ever sent
     to a peer with no pending copy; responses go only to requesters.
   - **Receiving a request.** The node runs `CheckPeer` on the frame's evidence,
@@ -402,8 +402,10 @@ On the network route it is noticed within the cached refresh window, at most
     fresh, and A seals or re-deposits the copy.
   - If B holds a copy for A, B's own request (or the request it received)
     repairs the other direction the same way.
-  - If the responder was offline for more than 24 h, the request it missed is
-    re-deposited every 20 h, so it is waiting at the relay when B returns.
+  - If the responder was offline for longer than the relay TTL, the request
+    it missed is re-deposited before each TTL runs out (every 48 minutes
+    against 1-hour test relays, every 2 hours 24 minutes against 3-hour
+    production relays), so it is waiting at the relay when B returns.
   - Kinds 2 and 4 need only the peer's card, never `CheckPeer`, so nothing in
     this exchange is blocked by the staleness it repairs.
 
@@ -489,29 +491,81 @@ store (`messenger/docs/ENCRYPTED_ATTACHMENTS.md:1-40`; up to 2,048 chunks of
 the `artifact.encrypted` event, whose Reference is already E2EE. **Rejected:
 chunks through the relay**: one 16 MiB attachment fills the per-recipient
 quota (`AGENT_PACKET_RELAY_V1.md:640`) and blocks task results, and its chunks
-expire after 24 h at an offline recipient.
+expire after the relay TTL (at most 24 h) at an offline recipient.
 
 **Fan-out is one envelope per recipient Agent**: per device for copies, per
 member Agent for room frames, each signed and sealed separately. M-R2 bounds
 relay rooms to **32 members** (32 signatures per message, one envelope in each
 member's quota).
 
-**Offline beyond the 24 h relay TTL** (`:636-640`):
+**Offline beyond the relay TTL** (`AGENT_PACKET_RELAY_V1.md` sections 9.6,
+9.8 and 10). A relay keeps an unacknowledged envelope for its TTL, an operator
+ceiling of at most 24 h: 1 h on the project's test relays, 3 h on its
+production relays.
 
+- **The carrier reports the TTL.** OpenFox reads each relay's advertised
+  `max_ttl_seconds` and answers every `carrier.carry` that a relay accepted
+  with `carried` and `relay_ttl_seconds`, the smallest value among the relays
+  of the recipient's chat card (a relay whose description cannot be read
+  counts as 86,400 until it is read). The field is required on `carried`, in
+  1..86,400, and absent from every other answer. The daemon has no relay
+  client of its own; the card and its relays are the carrier's.
 - **One-to-one copies are re-deposited.** A copy with no verified delivery ack
-  20 h after its last accepted deposit (a test MAY set 10 min to 20 h and
-  records it) is deposited again: the same ciphertext, since a retry never
-  re-seals (`messenger/README.md:121`), in a new packet and envelope under the
-  next generation's key. Once a relay accepts it, the sender withdraws the
-  previous envelope with its secret (`AGENT_PACKET_RELAY_V1.md:603-606`), so at
-  most two copies are ever stored. This runs until the delivery's own expiry,
-  by default **7 days** and never beyond 30 days
+  is deposited again **80 % of the reported TTL** after its last accepted
+  deposit, never sooner than 10 minutes after it and never later than
+  `redeposit_interval_seconds` (default and maximum 20 h; a test MAY set
+  10 min to 20 h and records it). Each `carried` answer schedules the next
+  generation from the TTL it reports, so a card that changes its relays
+  changes the schedule at the next deposit. The new deposit has the same
+  ciphertext, since a retry never re-seals (`messenger/README.md:121`), in a
+  new packet and envelope under the next generation's key. Once a relay
+  accepts it, the sender withdraws the previous envelope with its secret
+  (`AGENT_PACKET_RELAY_V1.md` section 9.5). This runs until the delivery's own
+  expiry, by default **7 days** and never beyond 30 days
   (`messenger/pkg/envelope/envelope.go:49`); then the delivery is `abandoned`
   with `retention-exceeded` (`fault.go:141`) on the owner surface. Nothing is
   lost silently.
-- **Room application messages: loss with notice.** One deposit, 24 h; a member
-  detects the gap from the MLS per-sender generation and the runtime is told.
-  Re-depositing to N members multiplies load by N per day of absence.
+
+  | Relay TTL | Re-deposit every | Deposits over 7 days | Over 30 days | Per pending copy per day |
+  |---|---|---|---|---|
+  | 1 h (test) | 48 min | 210 | 900 | 30 |
+  | 3 h (production) | 2 h 24 min | 70 | 300 | 10 |
+  | 24 h (V1 bound) | 19 h 12 min | 9 | 38 | 1.25 |
+
+  Deposits are counted from the first one at time 0 up to, not including, the
+  delivery's expiry (a re-deposit due at or after the expiry is not made). The
+  generation number is a 32-bit counter. The journal records only the latest
+  16 generations of a delivery. That is a bound on the record, not on what
+  the relays store: every generation carries the same ciphertext, and a
+  delivery ack matches the Event, session, device and ciphertext digest
+  (5.2), not a generation, so an older generation still held at a relay is
+  answered like any other.
+- **How many generations a relay holds.** Let d be the re-deposit interval
+  (80 % of the smallest TTL of the card, within the 10-minute floor and the
+  configured cap). Relay R keeps generation k until its receipt plus R's own
+  TTL at the latest, and generation k+j is deposited at least j·d later.
+  Without a successful withdrawal, R therefore holds up to ⌈TTL_R / d⌉
+  generations of one copy. That is at most two only when **every relay of the
+  card has a TTL of at most 2d**, which holds whenever all the card's relays
+  advertise the same TTL (2d = 1.6 TTL) and for any mix within a factor of
+  1.6. A card that mixes, say, a 1 h and a 24 h relay re-deposits every
+  48 minutes, and the 24 h relay would hold up to 30 generations if every
+  withdrawal failed. In that case, and for a configured interval below half
+  the TTL, staying within two generations relies on the withdrawal of
+  generation N once N+1 is accepted (5.3, 9.5), and the per-peer cap of 24
+  (section 7) is enforced by the carrier, which alone knows what is still
+  stored or still being withdrawn at each relay. The daemon counts two
+  envelopes per copy, each previous generation for 24 h after its deposit;
+  that count defers early and can undercount for such a card, and it is not
+  the authority.
+- **The rate.** A shorter TTL changes how often a copy is deposited, not the
+  cap. The relay's own deposit rate (60 per minute per client address) is far
+  above what the cap allows: 24 envelopes re-deposited every 48 minutes is one
+  deposit every 2 minutes.
+- **Room application messages: loss with notice.** One deposit, kept for the
+  relay TTL; a member detects the gap from the MLS per-sender generation and
+  the runtime is told. Re-depositing to N members would multiply the load
+  above by N.
 - **Room Commits and Welcomes** follow the one-to-one rule with a per-member
   ack: a lost Commit cuts a member off.
 
@@ -575,7 +629,8 @@ generation gets a fresh ack envelope that no tombstone (`410`) suppresses.
   past its re-deposit time is due again. The ciphertext stays until settled.
   Re-deposit works within the relay spec: a fresh ack secret gives a fresh
   envelope ID, a withdrawn generation's tombstone cannot block the next one,
-  and 20 h stays under the 24 h minus 5 min packet lifetime.
+  and the interval (at most 80 % of the reported TTL, and at most 20 h) stays
+  under both the relays' retention and the 24 h minus 5 min packet lifetime.
 - **Generation withdrawal.** When generation N+1 is accepted at a relay,
   `carrier.carry` withdraws generation N there (9.5) through
   `RelayTransport.Withdraw(idempotencyKey)`. The withdrawal is journaled and
@@ -654,8 +709,10 @@ Mitigations in V1, none touching the relay:
 > online; the operator also sees IP addresses, and by matching the address
 > that deposits a message with the address that polls a mailbox it can
 > usually tell which Agent sent it. No relay sees which conversation a message
-> belongs to, or any content. Envelopes are kept until acknowledged or at most 24 hours; an unacknowledged
-> one-to-one message is re-deposited by its sender for up to 7 days.
+> belongs to, or any content. Envelopes are kept until acknowledged or at most
+> for the relay's retention time (3 hours on the project's relays, never more
+> than 24 hours); an unacknowledged one-to-one message is re-deposited by its
+> sender before that time runs out, for up to 7 days.
 
 ## 7. Abuse and task traffic
 
@@ -674,7 +731,8 @@ Recipient protections, strongest first:
 1. **Prompt acknowledgement.** Everything that opens under the chat key is
    relay-acknowledged once handled, refusals included (wrong purpose, bad
    signature, unprovisioned peer, admission refusal), so an online recipient
-   holds chat for one poll interval. Only unopenable junk holds quota 24 h, as
+   holds chat for one poll interval. Only unopenable junk holds quota for the
+   relay TTL (at most 24 h), as
    it already can against the rail key (`:790-800`).
 2. **Messenger admission.** The first-contact default (allow-listed contacts,
    one-time invites, owner hold otherwise) applies on this route as on every
@@ -686,12 +744,18 @@ Recipient protections, strongest first:
    still stored, including earlier generations not yet withdrawn and the
    node's own kind-2 ack and kind-4 evidence envelopes to that peer, which
    share the same relay bound; the rest stay `pending` and are not deposited.
-   The count is split by who can see each envelope: the Messenger daemon
-   counts its carried copies (with a previous generation that may not yet be
-   withdrawn) and its kind-4 envelopes, and defers a copy at the cap; the
-   carrier (OpenFox), which alone sees its stored kind-2 ack envelopes, counts
-   those as well and answers `carrier.carry` with the fixed refusal `peer-cap`
-   when the full count would exceed 24. The relay caps one client address at 64
+   **The carrier enforces the 24.** OpenFox alone sees what is stored at each
+   relay: its outbox holds every envelope it deposited and has not seen
+   expire, including kind-2 acks, earlier generations whose withdrawal is
+   still pending or failed, and envelopes kept longer by a relay with a
+   longer TTL than the card's smallest. It counts all of them per peer across
+   its relays (at least each relay's count, so the bound is conservative) and
+   answers `carrier.carry` with the fixed refusal `peer-cap` when the deposit
+   would take that count above 24. The Messenger daemon
+   counts what it can see (its carried copies, each with a previous
+   generation that may not yet be withdrawn, and its kind-4 envelopes) and
+   defers a copy at the cap before asking. That early deferral saves a round
+   trip; it can undercount (section 4) and is not the bound. The relay caps one client address at 64
    envelopes per recipient (`:641`). On shared relays, 24 chat envelopes leave
    at least 40 of that 64 for the same sender's rail deposits (tasks, results,
    acks) to the same peer.
@@ -832,7 +896,8 @@ imports `messenger/`; OpenFox imports both.
    `protocol/pkg/agentpacketseal` for size constants only.
 2. `pkg/carrierapi` (new): strict bounded client and server on mode-0600 Unix
    sockets, modelled on `pkg/prekeyapi`: `carrier.carry` (daemon → OpenFox:
-   one frame plus idempotency key; `carried`, `retry` or a fixed refusal),
+   one frame plus idempotency key; `carried` with the card's smallest relay
+   TTL in `relay_ttl_seconds`, `retry` or a fixed refusal),
    `carrier.deliver` (OpenFox → daemon: verified copy frame plus packet sender;
    signed ack object or `retry`), `carrier.delivery-ack` (OpenFox → daemon:
    verified kind-2 frame plus packet sender).
@@ -893,7 +958,10 @@ this document.
    `relay_cards.go:292-345`), a chat `RelayTransport` (`relay/chat-outbox`),
    one shared relay pool; and the `carrier.carry` server: validate the frame,
    sign (zero Capability, expiry = min(copy expiry, now + `PacketLifetime`),
-   `transport.go:25-27`), `Send`, answer `carried` only on acceptance; and
+   `transport.go:25-27`), `Send`, answer `carried` only on acceptance, with
+   the smallest advertised `max_ttl_seconds` among the recipient card's
+   relays (each relay's description read and cached with a bounded refresh;
+   86,400 for a relay not yet read); and
    once generation N+1 is accepted, call the new
    `RelayTransport.Withdraw(idempotencyKey)` for generation N. That call is
    journaled and retried with the bounds and backoff of the revocation path

@@ -363,6 +363,12 @@ func (c *Client) Describe(ctx context.Context) (RelayDescription, error) {
 	if err := strictJSON(body, &wire); err != nil || wire.Schema != SchemaRelay {
 		return RelayDescription{}, fmt.Errorf("%w: relay description", ErrInvalidResponse)
 	}
+	// Clients schedule re-deposit from max_ttl_seconds, so a value no V1
+	// relay can have is refused rather than trusted.
+	if wire.MaxTTLSeconds == 0 || wire.MaxTTLSeconds > uint64(MaxTTL/time.Second) {
+		return RelayDescription{}, fmt.Errorf("%w: relay description max_ttl_seconds outside 1..%d",
+			ErrInvalidResponse, uint64(MaxTTL/time.Second))
+	}
 	return RelayDescription{MaxEnvelopeBytes: wire.MaxEnvelopeBytes, MaxTTLSeconds: wire.MaxTTLSeconds,
 		PerRecipientMaxEnvelopes: wire.PerRecipientMaxEnvelopes, PerRecipientMaxBytes: wire.PerRecipientMaxBytes}, nil
 }

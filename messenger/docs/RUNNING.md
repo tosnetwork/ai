@@ -568,14 +568,24 @@ The daemon configuration adds:
 - **Delivery states.** A copy a relay accepted is `carried`; it becomes
   `delivered` only on an Endpoint-signed kind-2 ack whose packet sender is the
   signing Endpoint's Agent. A carried copy is deposited again, with the same
-  ciphertext, every `redeposit_interval_seconds` (default 20 h; a test may set
-  600 s or more) until its own expiry, then abandoned with
+  ciphertext, at 80 % of the relay TTL the carrier reports with each `carried`
+  answer (the smallest `max_ttl_seconds` among the recipient card's relays:
+  48 min against 1 h test relays, 2 h 24 min against 3 h production relays),
+  never sooner than 600 s and never later than `redeposit_interval_seconds`
+  (default and maximum 20 h; a test may set 600 s or more), until its own
+  expiry, then abandoned with
   `retention-exceeded`. A `descriptor-expired` ack is retried at once only
   with newer own evidence, otherwise after 30 s to 5 min.
-- **In-flight cap.** At most 24 chat envelopes per peer at a relay. The
-  daemon counts its carried copies (and a previous generation not yet
-  withdrawn) and its kind-4 envelopes, and defers copies at the cap; the
-  carrier counts its stored kind-2 acks as well and answers `peer-cap`.
+- **In-flight cap.** At most 24 chat envelopes per peer at a relay,
+  enforced by the carrier: it counts everything still stored or being
+  withdrawn at each relay (kind-2 acks and earlier generations included) and
+  answers `peer-cap`. The daemon counts its carried copies (and a previous
+  generation not yet withdrawn) and its kind-4 envelopes and defers copies at
+  the cap early; that count can undercount for a card whose relays advertise
+  different TTLs and is not the bound.
+- **Carrier TTL.** A `carried` answer without a valid `relay_ttl_seconds`
+  (a carrier built against an older API) is retried and reported once per
+  process on the owner surface.
 - **Refusals.** `agent.packet` Events are refused on this route in both
   directions. The relay route's largest Event payload is computed from the
   worst-case frame before sealing (139,547 bytes); a larger one is refused

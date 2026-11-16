@@ -5,7 +5,8 @@
 //
 //   - carrier.carry, daemon to carrier: one complete frame and its
 //     idempotency key; the carrier signs it into an Agent Packet, seals and
-//     deposits it, and answers carried only once a relay accepted it;
+//     deposits it, and answers carried only once a relay accepted it, with
+//     the smallest retention any relay of the recipient's card advertises;
 //   - carrier.deliver, carrier to daemon: a frame of kind 1 or 4 from a
 //     verified packet, with the packet's sender Agent; the daemon answers a
 //     kind-2 frame to send back, an admission answer, retry or a refusal;
@@ -34,6 +35,10 @@ const (
 
 	// MaxMessageBytes holds one maximal frame in base64 with its JSON fields.
 	MaxMessageBytes uint32 = 320 << 10
+
+	// MaxRelayTTLSeconds is the Agent Packet relay V1 retention ceiling
+	// (24 h); a relay may advertise less, never more.
+	MaxRelayTTLSeconds uint64 = 86_400
 )
 
 // Op names one carrier operation.
@@ -50,6 +55,8 @@ type Result string
 
 const (
 	// ResultCarried: a relay durably accepted the envelope (carry).
+	// RelayTTLSeconds is then the smallest max_ttl_seconds that the relays of
+	// the recipient's card advertise: how long the envelope is held at most.
 	ResultCarried Result = "carried"
 	// ResultRetry: nothing durable happened; try the same request again. A
 	// carrier leaves the inbound envelope unacknowledged at the relay.
@@ -116,6 +123,9 @@ type Response struct {
 	Code           Code   `json:"code,omitempty"`
 	AckFrameBase64 string `json:"ack_frame_base64,omitempty"`
 	AckOutcome     string `json:"ack_outcome,omitempty"`
+	// RelayTTLSeconds is set on a carried answer only, in
+	// 1..MaxRelayTTLSeconds.
+	RelayTTLSeconds uint64 `json:"relay_ttl_seconds,omitempty"`
 }
 
 // Frame returns the request's decoded frame bytes.
@@ -169,6 +179,15 @@ func ValidateResponse(op Op, response Response) error {
 	if response.Schema != ResponseSchema {
 		return errors.New("unsupported carrier response schema")
 	}
+	if response.Result == ResultCarried && op == OpCarry {
+		if response.Code != "" || response.AckFrameBase64 != "" || response.AckOutcome != "" {
+			return errors.New("invalid carrier carried answer")
+		}
+		return ValidateRelayTTL(response.RelayTTLSeconds)
+	}
+	if response.RelayTTLSeconds != 0 {
+		return errors.New("only a carried answer reports a relay TTL")
+	}
 	if response.Result == ResultRefused {
 		if _, known := codes[response.Code]; !known || response.AckFrameBase64 != "" || response.AckOutcome != "" {
 			return errors.New("invalid carrier refusal")
@@ -209,6 +228,17 @@ func ValidateResponse(op Op, response Response) error {
 	}
 	if response.AckFrameBase64 != "" || response.AckOutcome != "" {
 		return errors.New("only an ack answer carries an ack frame")
+	}
+	return nil
+}
+
+// ErrRelayTTL is a relay TTL outside 1..MaxRelayTTLSeconds.
+var ErrRelayTTL = errors.New("carrier relay TTL is outside 1s..24h")
+
+// ValidateRelayTTL checks a reported relay TTL in seconds.
+func ValidateRelayTTL(seconds uint64) error {
+	if seconds == 0 || seconds > MaxRelayTTLSeconds {
+		return ErrRelayTTL
 	}
 	return nil
 }
@@ -297,6 +327,12 @@ func decodeStrict(raw []byte, value any) error {
 // Refusal builds a refused answer.
 func Refusal(code Code) Response {
 	return Response{Schema: ResponseSchema, Result: ResultRefused, Code: code}
+}
+
+// Carried builds a carried answer reporting the recipient card's smallest
+// advertised relay TTL.
+func Carried(relayTTLSeconds uint64) Response {
+	return Response{Schema: ResponseSchema, Result: ResultCarried, RelayTTLSeconds: relayTTLSeconds}
 }
 
 // Retry builds a retry answer.
