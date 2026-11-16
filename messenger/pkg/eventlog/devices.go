@@ -141,6 +141,53 @@ func (l *DeviceLedger) AcceptSet(endpointID string, bundles []e2ee.Bundle, now t
 	return succession, nil
 }
 
+// JudgeSet judges a peer's published set against the record exactly as
+// AcceptSet would, and writes nothing. It is the read-only half of the
+// rollback boundary: verifying a stranger's set must not move it.
+func (l *DeviceLedger) JudgeSet(endpointID string, bundles []e2ee.Bundle, now time.Time) (e2ee.Succession, error) {
+	if l == nil {
+		return e2ee.Succession{}, errors.New("no device ledger")
+	}
+	if err := l.journal.usable(); err != nil {
+		return e2ee.Succession{}, err
+	}
+	if !ids.Endpoint.MatchString(endpointID) {
+		return e2ee.Succession{}, errors.New("invalid endpoint identifier")
+	}
+	if now.IsZero() || now.Unix() < 0 {
+		return e2ee.Succession{}, errors.New("invalid time")
+	}
+	l.journal.mutex.Lock()
+	record, found, err := l.read(endpointID)
+	l.journal.mutex.Unlock()
+	if err != nil {
+		return e2ee.Succession{}, err
+	}
+	current := e2ee.SetSummary{}
+	tombstones := map[string]struct{}{}
+	if found {
+		current = e2ee.SetSummary{
+			Digest: record.SetDigest, EndpointID: record.EndpointID,
+			DeviceIDs: record.DeviceIDs, BundleDigests: record.BundleDigests,
+			NewestIssuedAtUnix: record.NewestIssuedAtUnix,
+		}
+		for _, device := range record.Tombstones {
+			tombstones[device] = struct{}{}
+		}
+	}
+	succession, err := e2ee.Succeed(current, tombstones, bundles)
+	if err != nil {
+		return e2ee.Succession{}, err
+	}
+	if succession.Accepted.EndpointID != endpointID {
+		return e2ee.Succession{}, errors.New("the set belongs to another endpoint")
+	}
+	if succession.Accepted.Digest != record.SetDigest && len(record.Tombstones)+len(succession.Removed) > MaxTombstones {
+		return e2ee.Succession{}, errors.New("this peer has revoked more devices than a record may carry")
+	}
+	return succession, nil
+}
+
 // AdmitPublishedSet is the descriptor-fetch populate path: it takes a peer's
 // published prekey set, checks it belongs to the delegated endpoint and
 // matches what the descriptor committed, and only then submits it to

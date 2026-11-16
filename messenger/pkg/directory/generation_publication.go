@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
 )
 
@@ -37,10 +38,24 @@ type GenerationPublisher struct {
 	Policy          DescriptorPolicy
 	Descriptor      Descriptor
 	PublishInterval time.Duration
+	// Relay, when set, receives every published descriptor with its prekey
+	// set as this node's relay identity evidence. With no HTTPS objects and
+	// no locator publisher the generation is published to Relay only: the
+	// relay route needs no locator.
+	Relay RelayEvidencePublication
+}
+
+// RelayEvidencePublication receives this node's own relay identity evidence.
+// Last reports the descriptor most recently published, so the publisher can
+// keep issue times strictly increasing across restarts.
+type RelayEvidencePublication interface {
+	LastRelayDescriptor() (digest string, issuedAtUnix uint64, found bool, err error)
+	PutRelayEvidence(descriptor Descriptor, descriptorJSON, bundleSetJSON []byte) error
 }
 
 func (p *GenerationPublisher) Validate() error {
-	if p == nil || p.Objects == nil || p.Locators == nil || p.Signer == nil {
+	if p == nil || p.Signer == nil || (p.Objects == nil) != (p.Locators == nil) ||
+		p.Objects == nil && p.Relay == nil {
 		return errors.New("generation publication is not configured")
 	}
 	if p.PublishInterval < time.Minute || p.PublishInterval > time.Hour {
@@ -107,6 +122,10 @@ func (p *GenerationPublisher) Publish(ctx context.Context, generation PublicGene
 	descriptor := p.Descriptor
 	descriptor.IssuedAtUnix = descriptorIssued
 	descriptor.ExpiresAtUnix = descriptorExpiry
+	if p.Objects == nil {
+		activation, err := p.publishRelayOnly(descriptor, generation, now)
+		return activation, 0, err
+	}
 	locatorIssued := descriptorIssued
 	locatorExpiry := locatorIssued + MaxLocatorLifetimeSeconds
 	if locatorExpiry > descriptorExpiry {
@@ -122,5 +141,69 @@ func (p *GenerationPublisher) Publish(ctx context.Context, generation PublicGene
 	if err != nil {
 		return HTTPSActivation{}, 0, err
 	}
+	if p.Relay != nil {
+		if err := p.Relay.PutRelayEvidence(activation.Descriptor, activation.DescriptorJSON,
+			append([]byte(nil), generation.JSON...)); err != nil {
+			return HTTPSActivation{}, 0, err
+		}
+	}
 	return activation, stored, nil
+}
+
+// publishRelayOnly signs the descriptor for the relay route, where no HTTPS
+// object or locator exists, and hands it to the relay sink. The publisher
+// invariant holds here: a descriptor with different content always has a
+// strictly later issue time than the one published before it, so successive
+// evidences are totally ordered by "newer".
+func (p *GenerationPublisher) publishRelayOnly(descriptor Descriptor, generation PublicGeneration,
+	now time.Time) (HTTPSActivation, error) {
+	bundles, canonicalPrekeys, err := canonicalPrekeyObject(generation.JSON)
+	if err != nil {
+		return HTTPSActivation{}, err
+	}
+	if !bytes.Equal(generation.JSON, canonicalPrekeys) {
+		return HTTPSActivation{}, errors.New("prekey object is not in canonical publication order")
+	}
+	if err := e2ee.BindBundleSet(p.Delegation, bundles, generation.SetDigest, now); err != nil {
+		return HTTPSActivation{}, err
+	}
+	descriptor.PrekeyBundleDigest = generation.SetDigest
+	descriptor.EndpointSignature = nil
+	lastDigest, lastIssued, found, err := p.Relay.LastRelayDescriptor()
+	if err != nil {
+		return HTTPSActivation{}, err
+	}
+	signed, err := SignDescriptorWith(descriptor, p.Signer)
+	if err != nil {
+		return HTTPSActivation{}, err
+	}
+	digest, err := DescriptorDigest(signed)
+	if err != nil {
+		return HTTPSActivation{}, err
+	}
+	if found && digest != lastDigest && signed.IssuedAtUnix <= lastIssued {
+		if lastIssued == ^uint64(0) || lastIssued+1 > uint64(now.Unix()) || lastIssued+1 >= descriptor.ExpiresAtUnix {
+			return HTTPSActivation{}, errors.New("relay descriptor issue time cannot advance yet")
+		}
+		descriptor.IssuedAtUnix = lastIssued + 1
+		signed, err = SignDescriptorWith(descriptor, p.Signer)
+		if err != nil {
+			return HTTPSActivation{}, err
+		}
+		digest, err = DescriptorDigest(signed)
+		if err != nil {
+			return HTTPSActivation{}, err
+		}
+	}
+	if err := Bind(p.Delegation, signed, p.Policy, now); err != nil {
+		return HTTPSActivation{}, err
+	}
+	descriptorJSON, err := EncodeDescriptorJSON(signed)
+	if err != nil {
+		return HTTPSActivation{}, err
+	}
+	if err := p.Relay.PutRelayEvidence(signed, descriptorJSON, append([]byte(nil), generation.JSON...)); err != nil {
+		return HTTPSActivation{}, err
+	}
+	return HTTPSActivation{Descriptor: signed, DescriptorJSON: descriptorJSON, DescriptorDigest: digest}, nil
 }

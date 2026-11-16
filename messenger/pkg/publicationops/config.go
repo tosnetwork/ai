@@ -25,6 +25,12 @@ import (
 	"github.com/tosnetwork/tosutils-go/liteclient"
 )
 
+// Publication modes.
+const (
+	ModeNetwork = "network"
+	ModeRelay   = "relay"
+)
+
 const (
 	ConfigSchema      = "tos.messaging.publication-operator.v1"
 	MaxConfigBytes    = 32 << 10
@@ -36,7 +42,11 @@ const (
 // daemon's public-generation publisher. Identity and authority fields are not
 // configurable here; Assemble derives them from the finalized delegation.
 type Config struct {
-	Schema                  string   `json:"schema"`
+	Schema string `json:"schema"`
+	// Mode is "network" (the default when empty): HTTPS objects plus a DHT
+	// locator; or "relay": the descriptor and prekey set are published only
+	// as relay identity evidence, with no HTTPS root and no DHT.
+	Mode                    string   `json:"mode,omitempty"`
 	HTTPSPublicationRoot    string   `json:"https_publication_root"`
 	DHTGlobalConfigPath     string   `json:"dht_global_config_path"`
 	DescriptorPolicyPath    string   `json:"descriptor_policy_path"`
@@ -84,7 +94,18 @@ func (c Config) Validate() error {
 	if c.Schema != ConfigSchema {
 		return errors.New("unsupported publication operator configuration schema")
 	}
-	for _, path := range []string{c.HTTPSPublicationRoot, c.DHTGlobalConfigPath, c.DescriptorPolicyPath, c.EndpointSignerSocket} {
+	paths := []string{c.HTTPSPublicationRoot, c.DHTGlobalConfigPath, c.DescriptorPolicyPath, c.EndpointSignerSocket}
+	switch c.Mode {
+	case "", ModeNetwork:
+	case ModeRelay:
+		if c.HTTPSPublicationRoot != "" || c.DHTGlobalConfigPath != "" {
+			return errors.New("relay publication has no HTTPS root and no DHT")
+		}
+		paths = []string{c.DescriptorPolicyPath, c.EndpointSignerSocket}
+	default:
+		return errors.New("publication mode must be network or relay")
+	}
+	for _, path := range paths {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return errors.New("publication operator paths must be absolute and clean")
 		}
@@ -156,14 +177,21 @@ func Assemble(config Config, delegation identity.Delegation) (*Runtime, error) {
 	if err := policy.Permits(descriptor); err != nil {
 		return nil, errors.New("publication descriptor template exceeds committed policy: " + err.Error())
 	}
-	objects, err := directory.OpenHTTPSPublisher(config.HTTPSPublicationRoot)
-	if err != nil {
-		return nil, errors.New("open HTTPS publication root: " + err.Error())
-	}
 	signer, err := signerapi.NewClient(config.EndpointSignerSocket, delegation.IdentityPublicKey,
 		time.Duration(config.SignerTimeoutSeconds)*time.Second)
 	if err != nil {
 		return nil, err
+	}
+	if config.Mode == ModeRelay {
+		// The daemon installs its relay evidence sink before validating; the
+		// publisher has no HTTPS objects and no locator publisher.
+		return &Runtime{Publisher: &directory.GenerationPublisher{Signer: signer, Delegation: delegation,
+			Policy: policy, PublishInterval: time.Duration(config.PublishIntervalSeconds) * time.Second,
+			Descriptor: descriptor}}, nil
+	}
+	objects, err := directory.OpenHTTPSPublisher(config.HTTPSPublicationRoot)
+	if err != nil {
+		return nil, errors.New("open HTTPS publication root: " + err.Error())
 	}
 	client, err := openDHT(config.DHTGlobalConfigPath)
 	if err != nil {

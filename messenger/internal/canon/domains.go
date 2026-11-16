@@ -205,6 +205,24 @@ const (
 	// DomainHTTPSDeliveryAck authenticates a recipient Endpoint's durable
 	// acceptance of one encrypted device copy.
 	DomainHTTPSDeliveryAck = "tos.messaging.https-delivery-ack.v1\x00"
+	// DomainRelayFrame prefixes one padded relay carriage frame.
+	DomainRelayFrame = "tos.messaging.relay-frame.v1\x00"
+	// DomainRelayObject derives the digest of the object a relay frame
+	// carries, so the parts of one object share one commitment.
+	DomainRelayObject = "tos.messaging.relay-object.v1\x00"
+	// DomainRelayEvidence prefixes the locator-free relay identity evidence:
+	// delegation, descriptor policy, Contact Descriptor and prekey set.
+	DomainRelayEvidence = "tos.messaging.relay-evidence.v1\x00"
+	// DomainRelayDelivery prefixes the binary device copy a relay frame of
+	// kind 1 carries.
+	DomainRelayDelivery = "tos.messaging.relay-delivery.v1\x00"
+	// DomainRelayDeliveryAck authenticates a recipient Endpoint's outcome for
+	// one relay-carried device copy. It is distinct from the HTTPS ack domain
+	// so an ack never verifies on the other route.
+	DomainRelayDeliveryAck = "tos.messaging.relay-delivery-ack.v1\x00"
+	// DomainRelayIdempotency derives the carrier idempotency key of one
+	// relay deposit generation.
+	DomainRelayIdempotency = "tos.messaging.relay-idempotency.v1\x00"
 	// DomainOutboundAttachmentIntent binds exact plaintext evidence and the
 	// operator-selected route/storage policy before streaming encryption begins.
 	DomainOutboundAttachmentIntent = "tos.messaging.outbound-attachment-intent.v1\x00"
@@ -277,6 +295,12 @@ var Domains = []string{
 	DomainOutboundIntent,
 	DomainDeliveryCopy,
 	DomainHTTPSDeliveryAck,
+	DomainRelayFrame,
+	DomainRelayObject,
+	DomainRelayEvidence,
+	DomainRelayDelivery,
+	DomainRelayDeliveryAck,
+	DomainRelayIdempotency,
 	DomainOutboundAttachmentIntent,
 	DomainAttachmentCorpusManifest,
 	DomainAttachmentCorpusReport,

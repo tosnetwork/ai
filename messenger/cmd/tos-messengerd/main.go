@@ -83,6 +83,10 @@ func run(configPath, publicationPath, attachmentPath, httpsListen, httpsCert, ht
 	} else if httpsConfigured {
 		return fmt.Errorf("HTTPS ingress flags require transport https-bootstrap")
 	}
+	relayPublication := publicationPath != "" && publicationConfig.Mode == publicationops.ModeRelay
+	if (config.Transport == daemon.TransportAgentPacketRelay) != relayPublication {
+		return fmt.Errorf("agent-packet-relay needs publication operator resources in relay mode, and only it uses them")
+	}
 	if checkOnly {
 		fmt.Printf("configuration is valid: state_dir=%s runtime_socket=%s owner_socket=%s prekey_socket=%s transport=%s\n",
 			config.StateDir, config.SocketPath, config.OwnerSocketPath, config.Publication.DeviceSocketPath, config.Transport)
@@ -138,6 +142,9 @@ func run(configPath, publicationPath, attachmentPath, httpsListen, httpsCert, ht
 		instance.SocketPath(), instance.OwnerSocketPath(), instance.PrekeySocketPath(), config.StateDir, config.Transport)
 	if config.Transport == daemon.TransportNone {
 		fmt.Println("no transport is configured: outbound events are queued and not sent")
+	}
+	if socket := instance.RelaySocketPath(); socket != "" {
+		fmt.Printf("relay_carrier_socket=%s\n", socket)
 	}
 	var httpsServer *http.Server
 	httpsErrors := make(chan error, 1)

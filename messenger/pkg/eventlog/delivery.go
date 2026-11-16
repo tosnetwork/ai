@@ -47,7 +47,10 @@ func (d Delivery) Ciphertext() ([]byte, error) {
 }
 
 // DeliverySchema is the on-disk record schema for an outbound event.
-const DeliverySchema = "tos.messaging.delivery-journal.v1"
+//
+// v2 adds the relay carriage state and its deposit generations. The project is
+// pre-launch, so a v1 record is unreadable rather than migrated.
+const DeliverySchema = "tos.messaging.delivery-journal.v2"
 
 // DeliveryState is where one outbound event stands.
 type DeliveryState string
@@ -64,7 +67,27 @@ const (
 	// StateAbandoned means no further attempt can succeed, or the event
 	// outlived its own expiry.
 	StateAbandoned DeliveryState = "abandoned"
+	// StateCarried means a relay durably holds the copy and no recipient
+	// device has acknowledged it yet. Storage is not delivery: only a verified
+	// Endpoint-signed delivery ack moves it to delivered, and a carried copy
+	// past its re-deposit time is due again.
+	StateCarried DeliveryState = "carried"
 )
+
+// MaxRelayGenerations bounds the deposit generations one delivery records.
+// Older generations are dropped from the record; their envelopes are already
+// withdrawn or expired at the relays.
+const MaxRelayGenerations = 16
+
+// RelayGeneration is one accepted relay deposit of a delivery: the own
+// evidence and card the frame carried, and when a relay accepted it.
+type RelayGeneration struct {
+	Generation             uint32 `json:"generation"`
+	DescriptorDigest       string `json:"descriptor_digest"`
+	DescriptorIssuedAtUnix uint64 `json:"descriptor_issued_at_unix"`
+	CardDigest             string `json:"card_digest,omitempty"`
+	DepositedAtUnix        uint64 `json:"deposited_at_unix"`
+}
 
 // ErrNotPending reports a transition on a delivery that is no longer waiting.
 var ErrNotPending = errors.New("delivery is not awaiting an attempt")
@@ -106,6 +129,16 @@ type Delivery struct {
 	CreatedAtUnix       uint64        `json:"created_at_unix"`
 	ExpiresAtUnix       uint64        `json:"expires_at_unix"`
 	SettledAtUnix       uint64        `json:"settled_at_unix,omitempty"`
+	// Generation is the last relay deposit generation a relay accepted; zero
+	// for a copy never carried. NextRedepositAtUnix is when a carried copy is
+	// due again, zero once its own expiry comes first.
+	Generation          uint32            `json:"relay_generation,omitempty"`
+	LastDepositAtUnix   uint64            `json:"last_deposit_at_unix,omitempty"`
+	NextRedepositAtUnix uint64            `json:"next_redeposit_at_unix,omitempty"`
+	Generations         []RelayGeneration `json:"relay_generations,omitempty"`
+	// RejectedDescriptorDigest is the own descriptor the recipient last
+	// answered descriptor-expired for.
+	RejectedDescriptorDigest string `json:"rejected_descriptor_digest,omitempty"`
 }
 
 // Outbound is a request to deliver one event.
@@ -225,13 +258,20 @@ func (j *Journal) Due(now time.Time) ([]Delivery, error) {
 		if err != nil {
 			continue
 		}
-		if delivery.State != StatePending {
-			continue
-		}
 		if delivery.ExpiresAtUnix <= seconds {
 			continue
 		}
-		if delivery.NextAttemptAtUnix > seconds {
+		switch delivery.State {
+		case StatePending:
+			if delivery.NextAttemptAtUnix > seconds {
+				continue
+			}
+		case StateCarried:
+			// A carried copy is due only for its next re-deposit.
+			if delivery.NextRedepositAtUnix == 0 || delivery.NextRedepositAtUnix > seconds {
+				continue
+			}
+		default:
 			continue
 		}
 		// A delivery another sweep is already attempting is not due. The lease
@@ -242,8 +282,8 @@ func (j *Journal) Due(now time.Time) ([]Delivery, error) {
 		due = append(due, delivery)
 	}
 	sort.Slice(due, func(first, second int) bool {
-		if due[first].NextAttemptAtUnix != due[second].NextAttemptAtUnix {
-			return due[first].NextAttemptAtUnix < due[second].NextAttemptAtUnix
+		if due[first].dueAt() != due[second].dueAt() {
+			return due[first].dueAt() < due[second].dueAt()
 		}
 		return due[first].Key() < due[second].Key()
 	})
@@ -284,7 +324,7 @@ func (j *Journal) ClaimForSend(deliveryID, attemptID string, now time.Time, leas
 		}
 		return Delivery{}, err
 	}
-	if delivery.State != StatePending {
+	if delivery.State != StatePending && delivery.State != StateCarried {
 		return Delivery{}, ErrNotPending
 	}
 	current := uint64(now.Unix())
@@ -324,18 +364,29 @@ func (j *Journal) Failed(deliveryID, attemptID string, code fault.Code, now time
 		}
 		return Delivery{}, err
 	}
-	if delivery.State != StatePending {
+	if delivery.State != StatePending && delivery.State != StateCarried {
 		return Delivery{}, ErrNotPending
 	}
 	if err := holdsAttempt(delivery, attemptID); err != nil {
 		return Delivery{}, err
 	}
-	seconds := uint64(now.Unix())
-	delivery.Attempts++
 	delivery.AttemptID = ""
 	delivery.AttemptExpiresAt = 0
-	delivery.LastCode = code
+	return j.commitDelivery(path, applyFailure(delivery, code, uint64(now.Unix())))
+}
 
+// applyFailure counts one failed attempt and applies the retry disposition of
+// its code. A carried copy whose re-deposit failed returns to pending: it
+// keeps its ciphertext and generation, and is deposited again on schedule.
+func applyFailure(delivery Delivery, code fault.Code, seconds uint64) Delivery {
+	if delivery.Attempts < ^uint32(0) {
+		delivery.Attempts++
+	}
+	delivery.LastCode = code
+	delivery.NextRedepositAtUnix = 0
+	if delivery.State == StateCarried {
+		delivery.State = StatePending
+	}
 	retry := fault.NextCode(code, int(delivery.Attempts))
 	switch {
 	case delivery.ExpiresAtUnix <= seconds:
@@ -361,7 +412,7 @@ func (j *Journal) Failed(deliveryID, attemptID string, code fault.Code, now time
 		delivery.NextAttemptAtUnix = 0
 		delivery.SettledAtUnix = seconds
 	}
-	return j.commitDelivery(path, delivery)
+	return delivery
 }
 
 // Delivered records that a recipient device durably accepted the event. Only
@@ -474,7 +525,7 @@ func (j *Journal) settle(deliveryID, attemptID string, state DeliveryState, now 
 		}
 		return Delivery{}, err
 	}
-	if delivery.State != StatePending && delivery.State != StateHeld {
+	if delivery.State != StatePending && delivery.State != StateHeld && delivery.State != StateCarried {
 		return Delivery{}, ErrNotPending
 	}
 	if attemptID != "" {
@@ -573,8 +624,23 @@ func readDelivery(path string) (Delivery, error) {
 	}
 	switch delivery.State {
 	case StatePending, StateHeld, StateDelivered, StateAbandoned:
+	case StateCarried:
+		if delivery.CiphertextBase64 == "" || delivery.Generation == 0 {
+			return Delivery{}, errors.New("invalid delivery record")
+		}
 	default:
 		return Delivery{}, errors.New("invalid delivery record")
+	}
+	if len(delivery.Generations) > MaxRelayGenerations ||
+		delivery.RejectedDescriptorDigest != "" && !canon.ValidDigest(delivery.RejectedDescriptorDigest) {
+		return Delivery{}, errors.New("invalid delivery record")
+	}
+	for _, generation := range delivery.Generations {
+		if generation.Generation == 0 || generation.Generation > delivery.Generation ||
+			!canon.ValidDigest(generation.DescriptorDigest) ||
+			generation.CardDigest != "" && !canon.ValidDigest(generation.CardDigest) {
+			return Delivery{}, errors.New("invalid delivery record")
+		}
 	}
 	if delivery.LastCode != "" && !fault.Known(delivery.LastCode) {
 		return Delivery{}, errors.New("invalid delivery record")
@@ -641,18 +707,25 @@ func (j *Journal) ExpireDeliveries(now time.Time) (int, error) {
 		if err != nil {
 			continue
 		}
-		if delivery.State != StatePending && delivery.State != StateHeld {
+		if delivery.State != StatePending && delivery.State != StateHeld && delivery.State != StateCarried {
 			continue
 		}
 		if delivery.ExpiresAtUnix > seconds {
 			continue
 		}
+		carried := delivery.State == StateCarried || delivery.Generation != 0
 		delivery.State = StateAbandoned
 		delivery.NextAttemptAtUnix = 0
+		delivery.NextRedepositAtUnix = 0
 		delivery.AttemptID = ""
 		delivery.AttemptExpiresAt = 0
 		delivery.SettledAtUnix = seconds
-		if delivery.LastCode == "" {
+		switch {
+		case carried:
+			// A relay held it and no device acknowledged it within its own
+			// lifetime: the owner surface says so rather than losing it.
+			delivery.LastCode = fault.CodeRetentionExceeded
+		case delivery.LastCode == "":
 			delivery.LastCode = fault.CodeTimeout
 		}
 		if _, err := j.commitDelivery(path, delivery); err != nil {
