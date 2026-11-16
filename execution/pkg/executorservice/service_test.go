@@ -487,12 +487,47 @@ func TestCallerThatNeverReadsItsResponseCannotHoldAConnection(t *testing.T) {
 	}
 	_ = stalled.CloseWrite()
 	eventually(t, "the run", func() bool { return backend.runs() == 1 })
+	// The run happens inside the stalled connection's handler, so its slot
+	// is held from here; only the write deadline can end that handler.
+	// The slot count is read directly: probing with another call would
+	// itself take the only slot, and the server frees a slot just after
+	// the caller has read the end of its response, so a probe's own slot
+	// could still be held when the next call arrives.
 	eventually(t, "the slot held by the stalled reader", func() bool {
-		_, err := service.client.Describe(background(t))
-		return err == nil
+		service.server.mutex.Lock()
+		defer service.server.mutex.Unlock()
+		return service.server.connections == 0
 	})
-	// Its outcome was journaled all the same.
-	if result, err := service.client.Execute(background(t), request); err != nil || backend.runs() != 1 ||
+	// The deadline, not a completed delivery, freed it: what reached the
+	// stalled reader is a cut-short response.
+	_ = stalled.SetReadDeadline(time.Now().Add(10 * time.Second))
+	raw, err := readHeader(stalled, MaxResponseHeaderBytes)
+	if err != nil {
+		t.Fatalf("stalled reader's response header: %v", err)
+	}
+	var response responseHeader
+	if err := decodeStrict(raw, &response); err != nil || response.Status != StatusOK || response.Outcome == nil {
+		t.Fatalf("stalled reader's response: err=%v %s", err, raw)
+	}
+	received, err := io.ReadAll(stalled)
+	if err != nil {
+		t.Fatalf("stalled reader's response body: %v", err)
+	}
+	if delivered := response.Outcome.Artifact.SizeBytes + response.Outcome.Report.SizeBytes; uint64(len(received)) >= delivered {
+		t.Fatalf("the stalled reader received the whole response: %d of %d bytes", len(received), delivered)
+	}
+	// The one slot is free for the next caller. A describe answer is far
+	// smaller than the socket buffer, so the short write deadline cannot
+	// cut it.
+	if _, err := service.client.Describe(background(t)); err != nil {
+		t.Fatalf("describe after the stalled reader: %v", err)
+	}
+	// Its outcome was journaled all the same. It is fetched from a server
+	// on the same state with the default write deadline, because the 8 MiB
+	// answer is not something a caller must read within the short one.
+	service.stop(t)
+	restarted := startServiceIn(t, filepath.Dir(service.state), backend, func(config *Config) { config.MaxConnections = 1 })
+	if result, err := restarted.client.Execute(background(t), request); err != nil || backend.runs() != 1 ||
 		len(result.Artifact) < 8<<20 {
 		t.Fatalf("after the stalled reader: err=%v runs=%d", err, backend.runs())
 	}
