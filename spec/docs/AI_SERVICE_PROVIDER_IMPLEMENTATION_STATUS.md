@@ -257,7 +257,8 @@ Not covered by these records:
 
 - two physical machines or an internet path (covered by the multi-host
   records below), or a relay operated by anyone but the core team;
-- a second relay in the card carrying traffic while the first is down;
+- a second relay in the card carrying traffic while the first is down
+  (since covered live by the two-test-relay records below);
 - live adversarial cases: tampered, forged, foreign and replayed envelopes,
   quota pressure, and the section 8.6 public-ID race. No live adversarial run
   was performed. The two-host record lists by name the merged in-repository
@@ -350,7 +351,8 @@ Proven by these records:
 Not proven by these records:
 
 - **The relay is operated by us**, not by a third party, and there is a
-  single relay: no second relay in the card.
+  single relay: no second relay in the card (covered by the two-test-relay
+  records below).
 - **The chain is a local test network.** Its three validators run on the
   provider's host, and the buyer reaches their JSON-RPC only through an SSH
   reverse tunnel to its loopback. This is not a public chain.
@@ -364,6 +366,62 @@ Not proven by these records:
   the public-ID race, key expiry and rotation, and node crash windows are
   covered by unit tests only, or not at all, as listed for the namespace
   record above.
+
+## Agent Packet Relay — two deployed test relays, one of them down for a whole sale
+
+Live evidence over the public internet against two long-running test relays
+that the core team deployed (memo plan `relay-official`, test relays by IP
+with a pinned private CA; not production). It does not qualify as public or
+independent acceptance and is not Gate O evidence (relay spec section 12).
+
+| Record | What it proves | Script commit | Result |
+|---|---|---|---|
+| [`openfox-relay-two-relays-both-up-20261115.json`](../deployments/openfox-relay-two-relays-both-up-20261115.json) (sha256 `4a8565a188338d48cc56270e62cb59acf5d521943cbb7a0545f61bc3964b2ce4`, copied byte for byte) | `openfox` `scripts/service-relay-multi-host-e2e.sh` in external-relays mode, 2026-11-15 23:45 to 23:51 UTC: both relays up; every journaled envelope of both nodes names both relays and is accepted by each | `openfox` `9d021351` (head of tosnetwork/openfox#49, merged with a merge commit as `3e26dc24`, so it is reachable from `main`; clean tree) | ALL PASS, 72 of 72; `qualifies_as_public_acceptance: false` |
+| [`openfox-relay-two-relays-first-down-20261115.json`](../deployments/openfox-relay-two-relays-first-down-20261115.json) (sha256 `87418edb4c2f0c7790b023b698a42be7d4c565171f5866914e4837084e9fd5fe`, copied byte for byte) | The same script and commits, 2026-11-15 23:51 to 23:57 UTC: relay-1 stopped for the whole sale | `openfox` `9d021351` | ALL PASS, 71 of 71; `qualifies_as_public_acceptance: false` |
+
+Both runs use `tos` `5af405dcb`. Both relays run the daemon built from `ai`
+`01488fff` (`CGO_ENABLED=0`, `-trimpath`, sha256 `f8ff662f…`, byte-identical
+on both relay hosts) as a dynamic non-root user (uid 64434, recorded in both
+files) with the TLS key as a systemd credential. Two deployment facts are
+not in these records but were checked when the relays were installed (gate
+G1 of the memo plan `relay-official`): the unit is the shipped one plus a
+limits drop-in, and inside its sandbox `/opt`, `/root` and `/home` are
+unreadable (`InaccessiblePaths`). Public addresses, SSH
+targets and key paths are replaced by labels in the records.
+
+Proven by these records, in addition to everything the single-relay
+multi-host records above prove (no direct path, relay-only carriage, a
+pinned private CA refused by system trust, exactly one execution, an exact
+withdraw, no plaintext at the relays):
+
+- **Two relays in every card, on two hosts.** Four distinct machines: the
+  provider with the local chain, a buyer VPS, and one VPS per relay. Both
+  nodes name both relay URLs and pin the test CA; preflight's trust check
+  passes for each relay.
+- **Every envelope at every relay while both are up.** Every task, result
+  and acknowledgement envelope journaled by either node names both relays
+  and was accepted by both.
+- **A second relay carries the sale while the first is down.** relay-1 was
+  stopped before the purchase and stayed stopped until the last sale step:
+  its unit reported inactive with unchanged start and stop timestamps, it
+  answered nothing, and no journaled envelope of either node lists it as
+  accepted although every card names it. relay-2 carried every envelope.
+  During the same run relay-2 was itself stopped while the result was
+  pending, the result deposit failed and stayed journaled, and after
+  relay-2 restarted on its state directory the result was delivered.
+
+Not proven by these records:
+
+- **Both relays are operated by us and sit at one provider.** No
+  third-party relay and no second provider or region.
+- **The chain is a local test network**, reached by the buyer through an SSH
+  tunnel; **the provider runs on our host**; **the buyer ran as uid 0** on
+  its VPS.
+- **No public CA and no DNS name.** The relays are addressed by IP with a
+  pinned private test CA.
+- **No live adversarial run.** Adversarial envelopes, quota pressure, the
+  public-ID race, key expiry and rotation, and node crash windows are
+  covered by unit tests only, or not at all.
 
 ## Not delivered by these changes
 

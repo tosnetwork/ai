@@ -913,14 +913,21 @@ Live evidence:
   [`openfox-relay-multi-host-buyer-b-20261115.json`](../deployments/openfox-relay-multi-host-buyer-b-20261115.json),
   runs across three physical machines over the public internet. The relay
   is operated by the core team and has a pinned private CA, and the chain
-  is a local test network.
+  is a local test network;
+- [`openfox-relay-two-relays-both-up-20261115.json`](../deployments/openfox-relay-two-relays-both-up-20261115.json)
+  and
+  [`openfox-relay-two-relays-first-down-20261115.json`](../deployments/openfox-relay-two-relays-first-down-20261115.json),
+  runs across four physical machines against two deployed test relays, both
+  up and then with the first relay down for the whole sale. Both relays are
+  operated by the core team at one provider, by IP with a pinned private CA,
+  and the chain is a local test network.
 
 They are described in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`.
 
 | Item | Status |
 |---|---|
 | 1. Two hosts | **Covered on two physical machines, with a relay operated by the core team.** The provider (behind NAT, no inbound port) and the buyer (on a separate VPS; two runs with two different VPSs) complete one paid task → result → result-ack lifecycle with exactly one execution. Carriage is only through a relay on a third machine over the public internet, with TLS against a CA both nodes pin. From the buyer host, no TCP connection to the provider host opens. The chain is a local test network, reached by the buyer only through an SSH tunnel. The namespace run additionally shows buyer-to-provider traffic dropped in both directions on one host. Not covered: a relay or provider host operated by anyone else, or a public chain. |
-| 2. Relay outage and recovery | **First half covered.** The relay is stopped while it holds the task and restarted from its durable store (namespace run). It is stopped while the result is pending, both in the namespace run and on the public relay host in the multi-host runs: the result deposits fail and stay journaled, and the courier's retry delivers it after the restart. No packet is lost and nothing is executed twice. Not covered: a second relay in the card carrying traffic while the first is down. |
+| 2. Relay outage and recovery | **First half covered.** The relay is stopped while it holds the task and restarted from its durable store (namespace run). It is stopped while the result is pending, both in the namespace run and on the public relay host in the multi-host runs: the result deposits fail and stay journaled, and the courier's retry delivers it after the restart. No packet is lost and nothing is executed twice. A second relay in the card carrying traffic while the first is down is covered live by `openfox-relay-two-relays-first-down-20261115.json` (two test relays operated by the core team), with `openfox-relay-two-relays-both-up-20261115.json` as the both-up control. |
 | 3. Crash windows | Not covered by live evidence. |
 | 4. Adversarial envelopes | Unit tests only (listed by name in the record); no live adversarial run. |
 | 5. Quota exhaustion | Unit tests only (listed by name in the record); no live run. |
