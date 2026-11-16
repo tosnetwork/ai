@@ -101,13 +101,13 @@ reach the rail inbox inside a chat copy, bypassing the key-purpose rule of 2.2.
 ```text
 relay_frame =
   D("tos.messaging.relay-frame.v1")   29 bytes
-  frame_kind      u8    1 = copy, 2 = delivery-ack, 3 = room (M-R2)
+  frame_kind      u8    1 = copy, 2 = delivery-ack, 3 = room (M-R2), 4 = evidence
   part_index      u8    0 .. part_count-1
-  part_count      u8    1 .. 8; kinds 1 and 2 require 1
+  part_count      u8    1 .. 8; kinds 1, 2 and 4 require 1 (kind 4: empty part)
   object_digest   32    SHA-256(D("tos.messaging.relay-object.v1") || object)
   card_length     u16   0, or 1 .. 9,216
   card            exact key-card packet JSON (2.3)
-  evidence_length u16   0, or 1 .. 16,384
+  evidence_length u16   1 .. 18,432 (required in kinds 1, 2, 4)
   evidence        the sender's current relay identity evidence (2.5)
   part_length     u32
   part            this part of the object
@@ -247,63 +247,118 @@ after days would have no fresh evidence for its retained messages.
 
 **Decision.** A locator says how to reach a peer over a network route. On
 `admission.RouteRelay` the route is the chat card, so the relay route MUST
-NOT require a locator.
+NOT require a locator. Everything else the network route checks, on either
+side, keeps a relay equivalent on the same side. That is why this section has
+one shape: a single read-only check, used identically by sender and receiver,
+and a separate commit that runs only after admission.
 
-What is skipped on `RouteRelay` is exactly the locator stage:
+**Skipped on `RouteRelay`**, exactly the locator stage:
 
 - the locator fetch and `VerifyLocator` (`refresh.go:117-128`);
 - `MatchesDescriptor(locator, descriptor)` (`locator.go:320`, called at
   `refresh.go:136`);
 - the locator's term in the refresh time.
 
-What is still required, and verified exactly as the refresh chain does:
+**Relay identity evidence** is the four remaining objects of the refresh
+chain, under schema `tos.messaging.relay-evidence.v1`:
 
-1. the Endpoint delegation: committed by the finalized, live Agent and inside
-   its window (`identity/delegation.go:256-310`, at most 365 days, `:44`),
-   re-read from finalized state on every use;
-2. the descriptor-policy document reproducing the digest the delegation
-   commits;
-3. the descriptor, signed by that Endpoint and unexpired (at most 7 days,
-   `messenger/pkg/directory/descriptor.go:35`, `:311`);
-4. the prekey bundle set matching the descriptor's digest, admitted through
-   the rollback and revocation boundary (`refresh.go:26-28`). Each bundle
-   lives at most 30 days (`messenger/pkg/e2ee/bundle.go:31`), and V1 has one
-   device (D3).
+| Object | Network-route bound | Relay bound | Vector size |
+|---|---|---|---|
+| Endpoint delegation | 64 KiB (`file_delegations.go:13`) | 4,096 | 1,012 |
+| Descriptor policy | 4 KiB (`policy_json.go:10`) | 1,024 | 153 |
+| Contact Descriptor | 32 KiB (`https_source.go:24`) | 4,096 | 1,321 |
+| Prekey bundle set, one device (D3) | 128 KiB | 8,192 | 827 per bundle |
 
-Items 1–4, encoded strictly under schema `tos.messaging.relay-evidence.v1`
-and at most 16,384 bytes, are the **relay identity evidence**. The descriptor
-still expires within 7 days, so it is renewed in band.
+Vector sizes are from `messenger/internal/vectors/testdata/vectors.json`. One
+bundle's material is at most 4 KiB (`messenger/pkg/e2ee/bundle.go:27`), which
+is 5,462 bytes in base64 plus its fields, so 8,192 bytes covers one device.
+
+**Chosen: a derived cap, not a bare limit.** The evidence is at most
+**18,432 bytes**: the four relay bounds plus 1,024 bytes for the schema and
+length prefixes. The real objects are four to eight times below their relay
+bounds, so lowering the per-object bounds costs nothing. A node whose own
+objects exceed a relay bound cannot publish relay evidence: export fails with
+the fixed error `relay-evidence-too-large`. Import, and an in-band frame,
+refuse such evidence the same way. The codec vectors include an over-bound
+object of each kind.
+
+**`CheckPeer`: one read-only check, the same on both sides.**
+`CheckPeer(peer Agent, evidence, pin, now)` passes only if all of these hold:
+
+1. The delegation, re-read from finalized state on every call, is still
+   committed by the live Agent and inside its window
+   (`identity/delegation.go:256-310`, at most 365 days, `:44`). Its Endpoint is
+   the one in `pin`.
+2. The policy reproduces the digest the delegation commits.
+3. The descriptor is signed by that Endpoint and unexpired
+   (`messenger/pkg/directory/descriptor.go:35`, `:311`).
+4. The bundle set matches the descriptor's digest and contains the device in
+   `pin`.
+5. The set is not a rollback against the stored boundary. This is read-only:
+   the boundary is read, and nothing is written.
+
+The `pin` is the session's pinned peer Endpoint and device, or on first
+contact the bootstrap's sender bundle. `CheckPeer` writes nothing durable, so
+verifying a stranger's evidence costs no storage and moves no rollback state.
+
+**`CommitPeer`: the only durable step.** It stores the evidence (one per peer,
+the newest descriptor by issue time) and calls `AdmitPublishedSet`
+(`refresh.go:26-28`), and it runs only under the admission rule of 2.3:
+
+- after `carrier.deliver` answers `accepted`, `duplicate` or `held`;
+- or for a peer with an established session;
+- or on contact-file import.
+
+Only provisioned or admitted peers are ever committed.
+
+**Receiver.** `CheckPeer` runs on every frame, using the frame's evidence if
+it carries any and the stored evidence otherwise. This replaces `Ensure` at
+`inbound.go:70` and `:160` on `RouteRelay`.
+
+**Sender.** `CheckPeer` runs on the stored recipient evidence before every
+seal and before every re-deposit on `RouteRelay`. This matches the HTTPS
+route, which re-resolves the peer and requires the pinned device to be current
+on every attempt (`messenger/pkg/daemon/direct_https.go:31-49`), as does the
+reply path (`daemon.go:415-418`). If the check fails, the copy is not sealed
+and not carried (a sealed copy is not re-deposited). It stays `pending` until
+fresher evidence arrives, either in band or from a new contact file, or until
+it expires.
+
+**The freshness window differs from the network route.** A device removed by
+a newer descriptor is noticed on the network route within the 24 h locator
+lifetime. On the relay route it is noticed when the newer evidence arrives,
+and at the latest when the stored descriptor expires (at most 7 days). An
+Endpoint revocation (the delegation is withdrawn on chain) is noticed at once
+on both routes, because check 1 reads finalized state every time.
 
 **In-band renewal.**
 
-- **Sender.** Every frame of kind 1 and 2, including every re-deposit
-  generation, carries the sender's current evidence. A re-deposit is a new
-  frame and a new seal anyway (a fresh ack secret, 5.3), so the outer frame
-  takes fresh evidence while the inner Messenger ciphertext stays
-  byte-identical. The daemon keeps its own descriptor fresh through its
-  existing publication schedule, written to the export sink (section 9).
-- **Receiver.** Evidence verifies one frame on its own merits, against
-  finalized state. It is *stored* (replacing the peer's older evidence) only
-  under the admission rule for cards (2.3):
-  - after `carrier.deliver` answers `accepted`, `duplicate` or `held`, or for
-    a peer with an established session;
-  - at most one stored evidence per peer, the newest by descriptor issue time;
-  - only for provisioned or admitted peers.
+- **Every frame carries evidence.** Every frame of kind 1, 2 and 4 carries the
+  sender's current evidence, including every re-deposit generation. A
+  re-deposit is a new frame and seal anyway (a fresh ack secret, 5.3), so the
+  outer frame takes fresh evidence while the inner ciphertext stays
+  byte-identical. The daemon keeps its own descriptor fresh on its existing
+  publication schedule.
+- **Kind 4 (`evidence`) frames.** A kind-4 frame carries no object, only
+  evidence and optionally a card. When a node publishes a new descriptor, for
+  example on restart after an absence, it sends one kind-4 frame to each peer
+  it has an established session with, at most one per peer per descriptor.
+  Without this, two peers that each hold the other's expired evidence would
+  wait on each other forever. A kind-4 frame gets a relay ack and no delivery
+  ack, and is committed only for established peers. It counts against the
+  in-flight cap of section 7.
+- **Retained message whose evidence expired.** The receiver accepts the
+  message if the frame's evidence passes `CheckPeer`. Otherwise it answers a
+  signed `rejected` delivery ack with `descriptor-expired`
+  (`messenger/pkg/fault/fault.go:72`) and relay-acknowledges the frame. The
+  sender's journal records the code and the descriptor digest of the evidence
+  it had sent.
+  - It retries at once only if its current evidence is newer than the one
+    rejected, meaning a different descriptor digest or a later issue time.
+  - Otherwise it waits for its own renewal, with the normal 30 s to 5 min
+    backoff, every attempt counted against the 24-envelope cap.
 
-  A stranger's evidence is never stored.
-- **Retained message whose stored evidence expired.** The receiver accepts it
-  if the frame carries valid current evidence. Otherwise it refuses the frame
-  with a signed `rejected` delivery ack carrying `descriptor-expired`
-  (`messenger/pkg/fault/fault.go:72`) and relay-acknowledges it. The sender's
-  journal records the code. It treats it as retryable: the next generation
-  goes out at once with the sender's current evidence, or, if the sender's own
-  evidence has lapsed, once publication renews it, until the delivery's own
-  expiry.
-- **Sending side.** Sending and re-depositing on the relay route never call
-  `Ensure` for the recipient. A copy is sealed to the device the session pins
-  and carried to the peer's chat card; device revocation is learned from the
-  peer's next evidence. The first seal to a new peer uses the contact-file
-  evidence, which must then be unexpired.
+  The descriptor-expired retry therefore cannot loop on clock skew.
 
 ## 3. Double encryption
 
@@ -331,7 +386,7 @@ keys are independent (2.2).
 and its ciphertext 165 KiB (`messenger/pkg/eventlog/journal.go:65-69`). A
 first-contact bootstrap carries one sender bundle, whose material is at most
 4 KiB (`messenger/pkg/e2ee/bundle.go:27`), plus an initial message of at most
-4 KiB (`bootstrap.go:19`), in JSON. Every frame also carries up to 16,384
+4 KiB (`bootstrap.go:19`), in JSON. Every frame also carries up to 18,432
 bytes of evidence (2.5) and possibly a card, so the relay route's largest
 payload is below Messenger's own: the frame codec derives the exact worst case
 from the maximal card, evidence and bootstrap. The daemon MUST compute the worst-case frame
@@ -468,8 +523,8 @@ generation gets a fresh ack envelope that no tombstone (`410`) suppresses.
 The operator, and since listing and download are open anyone who knows an
 Agent ID (`AGENT_PACKET_RELAY_V1.md:772-779`), learns: the recipient Agent ID
 and chat key ID (which, with a separate chat card, tells chat from task
-traffic to someone who has seen both cards); the frame's padded size bucket,
-through the envelope size of 1.1 and nothing finer; deposit,
+traffic to someone who has seen both cards); the frame bucket, through the
+envelope size of 1.1 and nothing finer; deposit,
 listing, download and ack times. The operator also sees sender and recipient
 IP addresses, kept per stored envelope for quota (`:688-689`), and can infer
 room fan-out from one address depositing to N mailboxes at once.
@@ -487,9 +542,22 @@ privacy regression accepted to reuse the relay unchanged.
 
 Mitigations in V1, none touching the relay:
 
-- **Padding** of the binary frame to buckets of 1, 2, 4, 8, 16, 32, 64,
-  128 KiB and 190,464 bytes. Every frame carries evidence (2.5), so acks and
-  short texts share the same small bucket, typically 16 KiB.
+- **Padding** of the binary frame to frame buckets of 1, 2, 4, 8, 16, 32, 64,
+  128 KiB and 190,464 bytes. Every frame carries evidence (about 3.5 KB with
+  the vector-sized objects of 2.5), so acks and short texts share one frame
+  bucket: typically 8 KiB, or 16 KiB when a card rides along.
+- **Stored sizes** (1.1, at the maximum F):
+
+  | Frame bucket | Stored envelope (bytes) |
+  |---|---|
+  | 8 KiB | 17,729 |
+  | 16 KiB | 28,653 |
+  | 32 KiB | 50,497 |
+
+  An ack therefore stores about 2.2 to 3.5 times what a bare 1 KiB frame
+  would (8,173 bytes). That is the price of carrying evidence everywhere.
+  With frames this size, the relay's 256-envelope count limit binds before
+  its 16 MiB byte limit: 256 × 28,653 bytes ≈ 7.0 MiB.
 - **No extra signals**: no typing or presence over the relay; read state only
   as an ordinary sealed `ReadAck` event.
 - **Prompt relay ack** (15 s poll, openfox `relay_inbound.go:18-37`), so
@@ -537,9 +605,8 @@ Recipient protections, strongest first:
 3. **Sender in-flight cap.** An honest sender holds at most **24** chat
    envelopes per peer Agent at any relay. The count includes every envelope
    still stored, including earlier generations not yet withdrawn and the
-   node's own kind-2 ack envelopes to that peer, which share the same relay
-   bound; the rest stay
-   `pending` and are not deposited. The relay caps one client address at 64
+   node's own kind-2 ack and kind-4 evidence envelopes to that peer, which
+   share the same relay bound; the rest stay `pending` and are not deposited. The relay caps one client address at 64
    envelopes per recipient (`:641`). On shared relays, 24 chat envelopes leave
    at least 40 of that 64 for the same sender's rail deposits (tasks, results,
    acks) to the same peer.
@@ -587,6 +654,16 @@ Record `messenger-relay-one-to-one-<date>.json`, schema
    receives A's retained message, and both continue the conversation, with no
    second out-of-band exchange. The record shows the evidence carried in band
    and that no locator was checked on the relay route.
+   **Descriptor expiry:** B's stored descriptor for A expires while a message
+   of A's is retained. B accepts it because the frame carries fresh evidence,
+   or B answers `descriptor-expired` and A retries once with newer evidence
+   (and only then). This case is a live step if the run can wait out a
+   descriptor lifetime with a test-shortened descriptor. Otherwise it is a
+   named unit test listed in `not_verified`.
+   **Peer revocation:** a test removes B's device through a newer descriptor,
+   and separately withdraws B's Endpoint delegation on chain. After each, A
+   seals and carries no copy to the old device. The copy stays `pending`, and
+   the record shows A's `CheckPeer` refusal.
 6. **Crash windows.** B killed between Messenger commit and relay ack; A killed
    between `carried` and its journal write. One runtime application; on
    restart the same envelope (`200`).
@@ -595,7 +672,8 @@ Record `messenger-relay-one-to-one-<date>.json`, schema
    from the Event sender is refused; a kind-2 ack whose packet sender is not
    the signing Endpoint's Agent is refused; an `agent.packet` Event arriving
    over the relay is refused; an oversize payload is refused before sealing;
-   a refused stranger's in-band card is not stored.
+   a refused stranger's in-band card and evidence are not stored, and its
+   evidence leaves the rollback boundary unchanged.
 8. **Public-ID race.** An observer pre-deposits junk under a chat envelope's ID
    at one relay. The honest deposit there gets `409` and is abandoned at that
    relay, while delivery succeeds through the other relay.
@@ -635,9 +713,12 @@ imports `messenger/`; OpenFox imports both.
 
 **`ai/messenger`**
 
-1. `pkg/relayframe` (new): frame codec (kinds 1–2, buckets, strict decode,
-   worst-case size), copy object codec, relay identity evidence codec (2.5), kind-2 ack preimage/sign/verify with a
-   new `canon.DomainRelayDeliveryAck`; vectors in `internal/vectors`. Imports
+1. `pkg/relayframe` (new): the frame codec (kinds 1, 2 and 4, buckets, strict
+   decode, worst-case size); the copy object codec; the relay identity
+   evidence codec with the per-object relay bounds of 2.5 and
+   `relay-evidence-too-large`; and the kind-2 ack preimage, signing and
+   verification with a new `canon.DomainRelayDeliveryAck`. Vectors go in
+   `internal/vectors`, including an over-bound object of each kind. Imports
    `protocol/pkg/agentpacketseal` for size constants only.
 2. `pkg/carrierapi` (new): strict bounded client and server on mode-0600 Unix
    sockets, modelled on `pkg/prekeyapi`: `carrier.carry` (daemon → OpenFox:
@@ -650,21 +731,33 @@ imports `messenger/`; OpenFox imports both.
    session" lookup; schema bump (pre-launch, no migration).
 4. `pkg/dispatch`: a distinct `carried` sender result routed to the new state
    instead of `Delivered` (`dispatch.go:811-816`), keeping the `nil` contract
-   (`:48-56`); pre-seal size check; re-deposit generations; per-peer cap.
+   (`:48-56`); pre-seal size check; `CheckPeer` before every seal and
+   re-deposit on the relay route; re-deposit generations recording each
+   generation's evidence digest; per-peer cap.
 5. `pkg/daemon`: `TransportAgentPacketRelay` (`config.go:65-68`) with carry and
    listen socket paths; `configureRelayCarriage` beside `configureHTTPSBootstrap`
    (`direct_https.go:61-75`); `ReceiveSealed(…, admission.RouteRelay)` with the
    duplicate lookup before `Open` (`inbound.go:41-51`), the sender check of
    2.4, and refusal of Agent-Packet-carrying Event classes on that route; the
    same-Agent startup check.
-6. `pkg/directory` and daemon config: `contact-files` discovery. This is a
-   locator-free verifier for relay identity evidence: the refresh chain
-   (`refresh.go:16-22`) minus its locator stage, per 2.5. It is fed from the
-   imported contact file and from admitted in-band evidence, and it keeps the
-   newest evidence per peer. On `RouteRelay`, `inbound.go:70` and `:160` use
-   it instead of `Manager.Ensure`. Also a publication sink that writes the
-   node's own current evidence to an export directory on the existing
-   publication schedule.
+6. `pkg/directory` and daemon config: `contact-files` discovery with the two
+   functions of 2.5.
+   - `CheckPeer` is read-only: the refresh chain (`refresh.go:16-22`) minus
+     its locator stage, plus the pin check and a rollback comparison that does
+     not write.
+   - `CommitPeer` stores the newest evidence per peer and calls
+     `AdmitPublishedSet` (`refresh.go:26-28`), only under the admission rule.
+
+   `CheckPeer` replaces `Manager.Ensure` on `RouteRelay` in three places:
+   - on receive, at `inbound.go:70` and `:160`;
+   - on send, before every seal and every re-deposit, with a failure holding
+     the copy `pending` (in `pkg/dispatch`, item 4);
+   - on reply, at `daemon.go:415`.
+
+   Also: kind-4 frames sent on own-descriptor renewal, the `descriptor-expired`
+   retry rule (retry at once only with newer evidence, else 30 s to 5 min
+   backoff), and a publication sink that writes the node's own current
+   evidence to an export directory.
 7. `docs/RUNNING.md`, `docs/ROADMAP.md`: the mode and its status.
 
 **`ai/protocol`**: none. **Relay program, relay spec**: none. **`ai/spec`**:
