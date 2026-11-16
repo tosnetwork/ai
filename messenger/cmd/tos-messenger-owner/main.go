@@ -47,7 +47,7 @@ func run(args []string, output io.Writer) error {
 	}
 	rest := global.Args()
 	if len(rest) == 0 {
-		return errors.New("usage: tos-messenger-owner [-socket PATH] <pending|history|prepare-grant|prepare-deny|prepare-invite|prepare-history|sign|submit>")
+		return errors.New("usage: tos-messenger-owner [-socket PATH] <pending|history|prepare-grant|prepare-deny|prepare-invite|prepare-present-invite|prepare-remove-contact|prepare-history|sign|submit>")
 	}
 	if rest[0] == "sign" {
 		return signCommand(rest[1:], output)
@@ -104,6 +104,24 @@ func run(args []string, output io.Writer) error {
 		return prepare(client, localapi.Request{
 			Op: localapi.OpCreateAdmissionInvite, InvitedAgentID: *agentID, InviteExpiresAtUnix: *expiresAt,
 		}, output)
+	case "prepare-present-invite":
+		set := commandFlags("prepare-present-invite")
+		recipient := set.String("recipient", "", "Agent whose owner issued the invite")
+		token := set.String("token", "", "the invite_ token received out of band")
+		expiresAt := set.Uint64("expires-at", 0, "the invite's absolute Unix expiry")
+		if err := set.Parse(rest[1:]); err != nil || set.NArg() != 0 || *recipient == "" || *token == "" || *expiresAt == 0 {
+			return errors.New("usage: prepare-present-invite -recipient AGENT_ID -token invite_... -expires-at UNIX")
+		}
+		return prepare(client, localapi.Request{
+			Op: localapi.OpPresentInvite, InviteRecipientAgentID: *recipient, InviteToken: *token, InviteExpiresAtUnix: *expiresAt,
+		}, output)
+	case "prepare-remove-contact":
+		set := commandFlags("prepare-remove-contact")
+		agentID := set.String("agent", "", "invited contact to remove")
+		if err := set.Parse(rest[1:]); err != nil || set.NArg() != 0 || *agentID == "" {
+			return errors.New("usage: prepare-remove-contact -agent AGENT_ID")
+		}
+		return prepare(client, localapi.Request{Op: localapi.OpRemoveContact, ContactAgentID: *agentID}, output)
 	case "prepare-history":
 		set := commandFlags("prepare-history")
 		target := set.String("target-device", "", "current destination Device identifier")

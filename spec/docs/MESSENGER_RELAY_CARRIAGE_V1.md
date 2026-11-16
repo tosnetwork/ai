@@ -1199,8 +1199,8 @@ seal already carry any frame; nothing new is resolved on chain).
    in the registry with class `room` (`registry.go:71-74`,
    `envelope/event.go:132-135`); a `sequence` field in `RoomMessage`
    (`kinds_more.go:795-800`).
-7. `pkg/fault`: `room-epoch-gap`, `room-fork`, `room-fork-suspected`, with
-   their dispositions and peer visibility.
+7. `pkg/fault`: `room-epoch-gap`, `room-fork`, `room-fork-suspected` and
+   `room-roster-conflict`, with their dispositions and peer visibility.
 8. `pkg/admission`: room-scoped admission (11.2, D11), after the room
    overlay (`admit.go:304-317`) and with `JudgeMember`, checking the packet
    sender against the committed membership at the Event's epoch; on a spent
@@ -1638,9 +1638,9 @@ authority named in the `room.invite`), with replay refused by the ledger
 
 Rosters are keyed by (roster, room epoch E) and checked as in 11.2: a digest
 among the last 64 applied rosters answers `duplicate`; a second, different
-roster for the same E to the same receiver answers `rejected` with an owner
-notice (a roster conflict, not `room-fork`, since a roster carries no MLS
-state). Welcome replay stays refused (`eventlog/mls.go:98`). On any `rejected` room
+roster for the same E to the same receiver answers `rejected` with the
+dedicated code `room-roster-conflict` and an owner notice naming it (a
+roster conflict, not `room-fork`, since a roster carries no MLS state). Welcome replay stays refused (`eventlog/mls.go:98`). On any `rejected` room
 ack the authority stops that member's queue with an owner notice.
 
 **Receiver, application.** Let e be the object's MLS epoch and r the
@@ -1778,7 +1778,12 @@ Every delivery to that Agent, first contact or an existing session, records
 the token on its `Delivery` and `dispatch` sets `Message.AdmissionToken`, so
 every re-deposit generation carries the same token for the same Event; this
 continues until one delivery to that Agent settles `accepted`, and the token
-is deleted then, or at its expiry. **Rejected: an `admission_token`
+is deleted then, or at its expiry. Only a verified relay delivery ack reports
+`accepted`; the HTTPS route's durable acceptance does not tell `accepted`
+from `duplicate` or `held`, so there the token is kept until its expiry. That
+is safe: the token is single use, and once it is spent the receiver re-runs
+its policy without it, under which the claim has already made the sender a
+contact (D12). **Rejected: an `admission_token`
 field on `messages.send-direct`,** which would hand a bearer the recipient's
 owner issued to the runtime, able to spend it on any Event. **Carried only
 sealed:** inside the kind-1 object in the sealed packet (3), never in a

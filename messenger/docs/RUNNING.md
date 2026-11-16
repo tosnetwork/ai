@@ -94,9 +94,29 @@ tos-messenger-owner -socket /run/tos-messengerd/owner.sock \
 
 Transmit the returned `invite_...` value out of band. The daemon persists only
 its domain-separated SHA-256 digest. The first valid authenticated event binds
-it durably to that sender and Event ID; an exact retry is idempotent, while any
-other event falls back to owner hold. Relay deposit signatures commit the
-opaque token, so a Relay cannot substitute it.
+it durably to that sender and Event ID, and makes that sender a known contact
+in a journaled list that is never swept; an exact retry is idempotent. The
+same token on any other event is spent: the policy is re-run without it, so the
+sender's later events pass as a contact's, and anyone else's meet the policy.
+`prepare-remove-contact -agent agent_...` removes such a contact; its later
+events meet the policy again. Relay deposit signatures commit the opaque
+token, so a Relay cannot substitute it.
+
+On the sending side the owner presents an invite it received, once per
+recipient Agent:
+
+```sh
+tos-messenger-owner -socket /run/tos-messengerd/owner.sock \
+  prepare-present-invite -recipient agent_... -token invite_... -expires-at 1900000000 > prepared.json
+```
+
+followed by `sign` and `submit` as above. The runtime never holds the token.
+Every delivery to that Agent then carries it sealed, every re-deposit of an
+Event the same token, until one delivery is acknowledged `accepted` over the
+relay; the token is then deleted. The HTTPS route cannot tell `accepted` from
+`duplicate` or `held`, so there the token is kept until its expiry, which is
+safe because it is single use and the claim has already made the sender a
+contact.
 
 The escrow funding locator and runtime `quotes.verify` were removed with
 stablecoin escrow: software work settles on the Service Actor rail, and the
