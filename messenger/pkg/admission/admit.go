@@ -329,6 +329,17 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 	// without claiming is what leaves the remedy usable. Denied senders are
 	// not written down either, which keeps a stranger from filling the journal.
 	admission := g.config.Policy.Admits(inbound.Event.SenderAgentID, inbound.Event.Kind)
+	// A sender a claimed invite made a contact is known like a configured
+	// contact; blocked senders were already refused above it.
+	if admission != AdmitAllow && admission != AdmitDeny {
+		invited, err := g.config.Journal.IsInvitedContact(inbound.Event.SenderAgentID)
+		if err != nil {
+			return Decision{}, err
+		}
+		if invited {
+			admission = AdmitAllow
+		}
+	}
 	usedInvite := false
 	if (admission == AdmitRequireAdmission || admission == AdmitInviteOrHold) && inbound.AdmissionToken != "" {
 		// Checking first prevents a stranger with a made-up token from using
@@ -389,6 +400,12 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 			decision := g.refuse(inbound, fault.CodeAdmissionRequired, class)
 			decision.Delegation = delegation
 			return decision, nil
+		}
+		// The claim makes the sender a contact, journaled before the Event is
+		// committed. The exact retry after a crash repeats both as no-ops.
+		if _, err := g.config.Journal.AddInvitedContact(inbound.Event.SenderAgentID, inbound.Event.EventID,
+			inbound.AdmissionToken, time.Unix(int64(inbound.ReceivedAtUnix), 0)); err != nil {
+			return Decision{}, err
 		}
 	}
 	if inbound.Event.Kind == "room.moderation" {

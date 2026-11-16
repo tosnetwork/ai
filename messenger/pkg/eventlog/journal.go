@@ -339,7 +339,7 @@ func openJournalAt(root string, quota Quota) (*Journal, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, errors.New("read legacy MLS ledger directory")
 	}
-	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, mandateDir, budgetDir, mandateBudgetDir, negotiationDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, roomMLSDir, roomStateDir, roomBlobDir, roomObjectChunkDir, roomOutboxDir, roomStagedDir, executionDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayPullDir} {
+	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, mandateDir, budgetDir, mandateBudgetDir, negotiationDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, roomMLSDir, roomStateDir, roomBlobDir, roomObjectChunkDir, roomOutboxDir, roomStagedDir, presentedInviteDir, invitedContactDir, executionDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayPullDir} {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
 			return nil, errors.New("create event journal directory")
 		}

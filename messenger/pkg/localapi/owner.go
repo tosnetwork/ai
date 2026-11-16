@@ -32,6 +32,8 @@ var deciding = map[Operation]struct{}{
 	OpGrantAction: {}, OpDenyAction: {},
 	OpPlaceMandate: {}, OpRevokeMandate: {},
 	OpCreateAdmissionInvite: {},
+	OpPresentInvite:         {},
+	OpRemoveContact:         {},
 	OpExportDeviceHistory:   {},
 }
 
@@ -124,6 +126,13 @@ func DecisionBytes(request Request, challenge string) ([]byte, error) {
 	canon.Text(buffer, request.Reason)
 	canon.Text(buffer, request.InvitedAgentID)
 	canon.Uint64(buffer, request.InviteExpiresAtUnix)
+	switch request.Op {
+	case OpPresentInvite:
+		canon.Text(buffer, request.InviteRecipientAgentID)
+		canon.Text(buffer, request.InviteToken)
+	case OpRemoveContact:
+		canon.Text(buffer, request.ContactAgentID)
+	}
 	if request.Op == OpExportDeviceHistory {
 		canon.Text(buffer, request.TargetDeviceID)
 		canon.Text(buffer, request.ConversationID)

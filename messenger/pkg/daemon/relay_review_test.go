@@ -239,7 +239,7 @@ func TestSealedCopiesAreGatedBeforeEveryDeposit(t *testing.T) {
 		older := delivery
 		older.Generations[0].DescriptorDigest = "sha256:" + strings.Repeat("6", 64)
 		older.Generations[0].DescriptorIssuedAtUnix--
-		if err := a.d.relay.applyAck(delivery.Key(), older, ack, eventlog.RelayAckMatch{SessionID: delivery.SessionID,
+		if err := a.d.relay.applyAck(b.d.config.AgentID, delivery.Key(), older, ack, eventlog.RelayAckMatch{SessionID: delivery.SessionID,
 			DeviceID: b.d.config.DeviceID, CiphertextDigest: ack.CiphertextDigest}, now); err != nil {
 			t.Fatal(err)
 		}

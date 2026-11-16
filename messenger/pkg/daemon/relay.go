@@ -17,6 +17,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/directory"
 	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
 	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
+	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
@@ -297,11 +298,21 @@ func (g relayGate) CheckCopy(ctx context.Context, delivery eventlog.Delivery, se
 	if err != nil {
 		return fault.Wrap(fault.CodeInternal, err)
 	}
+	payload, err := delivery.Payload()
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, err)
+	}
+	// Room content crosses the relay only as an MLS room object, so a
+	// member's removal takes effect; a room-addressed device copy is never
+	// sealed or carried here.
+	event, err := envelope.DecodeEventJSON(payload)
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, err)
+	}
+	if event.RoomID != "" {
+		return fault.New(fault.CodePayloadMalformed, "a room-addressed event crosses the relay only as a room object")
+	}
 	if sealing {
-		payload, err := delivery.Payload()
-		if err != nil {
-			return fault.Wrap(fault.CodeInternal, err)
-		}
 		// Refused before sealing, so no message key is spent on a copy the
 		// relay route cannot carry.
 		if err := relayframe.CheckCopyFits(len(payload)); err != nil {
@@ -840,7 +851,7 @@ func (r *relayRuntime) DeliveryAck(ctx context.Context, sender string, raw []byt
 	}
 	match := eventlog.RelayAckMatch{SessionID: ack.SessionID, DeviceID: ack.RecipientDeviceID,
 		CiphertextDigest: ack.CiphertextDigest}
-	if err := r.applyAck(deliveryID, delivery, ack, match, now); err != nil {
+	if err := r.applyAck(sender, deliveryID, delivery, ack, match, now); err != nil {
 		if errors.Is(err, eventlog.ErrAckMismatch) {
 			return carrierapi.Refusal(carrierapi.CodeFrameMalformed)
 		}
@@ -857,12 +868,19 @@ func (r *relayRuntime) DeliveryAck(ctx context.Context, sender string, raw []byt
 	return carrierapi.Response{Result: carrierapi.ResultApplied}
 }
 
-func (r *relayRuntime) applyAck(deliveryID string, delivery eventlog.Delivery, ack relayframe.Ack,
+func (r *relayRuntime) applyAck(peer, deliveryID string, delivery eventlog.Delivery, ack relayframe.Ack,
 	match eventlog.RelayAckMatch, now time.Time) error {
 	if ack.Outcome != relayframe.OutcomeRejected {
 		settled, changed, err := r.daemon.journal.DeliveredByAck(deliveryID, match, now)
 		if err != nil {
 			return err
+		}
+		// The presented invite has done its work once the recipient accepted
+		// a delivery that carried it: the sender is its contact now.
+		if ack.Outcome == relayframe.OutcomeAccepted && delivery.AdmissionToken != "" {
+			if _, err := r.daemon.journal.SettlePresentedInvite(peer, delivery.AdmissionToken); err != nil {
+				r.daemon.report("presented invite settle", err)
+			}
 		}
 		if !changed {
 			// Already delivered: a lost ack's re-deposit answered again.

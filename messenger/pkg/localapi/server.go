@@ -328,6 +328,21 @@ func (s *Server) handle(ctx context.Context, principal Principal, raw []byte) Re
 		return s.challenge(now)
 	case OpCreateAdmissionInvite:
 		return s.createAdmissionInvite(request, now)
+	case OpPresentInvite:
+		if _, err := s.config.Journal.PresentInvite(request.InviteRecipientAgentID, request.InviteToken,
+			time.Unix(int64(request.InviteExpiresAtUnix), 0), now); err != nil {
+			return refuse(fault.CodePayloadMalformed, err)
+		}
+		return Response{OK: true}
+	case OpRemoveContact:
+		removed, err := s.config.Journal.RemoveInvitedContact(request.ContactAgentID)
+		if err != nil {
+			return refuse(fault.CodeInternal, err)
+		}
+		if !removed {
+			return refuse(fault.CodePayloadMalformed, errors.New("no invited contact for that Agent"))
+		}
+		return Response{OK: true}
 	case OpExportDeviceHistory:
 		return s.exportDeviceHistory(request)
 	case OpListDeviceHistory:
