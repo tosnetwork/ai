@@ -76,6 +76,9 @@ type openMLSResponse struct {
 	GroupID    string  `json:"group_id,omitempty"`
 	Secret     string  `json:"secret,omitempty"`
 	Epoch      *uint64 `json:"epoch,omitempty"`
+
+	SenderIdentity     string `json:"sender_identity,omitempty"`
+	EpochAuthenticator string `json:"epoch_authenticator,omitempty"`
 }
 
 func (d *OpenMLSSidecar) CipherSuite() uint16 { return MLSCipherSuite }
@@ -89,7 +92,11 @@ func (d *OpenMLSSidecar) Inspect(state []byte) (MLSStateInfo, error) {
 	if err != nil || response.Epoch == nil {
 		return MLSStateInfo{}, errors.New("invalid OpenMLS state binding")
 	}
-	return MLSStateInfo{GroupID: groupID, Epoch: *response.Epoch}, nil
+	authenticator, err := decodeOpenMLS("epoch authenticator", response.EpochAuthenticator, MLSEpochAuthenticatorBytes)
+	if err != nil || len(authenticator) != MLSEpochAuthenticatorBytes {
+		return MLSStateInfo{}, errors.New("invalid OpenMLS epoch authenticator")
+	}
+	return MLSStateInfo{GroupID: groupID, Epoch: *response.Epoch, EpochAuthenticator: authenticator}, nil
 }
 
 // Export derives an RFC 9420 exporter secret without changing group state.
@@ -238,11 +245,26 @@ func validOpenMLSNextLeaf(leaf *Leaf) bool {
 }
 
 func (d *OpenMLSSidecar) Apply(state, commit []byte) ([]byte, error) {
+	next, _, err := d.ApplyAttributed(state, commit)
+	return next, err
+}
+
+// ApplyAttributed applies a Commit and returns the committer's credential
+// identity. The driver refuses a Commit from anyone but a current member.
+func (d *OpenMLSSidecar) ApplyAttributed(state, commit []byte) ([]byte, []byte, error) {
 	response, err := d.call(openMLSRequest{Operation: "apply", State: b64(state), Message: b64(commit)})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
+	next, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	committer, err := decodeOpenMLS("committer identity", response.SenderIdentity, MaxOpenMLSIdentityBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	return next, committer, nil
 }
 
 func (d *OpenMLSSidecar) Seal(state, aad, plaintext []byte) ([]byte, []byte, error) {
@@ -259,16 +281,30 @@ func (d *OpenMLSSidecar) Seal(state, aad, plaintext []byte) ([]byte, []byte, err
 }
 
 func (d *OpenMLSSidecar) Open(state, aad, message []byte) ([]byte, []byte, error) {
+	next, plaintext, _, err := d.OpenAttributed(state, aad, message)
+	return next, plaintext, err
+}
+
+// OpenAttributed opens a PrivateMessage of the current or a retained past
+// epoch and returns the sending member's credential identity.
+func (d *OpenMLSSidecar) OpenAttributed(state, aad, message []byte) ([]byte, []byte, []byte, error) {
 	response, err := d.call(openMLSRequest{Operation: "open", State: b64(state), AAD: optionalB64(aad), Message: b64(message)})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	next, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	plaintext, err := decodeOpenMLS("plaintext", response.Plaintext, MaxOpenMLSMessageBytes)
-	return next, plaintext, err
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sender, err := decodeOpenMLS("sender identity", response.SenderIdentity, MaxOpenMLSIdentityBytes)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return next, plaintext, sender, nil
 }
 
 func (d *OpenMLSSidecar) call(request openMLSRequest) (openMLSResponse, error) {
@@ -359,3 +395,4 @@ func decodeOpenMLS(label, value string, max int) ([]byte, error) {
 
 var _ Driver = (*OpenMLSSidecar)(nil)
 var _ StateInspector = (*OpenMLSSidecar)(nil)
+var _ AttributedDriver = (*OpenMLSSidecar)(nil)

@@ -104,7 +104,8 @@ messenger-cross-build:
 # after a handful of executions.
 MESSENGER_FUZZ_PACKAGES ?= ./messenger/pkg/identity ./messenger/pkg/directory ./messenger/pkg/envelope \
 	./messenger/pkg/probe ./messenger/pkg/fault ./messenger/pkg/attachments ./messenger/pkg/attachmentapi \
-	./messenger/pkg/attachmentops ./messenger/pkg/relayframe ./messenger/pkg/carrierapi
+	./messenger/pkg/attachmentops ./messenger/pkg/relayframe ./messenger/pkg/carrierapi \
+	./messenger/pkg/eventlog
 MESSENGER_FUZZ_EXECUTIONS ?= 2000000
 messenger-fuzz:
 	GOWORK=off scripts/messenger-fuzz.sh $(MESSENGER_FUZZ_EXECUTIONS) $(MESSENGER_FUZZ_PACKAGES)

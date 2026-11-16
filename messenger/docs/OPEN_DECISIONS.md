@@ -191,7 +191,7 @@ implementation of them:
   post-quantum successor and its downgrade rules remain a separate version;
 - the TOS-MLS v1 wire freeze. MLS 1.0 / RFC 9420 is selected; `pkg/group` and
   pinned OpenMLS `0.8.1` now supply the two-clock application adapter and real
-  suite-`0x0001` operations, while `eventlog.MLSController` durably orders
+  suite-`0x0001` operations, while `eventlog.RoomMLSController` durably orders
   private ratchets, Welcomes and commits. Still open are the remaining
   cryptographic/Relay acceptance vectors, independent review, and
   second-implementation evidence;
