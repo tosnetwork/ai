@@ -587,6 +587,13 @@ The state directory holds the journal and the install salt, and one daemon owns
 it at a time through a lock file. A second daemon on the same directory fails
 immediately rather than interleaving writes with the first.
 
+A fresh state directory is marked as a journal root before the finalized read
+writes its checkpoint into it; the marking takes no lock, so a tool that
+verifies the delegation beside a running daemon is unaffected. A non-empty
+directory without the marker is always refused. A state directory left by an
+earlier start that failed this way holds only `chain.checkpoint` and no
+marker: delete that one file once and start again.
+
 The install salt is generated once and kept. It is what makes decision records
 correlatable within one node and meaningless elsewhere, so a salt regenerated
 on each start would stop a node's own records from correlating with themselves.
