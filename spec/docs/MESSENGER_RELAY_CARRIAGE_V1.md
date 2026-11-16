@@ -1556,7 +1556,15 @@ MLS-only refresh that leaves the room epoch unchanged), in order:
 2. another Commit or Welcome for an MLS epoch within that window answers
    `room-fork` (11.5);
 3. one older than the window is dropped silently and relay-acknowledged;
-4. an MLS epoch above current + 1 answers `rejected` with `room-epoch-gap`.
+4. an MLS epoch above current + 1 answers `rejected` with `room-epoch-gap`,
+   except that a member treats a verified Commit whose header removes it, at
+   any epoch above its own, as a removal notice (11.4).
+
+A joiner's Welcome arrives before the joiner has any MLS epoch, so steps 2–4
+do not apply to it: it goes through the pending-join path (11.2; from the
+authority named in the `room.invite`), with replay refused by the ledger
+(`eventlog/mls.go:98`); once installed, later copies of it answer
+`duplicate` under step 1.
 
 Rosters are keyed by (roster, room epoch E) and checked as in 11.2: a digest
 among the last 64 applied rosters answers `duplicate`; a second, different
