@@ -224,11 +224,11 @@ evidence.
 - OpenFox `main`: a data race in `web/backend/api`
   (`TestStartGatewayLocked_ForwardsWildcardHostForPublicLauncher`) under
   `-race`. CI does not run `-race`.
-- Fixed in the stale-references docs change (`docs/stale-references`): the
+- Fixed in `ai` #27: the
   messenger prose that still named the protocol repository
   (`messenger/docs/AGENT_PACKET_BRIDGE.md`, `messenger/pkg/chainagent/resolver.go`,
   `messenger/pkg/payload/agent_gift.go`) now names `protocol/`.
-- Fixed in the same change: the two stale references that predated the move.
+- Fixed in `ai` #27: the two stale references that predated the move.
   `spec/docs/GATE_E_BUYER_ONBOARDING.md` no longer names the removed
   `StablecoinResolver` as current; it records that the resolver was removed
   with the stablecoin rail (`b9ad8e17`) and points to the Service Actor buyer
