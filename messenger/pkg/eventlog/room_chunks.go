@@ -139,18 +139,15 @@ func (j *Journal) roomObjectChunkPath(chunkDigest string) (string, error) {
 	return filepath.Join(j.root, roomObjectChunkDir, digest+".json"), nil
 }
 
-// writeChunk stores data under its digest. A chunk is immutable: if the file
-// already exists it must hold exactly these bytes, which a rewrite by an
-// interrupted earlier attempt does.
+// writeChunk stores data under its digest. A chunk is immutable, so an
+// existing file that verifies already holds these bytes. One that does not
+// verify (damaged, or left by an interrupted write) is atomically replaced
+// with the correct bytes, which repairs it rather than failing every later
+// staging of the same content.
 func (j *Journal) writeChunk(path, schema string, data []byte) (string, error) {
 	digest := canon.Digest(data)
-	if existing, err := readChunk(path, schema, digest); err == nil {
-		if string(existing) != string(data) {
-			return "", ErrRoomChunkDigest
-		}
+	if _, err := readChunk(path, schema, digest); err == nil {
 		return digest, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
 	}
 	encoded, err := json.Marshal(roomChunkRecord{Schema: schema, Digest: digest, DataBase64: base64.StdEncoding.EncodeToString(data)})
 	if err != nil {

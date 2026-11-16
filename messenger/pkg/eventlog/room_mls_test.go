@@ -567,3 +567,81 @@ func FuzzRoomMLSRecordDecode(f *testing.F) {
 		}
 	})
 }
+
+// The same Commit reference under a different authorization is not a repeat
+// of the accepted advance; it is a second child of the same parent.
+func TestFusedLedgerSameCommitWithAnotherAuthorizationIsAFork(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	add, membership := addTransition(t, record, []string{fusedAgent(1)}, canon.Digest([]byte("add")))
+	proof := fixture.proof(membership)
+	if _, _, err := ledger.Advance(RoomMLSAdvance{Transition: add, Proof: &proof, ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2)}, fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	fixture.now = fixture.now.Add(time.Minute)
+	resigned := fixture.proof(membership)
+	if sameAuthorization(resigned.Authorization, proof.Authorization) {
+		t.Fatal("the re-signed authorization is identical")
+	}
+	if _, _, err := ledger.Advance(RoomMLSAdvance{Transition: add, Proof: &resigned, ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2)}, fixture.now); !errors.Is(err, ErrMLSFork) {
+		t.Fatalf("re-signed repeat: %v", err)
+	}
+}
+
+func TestOpenRefusesALegacyMLSLedger(t *testing.T) {
+	root := t.TempDir() + "/state"
+	journal, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, legacyMLSDir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// An empty legacy directory holds nothing to lose.
+	journal, err = Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, legacyMLSDir, strings.Repeat("a", 64)+".json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(root); !errors.Is(err, ErrLegacyMLSLedger) {
+		t.Fatalf("legacy ledger: %v", err)
+	}
+}
+
+// Staging content whose chunk file is damaged repairs the file instead of
+// failing every later staging of the same bytes.
+func TestStagingRepairsADamagedChunk(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("state A"))
+	_, second, err := ledger.Ratchet(fusedRoom, record.StateDigest, []byte("state B"), fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Plant a damaged chunk where state A's chunk belongs, then return to A.
+	path, err := journal.roomStatePath(fusedRoom, record.StateChunks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"schema":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, back, err := ledger.Ratchet(fusedRoom, second.StateDigest, []byte("state A"), fixture.now)
+	if err != nil {
+		t.Fatalf("staging over a damaged chunk: %v", err)
+	}
+	if state, err := ledger.State(back); err != nil || string(state) != "state A" {
+		t.Fatalf("repaired state: %q %v", state, err)
+	}
+}

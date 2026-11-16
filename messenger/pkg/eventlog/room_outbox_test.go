@@ -516,3 +516,102 @@ func TestRoomOutboxRepeatedAckIsANoOp(t *testing.T) {
 		t.Fatalf("the unsettled member's queue: %d %v", len(queue), err)
 	}
 }
+
+// An unreadable staged output may be the output of the Commit a room
+// accepted; it names no room, so no room advances or answers a repeat until
+// it is repaired.
+func TestRoomUnreadableStagedOutputBlocksTheNextAdvance(t *testing.T) {
+	fixture := newFusedFixture(t)
+	root := t.TempDir() + "/state"
+	journal, ledger := openFused(t, root)
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	first := refreshTransition(record, canon.Digest([]byte("first")))
+	_, advanced, err := ledger.Advance(RoomMLSAdvance{Transition: first, ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2)}, fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	damaged := filepath.Join(root, roomStagedDir, canon.Digest([]byte("x"))[len("sha256:"):]+".json")
+	if err := os.WriteFile(damaged, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next := refreshTransition(advanced, canon.Digest([]byte("second")))
+	if _, _, err := ledger.Advance(RoomMLSAdvance{Transition: next, ExpectedStateDigest: advanced.StateDigest, State: []byte("epoch two"), EpochAuthenticator: fusedAuthenticator(3)}, fixture.now); !errors.Is(err, ErrRoomStagedOutput) {
+		t.Fatalf("advance past an unreadable staged output: %v", err)
+	}
+	if _, _, err := ledger.Advance(RoomMLSAdvance{Transition: first, ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2)}, fixture.now); !errors.Is(err, ErrRoomStagedOutput) {
+		t.Fatalf("repeat answered past an unreadable staged output: %v", err)
+	}
+	if err := os.Remove(damaged); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ledger.Advance(RoomMLSAdvance{Transition: next, ExpectedStateDigest: advanced.StateDigest, State: []byte("epoch two"), EpochAuthenticator: fusedAuthenticator(3)}, fixture.now); err != nil {
+		t.Fatalf("advance after repair: %v", err)
+	}
+}
+
+// A retry of an advance whose publication failed is an exact repeat, and it
+// publishes the output before it is answered.
+func TestRoomExactRepeatPublishesAFailedPublication(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	advance := RoomMLSAdvance{Transition: refreshTransition(record, canon.Digest([]byte("c"))), ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2), Output: commitOutput(fixture.now, 1, "the commit")}
+	simulateCrashBeforePublish(t)
+	if _, _, err := ledger.Advance(advance, fixture.now); !errors.Is(err, errSimulatedCrash) {
+		t.Fatalf("first attempt: %v", err)
+	}
+	beforeRoomPublish = nil
+	if heads, _ := journal.RoomOutboxHeads(fusedRoom); len(heads) != 0 {
+		t.Fatal("published before the retry")
+	}
+	if fresh, _, err := ledger.Advance(advance, fixture.now); err != nil || fresh {
+		t.Fatalf("retry: %v %v", fresh, err)
+	}
+	if heads, err := journal.RoomOutboxHeads(fusedRoom); err != nil || len(heads) != 1 {
+		t.Fatalf("the retry did not publish: %d %v", len(heads), err)
+	}
+}
+
+// If only the removal of the staged record fails, the heads are live and may
+// be settled, but none is retired while the staged record exists; once it is
+// removed (here at restart) nothing is published a second time.
+func TestRoomFailedStagedRemovalNeverRepublishesASettledObject(t *testing.T) {
+	fixture := newFusedFixture(t)
+	root := t.TempDir() + "/state"
+	journal, ledger := openFused(t, root)
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	saved := removeStagedRecord
+	removeStagedRecord = func(string) error { return errors.New("simulated removal failure") }
+	defer func() { removeStagedRecord = saved }()
+	_, _, err := ledger.Advance(RoomMLSAdvance{Transition: refreshTransition(record, canon.Digest([]byte("c"))), ExpectedStateDigest: record.StateDigest, State: []byte("epoch one"), EpochAuthenticator: fusedAuthenticator(2), Output: commitOutput(fixture.now, 1, "the commit")}, fixture.now)
+	if err == nil {
+		t.Fatal("a failed removal was not reported")
+	}
+	digest := RoomObjectDigest([]byte("the commit"))
+	if _, err := journal.RoomOutboxCarried(digest, fusedAgent(1), 1, canon.Digest([]byte("e")), fixture.now.Add(time.Hour), fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, roomOutboxDir, digest+".json")); err != nil {
+		t.Fatal("a settled head was retired while its staged record exists")
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	removeStagedRecord = saved
+	journal, _ = openFused(t, root)
+	defer journal.Close()
+	if queue, err := journal.RoomMemberQueue(fusedRoom, fusedAgent(1)); err != nil || len(queue) != 0 {
+		t.Fatalf("a delivered object is queued again: %d %v", len(queue), err)
+	}
+	if heads, err := journal.RoomOutboxHeads(fusedRoom); err != nil || len(heads) != 0 {
+		t.Fatalf("the settled head was not retired after publication: %d %v", len(heads), err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, roomStagedDir)); len(entries) != 0 {
+		t.Fatal("the staged record survived")
+	}
+}

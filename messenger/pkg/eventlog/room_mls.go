@@ -403,7 +403,7 @@ func (l *RoomMLSLedger) Advance(advance RoomMLSAdvance, now time.Time) (bool, Ro
 	defer l.journal.mutex.Unlock()
 	// A previous Commit's output is published or discarded before anything
 	// moves, so a later Commit never overtakes an earlier one's objects.
-	if _, err := l.journal.resolveRoomStaged(transition.Next.RoomID); err != nil {
+	if err := l.journal.requireRoomStagedResolved(transition.Next.RoomID); err != nil {
 		return false, RoomMLSRecord{}, err
 	}
 	current, found, err := l.read(transition.Next.RoomID)
@@ -610,6 +610,11 @@ func (l *RoomMLSLedger) repeat(transition group.Transition, proof *RoomAuthority
 		return false, RoomMLSRecord{}, err
 	}
 	if current.IsRepeatOf(transition, proof) {
+		// A retry of an advance whose publication failed publishes it now;
+		// a repeat is answered only once its output is published.
+		if err := l.journal.requireRoomStagedResolved(transition.Next.RoomID); err != nil {
+			return false, RoomMLSRecord{}, err
+		}
 		return true, current, nil
 	}
 	return false, RoomMLSRecord{}, nil

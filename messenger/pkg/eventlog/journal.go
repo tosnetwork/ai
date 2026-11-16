@@ -324,9 +324,20 @@ func prepareRoot(root string) error {
 	return ensureCanonicalStateMarker(root)
 }
 
+// ErrLegacyMLSLedger reports a journal written by the two-write MLS ledger
+// that the fused room record replaced. There is no migration before launch.
+var ErrLegacyMLSLedger = errors.New("legacy MLS ledger present; reset the journal")
+
+const legacyMLSDir = "mls"
+
 func openJournalAt(root string, quota Quota) (*Journal, error) {
 	if err := prepareRoot(root); err != nil {
 		return nil, err
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, legacyMLSDir)); err == nil && len(entries) > 0 {
+		return nil, ErrLegacyMLSLedger
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, errors.New("read legacy MLS ledger directory")
 	}
 	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, mandateDir, budgetDir, mandateBudgetDir, negotiationDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, roomMLSDir, roomStateDir, roomBlobDir, roomObjectChunkDir, roomOutboxDir, roomStagedDir, executionDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayPullDir} {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {

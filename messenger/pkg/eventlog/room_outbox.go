@@ -247,9 +247,15 @@ func newRoomOutboxHead(roomID, commitRef string, object StagedRoomObject, retain
 	}, nil
 }
 
-// publishStaged turns one staged output into outbox heads and removes it. It
-// is idempotent: a head already published with the same identity is kept. The
-// journal mutex is held.
+// publishStaged turns one staged output into outbox heads and removes it.
+//
+// Removing the staged record is what marks the output published. Until it is
+// removed the output is republished idempotently: a head already present is
+// kept as it is, a missing one is created. A head is never retired while its
+// staged record exists (updateRoomMember), so a missing head always means "not
+// yet written", never "settled and retired", and every member gets each object
+// once whichever step fails. Once the record is removed, heads of the output
+// that every member already settled are retired. The journal mutex is held.
 func (j *Journal) publishStaged(staged roomStagedOutput) error {
 	for _, head := range staged.Heads {
 		path, err := j.roomHeadPath(head.ObjectDigest)
@@ -274,10 +280,77 @@ func (j *Journal) publishStaged(staged roomStagedOutput) error {
 	if err != nil {
 		return err
 	}
+	if err := removeStagedRecord(path); err != nil {
+		return err
+	}
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
+	for _, head := range staged.Heads {
+		headPath, err := j.roomHeadPath(head.ObjectDigest)
+		if err != nil {
+			return err
+		}
+		current, err := j.readRoomHead(headPath)
+		if err != nil {
+			continue
+		}
+		if current.allSettled() {
+			if err := os.Remove(headPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return errors.New("retire settled room object")
+			}
+		}
+	}
+	return syncDirectory(filepath.Join(j.root, roomOutboxDir))
+}
+
+// removeStagedRecord is the one place a staged output is removed; tests
+// replace it to fail the removal.
+var removeStagedRecord = func(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("remove published room output")
 	}
-	return syncDirectory(filepath.Dir(path))
+	return nil
+}
+
+// requireRoomStagedResolved publishes or discards the staged outputs before
+// a room moves or answers a repeat, and refuses while any staged output is
+// unreadable: an unreadable record names no room, and it may be the output of
+// the Commit this room accepted, which must be published before anything
+// later. The journal mutex is held.
+func (j *Journal) requireRoomStagedResolved(roomID string) error {
+	unresolved, err := j.resolveRoomStaged(roomID)
+	if err != nil {
+		return err
+	}
+	if unresolved {
+		return ErrRoomStagedOutput
+	}
+	return nil
+}
+
+func (h RoomOutboxHead) allSettled() bool {
+	for _, member := range h.Members {
+		if !member.settled() {
+			return false
+		}
+	}
+	return true
+}
+
+// stagedOutputPending reports whether any staged output names this head's
+// Commit. The journal mutex is held.
+func (j *Journal) stagedOutputPending(commitRef string) (bool, error) {
+	path, err := j.roomStagedPath(commitRef)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, errors.New("read staged room output")
+	}
+	return false, nil
 }
 
 // resolveRoomStaged publishes or discards every staged output of a room (or
@@ -314,7 +387,7 @@ func (j *Journal) resolveRoomStaged(roomID string) (bool, error) {
 			}
 			continue
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := removeStagedRecord(path); err != nil {
 			return unreadable, errors.New("discard staged room output")
 		}
 	}
@@ -526,13 +599,18 @@ func (j *Journal) updateRoomMember(objectDigest, agentID string, now time.Time, 
 		}
 		return RoomOutboxHead{}, err
 	}
-	for _, member := range head.Members {
-		if !member.settled() {
-			if err := j.writeRoomHead(head); err != nil {
-				return RoomOutboxHead{}, err
-			}
-			return head, nil
+	// A settled head is retired only once its staged output is gone: while the
+	// staged record exists, restart would read a missing head as unpublished
+	// and deposit the object again.
+	pending, err := j.stagedOutputPending(head.CommitRef)
+	if err != nil {
+		return RoomOutboxHead{}, err
+	}
+	if !head.allSettled() || pending {
+		if err := j.writeRoomHead(head); err != nil {
+			return RoomOutboxHead{}, err
 		}
+		return head, nil
 	}
 	if err := os.Remove(path); err != nil {
 		return RoomOutboxHead{}, errors.New("retire settled room object")
