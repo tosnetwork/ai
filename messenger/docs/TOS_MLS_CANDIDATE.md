@@ -34,7 +34,9 @@ match its BasicCredential identity and LeafNode signing key;
   snapshot, exact BasicCredential/leaf-key validation, canonical group IDs,
   founder/join, mixed Add/Remove replacement commits, encrypted application
   messages, two retained past epochs (`max_past_epochs(2)`) with an
-  out-of-order tolerance of 32, the committer and sender identity of every
+  out-of-order tolerance of 8 and a forward distance of 1,000 (the worst-case
+  state at 32 leaves is 272,968 bytes, under the 512 KiB bound), the
+  committer and sender identity of every
   processed message, and public group-id/epoch/epoch-authenticator inspection;
 - `group.OpenMLSSidecar` and `eventlog.RoomMLSController`, which bound process
   I/O, reject wrong AAD and state bindings, refuse a Commit or message whose MLS

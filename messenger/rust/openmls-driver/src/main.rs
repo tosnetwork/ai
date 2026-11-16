@@ -28,9 +28,15 @@ const MAX_MESSAGE: usize = 1024 * 1024;
 // the authority's fan-out takes minutes. Two past epochs cover that window at
 // little forward-secrecy cost; anything older is reported as a gap.
 const MAX_PAST_EPOCHS: usize = 2;
-// The out-of-order tolerance covers a member's in-flight messages arriving
-// through two relays in any order within one epoch.
-const OUT_OF_ORDER_TOLERANCE: u32 = 32;
+// The out-of-order tolerance is how many skipped generations each sender
+// ratchet keeps, in the current and each retained epoch; a message further
+// behind is a gap. It is what bounds the state: 31 other members x 8 keys x
+// 3 epochs stays well inside MAX_STATE at the relay room bound of 32 leaves.
+const OUT_OF_ORDER_TOLERANCE: u32 = 8;
+// The forward distance is how far ahead of a sender's ratchet a message may
+// be. Jumping ahead derives every skipped secret but keeps only the last
+// OUT_OF_ORDER_TOLERANCE of them, so it does not change the state bound; it
+// bounds the work one message can cost a receiver (1,000 ratchet steps).
 const MAXIMUM_FORWARD_DISTANCE: u32 = 1000;
 
 fn sender_ratchet() -> SenderRatchetConfiguration {
@@ -677,10 +683,11 @@ mod tests {
         handle(apply).unwrap()
     }
 
-    // Builds a 64-leaf group in two Add Commits (the Go adapter caps one Commit
-    // at 32 leaf operations) and returns every member's state, founder first.
-    fn full_group() -> Vec<String> {
-        let names: Vec<Vec<u8>> = (0..64)
+    // Builds a group of `leaves` leaves in Add Commits of at most 32 (the Go
+    // adapter caps one Commit at 32 leaf operations) and returns every
+    // member's state, founder first.
+    fn full_group(leaves: usize) -> Vec<String> {
+        let names: Vec<Vec<u8>> = (0..leaves)
             .map(|i| format!("member-{i:02}").into_bytes())
             .collect();
         let ids: Vec<Response> = names.iter().map(|n| identity(n)).collect();
@@ -689,7 +696,11 @@ mod tests {
         create.key_package = ids[0].key_package.clone();
         create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
         let mut states = vec![handle(create).unwrap().state];
-        for batch in [1..33usize, 33..64usize] {
+        let batches: Vec<std::ops::Range<usize>> = (1..leaves)
+            .step_by(32)
+            .map(|start| start..(start + 32).min(leaves))
+            .collect();
+        for batch in batches {
             let mut add = request("commit");
             add.state = states[0].clone();
             add.key_packages = batch.clone().map(|i| ids[i].key_package.clone()).collect();
@@ -754,30 +765,67 @@ mod tests {
         Ok(largest)
     }
 
-    // The 512 KiB state bound, two 262,144-byte journal chunks, holds for a
-    // 64-leaf room with two retained past epochs under in-order delivery:
-    // the observer keeps the message secrets of the current and two past
-    // epochs, each with every sender's ratchet advanced past 8 messages.
+    // The relay room bound is 32 Agents with one device each: 32 leaves.
+    const RELAY_ROOM_LEAVES: usize = 32;
+
+    // The worst case the configuration allows at the relay room bound: in the
+    // current and both retained epochs every other member's ratchet holds the
+    // most skipped keys the tolerance keeps. It must fit the 512 KiB state
+    // bound, two 262,144-byte journal chunks, with at least 20 % headroom.
     #[test]
-    fn state_bound_holds_at_64_leaves_with_two_past_epochs() {
-        let mut states = full_group();
-        assert_eq!(states.len(), 64);
-        let largest = traffic(&mut states, MAX_PAST_EPOCHS + 2, 8, false).unwrap();
-        assert!(largest <= MAX_STATE, "{largest} exceeds {MAX_STATE}");
+    fn worst_case_state_fits_at_the_relay_room_bound() {
+        let mut in_order = full_group(RELAY_ROOM_LEAVES);
+        let base = traffic(&mut in_order, MAX_PAST_EPOCHS + 2, 1, false).unwrap();
+        let mut skipping = full_group(RELAY_ROOM_LEAVES);
+        let per_sender = OUT_OF_ORDER_TOLERANCE as usize + 1;
+        let worst = traffic(&mut skipping, MAX_PAST_EPOCHS + 2, per_sender, true).unwrap();
+        eprintln!("32 leaves: in-order {base} bytes, maximal skipped keys {worst} bytes, bound {MAX_STATE}");
         assert!(
-            largest.div_ceil(262_144) <= 2,
-            "{largest} needs more than two chunks"
+            worst <= MAX_STATE * 4 / 5,
+            "{worst} leaves less than 20 % of {MAX_STATE}"
         );
+        assert!(worst.div_ceil(262_144) <= 2);
     }
 
-    // Skipped generations are kept up to the out-of-order tolerance, so 63
-    // senders that each skip seven generations in all three retained epochs
-    // push the observer's state over the bound. The driver then refuses the
-    // operation instead of returning a state the journal cannot hold.
+    // A sender far ahead (one message just inside the forward distance) costs
+    // the receiver no more stored keys than the tolerance allows; one beyond
+    // it is refused.
+    #[test]
+    fn forward_jump_keeps_only_the_tolerance() {
+        let aad = b"room binding";
+        let growth = |skipped: usize| -> (usize, Result<Response, String>) {
+            let states = full_group(4);
+            let mut sender = states[2].clone();
+            let mut last = String::new();
+            for _ in 0..=skipped {
+                let sealed = seal_as(&sender, aad, b"m");
+                sender = sealed.state;
+                last = sealed.message;
+            }
+            (state_len(&states[1]), open_as(&states[1], aad, &last))
+        };
+        let (before, jumped) = growth(MAXIMUM_FORWARD_DISTANCE as usize);
+        let jump_growth = state_len(&jumped.unwrap().state) - before;
+        let (before, skipped) = growth(OUT_OF_ORDER_TOLERANCE as usize);
+        let tolerance_growth = state_len(&skipped.unwrap().state) - before;
+        eprintln!("forward jump of {MAXIMUM_FORWARD_DISTANCE}: +{jump_growth} bytes; skip of {OUT_OF_ORDER_TOLERANCE}: +{tolerance_growth} bytes");
+        assert!(
+            jump_growth <= tolerance_growth + 64,
+            "{jump_growth} > {tolerance_growth}"
+        );
+        let (_, beyond) = growth(MAXIMUM_FORWARD_DISTANCE as usize + 1);
+        assert!(beyond.is_err());
+    }
+
+    // The driver refuses an operation whose state would exceed the bound
+    // rather than return a state the journal cannot hold. The profile allows
+    // 64 leaves (several devices per Agent, not carried over the relay), and
+    // there the same maximal skipping exceeds 512 KiB.
     #[test]
     fn state_over_bound_fails_closed() {
-        let mut states = full_group();
-        let error = traffic(&mut states, MAX_PAST_EPOCHS + 1, 8, true).unwrap_err();
+        let mut states = full_group(64);
+        let per_sender = OUT_OF_ORDER_TOLERANCE as usize + 1;
+        let error = traffic(&mut states, MAX_PAST_EPOCHS + 1, per_sender, true).unwrap_err();
         assert_eq!(error, "state snapshot exceeds bound");
     }
 
