@@ -19,19 +19,45 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/internal/ids"
 )
 
 const (
-	presentedInviteDir    = "presented-invites"
-	invitedContactDir     = "invited-contacts"
-	presentedInviteSchema = "tos.messaging.presented-invite.v1"
-	invitedContactSchema  = "tos.messaging.invited-contact.v1"
+	presentedInviteDir            = "presented-invites"
+	invitedContactDir             = "invited-contacts"
+	invitedContactTombstoneDir    = "invited-contact-tombstones"
+	presentedInviteSchema         = "tos.messaging.presented-invite.v1"
+	invitedContactSchema          = "tos.messaging.invited-contact.v1"
+	invitedContactTombstoneSchema = "tos.messaging.invited-contact-tombstone.v1"
 	// MaxPresentedInvites and MaxInvitedContacts bound the two lists.
 	MaxPresentedInvites = 4096
 	MaxInvitedContacts  = 4096
+	// MaxInvitedContactTombstones bounds the removal tombstones. A tombstone
+	// is kept only while the invite record it names exists, and there are at
+	// most MaxAdmissionInvites of those.
+	MaxInvitedContactTombstones = MaxAdmissionInvites
+)
+
+// presentedInviteCap is the bound the list enforces: MaxPresentedInvites,
+// lowered by tests to fill the list cheaply.
+var presentedInviteCap = MaxPresentedInvites
+
+var (
+	// ErrInvalidPresentedInvite reports a presentation with an invalid
+	// recipient, token or expiry.
+	ErrInvalidPresentedInvite = errors.New("invalid presented invite")
+	// ErrPresentedInvitesFull reports a full presented-invite list after the
+	// expired entries were swept.
+	ErrPresentedInvitesFull = errors.New("presented invite list is full")
+	// ErrInvitedContactsFull reports a full invited-contact list.
+	ErrInvitedContactsFull = errors.New("invited contact list is full")
+	// ErrInvitedContactRemoved reports a claim whose contact the owner already
+	// removed: the same claimed invite never makes that Agent a contact again.
+	ErrInvitedContactRemoved = errors.New("the owner removed the contact this invite made")
 )
 
 // PresentedInvite is one invite the owner presented for a recipient Agent.
@@ -59,13 +85,13 @@ func (j *Journal) PresentInvite(recipientAgentID, token string, expires, now tim
 		return PresentedInvite{}, err
 	}
 	if !ids.Agent.MatchString(recipientAgentID) {
-		return PresentedInvite{}, errors.New("invalid invite recipient")
+		return PresentedInvite{}, ErrInvalidPresentedInvite
 	}
 	if _, err := decodeAdmissionInvite(token); err != nil {
-		return PresentedInvite{}, err
+		return PresentedInvite{}, ErrInvalidPresentedInvite
 	}
 	if now.IsZero() || now.Unix() <= 0 || !expires.After(now) || expires.Sub(now) > MaxAdmissionInviteLifetime {
-		return PresentedInvite{}, errors.New("invalid presented invite expiry")
+		return PresentedInvite{}, ErrInvalidPresentedInvite
 	}
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
@@ -75,8 +101,19 @@ func (j *Journal) PresentInvite(recipientAgentID, token string, expires, now tim
 		if err != nil {
 			return PresentedInvite{}, err
 		}
-		if count >= MaxPresentedInvites {
-			return PresentedInvite{}, errors.New("presented invite list is full")
+		// Expired entries never count: they are swept before the bound is
+		// judged, so a list once filled does not refuse new recipients for
+		// good.
+		if count >= presentedInviteCap {
+			if err := j.sweepPresentedInvites(uint64(now.Unix())); err != nil {
+				return PresentedInvite{}, err
+			}
+			if count, err = countEntries(filepath.Join(j.root, presentedInviteDir)); err != nil {
+				return PresentedInvite{}, err
+			}
+		}
+		if count >= presentedInviteCap {
+			return PresentedInvite{}, ErrPresentedInvitesFull
 		}
 	}
 	record := PresentedInvite{Schema: presentedInviteSchema, RecipientAgentID: recipientAgentID, Token: token,
@@ -111,9 +148,46 @@ func (j *Journal) PresentedInviteFor(recipientAgentID string, now time.Time) (st
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return "", false, errors.New("remove expired presented invite")
 		}
-		return "", false, nil
+		return "", false, syncDirectory(filepath.Dir(path))
 	}
 	return record.Token, true, nil
+}
+
+// sweepPresentedInvites deletes every presented invite whose expiry passed.
+// An unreadable record fails the sweep: it is never silently dropped. The
+// journal mutex is held.
+func (j *Journal) sweepPresentedInvites(now uint64) error {
+	dir := filepath.Join(j.root, presentedInviteDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return errors.New("read journal directory")
+	}
+	removed := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if isTransitionTemp(name) {
+			continue
+		}
+		stem, ok := strings.CutSuffix(name, ".json")
+		agentID := "agent_" + stem
+		if !ok || entry.IsDir() || !ids.Agent.MatchString(agentID) {
+			return errors.New("unexpected entry in the presented invite list")
+		}
+		record, found, err := readPresentedInvite(filepath.Join(dir, name), agentID)
+		if err != nil {
+			return err
+		}
+		if found && now >= record.ExpiresAtUnix {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return errors.New("remove expired presented invite")
+			}
+			removed = true
+		}
+	}
+	if removed {
+		return syncDirectory(dir)
+	}
+	return nil
 }
 
 // SettlePresentedInvite deletes the token for an Agent once a delivery to it
@@ -183,21 +257,29 @@ func (j *Journal) AddInvitedContact(agentID, eventID, inviteToken string, now ti
 	if err != nil || !ids.Agent.MatchString(agentID) || !ids.Event.MatchString(eventID) || now.IsZero() || now.Unix() <= 0 {
 		return false, errors.New("invalid invited contact")
 	}
+	digest := admissionInviteDigest(raw)
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 	path := j.agentRecordPath(invitedContactDir, agentID)
 	if _, found, err := readInvitedContact(path, agentID); err != nil || found {
 		return false, err
 	}
+	// A removal is final for the invite that made the contact: replaying the
+	// claimed Event must not undo the owner's decision.
+	if tombstoned, err := readInvitedContactTombstone(j.tombstonePath(agentID, digest), agentID, digest); err != nil {
+		return false, err
+	} else if tombstoned {
+		return false, ErrInvitedContactRemoved
+	}
 	count, err := countEntries(filepath.Join(j.root, invitedContactDir))
 	if err != nil {
 		return false, err
 	}
 	if count >= MaxInvitedContacts {
-		return false, errors.New("invited contact list is full")
+		return false, ErrInvitedContactsFull
 	}
 	encoded, err := json.Marshal(InvitedContact{Schema: invitedContactSchema, AgentID: agentID, EventID: eventID,
-		AddedAtUnix: uint64(now.Unix()), InviteDigest: admissionInviteDigest(raw)})
+		AddedAtUnix: uint64(now.Unix()), InviteDigest: digest})
 	if err != nil {
 		return false, err
 	}
@@ -224,6 +306,11 @@ func (j *Journal) IsInvitedContact(agentID string) (bool, error) {
 
 // RemoveInvitedContact deletes an invited contact; the Agent's later Events
 // meet the contact policy again. It reports whether an entry was removed.
+//
+// The removal first writes a tombstone naming the Agent and the invite that
+// made the contact, so the exact claimed Event presented again cannot re-add
+// it. A crash between the tombstone and the deletion leaves the contact in
+// place and a retry finishes the removal.
 func (j *Journal) RemoveInvitedContact(agentID string) (bool, error) {
 	if err := j.usable(); err != nil {
 		return false, err
@@ -234,13 +321,112 @@ func (j *Journal) RemoveInvitedContact(agentID string) (bool, error) {
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 	path := j.agentRecordPath(invitedContactDir, agentID)
-	if _, found, err := readInvitedContact(path, agentID); err != nil || !found {
+	record, found, err := readInvitedContact(path, agentID)
+	if err != nil || !found {
+		return false, err
+	}
+	if !canon.ValidDigest(record.InviteDigest) {
+		return false, errors.New("invalid invited contact record")
+	}
+	if err := j.writeInvitedContactTombstone(agentID, record.InviteDigest); err != nil {
 		return false, err
 	}
 	if err := os.Remove(path); err != nil {
 		return false, errors.New("remove invited contact")
 	}
 	return true, syncDirectory(filepath.Dir(path))
+}
+
+type invitedContactTombstone struct {
+	Schema       string `json:"schema"`
+	AgentID      string `json:"agent_id"`
+	InviteDigest string `json:"invite_digest"`
+}
+
+func (j *Journal) tombstonePath(agentID, inviteDigest string) string {
+	return filepath.Join(j.root, invitedContactTombstoneDir, agentID[len("agent_"):]+"-"+inviteDigest[len("sha256:"):]+".json")
+}
+
+// writeInvitedContactTombstone records a removal. Tombstones whose invite
+// record is gone are swept first: once the invite record is swept, the token
+// no longer checks, so the claimed Event cannot reach the contact step at
+// all. The journal mutex is held.
+func (j *Journal) writeInvitedContactTombstone(agentID, inviteDigest string) error {
+	path := j.tombstonePath(agentID, inviteDigest)
+	if found, err := readInvitedContactTombstone(path, agentID, inviteDigest); err != nil || found {
+		return err
+	}
+	if err := j.sweepInvitedContactTombstones(); err != nil {
+		return err
+	}
+	count, err := countEntries(filepath.Join(j.root, invitedContactTombstoneDir))
+	if err != nil {
+		return err
+	}
+	if count >= MaxInvitedContactTombstones {
+		return errors.New("invited contact tombstone list is full")
+	}
+	encoded, err := json.Marshal(invitedContactTombstone{Schema: invitedContactTombstoneSchema, AgentID: agentID, InviteDigest: inviteDigest})
+	if err != nil {
+		return err
+	}
+	return j.replace(path, encoded)
+}
+
+// sweepInvitedContactTombstones deletes the tombstones whose invite record no
+// longer exists. An unreadable entry fails the sweep. The journal mutex is
+// held.
+func (j *Journal) sweepInvitedContactTombstones() error {
+	dir := filepath.Join(j.root, invitedContactTombstoneDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return errors.New("read journal directory")
+	}
+	removed := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if isTransitionTemp(name) {
+			continue
+		}
+		stem, ok := strings.CutSuffix(name, ".json")
+		agentHex, digestHex, cut := strings.Cut(stem, "-")
+		if !ok || !cut || entry.IsDir() || !ids.Agent.MatchString("agent_"+agentHex) || !canon.HashPattern.MatchString(digestHex) {
+			return errors.New("unexpected entry in the invited contact tombstones")
+		}
+		digest := "sha256:" + digestHex
+		if found, err := readInvitedContactTombstone(filepath.Join(dir, name), "agent_"+agentHex, digest); err != nil || !found {
+			return errors.New("invalid invited contact tombstone")
+		}
+		if _, found, err := j.readAdmissionInvite(digest); err != nil {
+			return err
+		} else if found {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.New("remove invited contact tombstone")
+		}
+		removed = true
+	}
+	if removed {
+		return syncDirectory(dir)
+	}
+	return nil
+}
+
+func readInvitedContactTombstone(path, agentID, inviteDigest string) (bool, error) {
+	raw, err := readRecordBytes(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var record invitedContactTombstone
+	if err := json.Unmarshal(raw, &record); err != nil || record.Schema != invitedContactTombstoneSchema ||
+		record.AgentID != agentID || record.InviteDigest != inviteDigest {
+		return false, errors.New("invalid invited contact tombstone")
+	}
+	return true, nil
 }
 
 func (j *Journal) agentRecordPath(dir, agentID string) string {

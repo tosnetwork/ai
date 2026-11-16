@@ -340,6 +340,7 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 			admission = AdmitAllow
 		}
 	}
+	policyAdmission := admission
 	usedInvite := false
 	if (admission == AdmitRequireAdmission || admission == AdmitInviteOrHold) && inbound.AdmissionToken != "" {
 		// Checking first prevents a stranger with a made-up token from using
@@ -355,9 +356,7 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 			usedInvite = true
 		}
 	}
-	if admission == AdmitInviteOrHold {
-		admission = AdmitHoldForApproval
-	}
+	admission = withoutInvite(admission)
 	// Moderation changes presentation of an already accepted room message. It
 	// cannot sit in the generic owner-hold queue, because approving that queue
 	// only changes admission state and would bypass the role/revision ledger.
@@ -391,23 +390,9 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 		decision.Delegation = delegation
 		return decision, nil
 	}
-	if usedInvite {
-		if _, err := g.config.Journal.ClaimAdmissionInvite(
-			inbound.AdmissionToken, g.config.LocalEndpointID,
-			inbound.Event.SenderAgentID, inbound.Event.EventID,
-			time.Unix(int64(inbound.ReceivedAtUnix), 0),
-		); err != nil {
-			decision := g.refuse(inbound, fault.CodeAdmissionRequired, class)
-			decision.Delegation = delegation
-			return decision, nil
-		}
-		// The claim makes the sender a contact, journaled before the Event is
-		// committed. The exact retry after a crash repeats both as no-ops.
-		if _, err := g.config.Journal.AddInvitedContact(inbound.Event.SenderAgentID, inbound.Event.EventID,
-			inbound.AdmissionToken, time.Unix(int64(inbound.ReceivedAtUnix), 0)); err != nil {
-			return Decision{}, err
-		}
-	}
+	// A moderation decision's authority is verified before an invite is
+	// claimed for it, so an inauthentic one never spends a bearer.
+	var liveAuthority identity.Delegation
 	if inbound.Event.Kind == "room.moderation" {
 		if g.config.Rooms == nil {
 			decision := g.refuse(inbound, fault.CodeNotAuthentic, class)
@@ -427,13 +412,87 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 		if err != nil {
 			return Decision{}, err
 		}
-		liveAuthority, err := identity.Verify(g.config.Resolver, g.config.Network, g.config.Chain,
+		liveAuthority, err = identity.Verify(g.config.Resolver, g.config.Network, g.config.Chain,
 			rawAuthority, time.Unix(int64(inbound.ReceivedAtUnix), 0))
 		if err != nil {
 			decision := g.refuse(inbound, fault.CodeNotAuthentic, class)
 			decision.Delegation = delegation
 			return decision, nil
 		}
+	}
+	if usedInvite {
+		if beforeInviteClaim != nil {
+			beforeInviteClaim()
+		}
+		claimed, err := g.config.Journal.ClaimAdmissionInvite(
+			inbound.AdmissionToken, g.config.LocalEndpointID,
+			inbound.Event.SenderAgentID, inbound.Event.EventID,
+			time.Unix(int64(inbound.ReceivedAtUnix), 0),
+		)
+		switch {
+		case err == nil:
+		case errors.Is(err, eventlog.ErrAdmissionInviteSpent):
+			// Another Event won the claim between the check and here. The
+			// policy is re-run without the token: the winner's claim may
+			// already have made the sender a contact.
+			usedInvite = false
+			invited, err := g.config.Journal.IsInvitedContact(inbound.Event.SenderAgentID)
+			if err != nil {
+				return Decision{}, err
+			}
+			admission = withoutInvite(policyAdmission)
+			if invited {
+				admission = AdmitAllow
+			}
+			if inbound.Event.Kind == "room.moderation" && admission != AdmitAllow {
+				decision := g.refuse(inbound, fault.CodeAdmissionRequired, class)
+				decision.Delegation = delegation
+				return decision, nil
+			}
+			if admission != AdmitAllow && admission != AdmitHoldForApproval {
+				code, err := codeFor(admission)
+				if err != nil {
+					return Decision{}, err
+				}
+				decision := g.refuse(inbound, code, class)
+				decision.Delegation = delegation
+				return decision, nil
+			}
+		default:
+			decision := g.refuse(inbound, fault.CodeAdmissionRequired, class)
+			decision.Delegation = delegation
+			return decision, nil
+		}
+		if usedInvite {
+			// The claim makes the sender a contact, journaled before the Event
+			// is committed. Only a fresh claim adds it, or the exact retry of
+			// an Event not yet committed (a crash between claim and commit);
+			// re-sending an already committed claimed Event never re-adds a
+			// contact the owner removed.
+			add := claimed
+			if !claimed {
+				_, committed, err := g.config.Journal.Lookup(inbound.Event.EventID)
+				if err != nil {
+					return Decision{}, err
+				}
+				add = !committed
+			}
+			if add {
+				_, err := g.config.Journal.AddInvitedContact(inbound.Event.SenderAgentID, inbound.Event.EventID,
+					inbound.AdmissionToken, time.Unix(int64(inbound.ReceivedAtUnix), 0))
+				switch {
+				case err == nil, errors.Is(err, eventlog.ErrInvitedContactRemoved):
+				case errors.Is(err, eventlog.ErrInvitedContactsFull):
+					decision := g.refuse(inbound, fault.CodeQuotaExceeded, class)
+					decision.Delegation = delegation
+					return decision, nil
+				default:
+					return Decision{}, err
+				}
+			}
+		}
+	}
+	if inbound.Event.Kind == "room.moderation" {
 		moderation, err := g.config.Journal.OpenModeration()
 		if err != nil {
 			return Decision{}, err
@@ -518,6 +577,19 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 	}
 	decision.Record = g.record(inbound, class, outcome, "")
 	return decision, nil
+}
+
+// beforeInviteClaim, when set by a test, runs between the invite check and its
+// claim: the window in which a racing Event can spend the token first.
+var beforeInviteClaim func()
+
+// withoutInvite is the policy answer when no invite satisfies first contact:
+// invite-or-hold holds for the owner, every other answer stands.
+func withoutInvite(admission Admission) Admission {
+	if admission == AdmitInviteOrHold {
+		return AdmitHoldForApproval
+	}
+	return admission
 }
 
 // authority resolves the sender's delegation from finalized state.

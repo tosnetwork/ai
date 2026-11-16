@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/osguard"
 	"github.com/tosnetwork/ai/messenger/internal/securefile"
@@ -31,28 +33,45 @@ type decisionEnvelope struct {
 }
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "tos-messenger-owner:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, output io.Writer) error {
+func run(args []string, input io.Reader, stdout io.Writer) error {
 	global := flag.NewFlagSet("tos-messenger-owner", flag.ContinueOnError)
 	global.SetOutput(io.Discard)
 	socket := global.String("socket", "", "clean absolute owner socket path")
 	timeout := global.Duration("timeout", localapi.DefaultClientTimeout, "request timeout")
+	outPath := global.String("out", "", "write the output to this new file, mode 0600, instead of standard output")
 	if err := global.Parse(args); err != nil {
 		return err
 	}
 	rest := global.Args()
 	if len(rest) == 0 {
-		return errors.New("usage: tos-messenger-owner [-socket PATH] <pending|history|prepare-grant|prepare-deny|prepare-invite|prepare-present-invite|prepare-remove-contact|prepare-history|sign|submit>")
+		return errors.New("usage: tos-messenger-owner [-socket PATH] [-out FILE] <pending|history|prepare-grant|prepare-deny|prepare-invite|prepare-present-invite|prepare-remove-contact|prepare-history|sign|submit>")
 	}
+	// A prepared or signed decision can carry a bearer (a presented invite
+	// token), so -out writes a new private file rather than relying on the
+	// caller's umask for a shell redirection.
+	output, finish, err := openOutput(*outPath, stdout)
+	if err != nil {
+		return err
+	}
+	if err := dispatchCommand(rest, *socket, *timeout, input, output); err != nil {
+		finish(false)
+		return err
+	}
+	return finish(true)
+}
+
+func dispatchCommand(rest []string, socketPath string, timeout time.Duration, input io.Reader, output io.Writer) error {
+	socket := &socketPath
 	if rest[0] == "sign" {
 		return signCommand(rest[1:], output)
 	}
-	client, err := localapi.NewClient(*socket, *timeout)
+	client, err := localapi.NewClient(*socket, timeout)
 	if err != nil {
 		return err
 	}
@@ -107,13 +126,19 @@ func run(args []string, output io.Writer) error {
 	case "prepare-present-invite":
 		set := commandFlags("prepare-present-invite")
 		recipient := set.String("recipient", "", "Agent whose owner issued the invite")
-		token := set.String("token", "", "the invite_ token received out of band")
+		tokenFile := set.String("token-file", "", "0600 file holding the invite_ token, or - for standard input")
 		expiresAt := set.Uint64("expires-at", 0, "the invite's absolute Unix expiry")
-		if err := set.Parse(rest[1:]); err != nil || set.NArg() != 0 || *recipient == "" || *token == "" || *expiresAt == 0 {
-			return errors.New("usage: prepare-present-invite -recipient AGENT_ID -token invite_... -expires-at UNIX")
+		if err := set.Parse(rest[1:]); err != nil || set.NArg() != 0 || *recipient == "" || *tokenFile == "" || *expiresAt == 0 {
+			return errors.New("usage: prepare-present-invite -recipient AGENT_ID -token-file FILE|- -expires-at UNIX")
+		}
+		// The token is a bearer: it is never taken from the command line,
+		// where other local users can read it.
+		token, err := readToken(*tokenFile, input)
+		if err != nil {
+			return err
 		}
 		return prepare(client, localapi.Request{
-			Op: localapi.OpPresentInvite, InviteRecipientAgentID: *recipient, InviteToken: *token, InviteExpiresAtUnix: *expiresAt,
+			Op: localapi.OpPresentInvite, InviteRecipientAgentID: *recipient, InviteToken: token, InviteExpiresAtUnix: *expiresAt,
 		}, output)
 	case "prepare-remove-contact":
 		set := commandFlags("prepare-remove-contact")
@@ -247,6 +272,77 @@ func readDecision(path string) (decisionEnvelope, error) {
 	return envelope, nil
 }
 
+// maxTokenBytes bounds an invite token file: the token and a newline.
+const maxTokenBytes = 128
+
+// readToken reads an invite token from a private file (mode 0600, owned by
+// this user) or, for "-", from standard input.
+func readToken(path string, input io.Reader) (string, error) {
+	var raw []byte
+	if path == "-" {
+		if input == nil {
+			return "", errors.New("no standard input for the invite token")
+		}
+		read, err := io.ReadAll(io.LimitReader(input, maxTokenBytes+1))
+		if err != nil {
+			return "", errors.New("read the invite token")
+		}
+		raw = read
+	} else {
+		read, err := readRegular(path, maxTokenBytes, true)
+		if err != nil {
+			return "", err
+		}
+		raw = read
+	}
+	if len(raw) > maxTokenBytes {
+		return "", errors.New("invite token exceeds its bound")
+	}
+	token := strings.TrimSuffix(string(raw), "\n")
+	if token == "" || strings.ContainsAny(token, " \t\r\n") {
+		return "", errors.New("invite token must be one line")
+	}
+	return token, nil
+}
+
+// openOutput returns standard output, or a new mode-0600 file that finish
+// syncs and closes, or removes when the command failed.
+func openOutput(path string, stdout io.Writer) (io.Writer, func(bool) error, error) {
+	if path == "" {
+		return stdout, func(bool) error { return nil }, nil
+	}
+	if filepath.Clean(path) != path {
+		return nil, nil, errors.New("output path must be clean")
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, nil, errors.New("create the output file (it must not exist)")
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, nil, errors.New("protect the output file")
+	}
+	finish := func(ok bool) error {
+		if !ok {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return nil
+		}
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return errors.New("sync the output file")
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(path)
+			return errors.New("close the output file")
+		}
+		return nil
+	}
+	return file, finish, nil
+}
+
 func readPrivateKey(path string) (ed25519.PrivateKey, error) {
 	raw, err := readRegular(path, 130, true)
 	if err != nil {
@@ -277,10 +373,10 @@ func readRegular(path string, maximum int64, secret bool) ([]byte, error) {
 	if secret {
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, errors.New("owner key must remain a regular file")
+			return nil, errors.New("a secret file must remain a regular file")
 		}
 		if !osguard.CurrentUserOwns(info) || info.Mode().Perm() != 0o600 {
-			return nil, errors.New("owner key must be owned by this user with mode 0600")
+			return nil, errors.New("a secret file must be owned by this user with mode 0600")
 		}
 	}
 	return raw, nil

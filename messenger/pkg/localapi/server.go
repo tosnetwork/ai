@@ -331,7 +331,14 @@ func (s *Server) handle(ctx context.Context, principal Principal, raw []byte) Re
 	case OpPresentInvite:
 		if _, err := s.config.Journal.PresentInvite(request.InviteRecipientAgentID, request.InviteToken,
 			time.Unix(int64(request.InviteExpiresAtUnix), 0), now); err != nil {
-			return refuse(fault.CodePayloadMalformed, err)
+			switch {
+			case errors.Is(err, eventlog.ErrInvalidPresentedInvite):
+				return refuse(fault.CodePayloadMalformed, err)
+			case errors.Is(err, eventlog.ErrPresentedInvitesFull):
+				return refuse(fault.CodeQuotaExceeded, err)
+			default:
+				return refuse(fault.CodeInternal, err)
+			}
 		}
 		return Response{OK: true}
 	case OpRemoveContact:
