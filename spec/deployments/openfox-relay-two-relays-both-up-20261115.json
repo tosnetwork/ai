@@ -1,0 +1,2130 @@
+{
+  "schema": "tos.openfox.service-relay-multi-host.acceptance.v1",
+  "qualifies_as_public_acceptance": false,
+  "reason": "the relays are operated by us; the chain is a local three-validator test network on the provider's host, reached by the buyer only through an SSH reverse tunnel; the provider runs on our host; no live adversarial case runs",
+  "proves": "two OpenFox nodes on different physical machines complete a paid sale whose task and result travel only through the installed Agent Packet Relay daemons relay-1, relay-2, each on its own machine, over the public internet, with the relays' private CA pinned on both nodes; every relay is up for the sale, apart from the carrier outage",
+  "executor_mode": "executor service socket",
+  "carrier": "Agent Packet Relay daemons relay-1 at https://<relay-1-host>:8443, relay-2 at https://<relay-2-host>:8443, named together in both nodes' cards and the only transport of both nodes",
+  "started_utc": "2026-11-15T23:45:51.069718+00:00",
+  "openfox_commit": "9d0213519c74f80d29cf5534eed09b5bfe05ffdd",
+  "openfox_tree_status": [],
+  "openfox_tree_dirty": false,
+  "tos_commit": "5af405dcb1f523be0ff3b812e9f6945275c4945b",
+  "relay_daemon": {
+    "ai_commit": "01488fff0207a6df14a4d8b27c886a8fcdefebd4",
+    "ai_tree_status": [],
+    "build": "GOWORK=off CGO_ENABLED=0 go build -trimpath ./protocol/cmd/tos-service-packet-relay",
+    "launch": "installed systemd unit on each relay host (DynamicUser), not started or configured by this run; the run stops and starts it for the outages",
+    "units": {
+      "relay-1": "tos-service-packet-relay",
+      "relay-2": "tos-service-packet-relay"
+    },
+    "chain_rpc_configured": false,
+    "key_material": "its TLS key only, as a systemd credential"
+  },
+  "topology": {
+    "provider_and_chain_host": "the three validators on 127.0.0.1 and the provider node; behind NAT, no inbound port",
+    "buyer_host": "a VPS on the public internet running the buyer node; it reaches the chain's JSON-RPC only through an SSH reverse tunnel from the provider host to its 127.0.0.1",
+    "relay_1_host": "a VPS on the public internet running the relay daemon relay-1 on TCP 8443",
+    "relay_2_host": "a VPS on the public internet running the relay daemon relay-2 on TCP 8443"
+  },
+  "actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+  "network_label": "tos:global-id:3",
+  "terms": {
+    "price": "0.3",
+    "storage_fee": "0.25",
+    "cleanup_bounty": "0.1"
+  },
+  "adversarial_coverage": {
+    "statement": "No live adversarial case was run against the relay in this run. The adversarial cases are covered by merged in-repository tests (listed in the two-host namespace evidence), not by this run."
+  },
+  "not_verified": [
+    "a relay operated by a third party",
+    "relays at more than one provider (both relay hosts are at one provider)",
+    "a public chain (the chain is a local test network reached through an SSH tunnel)",
+    "a provider on a host we do not operate",
+    "live adversarial envelopes, quota pressure and the public-id race (unit tests only)",
+    "key expiry and rotation (unit tests only)",
+    "crash windows of the nodes"
+  ],
+  "not_openfox": [
+    "booting the three-validator network (tostester)",
+    "creating, funding and activating the two wallets with tosctl and the zerostate faucet",
+    "the SSH reverse tunnel, the copies to the buyer host, and stopping and starting the relay units",
+    "the container runtime and the root-run executor service in front of it",
+    "this script's own JSON-RPC reads, relay listings and probes, used only to verify"
+  ],
+  "relay_case": {
+    "relays": [
+      "relay-1",
+      "relay-2"
+    ],
+    "down_for_the_whole_sale": null,
+    "stopped_for_the_carrier_outage": [
+      "relay-1",
+      "relay-2"
+    ]
+  },
+  "network": {
+    "network_id": "tos:global-id:3",
+    "genesis_root_hash": "sha256:babf9f3152eae4e09a6b82eb21d4525b53840d3c2f5983eec8a6189873e2c8a3",
+    "genesis_file_hash": "sha256:e6d56ec8d7c6f581553e208b34baf03b342f7a96c6aabbb6bd9b9a7a582b3185",
+    "validators": 3,
+    "json_rpc": [
+      "http://127.0.0.1:49880/jsonRPC",
+      "http://127.0.0.1:49881/jsonRPC",
+      "http://127.0.0.1:49882/jsonRPC"
+    ],
+    "base_port": 49800
+  },
+  "wallets": {
+    "provider": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+    "buyer": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d"
+  },
+  "binaries": {
+    "openfox": {
+      "sha256": "d45902d36f012d41cdb40cd2d0d923862cabbdbddcf47c096b043952e6dd1478",
+      "on_buyer_host": "d45902d36f012d41cdb40cd2d0d923862cabbdbddcf47c096b043952e6dd1478",
+      "on_provider_host": "d45902d36f012d41cdb40cd2d0d923862cabbdbddcf47c096b043952e6dd1478"
+    },
+    "tosctl": {
+      "sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+      "on_buyer_host": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+      "on_provider_host": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b"
+    },
+    "tos-service-packet-relay": {
+      "sha256": "f8ff662fe12afadae7fee7676aece6f7e1107ada9c67bd4896ffa5d88fca23ef",
+      "on_relay-1_host": "f8ff662fe12afadae7fee7676aece6f7e1107ada9c67bd4896ffa5d88fca23ef",
+      "on_relay-2_host": "f8ff662fe12afadae7fee7676aece6f7e1107ada9c67bd4896ffa5d88fca23ef"
+    }
+  },
+  "node_files": {
+    "provider_uid": 1000,
+    "buyer_uid": 0,
+    "buyer_run_directory": "/opt/tos-relay-test/g2-3",
+    "ownership": {
+      "provider_host": [
+        "1000:997 700 /tos/relay-test-deploy/runs/g2-3/nodes/g2-3",
+        "1000:997 700 /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider",
+        ""
+      ],
+      "buyer_host": [
+        "0:0 700 /opt/tos-relay-test/g2-3",
+        "0:0 700 /opt/tos-relay-test/g2-3/nodes",
+        "0:0 700 /opt/tos-relay-test/g2-3/nodes/buyer",
+        "0:0 600 /opt/tos-relay-test/g2-3/nodes/buyer/vault.json",
+        ""
+      ]
+    }
+  },
+  "machines": {
+    "provider_and_chain_host": {
+      "machine_id_sha256_prefix": "483a5f52f5dcdd35",
+      "vcpus": "192",
+      "mem_kib": "131565104",
+      "kernel": "6.8.0-138-generic",
+      "os": "Ubuntu 22.04.5 LTS"
+    },
+    "buyer_host": {
+      "machine_id_sha256_prefix": "a56fae2bc6c10f38",
+      "vcpus": "6",
+      "mem_kib": "12246536",
+      "kernel": "6.8.0-146-generic",
+      "os": "Ubuntu 24.04.3 LTS"
+    },
+    "relay_1_host": {
+      "machine_id_sha256_prefix": "277abe7c7f2e48f4",
+      "vcpus": "4",
+      "mem_kib": "4008148",
+      "kernel": "6.8.0-146-generic",
+      "os": "Ubuntu 24.04.3 LTS"
+    },
+    "relay_2_host": {
+      "machine_id_sha256_prefix": "4e8ef93ea426fb6b",
+      "vcpus": "6",
+      "mem_kib": "12246540",
+      "kernel": "6.8.0-146-generic",
+      "os": "Ubuntu 24.04.3 LTS"
+    }
+  },
+  "chain_tunnel": {
+    "argv": [
+      "ssh",
+      "-N",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "StrictHostKeyChecking=accept-new",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=20",
+      "-o",
+      "ControlMaster=no",
+      "-o",
+      "ControlPath=none",
+      "-i",
+      "<ssh-key>",
+      "-R",
+      "127.0.0.1:49880:127.0.0.1:49880",
+      "-R",
+      "127.0.0.1:49881:127.0.0.1:49881",
+      "-R",
+      "127.0.0.1:49882:127.0.0.1:49882",
+      "<buyer-ssh>"
+    ],
+    "listening_on_buyer_host": [
+      "127.0.0.1:49880",
+      "127.0.0.1:49881",
+      "127.0.0.1:49882"
+    ]
+  },
+  "relay_units": {
+    "relay-1": {
+      "unit": "tos-service-packet-relay",
+      "before_run": {
+        "NRestarts": "0",
+        "ExecMainStartTimestampMonotonic": "20454233135",
+        "User": "tos-service-packet-relay",
+        "DynamicUser": "yes",
+        "ActiveState": "active",
+        "UnitFileState": "enabled",
+        "InactiveEnterTimestampMonotonic": "20403961101"
+      },
+      "uid": "64434"
+    },
+    "relay-2": {
+      "unit": "tos-service-packet-relay",
+      "before_run": {
+        "NRestarts": "0",
+        "ExecMainStartTimestampMonotonic": "22973657114",
+        "User": "tos-service-packet-relay",
+        "DynamicUser": "yes",
+        "ActiveState": "active",
+        "UnitFileState": "enabled",
+        "InactiveEnterTimestampMonotonic": "22924340088"
+      },
+      "uid": "64434"
+    }
+  },
+  "relay_since": {
+    "relay-1": "1794786392",
+    "relay-2": "1794786392"
+  },
+  "direct_path_probe": {
+    "buyer_to_provider_host_public_address": {
+      "22": "refused or unreachable: TimeoutError",
+      "80": "refused or unreachable: TimeoutError",
+      "443": "refused or unreachable: TimeoutError",
+      "8443": "refused or unreachable: TimeoutError",
+      "49880": "refused or unreachable: TimeoutError",
+      "49881": "refused or unreachable: TimeoutError",
+      "49882": "refused or unreachable: TimeoutError",
+      "47000": "refused or unreachable: TimeoutError"
+    },
+    "provider_host_public_address_is_on_a_local_interface": false,
+    "buyer_to_relay": {
+      "relay-1": {
+        "8443": "connected"
+      },
+      "relay-2": {
+        "8443": "connected"
+      }
+    },
+    "provider_host_to_relay": {
+      "relay-1": {
+        "8443": "connected"
+      },
+      "relay-2": {
+        "8443": "connected"
+      }
+    }
+  },
+  "objects": {
+    "provider_agent_id": "agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b",
+    "provider_agent_address": "0:2da6807a026495d5b3253461bc12fabfd1a38351376fd8a2987b2b9bfbd583eb",
+    "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+    "capability_id": "cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae",
+    "capability_address": "0:54713b2d6df99dcbb12c82ca6997662fdab3960f6016228919b8b7a73e4b6504",
+    "manifest_digest": "sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26",
+    "attestor": "mldsa44:cc30aa9fdb96f891dcef03acd16d794486223e30e67fa112be1647d8f1408027",
+    "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+    "buyer_agent_id": "agent_050113056392a1750e29d055d7f16295308995c8e5879dbcd227ecfe46d1490f",
+    "buyer_agent_address": "0:64a7f674bfbbe5d11a00232eec4474dc64316da2e6ade3fc920be0647862936a"
+  },
+  "preflight_not_passing": [
+    {
+      "id": "rpc.independence",
+      "status": "unknown",
+      "message": "endpoints have distinct authorities, but whether distinct operators run them is not verified; a quorum of one operator's endpoints is one point of trust"
+    },
+    {
+      "id": "signer.wallet",
+      "status": "unknown",
+      "message": "tosctl offers no way to resolve wallet \"provider\" without signing, so the respond wallet is not checked; preflight never signs"
+    }
+  ],
+  "tls": {
+    "mode": "direct TLS on each relay host's public address, each certificate issued by one private P-256 test CA (SAN: that relay's public IP address); both nodes pin that CA with init --relay-ca-file",
+    "pinned_ca_sha256": "707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c",
+    "node_pins": {
+      "provider": {
+        "relay_ca_sha256": "707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c",
+        "relay_ca_file_in_state": true
+      },
+      "buyer": {
+        "relay_ca_sha256": "707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c",
+        "relay_ca_file_in_state": true
+      }
+    },
+    "ca_validity": {
+      "not_before": "2026-11-15T23:12:08Z",
+      "not_after": "2027-11-15T23:12:08Z",
+      "days": 365.0
+    },
+    "ssl_cert_env_in_provider_run": [],
+    "ssl_cert_env_on_buyer_host": [],
+    "provider_preflight_relay_trust": {
+      "status": "pass",
+      "message": "https://<relay-1-host>:8443: the pinned CA file only; https://<relay-2-host>:8443: the pinned CA file only; pinned CA file /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/state/relay/relay-ca-707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c.pem (SHA-256 707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c, 1 certificates, valid until 2027-11-15T23:12:08Z); relays named only by a peer's card use the system trust store"
+    },
+    "provider_preflight_relay_reachable": "pass",
+    "preflight_pinned_ca_only_per_relay": {
+      "relay-1": true,
+      "relay-2": true
+    },
+    "plain_http": false,
+    "relays": {
+      "relay-1": {
+        "relay_spki_sha256": "2ff6b2723713bb570fc1e2db63b27245cc4831cd82c162728e80572eb08f9497",
+        "relay_certificate_file_spki_sha256": "2ff6b2723713bb570fc1e2db63b27245cc4831cd82c162728e80572eb08f9497",
+        "tls_version": "TLSv1.3",
+        "relay_certificate_validity": {
+          "not_before": "2026-11-15T23:12:08Z",
+          "not_after": "2027-06-03T23:12:08Z",
+          "days": 200.0
+        },
+        "system_trust_store_from_provider_host": "refused: SSLCertVerificationError: unable to get local issuer certificate",
+        "system_trust_store_from_buyer_host": "refused: SSLCertVerificationError: unable to get local issuer certificate"
+      },
+      "relay-2": {
+        "relay_spki_sha256": "c610ec395595a71d2eec9418c944cd39a2e276cc1242d8d220a96a1e7672c386",
+        "relay_certificate_file_spki_sha256": "c610ec395595a71d2eec9418c944cd39a2e276cc1242d8d220a96a1e7672c386",
+        "tls_version": "TLSv1.3",
+        "relay_certificate_validity": {
+          "not_before": "2026-11-15T23:17:59Z",
+          "not_after": "2027-06-03T23:17:59Z",
+          "days": 200.0
+        },
+        "system_trust_store_from_provider_host": "refused: SSLCertVerificationError: unable to get local issuer certificate",
+        "system_trust_store_from_buyer_host": "refused: SSLCertVerificationError: unable to get local issuer certificate"
+      }
+    }
+  },
+  "node_listening_sockets": {
+    "provider": [],
+    "buyer": []
+  },
+  "relay_process_uids": [
+    "relay-1:64434",
+    "relay-2:64434"
+  ],
+  "relay_outage": {
+    "task_envelopes": [
+      "77c0849d16c471d185d60493d40a1242b592a3b202b17c42cb5629b1e5aa6d8a"
+    ],
+    "failed_while_down": [
+      "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+    ],
+    "accepted_after_restart": [
+      "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+    ],
+    "relays_stopped_for_the_outage": [
+      "relay-1",
+      "relay-2"
+    ],
+    "snapshots": {
+      "task-held": {
+        "relay-1": {
+          "files": 14,
+          "envelope_files": 1,
+          "envelope_bytes": 37865,
+          "recipient_envelope_files": 1
+        },
+        "relay-2": {
+          "files": 14,
+          "envelope_files": 1,
+          "envelope_bytes": 37865,
+          "recipient_envelope_files": 1
+        }
+      },
+      "result-held": {
+        "relay-1": {
+          "files": 15,
+          "envelope_files": 1,
+          "envelope_bytes": 25037,
+          "recipient_envelope_files": 1
+        },
+        "relay-2": {
+          "files": 15,
+          "envelope_files": 1,
+          "envelope_bytes": 25037,
+          "recipient_envelope_files": 1
+        }
+      }
+    },
+    "task_listed_at": {
+      "relay-1": [
+        "77c0849d16c471d185d60493d40a1242b592a3b202b17c42cb5629b1e5aa6d8a"
+      ],
+      "relay-2": [
+        "77c0849d16c471d185d60493d40a1242b592a3b202b17c42cb5629b1e5aa6d8a"
+      ]
+    }
+  },
+  "sale": {
+    "request_hash": "0a40c4be9ab36223a328c044e1d84e61e4b0d2de93a8bbe0e3b57bef59e43f88",
+    "request_id": 0,
+    "response_hash": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9",
+    "artifact_sha256": "5e209dc0a8e28affc271adf62bbf7b556de3a168212fa6bf3189e4e2f76bae36",
+    "call": {
+      "lt": 264000003,
+      "hash": "FRFDxR+YgN7RqG1inaRvXACPZgmcxIhOZwKP+SHgz3c=",
+      "in_source": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+      "in_value": 750000000,
+      "op": 1398162177,
+      "query_id": 16441383893663271439,
+      "outs": [
+        {
+          "destination": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+          "value": 199581720
+        }
+      ],
+      "aborted": false,
+      "compute_success": true
+    },
+    "respond": {
+      "lt": 385000003,
+      "hash": "0UletEqh/rlAYVfF+HimgnakG5hecJhC9quHQQ7XIbs=",
+      "in_source": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+      "in_value": 10000000,
+      "op": 1398162178,
+      "query_id": 0,
+      "outs": [],
+      "aborted": false,
+      "compute_success": true,
+      "request_id": 0,
+      "response_hash": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9"
+    },
+    "execution_id": "92f018079e83e7a45ba8b01ba311b74f177d62316ab19d31d12e9641d81c1aad"
+  },
+  "withdrawal": {
+    "amount_nanotos": 550000000,
+    "query_id": "9804875816575691322",
+    "transaction": {
+      "lt": 451000003,
+      "hash": "cuQ88wgejHQZnOyyBpwrTpXMiN/IoI8L5UPUWz27KG8=",
+      "in_source": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+      "in_value": 200000000,
+      "op": 1398162185,
+      "query_id": 9804875816575691322,
+      "outs": [
+        {
+          "destination": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+          "value": 550000000
+        },
+        {
+          "destination": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+          "value": 199834730
+        }
+      ],
+      "aborted": false,
+      "compute_success": true,
+      "withdraw_amount": 550000000
+    }
+  },
+  "redundant_carriage": {
+    "accepted_by": {
+      "provider": {
+        "34b413a31de088fecc4a8737ed729d7312135b57677d9efa29adf7b5809db6be": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "b784e74441aea40120b7d3940a8ddacc4ce03a67a310628eb6340f11d0996056": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "7da2159cb851182103126e19ca5cf5d8bc0a7da4c7ed78139cb45510ffad067e": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ]
+      },
+      "buyer": {
+        "1d6f95f7993c5d96505dec216d3cdfc6b2330c83e29bc81d55df6014135b580d": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "a50f3da62fd96c7d11ac8fc874c4e55fa0f65c1e5f9d2de68ea27017c414ad35": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "77c0849d16c471d185d60493d40a1242b592a3b202b17c42cb5629b1e5aa6d8a": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "d703a9ac087c7771b0dc4602d99bdabadea9e86821fb6a963429aabd096585ca": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "dc2014c674e4e096de79c26800f842f25213b9fad128d81b3b69faf35dd8ec9e": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "77e1031c4e0010ae77a5b63921db0916da0d8a526a73e33505525bb7c2c14e4a": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "27f119ddb4dd796fc0d8f3cd079096f5b4bde8b68855ee401045c7710eb4ac03": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ]
+      }
+    }
+  },
+  "serve_log_lines_other_than_pause_notices": {
+    "provider": [
+      "2026-11-15T23:48:39Z: provider: servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)",
+      "servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)",
+      "2026-11-15T23:48:39Z: provider: servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)"
+    ],
+    "buyer": []
+  },
+  "plaintext_search": {
+    "searched": "copies of every relay host's state directory (taken over SSH with tar while the live relays held the task, while they held the result, and of every relay after the run) and every relay's journal since this run began",
+    "copies": {
+      "task-held-relay-2": 14,
+      "result-held-relay-2": 15,
+      "after-run-relay-1": 25,
+      "task-held-relay-1": 14,
+      "after-run-relay-2": 24,
+      "result-held-relay-1": 15
+    },
+    "scanned": {
+      "files": 109,
+      "bytes": 267480
+    },
+    "values": {
+      "source archive": 5,
+      "artifact": 3,
+      "buyer wallet address": 8,
+      "Quote package": 4
+    },
+    "found": {}
+  },
+  "teardown": {
+    "buyer_processes_of_this_run": [],
+    "tunnel_ports_still_bound_on_buyer_host": [],
+    "relay_unit": {
+      "relay-1": [
+        "active",
+        "2"
+      ],
+      "relay-2": [
+        "active",
+        "2"
+      ]
+    },
+    "left_for_inspection": {
+      "buyer_host": [
+        "/opt/tos-relay-test/g2-3",
+        "/opt/tos-relay-test/g2-3/serve-2.pid",
+        "/opt/tos-relay-test/g2-3/serve-supervisor.py",
+        "/opt/tos-relay-test/g2-3/buyer-serve.log",
+        "/opt/tos-relay-test/g2-3/serve-1.pid",
+        "/opt/tos-relay-test/g2-3/serve-1.exit",
+        "/opt/tos-relay-test/g2-3/nodes",
+        "/opt/tos-relay-test/g2-3/serve-2.exit"
+      ],
+      "relay_host": []
+    }
+  },
+  "ran_as_root": {
+    "provider_host": [],
+    "buyer_host": "the buyer node and its file commands run as the SSH user of the buyer host (uid 0)",
+    "relay_hosts": "systemctl, journalctl, ps, openssl on the certificate file, tar of the state directory and sha256sum, over SSH; the relay daemons themselves run unprivileged"
+  },
+  "steps": [
+    {
+      "name": "the OpenFox tree is clean at the commit the evidence names",
+      "pass": true,
+      "detail": "clean",
+      "at": "2026-11-15T23:45:51.078195+00:00"
+    },
+    {
+      "name": "the relay daemon is built from a clean ai tree at the commit the evidence names",
+      "pass": true,
+      "detail": "clean",
+      "at": "2026-11-15T23:45:51.078249+00:00"
+    },
+    {
+      "name": "every validator serves finalized JSON-RPC",
+      "pass": true,
+      "detail": null,
+      "at": "2026-11-15T23:46:01.344349+00:00"
+    },
+    {
+      "name": "not OpenFox: the provider wallet is created, funded from the faucet and activated with tosctl",
+      "pass": true,
+      "detail": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+      "at": "2026-11-15T23:46:05.806714+00:00"
+    },
+    {
+      "name": "not OpenFox: the buyer wallet is created, funded from the faucet and activated with tosctl",
+      "pass": true,
+      "detail": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+      "at": "2026-11-15T23:46:10.246881+00:00"
+    },
+    {
+      "name": "the buyer host has no directory of this run",
+      "pass": true,
+      "detail": "/opt/tos-relay-test/g2-3",
+      "at": "2026-11-15T23:46:11.348933+00:00"
+    },
+    {
+      "name": "the nodes' files are staged owner-only: the provider's here as uid 1000, the buyer's on its host; the openfox and tosctl binaries on both hosts hash to the ones built and pinned here",
+      "pass": true,
+      "detail": {
+        "openfox": {
+          "sha256": "d45902d36f012d41cdb40cd2d0d923862cabbdbddcf47c096b043952e6dd1478",
+          "on_buyer_host": "d45902d36f012d41cdb40cd2d0d923862cabbdbddcf47c096b043952e6dd1478",
+          "on_provider_host": "d45902d36f012d41cdb40cd2d0d923862cabbdbddcf47c096b043952e6dd1478"
+        },
+        "tosctl": {
+          "sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+          "on_buyer_host": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+          "on_provider_host": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b"
+        }
+      },
+      "at": "2026-11-15T23:46:25.951799+00:00"
+    },
+    {
+      "name": "4 different machines: the provider and chain host, the buyer host and each of the 2 relay hosts have distinct machine ids",
+      "pass": true,
+      "detail": {
+        "provider_and_chain_host": {
+          "machine_id_sha256_prefix": "483a5f52f5dcdd35",
+          "vcpus": "192",
+          "mem_kib": "131565104",
+          "kernel": "6.8.0-138-generic",
+          "os": "Ubuntu 22.04.5 LTS"
+        },
+        "buyer_host": {
+          "machine_id_sha256_prefix": "a56fae2bc6c10f38",
+          "vcpus": "6",
+          "mem_kib": "12246536",
+          "kernel": "6.8.0-146-generic",
+          "os": "Ubuntu 24.04.3 LTS"
+        },
+        "relay_1_host": {
+          "machine_id_sha256_prefix": "277abe7c7f2e48f4",
+          "vcpus": "4",
+          "mem_kib": "4008148",
+          "kernel": "6.8.0-146-generic",
+          "os": "Ubuntu 24.04.3 LTS"
+        },
+        "relay_2_host": {
+          "machine_id_sha256_prefix": "4e8ef93ea426fb6b",
+          "vcpus": "6",
+          "mem_kib": "12246540",
+          "kernel": "6.8.0-146-generic",
+          "os": "Ubuntu 24.04.3 LTS"
+        }
+      },
+      "at": "2026-11-15T23:46:27.998254+00:00"
+    },
+    {
+      "name": "the RPC ports are free on the buyer host",
+      "pass": true,
+      "detail": [],
+      "at": "2026-11-15T23:46:28.069495+00:00"
+    },
+    {
+      "name": "the chain's JSON-RPC reaches the buyer host only through the SSH reverse tunnel, bound to its 127.0.0.1",
+      "pass": true,
+      "detail": {
+        "argv": [
+          "ssh",
+          "-N",
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "StrictHostKeyChecking=accept-new",
+          "-o",
+          "ExitOnForwardFailure=yes",
+          "-o",
+          "ServerAliveInterval=15",
+          "-o",
+          "ServerAliveCountMax=20",
+          "-o",
+          "ControlMaster=no",
+          "-o",
+          "ControlPath=none",
+          "-i",
+          "<ssh-key>",
+          "-R",
+          "127.0.0.1:49880:127.0.0.1:49880",
+          "-R",
+          "127.0.0.1:49881:127.0.0.1:49881",
+          "-R",
+          "127.0.0.1:49882:127.0.0.1:49882",
+          "<buyer-ssh>"
+        ],
+        "listening_on_buyer_host": [
+          "127.0.0.1:49880",
+          "127.0.0.1:49881",
+          "127.0.0.1:49882"
+        ]
+      },
+      "at": "2026-11-15T23:46:31.749628+00:00"
+    },
+    {
+      "name": "relay-1: the installed relay unit is active and enabled on its host, runs as an unprivileged user (uid 64434) and serves TLS at its public URL, verified against the pinned CA",
+      "pass": true,
+      "detail": {
+        "unit": {
+          "NRestarts": "0",
+          "ExecMainStartTimestampMonotonic": "20454233135",
+          "User": "tos-service-packet-relay",
+          "DynamicUser": "yes",
+          "ActiveState": "active",
+          "UnitFileState": "enabled",
+          "InactiveEnterTimestampMonotonic": "20403961101"
+        },
+        "uid": "64434",
+        "answers": true
+      },
+      "at": "2026-11-15T23:46:31.980594+00:00"
+    },
+    {
+      "name": "relay-1: the relay binary on the relay host is byte-identical to the one built here from the named ai commit",
+      "pass": true,
+      "detail": {
+        "relay_host": "f8ff662fe12afadae7fee7676aece6f7e1107ada9c67bd4896ffa5d88fca23ef",
+        "built": "f8ff662fe12afadae7fee7676aece6f7e1107ada9c67bd4896ffa5d88fca23ef"
+      },
+      "at": "2026-11-15T23:46:32.159609+00:00"
+    },
+    {
+      "name": "relay-2: the installed relay unit is active and enabled on its host, runs as an unprivileged user (uid 64434) and serves TLS at its public URL, verified against the pinned CA",
+      "pass": true,
+      "detail": {
+        "unit": {
+          "NRestarts": "0",
+          "ExecMainStartTimestampMonotonic": "22973657114",
+          "User": "tos-service-packet-relay",
+          "DynamicUser": "yes",
+          "ActiveState": "active",
+          "UnitFileState": "enabled",
+          "InactiveEnterTimestampMonotonic": "22924340088"
+        },
+        "uid": "64434",
+        "answers": true
+      },
+      "at": "2026-11-15T23:46:32.391371+00:00"
+    },
+    {
+      "name": "relay-2: the relay binary on the relay host is byte-identical to the one built here from the named ai commit",
+      "pass": true,
+      "detail": {
+        "relay_host": "f8ff662fe12afadae7fee7676aece6f7e1107ada9c67bd4896ffa5d88fca23ef",
+        "built": "f8ff662fe12afadae7fee7676aece6f7e1107ada9c67bd4896ffa5d88fca23ef"
+      },
+      "at": "2026-11-15T23:46:32.574023+00:00"
+    },
+    {
+      "name": "no direct path: the provider host is behind NAT (its public address is on no local interface) and from the buyer host no TCP connection to that address opens, on any probed port",
+      "pass": true,
+      "detail": {
+        "buyer_to_provider_host_public_address": {
+          "22": "refused or unreachable: TimeoutError",
+          "80": "refused or unreachable: TimeoutError",
+          "443": "refused or unreachable: TimeoutError",
+          "8443": "refused or unreachable: TimeoutError",
+          "49880": "refused or unreachable: TimeoutError",
+          "49881": "refused or unreachable: TimeoutError",
+          "49882": "refused or unreachable: TimeoutError",
+          "47000": "refused or unreachable: TimeoutError"
+        },
+        "provider_host_public_address_is_on_a_local_interface": false,
+        "buyer_to_relay": {
+          "relay-1": {
+            "8443": "connected"
+          },
+          "relay-2": {
+            "8443": "connected"
+          }
+        },
+        "provider_host_to_relay": {
+          "relay-1": {
+            "8443": "connected"
+          },
+          "relay-2": {
+            "8443": "connected"
+          }
+        }
+      },
+      "at": "2026-11-15T23:47:13.094734+00:00"
+    },
+    {
+      "name": "both nodes' hosts reach every relay's TLS port over the internet",
+      "pass": true,
+      "detail": {
+        "buyer": {
+          "relay-1": {
+            "8443": "connected"
+          },
+          "relay-2": {
+            "8443": "connected"
+          }
+        },
+        "provider": {
+          "relay-1": {
+            "8443": "connected"
+          },
+          "relay-2": {
+            "8443": "connected"
+          }
+        }
+      },
+      "at": "2026-11-15T23:47:13.094944+00:00"
+    },
+    {
+      "name": "provider init without --yes creates, signs and sends nothing",
+      "pass": true,
+      "detail": "tosctl.pin: done: tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)\nnetwork.domain: done: network \"tos:global-id:3\" with genesis root sha256:babf9f3152eae4e09a6b82eb21d4525b53840d3c2f5983eec8a6189873e2c8a3 and file sha256:e6d56ec8d7c6f581553e208b34baf03b342f7a96c6aabbb6bd9b9a7a582b3185, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree\nwallet.address: done: wallet \"provider\" is 0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2\ncontroller.packet: planned: controller \"openfox-packet\" is not in the vault and will be created\nagent.register: planned: an Agent registration will be signed with controller \"openfox-packet\" and sent from wallet \"provider\" (0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2) attaching 2.000000000 TOS\nError: servicebridge: nothing was signed or sent; review the preview and re-run with --yes\n",
+      "at": "2026-11-15T23:47:13.675343+00:00"
+    },
+    {
+      "name": "provider init registered the node's Agent and wrote the rail configuration",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-init.v1",
+        "confirmed": true,
+        "rail_config": "/tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json",
+        "state_dir": "/tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/state",
+        "network": {
+          "network_id": "tos:global-id:3",
+          "genesis_root_hash": "sha256:babf9f3152eae4e09a6b82eb21d4525b53840d3c2f5983eec8a6189873e2c8a3",
+          "genesis_file_hash": "sha256:e6d56ec8d7c6f581553e208b34baf03b342f7a96c6aabbb6bd9b9a7a582b3185"
+        },
+        "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+        "tosctl_sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+        "tosctl_pin": "trust_on_first_use",
+        "tosctl_pin_note": "trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256",
+        "wallet_name": "provider",
+        "wallet_address": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+        "packet_controller": "openfox-packet",
+        "packet_key_id": "mldsa44:2392866114fa4f7b6e9097aaa013f3314d12f9285cfa9938301051a4b15c5a91",
+        "agent_id": "agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b",
+        "agent_address": "0:2da6807a026495d5b3253461bc12fabfd1a38351376fd8a2987b2b9bfbd583eb",
+        "registration_attached_nanotos": "2000000000",
+        "steps": [
+          {
+            "id": "tosctl.pin",
+            "status": "done",
+            "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)"
+          },
+          {
+            "id": "network.domain",
+            "status": "done",
+            "detail": "network \"tos:global-id:3\" with genesis root sha256:babf9f3152eae4e09a6b82eb21d4525b53840d3c2f5983eec8a6189873e2c8a3 and file sha256:e6d56ec8d7c6f581553e208b34baf03b342f7a96c6aabbb6bd9b9a7a582b3185, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+          },
+          {
+            "id": "wallet.address",
+            "status": "done",
+            "detail": "wallet \"provider\" is 0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2"
+          },
+          {
+            "id": "controller.packet",
+            "status": "done",
+            "detail": "created controller \"openfox-packet\" in the vault with key id mldsa44:2392866114fa4f7b6e9097aaa013f3314d12f9285cfa9938301051a4b15c5a91"
+          },
+          {
+            "id": "agent.register",
+            "status": "done",
+            "detail": "the registration of Agent agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b is in finalized state at checkpoint 202"
+          },
+          {
+            "id": "relay.trust",
+            "status": "done",
+            "detail": "this node's https relays are verified against the 1 pinned certificate authorities in /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/state/relay/relay-ca-707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c.pem (SHA-256 707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c) only, not the system trust store; relays only a peer's card names use the system trust store"
+          },
+          {
+            "id": "config.write",
+            "status": "done",
+            "detail": "wrote the rail configuration /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json (0600); it reads back strictly"
+          }
+        ],
+        "next_steps": [
+          "provider: openfox earning service offer --rail-config /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json --price <TOS> ...",
+          "buyer: openfox earning service buy --rail-config /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json --offer <file> --source <archive>"
+        ]
+      },
+      "at": "2026-11-15T23:47:16.902213+00:00"
+    },
+    {
+      "name": "provider offer without --yes shows the terms, every attached value and what will be created, and sends nothing",
+      "pass": true,
+      "detail": "executor.service: done: the executor service at /run/tos-service-executor/executor.sock answers as root, is ready, and runs the offered image under the offered limits\ncontroller.attestor: planned: controller \"service-attestor\" is not in the vault and will be created\noffer.preview: owner wallet 0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2; provider Agent agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b\noffer.preview: to be created: attestor controller \"service-attestor\": a new ML-DSA-44 key in the tosctl vault\noffer.preview: to be created: a Service Actor at an address derived from the owner wallet, these terms and that key\noffer.preview: to be created: a manifest naming that actor and key, and a Capability whose id derives from its digest\noffer.preview: deploy Service Actor (derived once the attestor key exists) (code tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c, attestor (derived once the attestor key exists)) funded with 1.200000000 TOS\noffer.preview: terms: price 0.300000000 TOS, storage fee 0.250000000 TOS, cleanup bounty 0.100000000 TOS, response SLA 3600 s, refund-claim window 3600 s\noffer.preview: register Capability (derived once the attestor key exists) version \"1.0.0\" at (derived once the attestor key exists) with manifest (derived once the attestor key exists), attaching 2.000000000 TOS\noffer.preview: update-policy with metadata hash (derived once the attestor key exists) and proof scheme 42d2913f1ad35c71597b62a52a15c9f86fbf4a0f179685acee10230957cafb19, attaching 0.010000000 TOS\noffer.preview: total attached 3.210000000 TOS plus wallet fees; a buyer attaches 0.750000000 TOS to each call\noffer.preview: planned: the actor address, the manifest digest and the Capability id derive from the attestor key, which does not exist yet; the run with --yes creates controller \"service-attestor\", prints them and then sends the three messages above\nError: servicebridge: nothing was signed or sent; review the preview and re-run with --yes\n",
+      "at": "2026-11-15T23:47:17.097517+00:00"
+    },
+    {
+      "name": "provider offer deployed the actor, registered the Capability and set the policy (read from the chain)",
+      "pass": true,
+      "detail": {
+        "offer": {
+          "schema": "tos.openfox.rail-offer-setup.v1",
+          "confirmed": true,
+          "rail_config": "/tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json",
+          "preview": {
+            "owner_wallet": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+            "provider_agent_id": "agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b",
+            "provider_agent_address": "0:2da6807a026495d5b3253461bc12fabfd1a38351376fd8a2987b2b9bfbd583eb",
+            "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+            "actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+            "attestor_controller": "service-attestor",
+            "attestor_key_id": "mldsa44:cc30aa9fdb96f891dcef03acd16d794486223e30e67fa112be1647d8f1408027",
+            "terms": {
+              "price_nanotos": "300000000",
+              "storage_fee_nanotos": "250000000",
+              "cleanup_bounty_nanotos": "100000000",
+              "response_sla_seconds": 3600,
+              "refund_claim_window_seconds": 3600
+            },
+            "version": "1.0.0",
+            "manifest_digest": "sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26",
+            "capability_id": "cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae",
+            "capability_address": "0:54713b2d6df99dcbb12c82ca6997662fdab3960f6016228919b8b7a73e4b6504",
+            "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+            "proof_scheme_hash": "42d2913f1ad35c71597b62a52a15c9f86fbf4a0f179685acee10230957cafb19",
+            "deploy_funding_nanotos": "1200000000",
+            "capability_registration_attached_nanotos": "2000000000",
+            "update_policy_attached_nanotos": "10000000",
+            "total_attached_nanotos": "3210000000",
+            "buyer_attaches_per_call_nanotos": "750000000",
+            "note": "tosctl signs each message with keys in its custody. The deploy funding stays in the actor as its operating reserve. Fees are paid from the owner wallet on top of the attached values."
+          },
+          "offer_file": "/tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/state/setup/offer.json",
+          "executor_socket": "/run/tos-service-executor/executor.sock",
+          "verification": [
+            {
+              "id": "manifest.local",
+              "status": "pass",
+              "message": "the local manifest sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26 names actor 0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1 and attestor mldsa44:cc30aa9fdb96f891dcef03acd16d794486223e30e67fa112be1647d8f1408027"
+            },
+            {
+              "id": "chain.registry",
+              "status": "pass",
+              "message": "the Native Registry account reads at the checkpoint under the pinned code hash"
+            },
+            {
+              "id": "chain.capability",
+              "status": "pass",
+              "message": "Capability cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae version \"1.0.0\" is live, owned by agent_id and commits to the local manifest"
+            },
+            {
+              "id": "chain.actor",
+              "status": "pass",
+              "message": "the actor 0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1 is active and runs the pinned code hash"
+            },
+            {
+              "id": "chain.attestor",
+              "status": "pass",
+              "message": "the actor's attestor is the manifest attestor mldsa44:cc30aa9fdb96f891dcef03acd16d794486223e30e67fa112be1647d8f1408027"
+            },
+            {
+              "id": "chain.admission",
+              "status": "pass",
+              "message": "the offer passes the protocol's admission verification at checkpoint 222"
+            }
+          ],
+          "steps": [
+            {
+              "id": "executor.service",
+              "status": "done",
+              "detail": "the executor service at /run/tos-service-executor/executor.sock answers as root, is ready, and runs the offered image under the offered limits"
+            },
+            {
+              "id": "controller.attestor",
+              "status": "done",
+              "detail": "created controller \"service-attestor\" in the vault with key id mldsa44:cc30aa9fdb96f891dcef03acd16d794486223e30e67fa112be1647d8f1408027"
+            },
+            {
+              "id": "actor.deploy",
+              "status": "done",
+              "detail": "the deployment of Service Actor 0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1 is in finalized state at checkpoint 209"
+            },
+            {
+              "id": "capability.register",
+              "status": "done",
+              "detail": "the registration of Capability cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae is in finalized state at checkpoint 216"
+            },
+            {
+              "id": "actor.policy",
+              "status": "done",
+              "detail": "the policy of actor 0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1 for this Capability version is in finalized state at checkpoint 221"
+            },
+            {
+              "id": "relay.card",
+              "status": "done",
+              "detail": "the offer carries encryption key card hpke:ad1ec03d1c0d7390b740a7da6d400f367e01b5a6c2f8936052b33ab44521fd80, valid until 2026-12-15T23:47:24Z, naming relays https://<relay-1-host>:8443, https://<relay-2-host>:8443"
+            },
+            {
+              "id": "offer.verify",
+              "status": "done",
+              "detail": "the offer passes the preflight's manifest, Capability, actor, attestor and admission checks at checkpoint 222"
+            },
+            {
+              "id": "config.write",
+              "status": "done",
+              "detail": "wrote the provider section of /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json"
+            },
+            {
+              "id": "offer.file",
+              "status": "done",
+              "detail": "wrote the offer file /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/state/setup/offer.json; give it to buyers (it holds nothing secret)"
+            }
+          ],
+          "next_steps": [
+            "openfox earning service preflight --rail-config /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json",
+            "openfox earning service serve --rail-config /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/rail.json"
+          ]
+        },
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+          "next_request_id": 0,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 0,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T23:47:24.957816+00:00"
+    },
+    {
+      "name": "the offer file names the provider's Agent and Capability and holds nothing but public data",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-offer.v2",
+        "capability_id": "cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae",
+        "version": "1.0.0",
+        "provider_agent_id": "agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b",
+        "manifest_digest": "sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26",
+        "relay_key_card_base64": "eyJzY2hlbWEiOiJ0b3Muc2VydmljZS5hZ2VudC1wYWNrZXQudjEiLCJzZW5kZXJfYWdlbnRfaWQiOiJhZ2VudF80ZGRiYTlhZGIwOTRiODU1MzI2OGM3ZDEyYzg4MWJkOWFiMDI4ZWMyMTdhYzI5ODU5M2U5ZTMzZGI2NjVhMTFiIiwicmVjaXBpZW50X2FnZW50X2lkIjoiYWdlbnRfMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsImNhcGFiaWxpdHlfaWQiOiJjYXBfMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInNlcXVlbmNlIjoxMTc2MjMxMjQzOTM5ODUsIm5vbmNlX2hleCI6IjIwODNmNTYyNDNiNTg5YTQ3YWI2OWM3ZTY4MzNiNTc2YmEyNDk2Y2YzMGNkNjhmYjRiMGE2YzFmZTIxMjM1Y2YiLCJwYXlsb2FkX2Jhc2U2NCI6ImRHOXpMbk5sY25acFkyVXVZV2RsYm5RdGNHRmphMlYwTFhKbGJHRjVMbXRsZVMxallYSmtMbll4QUdSNkFBRUFBaWRRRVJpWk1ORDRHQ3dCb3VpVVZUSzBGeExzSDl4cmN2NW5IUFRjVU44RnZMcFJoWWhvQzJ6bmU0b1RBZ0lCUzhBcVgzdjhwQ3NsTmRPS25rak1TekxKY1JVMVN0Q0pTK1U0WElkaHByU2xLVjNodFFNYnNKZVNTVGlFT0p1YkNvZ1h2OERNT3JjTUpBOTBBOU5HV1lUWW5LNEVpK0E4R1JiRkJDSjBFTWZvTmsvWVRYem9pb3djcjJPVEUyZ2NyeUhKcVNWRXQ4dEp3LytVVHVySW9MZlJhalNxVHY0Mkh0Qnp6OFE3SVFlbUduSERQeXZycVBXd3dvWXFkOXphR2ZWYlVMeXFGMExFeXBvVFdGbUVVOEZRVHEwQ1ltV3FqNU04WFR5c0FrT1ZIT0FMa0gzNXBxUVlHb1hVV3lES1VsUUNyVzZyUmQ2WmpXUVlaZEE3ZysvVWN5U2dXRWMzdldvNmY0d1JNMXNhWnRqemxTTUZZa1JtaG56d0cvelNiNXczRnBNV0tmeEtReU1XWFRNVG9BRW1tcFpTZkFqVlVxWlpqdEo2Q1lha0tIKzdrUDJUTFB5bE5RWXB0QWZLRHNob1k0clNDUlNCaHlwekhPeldXcGdFalV2WGEzeHdVZ0FJd2ZhcUtEU1dxa280SkJqV1MybFdxV0NNbnIzcU01MzZUeFlic3lTVHoyazRCdTZJYnNLN29tUnhia3drcWtDU3kvZTFPWlhheXo3Mkc1eDZvcTkzUkZlMEttNUhMbTg0T0k1N1dtSXBVN3hCTzZMVm9yT1NLOHo3SDNzNHhFbHlZUzVYYXZaYW1YREJ0S2hMcnRhNW41dDZQbHpYa3N0VGZFWUNNbGEwU2t0cklObkNodEdHSEwwUUdvNEF4cWlEZnBNckJQZTBRWWlhTTJuVFAwWFd0dkprVk1rVGNVMTBROXdNbTEvRFRzZ1FwZXR4bnJBWGNGa25RZFFwWnlRU1FpSTFqTzJnbUZhcEZkcmpsL3hFVjE1Z2QzMEZ6NllHRFFzakJIaFlnZWJBT3lvanh4bDBKcU95d0M3SGJEZTRUclViaFJqaldEcDZGTlVTSlRpeFFZSGN1Y2tIRSttV3E0NFVDYWxVTkpIUXRBcnJZUUlBdVFqYWdmRG9aS0JoTS9UaWM1RzZobUxsYnArMW1HTjZsY29KRERyaGpDVUhROWdIQk5lcHR0S2Fwdmh3dVd3OERYZFJjMkhaVDErOFBmUEd1UlBJWUdtSFBVWWFOYTIyeFEycXczVjVDTXhBU0N3RUNpQkhSQzR3akdpQWFyaklQWi9sUk5RWk1OY3lpeU9NbjRmS244bERLMXBtaTZxSHhjZkR4UnVZdjNMaE1MckVMTTJyZUl5akh4NnlXL3I1ditSWXRQUktmaCtyTEFNbmVJZmNmSUZGSzNYMllxcUxoRHNsZGFjNmo3YTVBUm4yVlFVaEh5ZElUWTRIUkV5c2NSMXNwUVQ0c2Y0MUtBZFpXbVk2TDRpcG9YcEZ1NGZaQUh5RFJhT3dWSDIyQmJwaGJ1M3JHak1pUGFZSXFzRXJOdW1hRmdDR1pCb0hFY09ZYlFsemVBYzdWeEFFdzcraHpqSHNMOVJYSTBqMm9UTG5iVEkzY3RtandkZ296UkZtd0F4Vmxna1FvWXpVSWZRYktndllWb2Z3d0J2eVhrT3FkRGNqeWFkeXNWb0tnUzAyZUFDZGd1NFVseWRCbGp3S1NnUGJ4RG4xR2hnS3oyOXlrUGdwVW9kM3hQeXB0N3M1SG0rTXcwbmt5VVNxRjZwYnZVaWFkanJRS1pWQkR4RW9pVy9tRXVOc2FvbzZYMXlHclBOTUs0K0VkWCszU1NCeU04NFpGbmlrWWlpWlN1ZzJaVUpjclJseFllUURHSjNLemw4RWVTSWxYU3dNUmNMM3N5c2l5Kys0U3pCclFLcWtqeTJsbHVPNndNNURDbkNheXd4YWwwZUJyQkdxYkRRUW45bnBHajZsb3QrREkraFlWK0xyaGNtYm1GYlRhVGRsaDJwNVhKZ1VpektlNVpNZ3JMOWxQQnFvWWRUZnNLSFA4YjVCVms3WUswUGcxNjJucGlrbmxyUCtCSnVha0VTRWwyeFJ1d3k1VUlqSjUzMFlHZERWbmttMWxMaDZxUWl0SHNBOUhBMXprTGRBcDlwdFFBODJmZ0cxcHNMNGsyQlNzenEwUlNIOWdBQUFBQUJxK2tTTUFBQUFBR3NoMFl3Q0FCdG9kSFJ3Y3pvdkx6RXpNeTR4TVRjdU56TXVNalEwT2pnME5ETUFHMmgwZEhCek9pOHZNVFl3TGpJMU1TNHlNell1T0RZNk9EUTBNdz09IiwiY3JlYXRlZF9hdF91bml4IjoxNzk0Nzg2NDQ0LCJzZW5kZXJfa2V5X2lkIjoibWxkc2E0NDoyMzkyODY2MTE0ZmE0ZjdiNmU5MDk3YWFhMDEzZjMzMTRkMTJmOTI4NWNmYTk5MzgzMDEwNTFhNGIxNWM1YTkxIiwic2lnbmF0dXJlX2hleCI6IjQ5NWQ0ZjA3NjViMDdlYjFjMWViNTVmODg4YWI0Y2FmZTNhZjYyYWIwN2UzZDIyYjRjNjk3NmIyZTQ3NmYwMmQ5MTg0NzQ1ZTkwZGRlZTlmMjhhYmE0MGVjMzU4NGFiYzE5NDY0YjU1N2Q2MjQzZDAxMGFiNTM1ZGUyNGNlZjlhMTAxNDVkZTdiM2VkZDI5NjQxMDFlMGNlYjc1NWNkN2M0ZDQ5MmM3ZDI2MmFkOTk2YWZlZGVkYjMzM2MyODA2NGM3M2MwNjZmY2YxYTY4OTQ2YTNlMTVjN2QxYjI4MTQyZDkyNjg2YjFjNjkwM2EyYTBjNWYzMGU3NzVmNGRhOTY0NTk4ZjNmY2Y4YWRjYzJlNDJjNDk2ZjhkZjJjMWQ0ZmE3MmY2ZmY1MTA2ZmU0NmU2NWEyMWNjOTRkNDE3OTM0NDVlNTFhZjQ0YzFiOTk4MmQ4NjRhZDZmYTFlMmY2NzE2Mjk5NTNiMmM1M2VmOWEyNWE2YTEzZDU4NzkwMGRiNmZlNmM5OWU4MTUxYWIxOTJlMmU2NTljNjBiYjhiMmNjYzJmYWRhOGViMGRkYTdkNmRjNzY2YTA2YzVmZmJiZWI4MTgzNzdiMmU1ZjI5NTQyYTUwMjg1MWEzYmJlZWI1NzAxODE1YWYwNjJhYzY1NmY2Yjk4Y2Q1ZTlhMmUyOTUwM2U3MWJlODA0ZDNjOTdmMDA2NmQzNTU2OTZhZTVlNmM1MDk5Y2YxODdhOTM1YjNmMjFhOTJkMDlhOWEyZDU5MGUxNWY2NDhjMTIyZDc3N2E4ZTc0NGI5OWViOWU1ZjNlYzNkMTkyMjBkOWJiOWRhYzA0NTQ1ZDJiNzQ5ZDAyZjc0OWQ0ZDU4NTVmZTMyZGQxODAyMDk2ODcwYzI0MDllMTU1MGYyMTkxNTA1ZDQ0NGY0Yzk4NzliNmYxMjA0NjIzZWNiYWMzNzVjOTc4OTcxZDI4ZDQ3NTI1N2UxMDIzMTY0ZmI2ZTkyYjRjN2IxNDhmNTQ0MDhkNTI1YjE4ZjExOWQ3OTYxODQ5OTFjZGQ0ODhlNmRmODkxMWVkMGE2YmE5YWMwNTgzYzhhNTU3NjFiYjg4Mjc1ZjFiNTZjYTdmNjllNDdlMjllMDk5YTU1YjhhM2FjZjZhNjQ5ODdhYWZlN2UxYTViZDBjZjZkNTEwMDZkMzIxNDJlM2QzNzhkZTdmMWNjNWI5OWQzOWNkNTU2NWMyNGEyZDhkODNkZTE2ZTQ1MWQzY2QyZTI1Njk2ZjVmYjUyODRjNGU0MzU4NDg0MDE4ZTU3OWJjNDg4MGMzMmE0ZmM1ODViMzZiZmYzYzBkYTg1ZjFmODhhMmEyMmNkY2NhZGI2NGQyNWNiZmU3NWNjYjkxMjhkNDVlOTIwODc5NDIyMzNlNjM5ZDVjZWMyYzI4MGZkNzA3MDEzYjZmZDVhMzEwNzhmNDI5ODMxMDA0YWU2MGMxZmVmOTAwNjgyNjAyMDYzOTRmM2QxMWRhNjBmMGZiYjY1N2FiZTA4NWM3YmEzYzY5ZDk1ZTAyZjk2ZGEyMTIwNjgxMDVjNGEzMjg5NGJlNDRiMWEwMzc5YjA1ZTkyOGFlYjM1MWYxOTVhZTg4N2IyNWYxNTkwNTBhODIyNWIzNGE2YmUzMmJlNjdjMzNmNTQzNDVkZjE0Yzk4MWI1MWZkNWY3OWZlMmQzMDI3NmE1Mjg0NjAxNWRjMTA4MDg2ODJjNDYyOGQ1MTk3MzdlOWU4NWQzYWNjMTQ2YWUyZjYzOTBiMzBjMzNmMDYxYWU3ZDFmZWQ3NjA2ZjBmYWJjNTM4ZGQ4ZDkwNGVlNDIzYWVkZTkyMDQ4NjA0MTQxNjBlOWQxZDM0NGNlOGY2YThlOGI0MjRlYmQwNWEzMDkyMTVhMjdlZWZiZTgxMzM5MzEyYjYxM2NlNWM4NmIzYjI0NzA5MDVhYzlhZWYyNWMzMmE5YzBlZGU4ZGY3ODA5YzNiNTM5NjQ4Njg0ZjE2MTgxMjkwYmNlZWU3MTZiNGFlNDhlZGNmMGU5NDQxNTdiMTcwNDhmZDIzMzg2OWM2ODgwMjJmZTk3MDk0YjhlMWY3YjgzM2Y3NTIyNjNmZWJkMzY2MjVlMmI1YjBlNWJlZWVhMDA1ZjI5ZDYzYzA3YzBlODc2YjE5ZWQ5OThmZTQ4ZTExYTY5ZDVjZTVjMmZhMzhjNDRhNTk4ZTczZjU5M2NkZjNhOWVjNDk5ZmNiZTA4ODk3ODVkN2E2N2I3ZDYzY2QyNzJjMTFkNDE5YzA3ZTEwMzRiZTM1ODA1ZmM3ZmY0MmVlMDE4N2VkOTc4ZDVlMzRkNWNkYjY4ZGJhN2Q0YWY5NGVmOTQ1NDQ1ZTgxOTAxZWRhNGI5NjgwZWI1MTIwMjJkNTU5OTBiMmFmNjFhZmUwYzZlMzJhYzkzMWEyZjVkMmFlN2JlNjMxMWMyYTlmZmMyMDNiNmUxNzE0ZTVjY2Y3OTE5ZjU0MGNhZjg2ZTM1ZDllZGM0Y2E1NDc1MmFjNDQzOWZkNzhiZjczN2Q0MGU4NmRmZDZlOGMxZDRlMTI2NzUyZjJmMWEzZTk3Nzg1YjNjYzc5OTJlYjQ0MTEzNjkwOTU1ZDAwZGJmYzMyZjBmODliYTUwY2NhMWZhNmVhMWE2ZTc3ZmVmMjEwNGY2ZGM1MDdjZWU2Y2VmZjEwZjU2ZGY2NWJlM2Y1ZjViZTE3ZGQzNmQzMzY5ZTk4ZmVmZmM5M2JhNTFiMDEwMmQ1YzMzZTU2OTllOWQ2MjQzMDQ0MWUzNjYzMzllNjYzNTE2MGVkYTA4MDViMmFlMmY5YTU4MDkwZjUwMmU1ODJlZTEyNTQyOTI1MWM3MjY5NWYxZjlmMTE3YWY4MGU2M2I0ZWYxY2YzMzBkZjhkOTc4OWJiMGJlOTQ1ZWU4NzhkZTk0YjA3NjQxZDgzY2MwYzhiODgyMWFkOTRlMmZkYzQzOTQzYzRlMzExNjFkYmJkYjBhMTg4MTM1MzgyMDMzMTEyMjhkNzc2OGYwMzY1ODllNmE0NjkyNjU5MzljN2NlNTcyNDk4NDU5NzZiNjAzYTRiMmEwZGU1MjQ0NGE1NGYzM2IxNjRjZWZmY2ZlNDQ3NDQ0NDEzZGUzNGIxYjJhYjE0NGE2YTdjYTYzMzA0ZDA2Nzg0NTllMzE5ZDQ4Yjg4NGFmNzQ3YTliYWEwMzdjYmMyMDViOWYwNDdhNGE2YzE0NzA1NGMzNGI3YWJkNGUxYTZkOWRmMzFiYWJmZjM2OGUxOGM0NzdmNmY5YmEyMWQwYjk5NDA5YmZlOTQzMWUwYWMwYTg2N2JhNmYxZjdlNDIyYzAyNTc3YTY1MWUyZTI4YWJlYTAyYmVjMjQ2ZTkzYTc3ODhjOTA2YjM3NmQ5MmU3OTg1YTAwNWQyZDQ2NzU0MDhlNGIwMDdjZWFhMDE3MjZjODFkOGJhYTEzZGZiZTNiNTAwMWM4ZTY0OTA5NWE2NjVmZmEzMDEwYTQ3Nzg0NGYyODI1ZjVhNjkwN2ZhNGI2OGFjZTc2ZTVkNzhlOWUyZGY1YTBkZDk0YWIwYmNmMGQxYzA3ZTBhZDJiYTdlZTVkZTQ4NTUzNzlhYjdhMWExZGUwODJmMmJlZjU2ZDNiMjEyZjQzZmViZTViZjZkZDYzYjRlMmFkNWJmY2MwN2ZiNzM1YTQ3OGM0NDNlYmE4MjZhYzY4M2EyMDY2MWM5ODhkYTZkNmI1NjI0NGQ2NjM1ZTA3MDIyMjBjZjhmZmJmNDM5ZDcxYjJhY2E3YTE0YjZhMmY3NzI4MjkxZmIzZmNkMGVlODY1NWMwNGYxZWI4MGExZWJkMWI2ZWFkODI1Y2RjNmJlYmM4N2M0NTQxNDdmZDBjY2QxMzMyOGFiMGNkMWMwODUyNGFhODc0OGUyMmVlYzg2MGU5MDlkY2QxMjc2Njc5OTRhNmI4NDc1OTFlN2I3MTA4ODUzNThkMjA0NDRjZjcxMWQ0ZTBhYjcxMmY4NDljMmYxNzlhYTNhM2I2NmRjYzI0MTQ0MGEwMjdhZWIwN2RjYmI1NjA2YzdjZjE1ZmQ5OWNlMDkwZDgxMWE5NzA0NTlmNDY1NGU1M2QwOTMwYmNiNjFmNTZiOGZlMmI2YTc5N2E0ZjRkMDZkOTBmZDIwZjM2NmQyNjNiNzZiMmE3YzNiNjUxZjNlZTdmY2NkYWYxZDRiMWYzZDcwNmNlMWZhMTJhYjAyMWM2MTc5YzgxYzlkNGRmNDdlOGUzZGUxOTJhNTZjNWNmZDk5YTY5NjVkOWRkZGQ5ODYzY2RhMGVmMjkyYTZkMmUzZjdhYWI5ZDM0NmMzYmQwNGMwYjBmM2NiMTk1MzkzMzQzMDFlM2RkMDgzN2I2ZDZmNjYxOWQyOWY2NzJmOGRhY2E1NmMzYjZjZTVjOWVkN2I0N2I1OGMzMTJlOTNiNmFmMzM3MGU5M2JiZGY2YzUxNmE1MzNkYjFiMTlhZjQ2ZWIwMjg3NzIzN2MzNmZkNzk0MjhmMWJlZmZhOWU1MzFkNjIzMWM1MmRkMzM2YTIwOTMwOTdmZDdmOGRkYmI2MzViNjRhZTNjMjZmNTNkYzBiMGI5NjcyYjE0ODExNWRjOGNmODJhYzhhZWU4NWYwZjVjMjFmZDk3OGNjOTJmY2FmOGY3OTY2Y2MwN2YzN2E0MmM5NzNjMjliZTM4NzU1NTk3NmNhZDdhZDk0MmIyYjJjOGJlZjljNWQ5NzQ4ZDFmYzJkYmNkNGRiZDA2OTU1OWNkZGM4NWIxMjRiMWI1N2U1NmQ3NmQ4ZDQ1MzU5NGU3NThlZjBhN2FiOGIwNzhkNzJlMGJlMzU4NTg0OWJmOWRlYzg1Y2I1YzFjODE4M2ZkM2EwZjg0Y2Q4NTg0MDliMzljODcyZGMwZThmY2Q3MzkwYmI0YzliMWEyNDczZTA3OGE2Yzg0NjQ2MDA2ZDU2N2NlNDQyZDgxOGFiZDk0MmE1N2E2MTMxMDBhMmVhNmFjNTRmZjRjMTBhYmQ1ZmEzODkxYmM2MjhlMzQ0OTRkZmMyOTI0NzU3NzIzOGVlZTMwNWY5MDFhNjc1MmE0M2JjOGRjNWRiOWJhOGE4MDhjM2QyMTY3YzRiYjViOTcxOGI0MDdkMzZkZGVhODE5MGMxMWU0YjhjM2Y0YjJjNDJhNzIxYmE3OTE4N2M2NGY4OTlhMThiNDg4NmI0M2JhNzIwYWQxMzVjYjczOTdlNWU2NWI2NjU5NmE3MDVjNGFiNTE0N2M3MTU4YWRkOGQ3YmFmMzA2NzZhOGFhYWJlNmJmMjQzN2MzZDUxNjlhMjQxY2ZlYmUzZGFlMTg2MzBlMWU3YTJiYjkzNzMwNjkxZDdlNGY3YjQ1MjJmMTc3MWQ1ZjYwMzUwMDZhZjVjZGFhYTBhYWM0YjdiNjQ1MTg5ZmI4MTEwZWMwODE1NTk1YTA0ZjFiMTU4NmI1ZjUzYjNiYTNmNDYzOTdlMmM0MmE1ODVmMjc1ODFhYWQ2MmU5ZThiNDYxNTljM2EwYWM5MTQwYzhkOTFhMzMxYWU0ZWM0Yjg5NDM1MjRkZGM3MjhhYWY5OWEzMzI3YTUyYzJkMTdjNzM1ZmEzOTU3YWE1ZjRlNDhlZWEwOWY2YzYxZTYxZjkwNjM2NmExYWE2ODE1ZWNhNjVlMWFjOWNjNjIzNjJjZTg1ODg5MWNhMDQyZDhhNzNjMzZlZmY2YTAyNGU1ZWYyMDQwMDE5MTNjZThlMjQ4Yjg2NWM4YTM2YjgyOTFmMDE0MzQwMGFlMTk1ODdmNzFmYWZiMmMwMTNkY2UwZmY2N2RlMmRjZDc2ZjYzZTkwMGI4MjE3MWI3MWQ0MzViY2YyOGRlOTBmNjA3M2YwMDkyMDc2YjFjMTY3Y2FkZmZhOWM2ZjA2NTVkZDJlYzcyYTJlOTE4NmRjNGQ2YjA3NGE5MmVjNTgwNTFmYTA2MDBiNGY4MWM2YjQ3YjAyNWNjZmQxZjM4MDA4YjliMWU1MzkwM2Y0ZjdjMTRlOTIxY2ViMzFlZTJlZjUwMWExZTczMmZiODY0MmI2ZTlkMWIxZjE0NDA0MWQ0NzRhODhhY2E2YzUyYzA0N2MwOTlkODY1YTIzYWYyMGI3Nzk2MjllMGY0Y2QzNDIzYTc2MjM2MDUzMzVlYTdlZGFjMGUzODdjNzE2MWMzZDlkOTUxNGRjZTM4NjYzNzllZGI5YTFlYjhlY2ZlY2RkNzQ3ZWU0OWNiMjM2Mzc3M2FiYzc5OGQ5OTJkMjZiZGY3MGIwM2MzNmJjZjIyYTM4NDg1YTY1NjY2YTZlN2Q4MDg3OGM5OWEyYWVjYWNjZGJkZWU3ZmIwNzFmMjAyNDNlNTM1NTYyNzU3ZDg0OGRjOWQ4ZGZmMmY3ZmIxMjE3NjE2MjcyN2M5ZWE5YWRiYWJlY2NjZGNlZGFkZmU1MDUwYjExNDA0MzQ4NGQ2NjZiNmM3Mzc1ODE4OWEyYTViNWI5YzZlZjAwMDAwMDAwMTUyNzM4NGMifQ==",
+        "updated_unix": 1794786444
+      },
+      "at": "2026-11-15T23:47:24.961898+00:00"
+    },
+    {
+      "name": "the offer file carries the provider's encryption key card for the relay, signed as the provider Agent and addressed to the key card audience",
+      "pass": true,
+      "detail": {
+        "sender_agent_id": "agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b",
+        "recipient_agent_id": "agent_0000000000000000000000000000000000000000000000000000000000000000",
+        "capability_id": "cap_0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "at": "2026-11-15T23:47:24.962027+00:00"
+    },
+    {
+      "name": "buyer init registered the buyer's Agent with a spending policy that allows the provider",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-init.v1",
+        "confirmed": true,
+        "rail_config": "/opt/tos-relay-test/g2-3/nodes/buyer/rail.json",
+        "state_dir": "/opt/tos-relay-test/g2-3/nodes/buyer/state",
+        "network": {
+          "network_id": "tos:global-id:3",
+          "genesis_root_hash": "sha256:babf9f3152eae4e09a6b82eb21d4525b53840d3c2f5983eec8a6189873e2c8a3",
+          "genesis_file_hash": "sha256:e6d56ec8d7c6f581553e208b34baf03b342f7a96c6aabbb6bd9b9a7a582b3185"
+        },
+        "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+        "tosctl_sha256": "6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b",
+        "tosctl_pin": "trust_on_first_use",
+        "tosctl_pin_note": "trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256",
+        "wallet_name": "buyer",
+        "wallet_address": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+        "packet_controller": "openfox-packet",
+        "packet_key_id": "mldsa44:585d056732bbbee4ed11c51e150f0c982c330ebf413c1394524d86b26104dacd",
+        "agent_id": "agent_050113056392a1750e29d055d7f16295308995c8e5879dbcd227ecfe46d1490f",
+        "agent_address": "0:64a7f674bfbbe5d11a00232eec4474dc64316da2e6ade3fc920be0647862936a",
+        "registration_attached_nanotos": "2000000000",
+        "steps": [
+          {
+            "id": "tosctl.pin",
+            "status": "done",
+            "detail": "tosctl is pinned to SHA-256 6de21cb218b009fee3ff342af90f4a341e02e3465c5c425c3265a98107cffd1b (trust on first use: this SHA-256 was computed from the binary found, not checked against anything; compare it with the digest of the release you meant to install, or pass --tosctl-sha256)"
+          },
+          {
+            "id": "network.domain",
+            "status": "done",
+            "detail": "network \"tos:global-id:3\" with genesis root sha256:babf9f3152eae4e09a6b82eb21d4525b53840d3c2f5983eec8a6189873e2c8a3 and file sha256:e6d56ec8d7c6f581553e208b34baf03b342f7a96c6aabbb6bd9b9a7a582b3185, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree"
+          },
+          {
+            "id": "wallet.address",
+            "status": "done",
+            "detail": "wallet \"buyer\" is 0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d"
+          },
+          {
+            "id": "controller.packet",
+            "status": "done",
+            "detail": "created controller \"openfox-packet\" in the vault with key id mldsa44:585d056732bbbee4ed11c51e150f0c982c330ebf413c1394524d86b26104dacd"
+          },
+          {
+            "id": "agent.register",
+            "status": "done",
+            "detail": "the registration of Agent agent_050113056392a1750e29d055d7f16295308995c8e5879dbcd227ecfe46d1490f is in finalized state at checkpoint 232"
+          },
+          {
+            "id": "relay.trust",
+            "status": "done",
+            "detail": "this node's https relays are verified against the 1 pinned certificate authorities in /opt/tos-relay-test/g2-3/nodes/buyer/state/relay/relay-ca-707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c.pem (SHA-256 707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c) only, not the system trust store; relays only a peer's card names use the system trust store"
+          },
+          {
+            "id": "config.write",
+            "status": "done",
+            "detail": "wrote the rail configuration /opt/tos-relay-test/g2-3/nodes/buyer/rail.json (0600); it reads back strictly"
+          }
+        ],
+        "next_steps": [
+          "provider: openfox earning service offer --rail-config /opt/tos-relay-test/g2-3/nodes/buyer/rail.json --price <TOS> ...",
+          "buyer: openfox earning service buy --rail-config /opt/tos-relay-test/g2-3/nodes/buyer/rail.json --offer <file> --source <archive>"
+        ]
+      },
+      "at": "2026-11-15T23:47:29.292539+00:00"
+    },
+    {
+      "name": "both nodes are configured for the relay and name no direct peer",
+      "pass": true,
+      "detail": {
+        "provider": {
+          "relay_urls": [
+            "https://<relay-1-host>:8443",
+            "https://<relay-2-host>:8443"
+          ],
+          "direct_peers": null,
+          "messenger_socket": null
+        },
+        "buyer": {
+          "relay_urls": [
+            "https://<relay-1-host>:8443",
+            "https://<relay-2-host>:8443"
+          ],
+          "direct_peers": null,
+          "messenger_socket": null
+        }
+      },
+      "at": "2026-11-15T23:47:29.363358+00:00"
+    },
+    {
+      "name": "buyer serve is running",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-15T23:47:30.790759+00:00"
+    },
+    {
+      "name": "provider preflight is ok",
+      "pass": true,
+      "detail": [
+        {
+          "id": "rpc.independence",
+          "status": "unknown",
+          "message": "endpoints have distinct authorities, but whether distinct operators run them is not verified; a quorum of one operator's endpoints is one point of trust"
+        },
+        {
+          "id": "signer.wallet",
+          "status": "unknown",
+          "message": "tosctl offers no way to resolve wallet \"provider\" without signing, so the respond wallet is not checked; preflight never signs"
+        }
+      ],
+      "at": "2026-11-15T23:47:31.521084+00:00"
+    },
+    {
+      "name": "provider serve is running",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-15T23:47:32.530969+00:00"
+    },
+    {
+      "name": "the pinned CA and every relay certificate are each valid for at least 90 days, so no pinned-certificate expiry warning applies",
+      "pass": true,
+      "detail": {
+        "ca_validity": {
+          "not_before": "2026-11-15T23:12:08Z",
+          "not_after": "2027-11-15T23:12:08Z",
+          "days": 365.0
+        },
+        "relay-1_certificate_validity": {
+          "not_before": "2026-11-15T23:12:08Z",
+          "not_after": "2027-06-03T23:12:08Z",
+          "days": 200.0
+        },
+        "relay-2_certificate_validity": {
+          "not_before": "2026-11-15T23:17:59Z",
+          "not_after": "2027-06-03T23:17:59Z",
+          "days": 200.0
+        }
+      },
+      "at": "2026-11-15T23:47:34.425768+00:00"
+    },
+    {
+      "name": "TLS pinned-CA mode: every live relay presents the certificate key of the file on its host; both nodes pin the CA in their own state; neither node's environment names SSL_CERT_FILE or SSL_CERT_DIR; the system trust store refuses every relay on both hosts; preflight verifies every relay against the pinned CA file only and reaches all of them",
+      "pass": true,
+      "detail": {
+        "mode": "direct TLS on each relay host's public address, each certificate issued by one private P-256 test CA (SAN: that relay's public IP address); both nodes pin that CA with init --relay-ca-file",
+        "pinned_ca_sha256": "707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c",
+        "node_pins": {
+          "provider": {
+            "relay_ca_sha256": "707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c",
+            "relay_ca_file_in_state": true
+          },
+          "buyer": {
+            "relay_ca_sha256": "707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c",
+            "relay_ca_file_in_state": true
+          }
+        },
+        "ca_validity": {
+          "not_before": "2026-11-15T23:12:08Z",
+          "not_after": "2027-11-15T23:12:08Z",
+          "days": 365.0
+        },
+        "ssl_cert_env_in_provider_run": [],
+        "ssl_cert_env_on_buyer_host": [],
+        "provider_preflight_relay_trust": {
+          "status": "pass",
+          "message": "https://<relay-1-host>:8443: the pinned CA file only; https://<relay-2-host>:8443: the pinned CA file only; pinned CA file /tos/relay-test-deploy/runs/g2-3/nodes/g2-3/provider/state/relay/relay-ca-707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c.pem (SHA-256 707182c39c2619b381c340fc4cdbd9231618955110a16d9956f0652749299a3c, 1 certificates, valid until 2027-11-15T23:12:08Z); relays named only by a peer's card use the system trust store"
+        },
+        "provider_preflight_relay_reachable": "pass",
+        "preflight_pinned_ca_only_per_relay": {
+          "relay-1": true,
+          "relay-2": true
+        },
+        "plain_http": false,
+        "relays": {
+          "relay-1": {
+            "relay_spki_sha256": "2ff6b2723713bb570fc1e2db63b27245cc4831cd82c162728e80572eb08f9497",
+            "relay_certificate_file_spki_sha256": "2ff6b2723713bb570fc1e2db63b27245cc4831cd82c162728e80572eb08f9497",
+            "tls_version": "TLSv1.3",
+            "relay_certificate_validity": {
+              "not_before": "2026-11-15T23:12:08Z",
+              "not_after": "2027-06-03T23:12:08Z",
+              "days": 200.0
+            },
+            "system_trust_store_from_provider_host": "refused: SSLCertVerificationError: unable to get local issuer certificate",
+            "system_trust_store_from_buyer_host": "refused: SSLCertVerificationError: unable to get local issuer certificate"
+          },
+          "relay-2": {
+            "relay_spki_sha256": "c610ec395595a71d2eec9418c944cd39a2e276cc1242d8d220a96a1e7672c386",
+            "relay_certificate_file_spki_sha256": "c610ec395595a71d2eec9418c944cd39a2e276cc1242d8d220a96a1e7672c386",
+            "tls_version": "TLSv1.3",
+            "relay_certificate_validity": {
+              "not_before": "2026-11-15T23:17:59Z",
+              "not_after": "2027-06-03T23:17:59Z",
+              "days": 200.0
+            },
+            "system_trust_store_from_provider_host": "refused: SSLCertVerificationError: unable to get local issuer certificate",
+            "system_trust_store_from_buyer_host": "refused: SSLCertVerificationError: unable to get local issuer certificate"
+          }
+        }
+      },
+      "at": "2026-11-15T23:47:34.426042+00:00"
+    },
+    {
+      "name": "neither node listens on a TCP or UDP port: the provider has no inbound port, and every packet goes out to the relay",
+      "pass": true,
+      "detail": {
+        "provider": [],
+        "buyer": []
+      },
+      "at": "2026-11-15T23:47:34.563963+00:00"
+    },
+    {
+      "name": "relays only: both nodes name every relay's public URL and no direct peer or Messenger socket",
+      "pass": true,
+      "detail": {
+        "provider": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ],
+        "buyer": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ]
+      },
+      "at": "2026-11-15T23:47:34.725311+00:00"
+    },
+    {
+      "name": "the provider is paused and stopped before the purchase, so only the relay can hold the task",
+      "pass": true,
+      "detail": {
+        "already_paused": false,
+        "paused": true,
+        "paused_unix": 1794786454,
+        "reason": "relay outage case"
+      },
+      "at": "2026-11-15T23:47:34.827499+00:00"
+    },
+    {
+      "name": "first purchase: buyer buy --offer built the Quote locally and called the actor",
+      "pass": true,
+      "detail": "price 0.300000000 TOS (refunded only if there is no attested response and the refund is claimed); storage fee 0.250000000 TOS (non-refundable, kept by the provider even on refund); admission allowance 0.200000000 TOS; attached with the call 0.750000000 TOS (unused execution funding is returned); a refund takes two transactions from this wallet inside a 3600 s window after the 3600 s response deadline, expire then claim_refund (claim_refund attaches 0.2 TOS), each paying fees; 0.300000000 TOS is reserved for them\n",
+      "at": "2026-11-15T23:47:43.864121+00:00"
+    },
+    {
+      "name": "the buyer's task, sealed to the provider's key card, is held in the provider's mailbox by every live relay of the card: relay-1, relay-2",
+      "pass": true,
+      "detail": {
+        "listed": {
+          "relay-1": [
+            "77c0849d16c471d185d60493d40a1242b592a3b202b17c42cb5629b1e5aa6d8a"
+          ],
+          "relay-2": [
+            "77c0849d16c471d185d60493d40a1242b592a3b202b17c42cb5629b1e5aa6d8a"
+          ]
+        },
+        "snapshot": {
+          "relay-1": {
+            "files": 14,
+            "envelope_files": 1,
+            "envelope_bytes": 37865,
+            "recipient_envelope_files": 1
+          },
+          "relay-2": {
+            "files": 14,
+            "envelope_files": 1,
+            "envelope_bytes": 37865,
+            "recipient_envelope_files": 1
+          }
+        }
+      },
+      "at": "2026-11-15T23:47:48.617830+00:00"
+    },
+    {
+      "name": "the provider took the task, acknowledged it at every live relay, and holds it while paused: nothing executed or responded",
+      "pass": true,
+      "detail": {
+        "responds": 0,
+        "executions": []
+      },
+      "at": "2026-11-15T23:47:50.805507+00:00"
+    },
+    {
+      "name": "relay-1: outage begins with the result pending: the relay daemon stopped cleanly on SIGTERM and no longer answers",
+      "pass": true,
+      "detail": {
+        "active_state": "inactive",
+        "answers": false
+      },
+      "at": "2026-11-15T23:47:52.031019+00:00"
+    },
+    {
+      "name": "relay-2: outage begins with the result pending: the relay daemon stopped cleanly on SIGTERM and no longer answers",
+      "pass": true,
+      "detail": {
+        "active_state": "inactive",
+        "answers": false
+      },
+      "at": "2026-11-15T23:47:53.292834+00:00"
+    },
+    {
+      "name": "the buyer node is stopped during the outage, so the result waits at the relay once accepted",
+      "pass": true,
+      "detail": null,
+      "at": "2026-11-15T23:47:53.565695+00:00"
+    },
+    {
+      "name": "during the outage the provider executed and responded on chain while its result deposits fail and stay journaled",
+      "pass": true,
+      "detail": {
+        "responded": true,
+        "pending_envelopes": [
+          "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+        ],
+        "executions": [
+          "92f018079e83e7a45ba8b01ba311b74f177d62316ab19d31d12e9641d81c1aad.json"
+        ]
+      },
+      "at": "2026-11-15T23:48:40.425965+00:00"
+    },
+    {
+      "name": "relay-1: outage ends: restart on the same state directory: the relay daemon runs on the relay host as an unprivileged user (uid 64434) and serves TLS at its public URL, verified against the pinned CA",
+      "pass": true,
+      "detail": {
+        "uid": "64434",
+        "answers": true
+      },
+      "at": "2026-11-15T23:48:40.682008+00:00"
+    },
+    {
+      "name": "relay-2: outage ends: restart on the same state directory: the relay daemon runs on the relay host as an unprivileged user (uid 64434) and serves TLS at its public URL, verified against the pinned CA",
+      "pass": true,
+      "detail": {
+        "uid": "64434",
+        "answers": true
+      },
+      "at": "2026-11-15T23:48:40.956624+00:00"
+    },
+    {
+      "name": "after the restart the provider's courier deposits the result and the relay holds it for the buyer",
+      "pass": true,
+      "detail": {
+        "failed_while_down": [
+          "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+        ],
+        "accepted_after_restart": [
+          "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+        ],
+        "accepted_at": {
+          "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de": [
+            "https://<relay-1-host>:8443",
+            "https://<relay-2-host>:8443"
+          ]
+        },
+        "listed_for_buyer": {
+          "relay-1": [
+            "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+          ],
+          "relay-2": [
+            "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+          ]
+        }
+      },
+      "at": "2026-11-15T23:48:46.363222+00:00"
+    },
+    {
+      "name": "the second relay carries the result too: every result envelope deposited after the outage is accepted by every relay of the buyer's card and listed in the buyer's mailbox at each of them",
+      "pass": true,
+      "detail": {
+        "accepted_by": {
+          "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de": [
+            "https://<relay-1-host>:8443",
+            "https://<relay-2-host>:8443"
+          ]
+        },
+        "listed_for_buyer": {
+          "relay-1": [
+            "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+          ],
+          "relay-2": [
+            "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de"
+          ]
+        }
+      },
+      "at": "2026-11-15T23:48:46.530179+00:00"
+    },
+    {
+      "name": "buyer serve is running again",
+      "pass": true,
+      "detail": "",
+      "at": "2026-11-15T23:48:46.827645+00:00"
+    },
+    {
+      "name": "buyer purchases shows the result accepted: the purchase is completed",
+      "pass": true,
+      "detail": {
+        "purchase": {
+          "schema": "tos.openfox.rail-purchase.v1",
+          "phase": "completed",
+          "request_hash": "0a40c4be9ab36223a328c044e1d84e61e4b0d2de93a8bbe0e3b57bef59e43f88",
+          "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+          "request_id": 0,
+          "call_lt": 264000003,
+          "call_hash": "151143c51f9880ded1a86d629da46f5c008f66099cc4884e67028ff921e0cf77",
+          "capability_id": "cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae",
+          "capability_version": "1.0.0",
+          "provider_agent_id": "agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b",
+          "quote_commitment": "tvm-cell-sha256:48f2ce6d8ee1ce98e3611246e8a192655e0cd7d3e61382c075d5afbc92b13120",
+          "execution_id": "92f018079e83e7a45ba8b01ba311b74f177d62316ab19d31d12e9641d81c1aad",
+          "execution_nonce": "beec6584814b3e49254cee4f28162f71e3841ecb0ffc55d09e061d0dcab47b33",
+          "input_digest": "f99195cfc9a76aacfef05c62da9fec78cb4dd40ec1ba89d1830677296e35a93a",
+          "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+          "price_nanotos": "300000000",
+          "committed_nanotos": "1050000000",
+          "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+          "manifest_digest": "sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26",
+          "status": "responded",
+          "response_deadline": 1794790061,
+          "refund_claim_deadline": 1794793661,
+          "response_hash": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9",
+          "last_action_unix": 1794786465,
+          "result_request_unix": 1794786528,
+          "created_unix": 1794786458,
+          "updated_unix": 1794786530
+        },
+        "buyer_serve": "",
+        "provider_serve": "2026-11-15T23:47:49Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n2026-11-15T23:48:39Z: provider: servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)\nservicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)\n2026-11-15T23:48:39Z: provider: servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)\n"
+      },
+      "at": "2026-11-15T23:48:52.113678+00:00"
+    },
+    {
+      "name": "provider status shows the request responded and the buyer's acknowledgement received",
+      "pass": true,
+      "detail": {
+        "schema": "tos.openfox.rail-provider-request.v1",
+        "state": "acked",
+        "buyer_agent_id": "agent_050113056392a1750e29d055d7f16295308995c8e5879dbcd227ecfe46d1490f",
+        "capability_id": "cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae",
+        "quote_commitment": "tvm-cell-sha256:48f2ce6d8ee1ce98e3611246e8a192655e0cd7d3e61382c075d5afbc92b13120",
+        "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+        "request_id": 0,
+        "request_hash": "0a40c4be9ab36223a328c044e1d84e61e4b0d2de93a8bbe0e3b57bef59e43f88",
+        "response_hash": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9",
+        "receipt_boc_base64": "te6cckECBQEAAXAABCROV1IxAAEAAAAAavpE1AAAAAABAgMEAMBI8s5tjuHOmONhEkbooZJlXgzX0+YTgsB11a+8krExIJLwGAeeg+ekW6iwG6MRt08XfWIxarGdMdEulkHYHBqt+ZGVz8mnaqz+8Fxi2p/seMtN1A7BuonRgwZ3KW41qToAwJCXNfrRq7qCxaiL+oMTK24SEOvSYXQ0hs7mUWHnkptCXiCdwKjiiv/Cca32K797VW3joWghL6a/MYnk4vdrrjYrqC/B10ItQ336OPEFiwLG2lbvHqQdfCpl4WBCixuiaQDAa+kPFSqBDImkZRNHKIEmo/svJzbcZ3rOA3gJU3TLBm2WJLynQJb4EMWyTkiVId3hJPrc+hgIWBZIs4vcG6GxBT+b7j214o++QI0VxpsEPo/xGgEWabjIJF7OfDnl5N8mAGAAAAAAAAAAAAAAAAAR4aMATduprbCUuFUyaMfRLIgb2asCjsIXrCmFk+njPbZloRvWMUR6",
+        "artifact_digest": "sha256:5e209dc0a8e28affc271adf62bbf7b556de3a168212fa6bf3189e4e2f76bae36",
+        "retention_end_unix": 1794876461,
+        "response_deadline": 1794790061,
+        "respond_attempt_unix": 1794786516,
+        "buyer_wallet": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+        "execution_id": "92f018079e83e7a45ba8b01ba311b74f177d62316ab19d31d12e9641d81c1aad",
+        "input_digest": "f99195cfc9a76aacfef05c62da9fec78cb4dd40ec1ba89d1830677296e35a93a",
+        "call_lt": 264000003,
+        "call_hash": "151143c51f9880ded1a86d629da46f5c008f66099cc4884e67028ff921e0cf77",
+        "price_nanotos": "300000000",
+        "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "sandbox_digest": "sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26",
+        "execution_limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "scratch_bytes": 2147483648,
+          "output_bytes": 1048576,
+          "wall_clock_millis": 180000
+        },
+        "next_delivery_unix": 1794786658,
+        "backoff_seconds": 120,
+        "deliveries": 2,
+        "result_request_unix": 1794786538,
+        "updated_unix": 1794786538,
+        "source": "record",
+        "slot_state": "completed",
+        "operator_state": "responded",
+        "chain_fact": "responded",
+        "state_reason": "finalized respond with this request's attested response hash"
+      },
+      "at": "2026-11-15T23:49:02.295485+00:00"
+    },
+    {
+      "name": "chain: exactly one request exists, called by the buyer wallet with price, storage fee and allowance",
+      "pass": true,
+      "detail": {
+        "calls": [
+          {
+            "lt": 264000003,
+            "hash": "FRFDxR+YgN7RqG1inaRvXACPZgmcxIhOZwKP+SHgz3c=",
+            "in_source": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+            "in_value": 750000000,
+            "op": 1398162177,
+            "query_id": 16441383893663271439,
+            "outs": [
+              {
+                "destination": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+                "value": 199581720
+              }
+            ],
+            "aborted": false,
+            "compute_success": true
+          }
+        ],
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+          "next_request_id": 1,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 550000000,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T23:49:02.303045+00:00"
+    },
+    {
+      "name": "chain: the request is responded by the provider wallet and nothing is pending",
+      "pass": true,
+      "detail": {
+        "responds": [
+          {
+            "lt": 385000003,
+            "hash": "0UletEqh/rlAYVfF+HimgnakG5hecJhC9quHQQ7XIbs=",
+            "in_source": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+            "in_value": 10000000,
+            "op": 1398162178,
+            "query_id": 0,
+            "outs": [],
+            "aborted": false,
+            "compute_success": true,
+            "request_id": 0,
+            "response_hash": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9"
+          }
+        ],
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+          "next_request_id": 1,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 550000000,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T23:49:02.303162+00:00"
+    },
+    {
+      "name": "chain: the response hash equals the Receipt hash OpenFox reports on both nodes, and is the hash of the Receipt the provider holds",
+      "pass": true,
+      "detail": {
+        "chain": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9",
+        "provider": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9",
+        "buyer": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9",
+        "receipt_cell_hash": "e2f9995ae1ee760e9d761f7343e3da8b2e192fea74dd9fdf2447199748f7fde9"
+      },
+      "at": "2026-11-15T23:49:02.303427+00:00"
+    },
+    {
+      "name": "the artifact the buyer received hashes to the artifact digest inside the Receipt",
+      "pass": true,
+      "detail": {
+        "received_sha256": "5e209dc0a8e28affc271adf62bbf7b556de3a168212fa6bf3189e4e2f76bae36",
+        "provider_artifact_digest": "sha256:5e209dc0a8e28affc271adf62bbf7b556de3a168212fa6bf3189e4e2f76bae36",
+        "digest_in_receipt_cells": true
+      },
+      "at": "2026-11-15T23:49:02.374850+00:00"
+    },
+    {
+      "name": "the provider holds the verified objects of exactly one execution, the purchase's execution id",
+      "pass": true,
+      "detail": [
+        "92f018079e83e7a45ba8b01ba311b74f177d62316ab19d31d12e9641d81c1aad.json"
+      ],
+      "at": "2026-11-15T23:49:02.374881+00:00"
+    },
+    {
+      "name": "the provider's outgoing packets were sealed and accepted by the relay",
+      "pass": true,
+      "detail": {
+        "envelopes": 2,
+        "accepted_by": [
+          "https://<relay-1-host>:8443",
+          "https://<relay-2-host>:8443"
+        ]
+      },
+      "at": "2026-11-15T23:49:02.425501+00:00"
+    },
+    {
+      "name": "the relay status names the provider's keys by id and validity only",
+      "pass": true,
+      "detail": [
+        "hpke:ad1ec03d1c0d7390b740a7da6d400f367e01b5a6c2f8936052b33ab44521fd80"
+      ],
+      "at": "2026-11-15T23:49:02.425616+00:00"
+    },
+    {
+      "name": "provider withdraw without --yes previews the whole credit and sends nothing",
+      "pass": true,
+      "detail": "withdraw: 0.550000000 TOS of 0.550000000 TOS credited (checkpoint 445) from actor 0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1 to owner wallet 0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2, attaching 0.200000000 TOS for fees\nError: servicebridge: nothing was signed or sent; review the preview and re-run with --yes\n",
+      "at": "2026-11-15T23:49:02.823603+00:00"
+    },
+    {
+      "name": "provider withdraw --all --yes reports the withdrawal finalized for the whole credit",
+      "pass": true,
+      "detail": {
+        "report": {
+          "schema": "tos.openfox.rail-withdraw.v1",
+          "confirmed": true,
+          "preview": {
+            "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+            "destination": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+            "credited_revenue_nanotos": "550000000",
+            "amount_nanotos": "550000000",
+            "attached_nanotos": "200000000",
+            "credited_after_nanotos": "0",
+            "checkpoint": 446,
+            "destination_note": "the contract pays a withdrawal to the actor's owner, which is this wallet",
+            "attached_note": "sent with the message to pay its fees; the contract returns what is unused"
+          },
+          "withdrawal": {
+            "schema": "tos.openfox.rail-withdrawal.v1",
+            "query_id": "9804875816575691322",
+            "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+            "destination": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+            "amount_nanotos": "550000000",
+            "attached_nanotos": "200000000",
+            "credited_before_nanotos": "550000000",
+            "anchor": {
+              "lt": 385000003,
+              "hash": "d1495eb44aa1feb9406157c5f878a68276a41b985e709842f6ab87410ed721bb"
+            },
+            "state": "finalized",
+            "started_unix": 1794786543,
+            "finalized_checkpoint": 453,
+            "transaction_hash": "72e43cf3081e8c74199cecb2069c2b4e95cc88dfc8a08f0be543d45b3dbb286f",
+            "payout_nanotos": "550000000",
+            "credited_after_nanotos": "0",
+            "detail": "finalized withdraw_revenue paid the amount out of the actor to the owner wallet",
+            "wallet_credit": "not_verified",
+            "updated_unix": 1794786545
+          }
+        },
+        "stderr": "withdraw: 0.550000000 TOS of 0.550000000 TOS credited (checkpoint 446) from actor 0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1 to owner wallet 0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2, attaching 0.200000000 TOS for fees\nwithdraw: finalized at checkpoint 453; the wallet credit itself is not_verified\n"
+      },
+      "at": "2026-11-15T23:49:05.495641+00:00"
+    },
+    {
+      "name": "chain: one withdraw_revenue from the owner wallet with this query id, whose first payout message carries exactly the amount to the owner wallet; the credit is zero afterwards",
+      "pass": true,
+      "detail": {
+        "withdrawals": [
+          {
+            "lt": 451000003,
+            "hash": "cuQ88wgejHQZnOyyBpwrTpXMiN/IoI8L5UPUWz27KG8=",
+            "in_source": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+            "in_value": 200000000,
+            "op": 1398162185,
+            "query_id": 9804875816575691322,
+            "outs": [
+              {
+                "destination": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+                "value": 550000000
+              },
+              {
+                "destination": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+                "value": 199834730
+              }
+            ],
+            "aborted": false,
+            "compute_success": true,
+            "withdraw_amount": 550000000
+          }
+        ],
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+          "next_request_id": 1,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 0,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T23:49:05.503826+00:00"
+    },
+    {
+      "name": "provider status lists the withdrawal as finalized and no credited revenue",
+      "pass": true,
+      "detail": [
+        {
+          "schema": "tos.openfox.rail-withdrawal.v1",
+          "query_id": "9804875816575691322",
+          "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+          "destination": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+          "amount_nanotos": "550000000",
+          "attached_nanotos": "200000000",
+          "credited_before_nanotos": "550000000",
+          "anchor": {
+            "lt": 385000003,
+            "hash": "d1495eb44aa1feb9406157c5f878a68276a41b985e709842f6ab87410ed721bb"
+          },
+          "state": "finalized",
+          "started_unix": 1794786543,
+          "finalized_checkpoint": 453,
+          "transaction_hash": "72e43cf3081e8c74199cecb2069c2b4e95cc88dfc8a08f0be543d45b3dbb286f",
+          "payout_nanotos": "550000000",
+          "credited_after_nanotos": "0",
+          "detail": "finalized withdraw_revenue paid the amount out of the actor to the owner wallet",
+          "wallet_credit": "not_verified",
+          "updated_unix": 1794786545
+        }
+      ],
+      "at": "2026-11-15T23:49:05.552778+00:00"
+    },
+    {
+      "name": "init and offer run again after success change nothing on chain: no transaction on either wallet, the Agents, the actor or the Capability, and the same ids",
+      "pass": true,
+      "detail": {
+        "before": {
+          "provider_wallet": {
+            "address": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+            "state": "active",
+            "last_lt": "451000006",
+            "last_hash": "4tKs6UFp8Ov3x005qSwhHC0JgWj4AZGwbjWzkT2oJFs="
+          },
+          "buyer_wallet": {
+            "address": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+            "state": "active",
+            "last_lt": "264000006",
+            "last_hash": "Ri8DkpzYt67S59YeUF2ABp+6fu8CX1oFyG3JVyjht60="
+          },
+          "provider_agent_address": {
+            "address": "0:2da6807a026495d5b3253461bc12fabfd1a38351376fd8a2987b2b9bfbd583eb",
+            "state": "active",
+            "last_lt": "213000003",
+            "last_hash": "r6gPLjf1TeYDp90tpIfuF3dzl8i9AtCcjS7kpiqxsCk="
+          },
+          "buyer_agent_address": {
+            "address": "0:64a7f674bfbbe5d11a00232eec4474dc64316da2e6ade3fc920be0647862936a",
+            "state": "active",
+            "last_lt": "228000003",
+            "last_hash": "9y2LtrJxAKl+sa8H2/aOEHbJyb+maPj991AU8wULSvU="
+          },
+          "actor": {
+            "address": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+            "state": "active",
+            "last_lt": "451000003",
+            "last_hash": "cuQ88wgejHQZnOyyBpwrTpXMiN/IoI8L5UPUWz27KG8="
+          },
+          "capability_address": {
+            "address": "0:54713b2d6df99dcbb12c82ca6997662fdab3960f6016228919b8b7a73e4b6504",
+            "state": "active",
+            "last_lt": "213000005",
+            "last_hash": "C1Yg0fwWJ71DQbcK1FtNlYlwb+0zUuBQCeXHZ/xOdqM="
+          }
+        },
+        "after": {
+          "provider_wallet": {
+            "address": "0:db4dced457e1e713e8daebd1ce534bb7a4b1f223990ef019754de141928031b2",
+            "state": "active",
+            "last_lt": "451000006",
+            "last_hash": "4tKs6UFp8Ov3x005qSwhHC0JgWj4AZGwbjWzkT2oJFs="
+          },
+          "buyer_wallet": {
+            "address": "0:ed69bc65fe93e1637d14488645a59e609a62a95fb79dce4e6014d5a48908368d",
+            "state": "active",
+            "last_lt": "264000006",
+            "last_hash": "Ri8DkpzYt67S59YeUF2ABp+6fu8CX1oFyG3JVyjht60="
+          },
+          "provider_agent_address": {
+            "address": "0:2da6807a026495d5b3253461bc12fabfd1a38351376fd8a2987b2b9bfbd583eb",
+            "state": "active",
+            "last_lt": "213000003",
+            "last_hash": "r6gPLjf1TeYDp90tpIfuF3dzl8i9AtCcjS7kpiqxsCk="
+          },
+          "buyer_agent_address": {
+            "address": "0:64a7f674bfbbe5d11a00232eec4474dc64316da2e6ade3fc920be0647862936a",
+            "state": "active",
+            "last_lt": "228000003",
+            "last_hash": "9y2LtrJxAKl+sa8H2/aOEHbJyb+maPj991AU8wULSvU="
+          },
+          "actor": {
+            "address": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+            "state": "active",
+            "last_lt": "451000003",
+            "last_hash": "cuQ88wgejHQZnOyyBpwrTpXMiN/IoI8L5UPUWz27KG8="
+          },
+          "capability_address": {
+            "address": "0:54713b2d6df99dcbb12c82ca6997662fdab3960f6016228919b8b7a73e4b6504",
+            "state": "active",
+            "last_lt": "213000005",
+            "last_hash": "C1Yg0fwWJ71DQbcK1FtNlYlwb+0zUuBQCeXHZ/xOdqM="
+          }
+        },
+        "not_already_done": []
+      },
+      "at": "2026-11-15T23:49:08.100095+00:00"
+    },
+    {
+      "name": "the offer's manifest digest is the SHA-256 of its manifest bytes",
+      "pass": true,
+      "detail": "sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26",
+      "at": "2026-11-15T23:49:08.100285+00:00"
+    },
+    {
+      "name": "a tampered offer file is refused by buy before any payment, also when its digest is recomputed",
+      "pass": true,
+      "detail": {
+        "flipped": {
+          "exit": 1,
+          "stderr": "Error: servicebridge: the offer's manifest does not hash to the digest the offer states"
+        },
+        "flipped-and-rehashed": {
+          "exit": 1,
+          "stderr": "Error: servicebridge: quote: servicebridge: the offer file does not match finalized state: the finalized manifest digest of version \"1.0.0\" is sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26, but the offer's manifest hashes to sha256:abadfb08d3ff84273e41eb1e23954f7fa9a409ee789344a1f6f53f04de966c9a"
+        }
+      },
+      "at": "2026-11-15T23:49:09.380593+00:00"
+    },
+    {
+      "name": "provider pause is in effect",
+      "pass": true,
+      "detail": {
+        "already_paused": false,
+        "paused": true,
+        "paused_unix": 1794786549,
+        "reason": "front-door acceptance run"
+      },
+      "at": "2026-11-15T23:49:09.468033+00:00"
+    },
+    {
+      "name": "while paused: buyer buy --offer built the Quote locally and called the actor",
+      "pass": true,
+      "detail": "price 0.300000000 TOS (refunded only if there is no attested response and the refund is claimed); storage fee 0.250000000 TOS (non-refundable, kept by the provider even on refund); admission allowance 0.200000000 TOS; attached with the call 0.750000000 TOS (unused execution funding is returned); a refund takes two transactions from this wallet inside a 3600 s window after the 3600 s response deadline, expire then claim_refund (claim_refund attaches 0.2 TOS), each paying fees; 0.300000000 TOS is reserved for them\n",
+      "at": "2026-11-15T23:49:17.440722+00:00"
+    },
+    {
+      "name": "while paused the second purchase is held: called and delivered, but not admitted, executed or responded",
+      "pass": true,
+      "detail": {
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+          "next_request_id": 2,
+          "pending_count": 1,
+          "live_count": 1,
+          "withdrawable_revenue": 0,
+          "locked_storage_fees": 250000000,
+          "pending_liability": 300000000,
+          "refundable_liability": 0
+        },
+        "provider_request": {},
+        "executions": [
+          "92f018079e83e7a45ba8b01ba311b74f177d62316ab19d31d12e9641d81c1aad.json"
+        ],
+        "provider_serve": " admissions are paused by the owner\n2026-11-15T23:49:53Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n2026-11-15T23:49:58Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n2026-11-15T23:50:03Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n2026-11-15T23:50:08Z: admission paused: 1 task(s) held, 0 retired over the hold bound: servicebridge: new admissions are paused by the owner\n"
+      },
+      "at": "2026-11-15T23:50:13.012226+00:00"
+    },
+    {
+      "name": "after resume the held purchase is admitted, executed, responded and accepted",
+      "pass": true,
+      "detail": {
+        "purchase": {
+          "schema": "tos.openfox.rail-purchase.v1",
+          "phase": "completed",
+          "request_hash": "c4b16d239e15096fa5fb6477e072da7fa346a2b8138dac53d9cf2145d22ffd41",
+          "actor": "0:466300b8f8b78616262587e06052d679e77e99461b360ca66f4b69a5c4d9ffd1",
+          "request_id": 1,
+          "call_lt": 480000003,
+          "call_hash": "71141f821aeff731ce8e511843043cd31507375d0758c813ee06af44d5ef2b11",
+          "capability_id": "cap_ab2747019fc475a515e3cab9c48f6c104f11d699b999353ea14bfac7f02eefae",
+          "capability_version": "1.0.0",
+          "provider_agent_id": "agent_4ddba9adb094b8553268c7d12c881bd9ab028ec217ac298593e9e33db665a11b",
+          "quote_commitment": "tvm-cell-sha256:1c013e25664fb927c22e56bebfb033eb78f9d8dc369b3e1c8194586c3e44b89c",
+          "execution_id": "1e5b786fe129827ab902aa4a622b5224c3a9616d0b21b7d43bcba0ee3ea1f768",
+          "execution_nonce": "91d78501ab47f7a5b779c5579781f6d13303f4ff197b0c2a2c06cb68cd641927",
+          "input_digest": "f99195cfc9a76aacfef05c62da9fec78cb4dd40ec1ba89d1830677296e35a93a",
+          "source_digest": "sha256:6be90f152a810c89a4651347288126a3fb2f2736dc677ace0378095374cb066d",
+          "price_nanotos": "300000000",
+          "committed_nanotos": "1050000000",
+          "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+          "manifest_digest": "sha256:3f9bee3db5e28fbe408d15c69b043e8ff11a011669b8c8245ece7c39e5e4df26",
+          "status": "responded",
+          "response_deadline": 1794790155,
+          "refund_claim_deadline": 1794793755,
+          "response_hash": "1b1105d7fd5ec7c6235aaeb67fb4b61a59a5d9c6ac4fca2d0f3a1c19e2bbfeee",
+          "last_action_unix": 1794786563,
+          "result_request_unix": 1794786662,
+          "created_unix": 1794786552,
+          "updated_unix": 1794786672
+        },
+        "service_data": {
+          "active": 1,
+          "policy_version": 1,
+          "price": 300000000,
+          "storage_fee": 250000000,
+          "metadata_hash": "ca026230525f1634147f099e246e7ee04333d2b37728f2f3480f22de8f9dd010",
+          "next_request_id": 2,
+          "pending_count": 0,
+          "live_count": 0,
+          "withdrawable_revenue": 550000000,
+          "locked_storage_fees": 0,
+          "pending_liability": 0,
+          "refundable_liability": 0
+        }
+      },
+      "at": "2026-11-15T23:51:14.814881+00:00"
+    },
+    {
+      "name": "the second relay carried the sale as well: every envelope either node sent (tasks, results and acknowledgements) was addressed to every relay by the recipient's card and accepted by each of them",
+      "pass": true,
+      "detail": {
+        "accepted_by": {
+          "provider": {
+            "34b413a31de088fecc4a8737ed729d7312135b57677d9efa29adf7b5809db6be": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "b784e74441aea40120b7d3940a8ddacc4ce03a67a310628eb6340f11d0996056": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "7da2159cb851182103126e19ca5cf5d8bc0a7da4c7ed78139cb45510ffad067e": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "b63466c372a2fabd9cf5e1ef5202638fffc371c520e0627884885db1e677e5de": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ]
+          },
+          "buyer": {
+            "1d6f95f7993c5d96505dec216d3cdfc6b2330c83e29bc81d55df6014135b580d": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "a50f3da62fd96c7d11ac8fc874c4e55fa0f65c1e5f9d2de68ea27017c414ad35": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "77c0849d16c471d185d60493d40a1242b592a3b202b17c42cb5629b1e5aa6d8a": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "d703a9ac087c7771b0dc4602d99bdabadea9e86821fb6a963429aabd096585ca": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "dc2014c674e4e096de79c26800f842f25213b9fad128d81b3b69faf35dd8ec9e": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "77e1031c4e0010ae77a5b63921db0916da0d8a526a73e33505525bb7c2c14e4a": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ],
+            "27f119ddb4dd796fc0d8f3cd079096f5b4bde8b68855ee401045c7710eb4ac03": [
+              "https://<relay-1-host>:8443",
+              "https://<relay-2-host>:8443"
+            ]
+          }
+        }
+      },
+      "at": "2026-11-15T23:51:14.928067+00:00"
+    },
+    {
+      "name": "both serve processes ran until the end of the run and stopped cleanly on SIGTERM",
+      "pass": true,
+      "detail": {
+        "running": {
+          "provider": true,
+          "buyer": true
+        },
+        "exit": {
+          "provider": 0,
+          "buyer": 0
+        },
+        "log_tail": {
+          "provider": [
+            "2026-11-15T23:48:39Z: provider: servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)",
+            "servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)",
+            "2026-11-15T23:48:39Z: provider: servicebridge: no relay of the recipient's key card accepted the envelope (2 relays failed)"
+          ],
+          "buyer": []
+        }
+      },
+      "at": "2026-11-15T23:51:16.468330+00:00"
+    },
+    {
+      "name": "the plaintext search finds every searched value in a control file holding one slice of each",
+      "pass": true,
+      "detail": [
+        "Quote package",
+        "artifact",
+        "buyer wallet address",
+        "source archive"
+      ],
+      "at": "2026-11-15T23:51:17.186599+00:00"
+    },
+    {
+      "name": "nothing in clear at any relay: no state file they wrote, while they held the task, while they held the result or after the run, nor their journals, contains the source archive, the artifact, the buyer wallet address or the Quote package",
+      "pass": true,
+      "detail": {
+        "found": {},
+        "scanned": {
+          "files": 109,
+          "bytes": 267480
+        }
+      },
+      "at": "2026-11-15T23:51:17.193073+00:00"
+    },
+    {
+      "name": "the relay journal names no Agent and no client address",
+      "pass": true,
+      "detail": [],
+      "at": "2026-11-15T23:51:17.193114+00:00"
+    },
+    {
+      "name": "teardown: no node process of this run on the buyer host, the tunnel is closed and every installed relay unit is active again",
+      "pass": true,
+      "detail": {
+        "buyer_processes_of_this_run": [],
+        "tunnel_ports_still_bound_on_buyer_host": [],
+        "relay_unit": {
+          "relay-1": [
+            "active",
+            "2"
+          ],
+          "relay-2": [
+            "active",
+            "2"
+          ]
+        },
+        "left_for_inspection": {
+          "buyer_host": [
+            "/opt/tos-relay-test/g2-3",
+            "/opt/tos-relay-test/g2-3/serve-2.pid",
+            "/opt/tos-relay-test/g2-3/serve-supervisor.py",
+            "/opt/tos-relay-test/g2-3/buyer-serve.log",
+            "/opt/tos-relay-test/g2-3/serve-1.pid",
+            "/opt/tos-relay-test/g2-3/serve-1.exit",
+            "/opt/tos-relay-test/g2-3/nodes",
+            "/opt/tos-relay-test/g2-3/serve-2.exit"
+          ],
+          "relay_host": []
+        }
+      },
+      "at": "2026-11-15T23:51:17.497825+00:00"
+    },
+    {
+      "name": "no home directory path or login name in the transcripts or logs",
+      "pass": true,
+      "detail": {},
+      "at": "2026-11-15T23:51:18.234268+00:00"
+    },
+    {
+      "name": "no home directory path, login name, e-mail address, SSH key path, public address or SSH target in evidence.json",
+      "pass": true,
+      "detail": [],
+      "at": "2026-11-15T23:51:18.683303+00:00"
+    }
+  ],
+  "finished_utc": "2026-11-15T23:51:18.445628+00:00",
+  "result": "ALL PASS"
+}
