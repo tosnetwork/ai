@@ -49,6 +49,21 @@ func (c *Client) Deliver(ctx context.Context, packetSenderAgentID string, frame 
 		FrameBase64: base64.StdEncoding.EncodeToString(frame)})
 }
 
+// RoomCards admits the chat cards a roster taught under a room's admission.
+func (c *Client) RoomCards(ctx context.Context, roomID string, cards []RoomCard) (Response, error) {
+	return c.do(ctx, Request{Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: cards})
+}
+
+// ForgetRoomCards drops a room's admission of some Agents' chat cards.
+func (c *Client) ForgetRoomCards(ctx context.Context, roomID string, agentIDs []string) (Response, error) {
+	return c.do(ctx, Request{Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsForget, ForgetAgentIDs: agentIDs})
+}
+
+// Withdraw asks the carrier to withdraw the envelope journaled under a key.
+func (c *Client) Withdraw(ctx context.Context, recipientAgentID, idempotencyKey string) (Response, error) {
+	return c.do(ctx, Request{Op: OpWithdraw, RecipientAgentID: recipientAgentID, IdempotencyKey: idempotencyKey})
+}
+
 // DeliveryAck hands the daemon a verified kind-2 frame.
 func (c *Client) DeliveryAck(ctx context.Context, packetSenderAgentID string, frame []byte) (Response, error) {
 	return c.do(ctx, Request{Op: OpDeliveryAck, PacketSenderAgentID: packetSenderAgentID,
@@ -92,6 +107,8 @@ type Handler interface {
 	Carry(ctx context.Context, request Request, frame []byte) Response
 	Deliver(ctx context.Context, packetSenderAgentID string, frame []byte) Response
 	DeliveryAck(ctx context.Context, packetSenderAgentID string, frame []byte) Response
+	RoomCards(ctx context.Context, request Request) Response
+	Withdraw(ctx context.Context, request Request) Response
 }
 
 // MaxConcurrentHandlers bounds the requests one server handles at once. A
@@ -183,14 +200,27 @@ func (s *Server) Handle(ctx context.Context, raw []byte) (Op, Response) {
 	if err != nil {
 		return OpDeliver, Refusal(CodeInvalidRequest)
 	}
-	frame, err := request.Frame()
-	if err != nil {
-		return request.Op, Refusal(CodeInvalidRequest)
-	}
 	if err := ctx.Err(); err != nil {
 		return request.Op, Retry()
 	}
 	var response Response
+	switch request.Op {
+	case OpRoomCards:
+		response = s.handler.RoomCards(ctx, request)
+	case OpWithdraw:
+		response = s.handler.Withdraw(ctx, request)
+	}
+	if request.Op == OpRoomCards || request.Op == OpWithdraw {
+		response.Schema = ResponseSchema
+		if err := ValidateResponse(request.Op, response); err != nil {
+			return request.Op, Retry()
+		}
+		return request.Op, response
+	}
+	frame, err := request.Frame()
+	if err != nil {
+		return request.Op, Refusal(CodeInvalidRequest)
+	}
 	switch request.Op {
 	case OpCarry:
 		response = s.handler.Carry(ctx, request, frame)
