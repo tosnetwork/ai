@@ -2,6 +2,7 @@ package admission
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -109,6 +111,22 @@ type Inbound struct {
 	AdmissionToken string
 	Route          Route
 	ReceivedAtUnix uint64
+	// Room is set for an Event opened from a private room object (kind 3):
+	// the context D11 judges it in. It is nil for every other Event.
+	Room *RoomCarriage
+}
+
+// RoomCarriage is what the room route knows about an Event it opened.
+type RoomCarriage struct {
+	// RoomID and RoomEpoch are the room object's: the room and the room
+	// epoch the Event was sealed in.
+	RoomID    string
+	RoomEpoch uint64
+	// PacketSenderAgentID is the Agent whose controller signed the packet
+	// that carried the object.
+	PacketSenderAgentID string
+	// SenderCredential is the DeviceCredential of the sending member's leaf.
+	SenderCredential group.DeviceCredential
 }
 
 // Config wires one gate.
@@ -136,6 +154,13 @@ type Config struct {
 	// unchecked, which is the honest state of an installation that tracks no
 	// rooms rather than a silent allow.
 	Rooms *eventlog.RoomLedger
+	// RoomMLS is the fused ledger of the private rooms this installation
+	// joined. It is the D11 room-scoped admission: an Event that names a
+	// joined private room, carried as a room object, is admitted without the
+	// allow-list when its packet sender is a member of the committed
+	// membership at the object's room epoch. Optional: without it no Event
+	// is admitted that way.
+	RoomMLS *eventlog.RoomMLSLedger
 	// LocalDelegationJSON is this installation's own published delegation, as
 	// it was published. It is verified against finalized state at start, and
 	// it names the inbox policy digest this endpoint told the network it
@@ -321,6 +346,15 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 			return g.refuse(inbound, fault.CodeNotARoomMember, class), nil
 		}
 	}
+	// D11: room-scoped admission, after the room overlay. It grants
+	// admission only to an Event naming a joined private room, and never 1:1.
+	roomGrant, code, err := g.judgeRoomCarriage(inbound, delegation)
+	if err != nil {
+		return Decision{}, err
+	}
+	if code != "" {
+		return g.refuse(inbound, code, class), nil
+	}
 	if !identity.AllowsEventClass(delegation, class) {
 		return g.refuse(inbound, fault.CodeClassNotDelegated, class), nil
 	}
@@ -334,6 +368,11 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 	// without claiming is what leaves the remedy usable. Denied senders are
 	// not written down either, which keeps a stranger from filling the journal.
 	admission := g.config.Policy.Admits(inbound.Event.SenderAgentID, inbound.Event.Kind)
+	// Joining a room is the owner's consent to hear from its members there;
+	// a blocked sender stays blocked.
+	if roomGrant && admission != AdmitDeny {
+		admission = AdmitAllow
+	}
 	// A sender a claimed invite made a contact is known like a configured
 	// contact; blocked senders were already refused above it.
 	if admission != AdmitAllow && admission != AdmitDeny {
@@ -594,6 +633,72 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 	}
 	decision.Record = g.record(inbound, class, outcome, "")
 	return decision, nil
+}
+
+// judgeRoomCarriage applies D11 to an Event. It reports whether the room
+// grants admission, or the code that refuses the Event:
+//
+//   - a room object whose Event names no room, or another room, is
+//     refused payload-malformed;
+//   - one for a private room this installation has not joined is refused
+//     not-a-room-member;
+//   - its packet sender must be the Event's sender Agent;
+//   - the sender's leaf DeviceCredential must be the sender's Endpoint and
+//     device, signed by that Endpoint and inside its validity window, or
+//     the object is refused not-authentic (D15);
+//   - the packet sender must be in the committed membership of the room
+//     epoch the Event was sealed in, the current one or the two before it,
+//     or it is refused not-a-room-member.
+//
+// An Event naming a room without room carriage gains nothing here and meets
+// the normal policy.
+func (g *Gate) judgeRoomCarriage(inbound Inbound, delegation identity.Delegation) (bool, fault.Code, error) {
+	carriage := inbound.Room
+	if carriage == nil {
+		return false, "", nil
+	}
+	if inbound.Event.RoomID == "" || carriage.RoomID != inbound.Event.RoomID || carriage.RoomEpoch == 0 {
+		return false, fault.CodePayloadMalformed, nil
+	}
+	if g.config.RoomMLS == nil {
+		return false, fault.CodeNotARoomMember, nil
+	}
+	record, joined, err := g.config.RoomMLS.Current(carriage.RoomID)
+	if err != nil {
+		return false, "", err
+	}
+	if !joined {
+		return false, fault.CodeNotARoomMember, nil
+	}
+	if carriage.PacketSenderAgentID != inbound.Event.SenderAgentID {
+		return false, fault.CodeSenderMismatch, nil
+	}
+	credential := carriage.SenderCredential
+	if credential.AgentID != delegation.AgentID || credential.EndpointID != delegation.EndpointID ||
+		credential.DeviceID != inbound.Event.SenderDeviceID {
+		return false, fault.CodeNotAuthentic, nil
+	}
+	preimage, err := group.CredentialSigningBytes(credential)
+	if err != nil || len(delegation.IdentityPublicKey) != ed25519.PublicKeySize ||
+		!ed25519.Verify(delegation.IdentityPublicKey, preimage, credential.EndpointSignature) {
+		return false, fault.CodeNotAuthentic, nil
+	}
+	if inbound.ReceivedAtUnix < credential.IssuedAtUnix || inbound.ReceivedAtUnix >= credential.ExpiresAtUnix {
+		return false, fault.CodeNotAuthentic, nil
+	}
+	// The membership is judged at the Event's own epoch: a message sealed
+	// just before a Commit is judged by the membership it was sealed for.
+	if carriage.RoomEpoch > record.RoomEpoch {
+		return false, fault.CodeNotARoomMember, nil
+	}
+	membership, found, err := g.config.RoomMLS.MembershipAt(carriage.RoomID, carriage.RoomEpoch)
+	if err != nil {
+		return false, "", err
+	}
+	if !found || !membership.Contains(carriage.PacketSenderAgentID) {
+		return false, fault.CodeNotARoomMember, nil
+	}
+	return true, "", nil
 }
 
 // withoutInvite is the policy answer when no invite satisfies first contact:
