@@ -35,6 +35,9 @@ type discoveryRuntime struct {
 	devices  *eventlog.DeviceLedger
 	peers    []string
 	close    func()
+	// relay verifies locator-free relay evidence; set only in contact-files
+	// discovery.
+	relay *directory.RelayVerifier
 }
 
 func (r *discoveryRuntime) Close() error {
@@ -53,6 +56,13 @@ type productionDiscoveryBuilder struct{}
 func (productionDiscoveryBuilder) Build(config Config, journal *eventlog.Journal, observer Observer) (*discoveryRuntime, error) {
 	if config.Discovery.Mode == DiscoveryNone {
 		return nil, nil
+	}
+	if config.Discovery.Mode == DiscoveryContactFiles {
+		resolver, chain, err := finalizedResolver(config)
+		if err != nil {
+			return nil, errors.New("construct finalized peer resolver: " + err.Error())
+		}
+		return buildContactFileDiscovery(config, journal, observer, resolver, chain)
 	}
 	files := make([]directory.DelegationFile, 0, len(config.Discovery.Peers))
 	peers := make([]string, 0, len(config.Discovery.Peers))

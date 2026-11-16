@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/pkg/admission"
+	"github.com/tosnetwork/ai/messenger/pkg/directory"
 	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
 	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/envelope"
@@ -22,41 +23,90 @@ type ReceiveResult struct {
 	EventID string
 }
 
+// verifiedPeer is the sender authority one route established for a copy.
+type verifiedPeer struct {
+	Delegation identity.Delegation
+	EndpointID string
+	Bundles    []e2ee.Bundle
+}
+
+// peerVerifier establishes a sender's current Endpoint authority. The
+// network route resolves it through the refresh chain; the relay route checks
+// the frame's locator-free evidence against finalized state.
+type peerVerifier func(ctx context.Context, agentID string, pin directory.Pin) (verifiedPeer, error)
+
 // ReceiveSealed authenticates, opens, admits and durably commits one device
 // copy. The arrival route grants no identity or admission authority.
 func (d *Daemon) ReceiveSealed(ctx context.Context, message dispatch.Message,
 	route admission.Route) (ReceiveResult, error) {
-	if d == nil || d.journal == nil || d.discovery == nil || d.discovery.contacts == nil ||
-		d.prekeys == nil || d.prekeys.devices == nil || d.admission == nil {
-		return ReceiveResult{}, errors.New("inbound encrypted messaging is not configured")
+	if route == admission.RouteRelay {
+		// The relay route has its own evidence and sender rules; it enters
+		// only through ReceiveRelay.
+		return ReceiveResult{}, errors.New("relay copies are received with their relay evidence")
 	}
-	if ctx == nil || message.EventID == "" || message.SessionID == "" || len(message.Ciphertext) == 0 ||
-		message.RecipientEndpointID != d.config.EndpointID || message.RecipientDeviceID != d.config.DeviceID {
-		return ReceiveResult{}, errors.New("sealed message targets another device")
+	if err := d.receivable(ctx, message); err != nil {
+		return ReceiveResult{}, err
 	}
-	now := time.Now()
-	if d.now != nil {
-		now = d.now()
-	}
+	now := d.clock()
 	record, found, err := d.journal.SessionState(message.SessionID)
 	if err != nil {
 		return ReceiveResult{}, err
 	}
-	if found && record.LastInboundEventID == message.EventID {
-		return ReceiveResult{Outcome: admission.Duplicate, EventID: message.EventID}, nil
+	if found {
+		duplicate, err := d.committedDuplicate(record, message)
+		if err != nil || duplicate {
+			return ReceiveResult{Outcome: admission.Duplicate, EventID: message.EventID}, err
+		}
+	}
+	verify := func(ctx context.Context, agentID string, _ directory.Pin) (verifiedPeer, error) {
+		resolved, err := d.discovery.contacts.Ensure(ctx, agentID)
+		if err != nil {
+			return verifiedPeer{}, err
+		}
+		return verifiedPeer{Delegation: resolved.Delegation, EndpointID: resolved.Descriptor.EndpointID,
+			Bundles: resolved.Bundles}, nil
 	}
 	if !found {
-		return d.receiveFirstContact(ctx, message, route, now)
+		bootstrap, err := e2ee.DecodeFirstContactJSON(message.Bootstrap)
+		if err != nil {
+			return ReceiveResult{}, err
+		}
+		return d.receiveFirstContact(ctx, message, bootstrap, route, now, verify)
 	}
-	return d.receiveEstablished(ctx, message, record, route, now)
+	return d.receiveEstablished(ctx, message, record, route, now, verify)
 }
 
-func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Message,
-	route admission.Route, now time.Time) (ReceiveResult, error) {
-	bootstrap, err := e2ee.DecodeFirstContactJSON(message.Bootstrap)
-	if err != nil {
-		return ReceiveResult{}, err
+func (d *Daemon) receivable(ctx context.Context, message dispatch.Message) error {
+	if d == nil || d.journal == nil || d.discovery == nil || d.discovery.contacts == nil ||
+		d.prekeys == nil || d.prekeys.devices == nil || d.admission == nil {
+		return errors.New("inbound encrypted messaging is not configured")
 	}
+	if ctx == nil || message.EventID == "" || message.SessionID == "" || len(message.Ciphertext) == 0 ||
+		message.RecipientEndpointID != d.config.EndpointID || message.RecipientDeviceID != d.config.DeviceID {
+		return errors.New("sealed message targets another device")
+	}
+	return nil
+}
+
+func (d *Daemon) clock() time.Time {
+	if d.now != nil {
+		return d.now()
+	}
+	return time.Now()
+}
+
+// committedDuplicate recognises any Event already committed under the
+// session, not only the most recent one, so an older duplicate is answered
+// without its ciphertext reaching the ratchet.
+func (d *Daemon) committedDuplicate(record eventlog.SessionRecord, message dispatch.Message) (bool, error) {
+	if record.LastInboundEventID == message.EventID {
+		return true, nil
+	}
+	return d.journal.EventCommittedInSession(message.SessionID, message.EventID)
+}
+
+func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Message, bootstrap e2ee.FirstContact,
+	route admission.Route, now time.Time, verify peerVerifier) (ReceiveResult, error) {
 	binding := bootstrap.Binding
 	if binding.RecipientAgentID != d.config.AgentID || binding.RecipientEndpointID != d.config.EndpointID ||
 		binding.RecipientDeviceID != d.config.DeviceID || binding.ConversationID != message.ConversationID ||
@@ -67,12 +117,14 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 	if err != nil || expected != message.SessionID {
 		return ReceiveResult{}, errors.New("first-contact session identity mismatch")
 	}
-	resolved, err := d.discovery.contacts.Ensure(ctx, binding.SenderAgentID)
+	senderBundle := bootstrap.SenderBundle
+	resolved, err := verify(ctx, binding.SenderAgentID, directory.Pin{EndpointID: binding.SenderEndpointID,
+		DeviceID: binding.SenderDeviceID, Bundle: &senderBundle})
 	if err != nil {
 		return ReceiveResult{}, errors.New("verify first-contact sender directory: " + err.Error())
 	}
 	if resolved.Delegation.AgentID != binding.SenderAgentID ||
-		resolved.Descriptor.EndpointID != binding.SenderEndpointID ||
+		resolved.EndpointID != binding.SenderEndpointID ||
 		!containsExactBundle(resolved.Bundles, bootstrap.SenderBundle) {
 		return ReceiveResult{}, errors.New("first-contact sender bundle is not verified directory evidence")
 	}
@@ -101,6 +153,9 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 	if envelope.RequiresEstablishedDirect(event.Kind) {
 		return ReceiveResult{}, errors.New("Agent Gift events are forbidden during first contact")
 	}
+	if refused, ok := refuseOnRoute(route, event); ok {
+		return refused, nil
+	}
 	delegationJSON, err := identity.EncodeJSON(resolved.Delegation)
 	if err != nil {
 		return ReceiveResult{}, err
@@ -119,7 +174,7 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 }
 
 func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Message, record eventlog.SessionRecord,
-	route admission.Route, now time.Time) (ReceiveResult, error) {
+	route admission.Route, now time.Time, verify peerVerifier) (ReceiveResult, error) {
 	if record.Authority == nil || record.AlgorithmID != d.prekeys.suite.AlgorithmID() {
 		return ReceiveResult{}, errors.New("session has no supported verified authority")
 	}
@@ -157,9 +212,12 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 	if err != nil {
 		return ReceiveResult{}, err
 	}
-	resolved, err := d.discovery.contacts.Ensure(ctx, a.PeerAgentID)
+	if refused, ok := refuseOnRoute(route, event); ok {
+		return refused, nil
+	}
+	resolved, err := verify(ctx, a.PeerAgentID, directory.Pin{EndpointID: a.PeerEndpointID, DeviceID: a.PeerDeviceID})
 	if err != nil || resolved.Delegation.AgentID != a.PeerAgentID ||
-		resolved.Descriptor.EndpointID != a.PeerEndpointID {
+		resolved.EndpointID != a.PeerEndpointID {
 		return ReceiveResult{}, errors.New("established sender no longer has verified Endpoint authority")
 	}
 	delegationJSON, err := identity.EncodeJSON(resolved.Delegation)
@@ -177,6 +235,22 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 		return ReceiveResult{}, err
 	}
 	return ReceiveResult{Outcome: decision.Outcome, Code: decision.Code, EventID: event.EventID}, nil
+}
+
+// refuseOnRoute closes the loop on the relay route: an Event class that
+// carries an Agent Packet is refused there before anything is committed, so
+// a rail packet can never reach the rail inbox inside a chat copy.
+func refuseOnRoute(route admission.Route, event envelope.Event) (ReceiveResult, bool) {
+	if route != admission.RouteRelay || !carriesAgentPacket(event.Kind) {
+		return ReceiveResult{}, false
+	}
+	return ReceiveResult{Outcome: admission.Rejected, Code: fault.CodeClassNotDelegated, EventID: event.EventID}, true
+}
+
+// carriesAgentPacket reports Event classes whose content is an Agent Packet.
+func carriesAgentPacket(kind string) bool {
+	class, known := envelope.ClassOf(kind)
+	return known && class == "agent.packet"
 }
 
 func validateOpenedMessage(raw []byte, message dispatch.Message, binding e2ee.Binding) (envelope.Event, error) {

@@ -163,7 +163,9 @@ nobody made:
 - the **discovery mode**, separately from transport. `none` carries no unused
   settings. `tos-dht-https` pins one bounded local DHT global configuration and
   a finite peer list mapping every non-local Agent to delegation and committed
-  descriptor-policy files, with explicit refresh and HTTPS budgets;
+  descriptor-policy files, with explicit refresh and HTTPS budgets.
+  `contact-files` names only a contact import directory and is used with the
+  relay carriage transport;
 - optional **contact DNS** credentials for human `.tos` recipient input. The
   bearer is read from a bounded regular file and the gateway must be HTTPS
   unless plaintext is explicitly enabled for a test deployment. This layer
@@ -196,7 +198,10 @@ nobody made:
   `"https-bootstrap"` enables the bounded descriptor-bound fallback and
   requires `tos-dht-https` discovery plus public prekey publication. This is a
   deployable first-contact carrier, not a claim that M0-R selected the final
-  production route; and
+  production route. `"agent-packet-relay"` carries every copy through the
+  packet relay (see [Relay carriage](#relay-carriage-agent-packet-relay));
+  it requires `contact-files` discovery, public prekey publication and a
+  `relay_carriage` block; and
 - an optional owner-private **Agent Packet receiver socket**. When configured,
   admitted `agent.packet` Events are re-verified against finalized Agent state,
   durably nonce-claimed, and sent to the independently verifying OpenFox
@@ -503,6 +508,78 @@ For a deliberately bounded real-network fallback, select
 [`HTTPS_BOOTSTRAP_TRANSPORT.md`](HTTPS_BOOTSTRAP_TRANSPORT.md). Existing
 AgentID, Endpoint delegation, device, prekey, session, admission and E2EE
 checks remain authoritative; HTTPS supplies availability only.
+
+## Relay carriage (`agent-packet-relay`)
+
+This is the Messenger half of milestone M-R1 of
+`spec/docs/MESSENGER_RELAY_CARRIAGE_V1.md`. Each sealed device copy travels
+as one padded relay frame (`pkg/relayframe`) inside a signed Agent Packet that
+the local carrier process (OpenFox's chat `RelayTransport`) signs, seals and
+deposits. The daemon never holds the packet controller key or the relay chat
+key; the carrier never sees plaintext, Messenger keys or session state.
+
+```sh
+tos-messengerd -config /etc/tos-messengerd/config.json \
+  -publication-operator-config /etc/tos-messengerd/publication-relay.json
+```
+
+The publication operator configuration sets `"mode": "relay"` and names no
+HTTPS root and no DHT configuration: the descriptor and prekey set are
+published only as this node's relay identity evidence. It also names no
+`https_endpoint`: the descriptor's advertised route is the delegation's ADNL
+identity, so the finalized delegation must commit one, and the Contact
+Descriptor format is unchanged. No placeholder HTTPS endpoint is published.
+The daemon configuration adds:
+
+```json
+"transport": "agent-packet-relay",
+"discovery": {"mode": "contact-files", "contact_dir": "/var/lib/tos-messengerd-contacts"},
+"relay_carriage": {
+  "carry_socket_path": "/run/openfox/chat-carrier.sock",
+  "listen_socket_path": "/run/tos-messengerd/carrier.sock",
+  "card_path": "/var/lib/openfox/relay/chat-card.json",
+  "evidence_export_dir": "/var/lib/tos-messengerd-export"
+}
+```
+
+- **Sockets.** The daemon calls `carrier.carry` on `carry_socket_path` and
+  serves `carrier.deliver` and `carrier.delivery-ack` on the mode-0600
+  `listen_socket_path` (`pkg/carrierapi`). Same-user peers only.
+- **Same Agent.** Startup reads the local chat card from `card_path` and
+  refuses to start unless it is an Agent Packet sent by this installation's
+  Agent. A frame carries that card until the peer has acknowledged a frame
+  that carried it; evidence frames always carry it.
+- **Own evidence.** Every publication writes `relay-evidence.bin` and
+  `relay-contact.json` (`tos.messaging.relay-contact.v1`: relay identity
+  evidence plus the chat card, no locator) to `evidence_export_dir`. A new
+  descriptor always has a strictly later issue time than the previous one.
+  Objects above their relay bounds fail with `relay-evidence-too-large`.
+- **Contacts.** Every `*.json` contact file in `contact_dir` is verified
+  (CheckPeer against finalized state, card shape and Agent) and committed at
+  start and on each discovery refresh interval. Importing a file is the
+  owner's admission decision. The carrier installs the card itself.
+- **No locator on this route.** `CheckPeer` runs the refresh chain without its
+  locator stage, read-only, on every inbound frame and before every content
+  seal and re-deposit; `CommitPeer` stores newer evidence only, and only for
+  an admitted peer. Composition (send and reply) also requires the stored
+  evidence to pass. A queued copy whose recipient evidence fails stays
+  `pending` unsealed, and one kind-4 evidence request per peer is deposited
+  on the re-deposit schedule until no such copy is left or a response arrives.
+- **Delivery states.** A copy a relay accepted is `carried`; it becomes
+  `delivered` only on an Endpoint-signed kind-2 ack whose packet sender is the
+  signing Endpoint's Agent. A carried copy is deposited again, with the same
+  ciphertext, every `redeposit_interval_seconds` (default 20 h; a test may set
+  600 s or more) until its own expiry, then abandoned with
+  `retention-exceeded`. A `descriptor-expired` ack is retried at once only
+  with newer own evidence, otherwise after 30 s to 5 min.
+- **In-flight cap.** At most 24 chat envelopes per peer at a relay. The
+  daemon counts its carried copies (and a previous generation not yet
+  withdrawn) and its kind-4 envelopes, and defers copies at the cap; the
+  carrier counts its stored kind-2 acks as well and answers `peer-cap`.
+- **Refusals.** `agent.packet` Events are refused on this route in both
+  directions. The relay route's largest Event payload is computed from the
+  worst-case frame before sealing (139,547 bytes); a larger one is refused
+  with `content-too-large` and no key is spent.
 
 ## State
 

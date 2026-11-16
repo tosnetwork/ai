@@ -66,9 +66,14 @@ const (
 	// TransportHTTPSBootstrap is the descriptor-bound HTTPS fallback. It is
 	// useful for real-network bootstrap but is not an M0-R route decision.
 	TransportHTTPSBootstrap TransportMode = "https-bootstrap"
+	// TransportAgentPacketRelay carries every copy as the payload of a signed
+	// Agent Packet through the packet relay, deposited by a local carrier
+	// process over a private socket. It needs no inbound port and no
+	// locator.
+	TransportAgentPacketRelay TransportMode = "agent-packet-relay"
 )
 
-var transports = map[TransportMode]struct{}{TransportNone: {}, TransportHTTPSBootstrap: {}}
+var transports = map[TransportMode]struct{}{TransportNone: {}, TransportHTTPSBootstrap: {}, TransportAgentPacketRelay: {}}
 
 // DiscoveryMode names whether this installation refreshes provisioned peers.
 type DiscoveryMode string
@@ -76,7 +81,14 @@ type DiscoveryMode string
 const (
 	DiscoveryNone        DiscoveryMode = "none"
 	DiscoveryTOSDHTHTTPS DiscoveryMode = "tos-dht-https"
+	// DiscoveryContactFiles learns peers only from relay contact files the
+	// owner places in a directory, and from relay evidence carried in band.
+	// Nothing is fetched and no locator is read.
+	DiscoveryContactFiles DiscoveryMode = "contact-files"
 )
+
+// MaxContactFiles bounds the contact files one import pass reads.
+const MaxContactFiles = 4096
 
 const (
 	DefaultDirectoryRefreshInterval = 5 * time.Minute
@@ -200,6 +212,9 @@ type Config struct {
 	// they are never exposed through the general runtime inbox.
 	AgentPacketReceiverSocket         string `json:"agent_packet_receiver_socket,omitempty"`
 	AgentPacketReceiverTimeoutSeconds uint64 `json:"agent_packet_receiver_timeout_seconds,omitempty"`
+
+	// RelayCarriage is required exactly with transport agent-packet-relay.
+	RelayCarriage *RelayCarriageConfig `json:"relay_carriage,omitempty"`
 
 	// AttachmentAdmission enables daemon-owned fetch, AEAD opening and pinned
 	// scanning. When absent, artifact.encrypted stays reserved and no secret
@@ -571,6 +586,8 @@ type DiscoveryConfig struct {
 	RefreshLeadSeconds         uint64                 `json:"refresh_lead_seconds,omitempty"`
 	HTTPSRequestTimeoutSeconds uint64                 `json:"https_request_timeout_seconds,omitempty"`
 	HTTPSConnectTimeoutSeconds uint64                 `json:"https_connect_timeout_seconds,omitempty"`
+	// ContactDir is where contact-files discovery imports relay contacts from.
+	ContactDir string `json:"contact_dir,omitempty"`
 }
 
 type PeerDelegationConfig struct {
@@ -597,11 +614,30 @@ func (d DiscoveryConfig) Validate(localAgentID string) error {
 	switch d.Mode {
 	case DiscoveryNone:
 		if d.DHTGlobalConfigPath != "" || len(d.Peers) != 0 || d.RefreshIntervalSeconds != 0 ||
-			d.RefreshLeadSeconds != 0 || d.HTTPSRequestTimeoutSeconds != 0 || d.HTTPSConnectTimeoutSeconds != 0 {
+			d.RefreshLeadSeconds != 0 || d.HTTPSRequestTimeoutSeconds != 0 || d.HTTPSConnectTimeoutSeconds != 0 ||
+			d.ContactDir != "" {
 			return errors.New("discovery none cannot carry unused settings")
 		}
 		return nil
+	case DiscoveryContactFiles:
+		if d.DHTGlobalConfigPath != "" || len(d.Peers) != 0 || d.RefreshLeadSeconds != 0 ||
+			d.HTTPSRequestTimeoutSeconds != 0 || d.HTTPSConnectTimeoutSeconds != 0 {
+			return errors.New("contact-files discovery cannot carry network discovery settings")
+		}
+		if !filepath.IsAbs(d.ContactDir) || filepath.Clean(d.ContactDir) != d.ContactDir {
+			return errors.New("contact_dir must be absolute and clean")
+		}
+		if d.RefreshIntervalSeconds > uint64(MaxDirectoryRefreshInterval/time.Second) {
+			return errors.New("directory refresh duration exceeds one day")
+		}
+		if interval := d.RefreshInterval(); interval < MinDirectoryRefreshInterval || interval > MaxDirectoryRefreshInterval {
+			return errors.New("directory refresh interval is outside its bound")
+		}
+		return nil
 	case DiscoveryTOSDHTHTTPS:
+		if d.ContactDir != "" {
+			return errors.New("tos-dht-https discovery has no contact directory")
+		}
 	default:
 		return errors.New("discovery mode must be stated explicitly")
 	}
@@ -640,6 +676,84 @@ func (d DiscoveryConfig) Validate(localAgentID string) error {
 	}
 	if d.HTTPSRequestTimeoutSeconds > 30 || d.HTTPSConnectTimeoutSeconds > 10 {
 		return errors.New("discovery HTTPS timeout exceeds its bound")
+	}
+	return nil
+}
+
+// Relay carriage bounds.
+const (
+	// DefaultRelayRedepositInterval is how long a carried copy waits for a
+	// device ack before it is deposited again: under the relay's 24 h TTL less
+	// the packet lifetime margin.
+	DefaultRelayRedepositInterval = 20 * time.Hour
+	// MinRelayRedepositInterval is the shortest interval a test may set.
+	MinRelayRedepositInterval = 10 * time.Minute
+	// MaxRelayPeerEnvelopes is the honest sender's in-flight cap per peer.
+	MaxRelayPeerEnvelopes = 24
+)
+
+// RelayCarriageConfig wires the daemon to its local carrier process.
+type RelayCarriageConfig struct {
+	// CarrySocketPath is the carrier's socket; the daemon calls carrier.carry
+	// on it.
+	CarrySocketPath string `json:"carry_socket_path"`
+	// ListenSocketPath is the daemon's socket for carrier.deliver and
+	// carrier.delivery-ack.
+	ListenSocketPath string `json:"listen_socket_path"`
+	// CardPath is the local chat key card packet JSON the carrier publishes.
+	// Every frame that must carry the card reads it from here.
+	CardPath string `json:"card_path"`
+	// EvidenceExportDir receives this node's own relay evidence and contact
+	// file on every publication.
+	EvidenceExportDir        string `json:"evidence_export_dir"`
+	TimeoutSeconds           uint64 `json:"timeout_seconds,omitempty"`
+	RedepositIntervalSeconds uint64 `json:"redeposit_interval_seconds,omitempty"`
+}
+
+// Timeout bounds one carrier operation.
+func (r RelayCarriageConfig) Timeout() time.Duration {
+	if r.TimeoutSeconds == 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(r.TimeoutSeconds) * time.Second
+}
+
+// RedepositInterval is how long a carried copy waits before its next deposit.
+func (r RelayCarriageConfig) RedepositInterval() time.Duration {
+	if r.RedepositIntervalSeconds == 0 {
+		return DefaultRelayRedepositInterval
+	}
+	return time.Duration(r.RedepositIntervalSeconds) * time.Second
+}
+
+// Validate checks paths and bounds; others are the daemon's other sockets.
+func (r RelayCarriageConfig) Validate(stateDir, contactDir string, others []string) error {
+	paths := []string{r.CarrySocketPath, r.ListenSocketPath, r.CardPath, r.EvidenceExportDir}
+	for _, path := range paths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return errors.New("relay_carriage paths must be absolute and clean")
+		}
+		if pathWithin(path, stateDir) {
+			return errors.New("relay_carriage paths must not live inside state_dir")
+		}
+	}
+	if r.CarrySocketPath == r.ListenSocketPath {
+		return errors.New("relay carry and listen sockets must be different")
+	}
+	for _, other := range others {
+		if other != "" && (other == r.CarrySocketPath || other == r.ListenSocketPath) {
+			return errors.New("relay carriage sockets must be independent")
+		}
+	}
+	if r.EvidenceExportDir == contactDir || pathWithin(contactDir, r.EvidenceExportDir) ||
+		pathWithin(r.EvidenceExportDir, contactDir) {
+		return errors.New("relay evidence export and contact import directories must be separate")
+	}
+	if r.TimeoutSeconds > 300 || r.TimeoutSeconds != 0 && r.TimeoutSeconds < 1 {
+		return errors.New("relay carrier timeout is outside 1s..5m")
+	}
+	if interval := r.RedepositInterval(); interval < MinRelayRedepositInterval || interval > DefaultRelayRedepositInterval {
+		return errors.New("relay re-deposit interval is outside 10m..20h")
 	}
 	return nil
 }
@@ -887,6 +1001,24 @@ func (c Config) Validate() error {
 		}
 		if c.Publication.Mode != PublicationPrekeys {
 			return errors.New("https-bootstrap requires public prekey publication")
+		}
+	}
+	if (c.Transport == TransportAgentPacketRelay) != (c.Discovery.Mode == DiscoveryContactFiles) {
+		return errors.New("agent-packet-relay and contact-files discovery are used together")
+	}
+	if (c.Transport == TransportAgentPacketRelay) != (c.RelayCarriage != nil) {
+		return errors.New("relay_carriage is required exactly with transport agent-packet-relay")
+	}
+	if c.RelayCarriage != nil {
+		if c.Publication.Mode != PublicationPrekeys {
+			return errors.New("agent-packet-relay requires public prekey publication")
+		}
+		if c.ContactDNS != nil {
+			return errors.New("agent-packet-relay contacts come from contact files, not DNS")
+		}
+		others := []string{c.SocketPath, c.OwnerSocketPath, c.Publication.DeviceSocketPath, c.AgentPacketReceiverSocket}
+		if err := c.RelayCarriage.Validate(c.StateDir, c.Discovery.ContactDir, others); err != nil {
+			return err
 		}
 	}
 	if c.AgentPacketReceiverSocket == "" {

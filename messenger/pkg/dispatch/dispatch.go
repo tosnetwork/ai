@@ -43,6 +43,12 @@ type Message struct {
 	AdmissionToken string
 	Ciphertext     []byte
 	ExpiresAtUnix  uint64
+	// DeliveryID and Generation name this attempt's journal copy and relay
+	// deposit generation. A synchronous carrier ignores them; a store-and-
+	// forward carrier derives its idempotency key from them, so a retry of
+	// one generation reuses the envelope it already deposited.
+	DeliveryID string
+	Generation uint32
 }
 
 // Sender delivers a sealed message.
@@ -50,9 +56,53 @@ type Message struct {
 // It returns nil once a recipient device has durably accepted the message, and
 // otherwise an error whose fault code says what to do next. Returning nil for
 // "handed to the network" would turn every lost packet into a delivered
-// message.
+// message. A store-and-forward carrier returns *Carried instead, which is
+// neither delivery nor failure.
 type Sender interface {
 	Send(context.Context, Message) error
+}
+
+// Carried is a Sender's answer that a relay durably holds the copy and no
+// recipient device has acknowledged it. The dispatcher records the generation
+// and keeps the copy open until a verified delivery ack settles it.
+type Carried struct {
+	Generation  eventlog.RelayGeneration
+	RedepositAt time.Time
+}
+
+func (c *Carried) Error() string {
+	return "copy is held by a relay and not yet acknowledged by a device"
+}
+
+// Deferred is a SealGate's or Sender's answer that a copy must wait without
+// spending an attempt: the recipient's evidence is stale, or an in-flight cap
+// is reached. Code says why, for the owner surface.
+type Deferred struct {
+	Code  fault.Code
+	Until time.Time
+}
+
+func (d *Deferred) Error() string {
+	if d == nil {
+		return "deferred"
+	}
+	return "copy deferred: " + string(d.Code)
+}
+
+// SealGate is consulted before a copy is sealed and before a sealed copy is
+// deposited again. A route that carries content only to currently verified
+// recipient devices implements it; an error that is not *Deferred is a
+// failure with the error's fault code.
+type SealGate interface {
+	CheckCopy(ctx context.Context, delivery eventlog.Delivery, sealing bool) error
+}
+
+// SweepPreparer is an optional SealGate extension called once at the start
+// of each sweep that has due deliveries, so a gate can index what it reads
+// once per sweep instead of once per copy. The returned function ends the
+// sweep and is called when the sweep returns.
+type SweepPreparer interface {
+	PrepareSweep(ctx context.Context, now time.Time) (func(), error)
 }
 
 // BindingResolver supplies the associated data one delivery is bound to.
@@ -168,6 +218,7 @@ func (i Identity) Validate() error {
 type Dispatcher struct {
 	config  Config
 	allowed map[string]struct{}
+	gate    SealGate
 }
 
 // Summary is what one sweep did.
@@ -183,6 +234,10 @@ type Summary struct {
 	Held int
 	// Abandoned counts messages no further attempt can deliver.
 	Abandoned int
+	// Carried counts messages a relay now holds without a device ack.
+	Carried int
+	// Deferred counts messages left pending without spending an attempt.
+	Deferred int
 }
 
 // ErrNoTransport reports a dispatcher that can queue but not send.
@@ -252,6 +307,19 @@ func (d *Dispatcher) ConfigureTransport(suite e2ee.Suite, sender Sender, binding
 		return errors.New("dispatcher transport is already configured")
 	}
 	d.config.Suite, d.config.Sender, d.config.Bindings = suite, sender, bindings
+	return nil
+}
+
+// ConfigureSealGate installs the route's pre-seal and pre-deposit check
+// during daemon assembly. It may be installed once.
+func (d *Dispatcher) ConfigureSealGate(gate SealGate) error {
+	if d == nil || gate == nil {
+		return errors.New("a seal gate is required")
+	}
+	if d.gate != nil {
+		return errors.New("dispatcher seal gate is already configured")
+	}
+	d.gate = gate
 	return nil
 }
 
@@ -727,6 +795,13 @@ func (d *Dispatcher) Sweep(ctx context.Context, limit int) (Summary, error) {
 		due = due[:limit]
 	}
 	summary := Summary{}
+	if preparer, ok := d.gate.(SweepPreparer); ok && len(due) != 0 {
+		finish, err := preparer.PrepareSweep(ctx, now)
+		if err != nil {
+			return summary, err
+		}
+		defer finish()
+	}
 	for _, delivery := range due {
 		if err := ctx.Err(); err != nil {
 			return summary, err
@@ -753,7 +828,44 @@ func (d *Dispatcher) Sweep(ctx context.Context, limit int) (Summary, error) {
 			summary.Sent++
 			continue
 		}
+		var carried *Carried
+		if errors.As(err, &carried) {
+			_, carryErr := d.config.Journal.Carried(delivery.Key(), attemptID, carried.Generation,
+				carried.RedepositAt, d.config.Now())
+			if errors.Is(carryErr, eventlog.ErrNotPending) {
+				// A verified ack settled the copy while it was being carried;
+				// nothing is left for this attempt to record.
+				summary.Sent++
+				continue
+			}
+			if carryErr != nil {
+				return summary, carryErr
+			}
+			summary.Carried++
+			continue
+		}
+		var deferred *Deferred
+		if errors.As(err, &deferred) {
+			_, deferErr := d.config.Journal.Defer(delivery.Key(), attemptID, deferred.Code,
+				deferred.Until, d.config.Now())
+			if errors.Is(deferErr, eventlog.ErrNotPending) {
+				// Settled meanwhile by a verified ack; the batch goes on.
+				summary.Sent++
+				continue
+			}
+			if deferErr != nil {
+				return summary, deferErr
+			}
+			summary.Deferred++
+			continue
+		}
 		settled, failErr := d.config.Journal.Failed(delivery.Key(), attemptID, fault.CodeOf(err), d.config.Now())
+		if errors.Is(failErr, eventlog.ErrNotPending) {
+			// A verified ack settled the copy while this attempt was failing;
+			// the failure no longer applies and the batch goes on.
+			summary.Sent++
+			continue
+		}
 		if failErr != nil {
 			return summary, failErr
 		}
@@ -776,6 +888,13 @@ func (d *Dispatcher) attempt(ctx context.Context, delivery eventlog.Delivery, at
 		return false, fault.Wrap(fault.CodeInternal, err)
 	}
 	sealed := false
+	if d.gate != nil {
+		// The route's check runs before a key is spent and before a sealed
+		// copy travels again; a copy it refuses is neither sealed nor carried.
+		if err := d.gate.CheckCopy(ctx, delivery, ciphertext == nil); err != nil {
+			return false, err
+		}
+	}
 	if ciphertext == nil {
 		ciphertext, err = d.seal(delivery, attemptID, now)
 		if err != nil {
@@ -807,7 +926,12 @@ func (d *Dispatcher) attempt(ctx context.Context, delivery eventlog.Delivery, at
 		Bootstrap:           bootstrap,
 		Ciphertext:          ciphertext,
 		ExpiresAtUnix:       delivery.ExpiresAtUnix,
+		DeliveryID:          delivery.Key(),
 	}
+	if delivery.Generation == ^uint32(0) {
+		return sealed, fault.New(fault.CodeRetentionExceeded, "relay deposit generations are exhausted")
+	}
+	message.Generation = delivery.Generation + 1
 	if err := d.config.Sender.Send(ctx, message); err != nil {
 		return sealed, err
 	}

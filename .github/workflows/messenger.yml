@@ -53,6 +53,8 @@ jobs:
           - ./messenger/pkg/attachments
           - ./messenger/pkg/attachmentapi
           - ./messenger/pkg/attachmentops
+          - ./messenger/pkg/relayframe
+          - ./messenger/pkg/carrierapi
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

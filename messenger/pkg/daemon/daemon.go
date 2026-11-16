@@ -20,6 +20,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/agentpacketbridge"
 	"github.com/tosnetwork/ai/messenger/pkg/attachmentadmission"
 	"github.com/tosnetwork/ai/messenger/pkg/attachmentops"
+	"github.com/tosnetwork/ai/messenger/pkg/carrierapi"
 	"github.com/tosnetwork/ai/messenger/pkg/contact"
 	"github.com/tosnetwork/ai/messenger/pkg/directory"
 	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
@@ -68,6 +69,7 @@ type Daemon struct {
 	admission    *admission.Gate
 	agentPackets *agentpacketbridge.Bridge
 	contactDNS   *nativeclient.Client
+	relay        *relayRuntime
 	now          func() time.Time
 
 	closeOnce sync.Once
@@ -348,6 +350,9 @@ func (d *Daemon) sendDirectApplication(ctx context.Context, input, kind string, 
 	if err != nil {
 		return localapi.DirectMessageResult{}, err
 	}
+	if err := d.checkRelayComposition(kind, encoded); err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
 	intent := bytes.NewBufferString(canon.DomainOutboundIntent)
 	for _, value := range []string{d.config.AgentID, resolved.AgentID, record.ConversationID,
 		kind, idempotencyKey} {
@@ -436,6 +441,9 @@ func (d *Daemon) ReplyDirectMessage(ctx context.Context, replyToEventID, mediaTy
 	}
 	encoded, err := envelope.EncodeEventJSON(event)
 	if err != nil {
+		return localapi.DirectMessageResult{}, err
+	}
+	if err := d.checkRelayComposition(event.Kind, encoded); err != nil {
 		return localapi.DirectMessageResult{}, err
 	}
 	intent := bytes.NewBufferString(canon.DomainOutboundIntent)
@@ -803,6 +811,7 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 		_ = journal.Close()
 		return nil, err
 	}
+	var relaySink *directory.RelayEvidenceSink
 	if publisher != nil {
 		if prekeys == nil {
 			_ = discovery.Close()
@@ -811,6 +820,16 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 		}
 		owned := *publisher
 		owned.Delegation = delegation
+		if config.Transport == TransportAgentPacketRelay {
+			sink, sinkErr := newRelayEvidenceSink(config, owned.Policy)
+			if sinkErr != nil {
+				_ = discovery.Close()
+				_ = journal.Close()
+				return nil, errors.New("configure relay evidence publication: " + sinkErr.Error())
+			}
+			owned.Relay = sink
+			relaySink = sink
+		}
 		if err := owned.Validate(); err != nil {
 			_ = discovery.Close()
 			_ = journal.Close()
@@ -829,6 +848,18 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 			_ = discovery.Close()
 			_ = journal.Close()
 			return nil, errors.New("configure HTTPS bootstrap transport: " + err.Error())
+		}
+	}
+	if config.Transport == TransportAgentPacketRelay {
+		if relaySink == nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("agent-packet-relay needs publication operator resources for its own evidence")
+		}
+		if err := instance.configureRelayCarriage(relaySink); err != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("configure relay carriage: " + err.Error())
 		}
 	}
 
@@ -862,8 +893,48 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 		}
 		prekeys.listener = device
 	}
+	if instance.relay != nil {
+		carrier, err := carrierapi.Listen(config.RelayCarriage.ListenSocketPath)
+		if err != nil {
+			if prekeys != nil && prekeys.listener != nil {
+				_ = prekeys.listener.Close()
+				_ = os.Remove(config.Publication.DeviceSocketPath)
+			}
+			_ = owner.Close()
+			_ = listener.Close()
+			_ = os.Remove(config.OwnerSocketPath)
+			_ = os.Remove(config.SocketPath)
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, err
+		}
+		instance.relay.listener = carrier
+	}
 	assembled = true
 	return instance, nil
+}
+
+// newRelayEvidenceSink binds the relay evidence export to the node's own
+// finalized delegation file and committed descriptor policy.
+func newRelayEvidenceSink(config Config, policy directory.DescriptorPolicy) (*directory.RelayEvidenceSink, error) {
+	if config.RelayCarriage == nil {
+		return nil, errors.New("relay carriage is not configured")
+	}
+	delegationJSON, err := securefile.ReadBoundedRegular(config.DelegationPath, maxDelegationFileBytes)
+	if err != nil {
+		return nil, errors.New("read local delegation: " + err.Error())
+	}
+	return directory.NewRelayEvidenceSink(config.RelayCarriage.EvidenceExportDir, config.RelayCarriage.CardPath,
+		delegationJSON, policy)
+}
+
+// RelaySocketPath returns the daemon's carrier socket, or an empty string
+// when relay carriage is disabled.
+func (d *Daemon) RelaySocketPath() string {
+	if d == nil || d.relay == nil {
+		return ""
+	}
+	return d.config.RelayCarriage.ListenSocketPath
 }
 
 // InstallSalt returns the per-install value used for decision records.
@@ -959,6 +1030,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.runAgentPackets(ctx)
 		}()
 	}
+	if d.relay != nil {
+		d.relay.run(ctx, d.config.SweepInterval(), &group)
+	}
 	group.Add(1)
 	go func() {
 		defer group.Done()
@@ -978,6 +1052,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	_ = d.owner.Close()
 	if d.prekeys != nil {
 		_ = d.prekeys.listener.Close()
+	}
+	if d.relay != nil && d.relay.listener != nil {
+		_ = d.relay.listener.Close()
 	}
 	group.Wait()
 	return d.Close()
@@ -1158,6 +1235,10 @@ func (d *Daemon) Close() error {
 		_ = os.Remove(d.config.OwnerSocketPath)
 		if d.prekeys != nil {
 			_ = os.Remove(d.config.Publication.DeviceSocketPath)
+		}
+		if d.relay != nil && d.relay.listener != nil {
+			_ = d.relay.listener.Close()
+			_ = os.Remove(d.config.RelayCarriage.ListenSocketPath)
 		}
 		_ = d.discovery.Close()
 		if d.contactDNS != nil {
