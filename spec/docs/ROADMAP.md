@@ -775,7 +775,7 @@ is not implied by Gate C's initial profile.
     (`native-safe-handoff-pack`), and the quorum checker
     (`native-safe-handoff-check`) were built for escrow version 1 and removed
     with it; they are not in this repository yet for the current rail
-    (see `deployments/README.md`). Once they exist, the next executable task
+    (see `spec/deployments/README.md`). Once they exist, the next executable task
     is an independent buyer/provider/resolver session: create a complete
     bundle, stop the original Gateway, and verify it against three validator
     endpoints. Then recruit two independently operated Gateways,
