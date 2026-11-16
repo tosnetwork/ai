@@ -43,8 +43,8 @@ What exists:
   relays (`AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md:370-424`).
 
 This document fixes the route for the OpenFox chat profile by owner decision,
-not by the study: in V1 the packet relay is the only cross-host route, and the study and Messenger's own Mailbox Relay are retired
-for this profile (D1).
+not by the study: in V1 the packet relay is the only cross-host route, and
+the study and Messenger's own Mailbox Relay are retired for this profile (D1).
 
 ## 1. Layering
 
@@ -143,7 +143,7 @@ No key serves two purposes and none is derived from another:
 
 | Key | Holder | Only purpose |
 |---|---|---|
-| ML-DSA-44 packet controller (finalized policy) | `tosctl` vault, used by OpenFox | signing Agent Packets and key cards |
+| ML-DSA-44 packet controller | `tosctl` vault, used by OpenFox | signing Agent Packets and key cards |
 | Relay rail key (X-Wing, card A) | OpenFox `relay/keys` | opening rail envelopes |
 | **Relay chat key** (X-Wing, card B, new) | OpenFox `relay/chat-keys` | opening chat envelopes |
 | Messaging Endpoint Ed25519 | external Endpoint signer | descriptors, prekeys, delivery acks |
@@ -253,9 +253,10 @@ receiver:
 - holds parts only from admitted room members;
 - caps one object at 1 MiB (the sidecar bound), refusing a part whose declared
   or accumulated size exceeds it;
-- holds at most 8 incomplete objects per peer and at most 16 MiB of
-  incomplete parts in total, refusing (and relay-acknowledging) parts beyond
-  either cap;
+- holds at most 4 incomplete objects and 4 MiB of incomplete parts per peer,
+  and at most 16 MiB of incomplete parts in total, refusing (and
+  relay-acknowledging) parts beyond any cap, so filling the global cap takes
+  at least four admitted peers;
 - drops an incomplete object after 24 h 5 min;
 - releases an object only when its digest matches.
 
@@ -325,7 +326,7 @@ Storage is not delivery (`AGENT_NATIVE_MESSENGER_V1.md:2080-2091`):
 |---|---|---|
 | relay `200`/`201`/`410` | a relay durably holds the envelope (a StoredAck in effect) | nobody |
 | relay ack (`POST …/ack`) | the recipient node has a durable Messenger result; frees quota | secret only |
-| **delivery ack** (kind 2) | the recipient device accepted, deduplicated, held or rejected the copy | recipient Endpoint |
+| **delivery ack** (kind 2) | the recipient device accepted, deduplicated, held or rejected it | recipient Endpoint |
 | `ReadAck` | optional; an ordinary sealed Messenger event | recipient Endpoint |
 
 The kind-2 object has the HTTPS ack fields (`directhttps/transport.go:55-66`:
@@ -439,7 +440,9 @@ Recipient protections, strongest first:
    before anything is stored.
 3. **Sender in-flight cap.** An honest sender holds at most **24** chat
    envelopes per peer Agent at any relay. The count includes every envelope
-   still stored, including earlier generations not yet withdrawn; the rest stay
+   still stored, including earlier generations not yet withdrawn and the
+   node's own kind-2 ack envelopes to that peer, which share the same relay
+   bound; the rest stay
    `pending` and are not deposited. The relay caps one client address at 64
    envelopes per recipient (`:641`). On shared relays, 24 chat envelopes leave
    at least 40 of that 64 for the same sender's rail deposits (tasks, results,
