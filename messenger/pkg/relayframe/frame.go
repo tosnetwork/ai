@@ -25,8 +25,8 @@ const (
 	KindCopy uint8 = 1
 	// KindDeliveryAck carries one Endpoint-signed delivery acknowledgement.
 	KindDeliveryAck uint8 = 2
-	// KindRoom is reserved for split room handshake objects. This build does
-	// not carry rooms and refuses the kind.
+	// KindRoom carries one part of a room object (room.go). It is the only
+	// kind an object may be split under.
 	KindRoom uint8 = 3
 	// KindEvidence carries a one-byte evidence pull request or response.
 	KindEvidence uint8 = 4
@@ -49,6 +49,9 @@ const (
 	MaxEvidenceBytes = 18_432
 	// MaxParts bounds the parts of one object. Kinds 1, 2 and 4 use one.
 	MaxParts = 8
+	// MaxPartBytes is the most object bytes one frame carries: a frame
+	// without card or evidence.
+	MaxPartBytes = MaxFrameBytes - fixedBytes
 
 	// domainBytes is the frame separator with its terminating zero byte.
 	domainBytes = len(canon.DomainRelayFrame)
@@ -125,8 +128,10 @@ func isBucket(n int) bool {
 	return false
 }
 
-// Frame is one decoded relay frame. ObjectDigest is computed by Encode and
-// checked by Decode; a caller never supplies it.
+// Frame is one decoded relay frame. For a single-part frame ObjectDigest is
+// computed by Encode and checked by Decode, and a caller never supplies it.
+// For a part of a split kind-3 object it is the digest of the whole object,
+// which the caller supplies and reassembly checks (Reassembler).
 type Frame struct {
 	Kind         uint8
 	PartIndex    uint8
@@ -159,7 +164,7 @@ func UnpaddedSize(cardBytes, evidenceBytes, partBytes int) (int, error) {
 	if evidenceBytes > MaxEvidenceBytes {
 		return 0, ErrRelayEvidenceTooLarge
 	}
-	if partBytes > MaxFrameBytes {
+	if partBytes > MaxPartBytes {
 		return 0, ErrContentTooLarge
 	}
 	// Each term is bounded above, so the sum cannot overflow an int, but the
@@ -171,13 +176,14 @@ func UnpaddedSize(cardBytes, evidenceBytes, partBytes int) (int, error) {
 	return total, nil
 }
 
-// Encode validates and pads one single-part frame of kind 1, 2 or 4 to the
-// smallest bucket that holds it.
+// Encode validates and pads one frame to the smallest bucket that holds it.
+// A single-part frame commits its part as the whole object; a part of a split
+// kind-3 object carries the whole object's digest in frame.ObjectDigest.
 func Encode(frame Frame) ([]byte, error) {
 	if err := validateShape(frame.Kind, frame.PartIndex, frame.PartCount); err != nil {
 		return nil, err
 	}
-	if err := validateFields(frame.Kind, frame.Card, frame.Evidence, frame.Part); err != nil {
+	if err := validateFields(frame.Kind, frame.PartIndex, frame.Card, frame.Evidence, frame.Part); err != nil {
 		return nil, err
 	}
 	size, err := UnpaddedSize(len(frame.Card), len(frame.Evidence), len(frame.Part))
@@ -188,7 +194,12 @@ func Encode(frame Frame) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	digest := ObjectDigest(frame.Part)
+	digest := frame.ObjectDigest
+	if frame.PartCount == 1 {
+		digest = ObjectDigest(frame.Part)
+	} else if digest == ([sha256.Size]byte{}) {
+		return nil, ErrFrameMalformed
+	}
 	out := bytes.NewBuffer(make([]byte, 0, bucket))
 	out.WriteString(canon.DomainRelayFrame)
 	out.WriteByte(frame.Kind)
@@ -253,7 +264,7 @@ func Decode(raw []byte) (Frame, error) {
 	if reader.err != nil {
 		return Frame{}, ErrFrameMalformed
 	}
-	if uint64(partLength) > uint64(MaxFrameBytes) {
+	if partLength == 0 || uint64(partLength) > uint64(MaxPartBytes) {
 		return Frame{}, ErrFrameMalformed
 	}
 	part := reader.take(int(partLength))
@@ -274,11 +285,16 @@ func Decode(raw []byte) (Frame, error) {
 		Card: append([]byte(nil), card...), Evidence: append([]byte(nil), evidence...),
 		Part: append([]byte(nil), part...)}
 	copy(frame.ObjectDigest[:], digestRaw)
-	if err := validateFields(kind, frame.Card, frame.Evidence, frame.Part); err != nil {
+	if err := validateFields(kind, partIndex, frame.Card, frame.Evidence, frame.Part); err != nil {
 		return Frame{}, err
 	}
-	if ObjectDigest(frame.Part) != frame.ObjectDigest {
+	// A split object is checked once, on reassembly; a single part is the
+	// whole object and is checked here.
+	if partCount == 1 && ObjectDigest(frame.Part) != frame.ObjectDigest {
 		return Frame{}, ErrFrameDigest
+	}
+	if partCount > 1 && frame.ObjectDigest == ([sha256.Size]byte{}) {
+		return Frame{}, ErrFrameMalformed
 	}
 	return frame, nil
 }
@@ -286,23 +302,37 @@ func Decode(raw []byte) (Frame, error) {
 func validateShape(kind, partIndex, partCount uint8) error {
 	switch kind {
 	case KindCopy, KindDeliveryAck, KindEvidence:
+		if partCount != 1 || partIndex != 0 {
+			return ErrFrameMalformed
+		}
 	case KindRoom:
-		return ErrFrameKindUnsupported
+		if partCount == 0 || partCount > MaxParts || partIndex >= partCount {
+			return ErrFrameMalformed
+		}
 	default:
 		return ErrFrameKind
-	}
-	if partCount != 1 || partIndex != 0 {
-		return ErrFrameMalformed
 	}
 	return nil
 }
 
-func validateFields(kind uint8, card, evidence, part []byte) error {
+// validateFields applies the per-kind field rules: kind 4 carries the card;
+// every frame of kinds 1, 2 and 4, and part 0 of kind 3, carries evidence;
+// later kind-3 parts carry neither card nor evidence.
+func validateFields(kind, partIndex uint8, card, evidence, part []byte) error {
 	if len(card) > MaxCardBytes {
 		return ErrCardTooLarge
 	}
 	if kind == KindEvidence && len(card) == 0 {
 		return ErrCardRequired
+	}
+	if kind == KindRoom && partIndex > 0 {
+		if len(card) != 0 || len(evidence) != 0 {
+			return ErrFrameMalformed
+		}
+		if len(part) == 0 {
+			return ErrFrameMalformed
+		}
+		return nil
 	}
 	if len(evidence) == 0 {
 		return ErrEvidenceRequired

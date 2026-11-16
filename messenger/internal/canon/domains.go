@@ -223,6 +223,17 @@ const (
 	// DomainRelayIdempotency derives the carrier idempotency key of one
 	// relay deposit generation.
 	DomainRelayIdempotency = "tos.messaging.relay-idempotency.v1\x00"
+	// DomainRelayRoomObject prefixes one room object a kind-3 relay frame
+	// carries: a Commit, Welcome, application message or roster.
+	DomainRelayRoomObject = "tos.messaging.relay-room-object.v1\x00"
+	// DomainRoomAAD prefixes the MLS authenticated data of a room
+	// application message, binding room, epochs, epoch authenticator, sender
+	// Agent and Event.
+	DomainRoomAAD = "tos.messaging.room-aad.v1\x00"
+	// DomainRelayRoomAck authenticates a member Endpoint's outcome for one
+	// room handshake object. It is distinct from the copy ack domain, so a
+	// room ack never verifies as a copy ack.
+	DomainRelayRoomAck = "tos.messaging.relay-room-ack.v1\x00"
 	// DomainOutboundAttachmentIntent binds exact plaintext evidence and the
 	// operator-selected route/storage policy before streaming encryption begins.
 	DomainOutboundAttachmentIntent = "tos.messaging.outbound-attachment-intent.v1\x00"
@@ -301,6 +312,9 @@ var Domains = []string{
 	DomainRelayDelivery,
 	DomainRelayDeliveryAck,
 	DomainRelayIdempotency,
+	DomainRelayRoomObject,
+	DomainRoomAAD,
+	DomainRelayRoomAck,
 	DomainOutboundAttachmentIntent,
 	DomainAttachmentCorpusManifest,
 	DomainAttachmentCorpusReport,
