@@ -89,7 +89,7 @@ unchanged.
 
 Private controller keys remain in the client wallet or dedicated signer. In
 the reference implementation, ML-DSA-44 controller keys stay in `tosctl`
-custody (vault): `tos-service-protocol` calls `tosctl` for ML-DSA-44 signing
+custody (vault): `protocol/` calls `tosctl` for ML-DSA-44 signing
 and verification rather than linking a Go ML-DSA library, and no private key
 leaves custody.
 Gateways, relayers, indexers, providers, and workers receive only public policy,

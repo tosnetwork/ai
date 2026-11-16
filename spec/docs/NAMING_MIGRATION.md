@@ -11,12 +11,13 @@ environment variables, discovery paths, or module imports.
 
 | Surface | Current value |
 |---|---|
-| specification repository | `tosnetwork/tos-service-spec` |
-| Go protocol repository/module | `tosnetwork/tos-service-protocol` |
-| reference Gateway repository/module | `tosnetwork/tos-service-gateway` |
+| repository and Go module | `tosnetwork/ai` (`github.com/tosnetwork/ai`) |
+| specification | `spec/` |
+| Go protocol packages | `protocol/` (`github.com/tosnetwork/ai/protocol/...`) |
+| reference Gateway | `gateway/` (`github.com/tosnetwork/ai/gateway/...`) |
 | wire protocol | `tos_service_v1` |
 | protobuf package | `tos.service.v1` |
-| protobuf Go package | `gen/tos/service/v1` |
+| protobuf Go package | `protocol/gen/tos/service/v1` |
 | schema and signing domain prefix | `tos.service.*` |
 | Gateway locator | `/.well-known/tos-service.json` |
 | Gateway environment prefix | `TOS_SERVICE_*` |
@@ -39,11 +40,11 @@ evidence.
 
 ## Release sequence
 
-1. Publish `tos-service-spec` with the current schema and vectors.
-2. Publish `tos-service-protocol` with its new Go module and generated protobuf.
-3. Update dependent Go modules to the new protocol commit and regenerate their
+1. Publish `spec/` with the current schema and vectors.
+2. Publish `protocol/` with its generated protobuf.
+3. Update dependent Go modules to the new `ai` commit and regenerate their
    checksums.
-4. Publish `tos-service-gateway`, `tos-ai`, OpenFox, and client updates.
+4. Publish `gateway/`, `execution/`, OpenFox, and client updates.
 5. Deploy fresh Registry and commerce objects and repeat Gates C–F as required
    by `ROADMAP.md`.
 

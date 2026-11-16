@@ -2,7 +2,7 @@
 // satisfies the Messenger's identity.AgentResolver.
 //
 // It reimplements no chain logic: the quorum-finalized,
-// rollback-protected typed read belongs to tos-service-protocol's toschain, and
+// rollback-protected typed read belongs to protocol/pkg/toschain, and
 // this package only adapts that read to the single-argument shape the
 // Messenger's delegation verifier calls. The finalized chain state is the
 // authority; this is how the Messenger consumes it for the Agent whose

@@ -85,7 +85,7 @@ The report labels Campaigns 1--4 `INCONCLUSIVE` and Campaigns 5--6 `BLOCKED`.
 This specification preserves those evidence limits.
 
 This is an immutable cross-repository reference, not evidence vendored into
-`tos-service-spec`; the facts above are externally asserted by that OpenFox
+`spec/`; the facts above are externally asserted by that OpenFox
 artifact and are not independently proven by this repository. Reviewers resolve
 the exact source at
 `https://github.com/tosnetwork/openfox/blob/ad39cbf365d1468189bb78bd15ddc2390ab700ed/docs/operations/bounded-adaptive-earning-campaign-report.md`.
@@ -414,7 +414,7 @@ event_content_id = AgentOperationPayloadDigest(
 ```
 
 V1 public JSON maps to RFC 8949 Core Deterministic CBOR using the common
-`tos-service-protocol` JSON data model: no floats, duplicate keys, indefinite
+`protocol/` JSON data model: no floats, duplicate keys, indefinite
 lengths, invalid UTF-8, unknown fields, or non-canonical integers.
 
 `AgentOperationBodyV1.payload_digest` equals `event_content_id`, `payload_size` equals
@@ -1317,7 +1317,7 @@ closed under owner policy.
 
 ## 17. Repository change plan
 
-### 17.1 `tos-service-spec`
+### 17.1 `spec/`
 
 - Freeze the core schema, registries, failure stages, dispositions, evidence,
   cost, transfer, disclosure, privacy, spam, and retention rules.
@@ -1339,7 +1339,7 @@ closed under owner policy.
 
 This repository defines interoperability but stores no operational history.
 
-### 17.2 `tos-service-protocol`
+### 17.2 `protocol/`
 
 - Implement typed core/payload structures, deterministic codec,
   digest/signature helpers, strict bounds, registries, and stable errors.
@@ -1375,7 +1375,7 @@ Package naming must not narrow the core to paid work.
   controlled internal transfers from external revenue.
 - Migrate existing journals without fabricating absent historical evidence.
 
-### 17.4 `tos-messenger`
+### 17.4 `messenger/`
 
 - Transport exact encrypted events/evidence with audience membership, bounds,
   stable send identity, Writer Fence, and query-before-retry. Dedupe exact
@@ -1389,7 +1389,7 @@ Package naming must not narrow the core to paid work.
 
 Messenger derives no Agreement, acceptance, payment, or global outcome truth.
 
-### 17.5 `tos-service-gateway` and other Carriers
+### 17.5 `gateway/` and other Carriers
 
 - Publish, resolve, and subscribe to exact events or safe projections using
   source-local cursors and provenance.
@@ -1401,7 +1401,7 @@ Messenger derives no Agreement, acceptance, payment, or global outcome truth.
 - Prove two independent implementations/operators before decentralized
   availability claims.
 
-### 17.6 `tos-ai` and execution systems
+### 17.6 `execution/` and execution systems
 
 - Emit Gate results over exact Agreement, plan, input, Skill/model, sandbox,
   resources, network, credentials, disclosure, and planned effects.
@@ -1446,15 +1446,15 @@ Agent, Agreement, execution, settlement, or outcome authority.
 
 | Responsibility | Accountable repository/component | Required boundary |
 |---|---|---|
-| schemas, profile registry, vectors, release manifest | `tos-service-spec` | signed versioned corpus and commit manifest |
-| production codec/verifier and independent verifier fixtures | `tos-service-protocol` plus separately implemented verifier | language-neutral conformance API |
+| schemas, profile registry, vectors, release manifest | `spec/` | signed versioned corpus and commit manifest |
+| production codec/verifier and independent verifier fixtures | `protocol/` plus separately implemented verifier | language-neutral conformance API |
 | journal, checkpoints, projections, reports | `openfox` | append/checkpoint/project API |
-| delegation and historical authority resolution | `tos-service-protocol` API backed by selected identity/custody authority | no network fetch inside structural verification |
+| delegation and historical authority resolution | `protocol/` API backed by selected identity/custody authority | no network fetch inside structural verification |
 | encrypted evidence store and key lifecycle | selected OpenFox storage provider; profile named in deployment manifest | capability-scoped resolve/fetch/delete-attest API |
-| Gate/execution evidence | `tos-ai` or selected executor repository | exact Gate/slot/runner evidence API |
+| Gate/execution evidence | `execution/` or selected executor repository | exact Gate/slot/runner evidence API |
 | custody/finality evidence | `tos`, `tosctl`, or selected Adapter named in manifest | prepared/submitted/resolved/finality API |
-| private transport | `tos-messenger` | send/resolve/subscribe with Action identity |
-| first public Carrier | `tos-service-gateway` deployment named in manifest | publish/resolve/subscribe/checkpoint API |
+| private transport | `messenger/` | send/resolve/subscribe with Action identity |
+| first public Carrier | `gateway/` deployment named in manifest | publish/resolve/subscribe/checkpoint API |
 | second independent Carrier | separate implementation/operator named before resilience gate | same wire contract, independent failure domain |
 
 Phase 0 publishes language-neutral fixtures for `decode`,
@@ -1475,9 +1475,9 @@ locators, credentials, or stable private-party identifiers.
 ## 18. Dependency and delivery order
 
 ```text
-S0  tos-service-spec schemas/profiles/registries/vectors
+S0  spec/ schemas/profiles/registries/vectors
 R0  separately implemented verifier
-P0  tos-service-protocol codec/verifier/API
+P0  protocol/ codec/verifier/API
 S0 + R0 + P0 -> local conformance
 
 P0 -> J1  OpenFox experimental local journal

@@ -119,7 +119,7 @@ against 2,048 in the masterchain) leave room for later growth of policy state.
 ### 4.1 Route
 
 A registry action is submitted as one internal message sent by a **relayer wallet**,
-delivered to that wallet by one external message: the route tos-service-protocol already
+delivered to that wallet by one external message: the route `protocol/` already
 uses (`pkg/chainactionpublisher`, which prepares the exact message with
 `tosctl wallet send --build-only` from an ordinary wallet and broadcasts only those
 bytes). A registration's internal message carries the StateInit with the registry code
@@ -237,11 +237,11 @@ route's envelope as the suite builds it: an `ext_in` header and a wallet v3r2 re
 |---|---|
 | tos `crypto/smartcont/native-registry-code.fc` | ML-DSA-44 policy and signatures with section 4.2 rules, cap 8, basechain only |
 | tos `contracts::native_registry` and its sandbox suites | ML-DSA-44 policy and signature encoders, key ids, test signer |
-| tos-service-protocol `pkg/nativecore`, `internal/referencecodec` | policy and signature encoders, key-id derivation, ML-DSA-44 verification |
-| tos-service-protocol relayer and journal | registration preflight: possession for every controller plus agent-control consent weight (fixed in tos-service-protocol `#28`); operation identity = action hash, while a broadcast attempt keeps its exact body, funding, destination and StateInit; a re-signed body for the same action must neither be rejected after completion nor broadcast twice |
-| tos-service-protocol wallet, tosctl vault | ML-DSA-44 controller keys and signing; no private key leaves custody |
-| tos-service-spec | `NATIVE_IDENTIFIERS_V1.md`, `NATIVE_IDENTITY_V1.md`, `NATIVE_REGISTRY_TVM_V1.md` code identity, frozen vectors, edited in place |
-| gateway, tos-ai, openfox | follow the protocol release that ships the change |
+| `protocol/` `pkg/nativecore`, `internal/referencecodec` | policy and signature encoders, key-id derivation, ML-DSA-44 verification |
+| `protocol/` relayer and journal | registration preflight: possession for every controller plus agent-control consent weight (fixed in tos-service-protocol `#28`); operation identity = action hash, while a broadcast attempt keeps its exact body, funding, destination and StateInit; a re-signed body for the same action must neither be rejected after completion nor broadcast twice |
+| `protocol/` wallet, tosctl vault | ML-DSA-44 controller keys and signing; no private key leaves custody |
+| `spec/` | `NATIVE_IDENTIFIERS_V1.md`, `NATIVE_IDENTITY_V1.md`, `NATIVE_REGISTRY_TVM_V1.md` code identity, frozen vectors, edited in place |
+| `gateway/`, `execution/`, openfox | follow the protocol release that ships the change |
 
 ## 7. Verification before freeze
 
@@ -282,6 +282,6 @@ route's envelope as the suite builds it: an `ext_in` header and a wallet v3r2 re
 | Real relayer message via `tosctl wallet send --build-only`, broadcast | Open | envelope sizes are from the suite (section 5), not a broadcast |
 | Both transfer legs separately | Met | old and new owner legs measured and executed in the sandbox and in the local Gate C run |
 | Frozen vectors from contract execution | Met for tos; open for `nativecore` and the reference codec | tos `protocol-vectors.json` (key id, public-key SHA-256, identities, actions, deterministic FIPS 204 signatures, submission bodies); reproduced byte for byte by the tos Rust builders and the local Python encoders |
-| Relayer journal re-signature tests | Open | tos-service-protocol |
+| Relayer journal re-signature tests | Open | `protocol/` |
 | Live chain | Local rehearsal met; public open | local Gate C on a two-validator v16 network: 12 lifecycle steps PASS (`PASS_LOCAL_REHEARSAL_ONLY`) |
 | Independent security review | Open | non-author codex reviews and the GitHub Codex bot only |

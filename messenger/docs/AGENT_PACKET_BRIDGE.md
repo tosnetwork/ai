@@ -2,7 +2,7 @@
 
 `pkg/agentpacketbridge` carries exact signed Agent Packet V1 JSON inside the
 typed `agent.packet` E2EE event. It does not reinterpret or re-sign a packet.
-The bridge calls `tos-service-protocol/pkg/agentpacket` for strict decoding,
+The bridge calls `protocol/pkg/agentpacket` for strict decoding,
 controller-signature authorization, and finalized sender/recipient resolution.
 
 Messenger adds the invariants the protocol's direct HTTP helper cannot provide:
@@ -25,10 +25,11 @@ process dies before marking completion, the receiver may see the packet again;
 the Native Execution Gate and software-work journal must therefore retain their
 existing transport-independent at-most-once claim.
 
-The bridge is compatible with `tos-ai/pkg/agentpacketadapter`, which already
-maps purchase-bound packet payloads into the same Native Execution Gate used by
-A2A and MCP. This repository does not import `tos-ai` or duplicate that mapping.
-`tos-ai` `a3c06d5` and `a9928de` add the A2A/MCP/Agent Packet execution matrix:
+The bridge was compatible with `execution/pkg/agentpacketadapter` (removed in
+`0d0dfc22`), which mapped purchase-bound packet payloads into the same Native
+Execution Gate used by A2A and MCP. `messenger/` does not import `execution/`
+or duplicate that mapping.
+`execution/` `a3c06d5` and `a9928de` added the A2A/MCP/Agent Packet execution matrix:
 all three adapters race one purchase through one shared Gate, exactly one
 transport succeeds, all three claims reach the Gate, and the runner executes
 once. The four ordered pairs A2A→Packet, MCP→Packet, Packet→A2A and Packet→MCP

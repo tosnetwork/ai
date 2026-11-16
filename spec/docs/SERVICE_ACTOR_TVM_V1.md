@@ -28,8 +28,8 @@ contract requires a new release manifest and new vectors.
 release code. They are tos
 `tosctl/src/node-control/contracts/tests/fixtures/service_actor/conformance-vectors.json`
 (sandbox test `conformance_vectors_come_from_contract_execution`), reproduced
-byte for byte in tos-service-protocol
-`pkg/nativecore/testdata/service-actor-conformance-vectors.json`. They cover the
+byte for byte in
+`protocol/pkg/nativecore/testdata/service-actor-conformance-vectors.json`. They cover the
 deployed and after-admission data, the call body, the terms cell and
 `terms_hash`, the request snapshot, the SRP2 respond domain and an attestor
 signature over it.

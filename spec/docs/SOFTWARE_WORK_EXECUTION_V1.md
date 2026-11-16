@@ -59,7 +59,7 @@ write permission while retaining container readability, and mounts it read-only 
 
 ## Isolation mapping
 
-The frozen manifest maps exactly to the existing `tos-ai` policy executor:
+The frozen manifest maps exactly to the existing `execution/` policy executor:
 
 - the toolchain digest is a SHA-256-pinned, operator-allowlisted OCI image;
 - the invocation is executed directly, without a shell;

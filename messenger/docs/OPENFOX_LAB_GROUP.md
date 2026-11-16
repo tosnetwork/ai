@@ -65,7 +65,7 @@ independent-operator, review, and second-implementation evidence remain open.
 Build both commands:
 
 ```sh
-cd ~/tos-messenger
+cd ~/ai/messenger
 GOWORK=off go build -o /tmp/tos-messenger-lab-group ./cmd/tos-messenger-lab-group
 GOWORK=off go build -o /tmp/tos-messenger-openfox-mls ./cmd/tos-messenger-openfox-mls
 

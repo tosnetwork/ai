@@ -1713,12 +1713,12 @@ funds without the normal policy boundary.
 
 | Repository or component | Responsibility |
 |---|---|
-| `tos-service-spec` | generic Intent/Agreement/obligation/action envelopes, body-bound authorization predicates, semantic action identity registry, retrieval policy, bounds, authority classes, settlement semantics, conformance vectors, and profile relationships |
-| `tos-service-protocol` | canonical codecs, signatures, profile-qualified authorization verification, semantic action identity, references, carrier clients, obligation/action helpers, and optional settlement adapters |
-| `tos-service-gateway` | bounded publish, retrieve, search, relay, pagination, provenance, action-ID resolution, controlled writer admission, and optional application metadata without market authority |
-| `tos-messenger` | authenticated conversations, rooms, direct negotiation, typed Agreement actions, action-ID resolution, controlled writer admission, exact object transport, Gift transport integration, and replay-safe delivery |
+| `spec/` | generic Intent/Agreement/obligation/action envelopes, body-bound authorization predicates, semantic action identity registry, retrieval policy, bounds, authority classes, settlement semantics, conformance vectors, and profile relationships |
+| `protocol/` | canonical codecs, signatures, profile-qualified authorization verification, semantic action identity, references, carrier clients, obligation/action helpers, and optional settlement adapters |
+| `gateway/` | bounded publish, retrieve, search, relay, pagination, provenance, action-ID resolution, controlled writer admission, and optional application metadata without market authority |
+| `messenger/` | authenticated conversations, rooms, direct negotiation, typed Agreement actions, action-ID resolution, controlled writer admission, exact object transport, Gift transport integration, and replay-safe delivery |
 | `openfox` | AI discovery, consistent Capability Inventory, semantic matching, capability/resource/profit/risk analysis, contact decisions, negotiation, local Agreement/Portfolio/obligation projection, settlement selection, durable scheduling, execution coordination, accounting, and learning |
-| `tos-ai` or other executors | optional bounded execution adapters with immutable resources, a task-scoped effect broker, one-shot start, and evidence selected by local OpenFox policy or a settlement profile |
+| `execution/` or other executors | optional bounded execution adapters with immutable resources, a task-scoped effect broker, one-shot start, and evidence selected by local OpenFox policy or a settlement profile |
 | `tos` / custody | optional Agent identity, Gift, transfer, Accepted Quote, escrow, Receipt, settlement contracts, rollback-resistant writer/action admission, signing, broadcast, and recovery |
 | optional market applications | branded board, search, moderation, ranking, support, notifications, KYC, fiat, and proprietary services without protocol authority |
 

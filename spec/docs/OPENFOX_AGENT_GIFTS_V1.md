@@ -636,14 +636,14 @@ never returns those private authority values to the model principal.
 
 | Repository | Responsibilities |
 |---|---|
-| `tos-service-spec` | This profile, canonical objects, BOC profile, vectors, negative corpus, and acceptance evidence |
+| `spec/` | This profile, canonical objects, BOC profile, vectors, negative corpus, and acceptance evidence |
 | `tos` | The single Agent Account contract and native TOS semantics; no Gift contract is added |
 | `tosctl` | Agent Account custody/journal, exact BOC construction/signing, verification, and raw-byte broadcast |
-| `tos-service-protocol` | Canonical Gift types, wallet/BOC parser, finalized resolver, and adversarial vectors |
-| `tos-messenger` | Authenticated E2EE address request/response and signed-offer carriage |
+| `protocol/` | Canonical Gift types, wallet/BOC parser, finalized resolver, and adversarial vectors |
+| `messenger/` | Authenticated E2EE address request/response and signed-offer carriage |
 | `OpenFox` | Intent, owner-policy orchestration, durable state, and honest presentation |
 
-`tos-service-gateway` and `tos-ai` are not required. Any Gateway projection is
+`gateway/` and `execution/` are not required. Any Gateway projection is
 non-authoritative and must not expose a standard Agent Gift graph.
 
 ## 15. Implementation sequence

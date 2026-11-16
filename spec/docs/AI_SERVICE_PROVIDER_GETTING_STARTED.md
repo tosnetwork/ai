@@ -1207,7 +1207,7 @@ Runtime, `tosctl` and the manual tools:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `containerd socket is not private` (or `... socket directory is not private`) | the socket is not `0600`, or its directory is not `0700`, owned by the executor's user. containerd creates the socket `0660` | use the current tos-ai unit, which tightens the socket after start; run the executor as the socket owner (root) |
+| `containerd socket is not private` (or `... socket directory is not private`) | the socket is not `0600`, or its directory is not `0700`, owned by the executor's user. containerd creates the socket `0660` | use the current `execution/deploy/provider` unit, which tightens the socket after start; run the executor as the socket owner (root) |
 | image `not found` from containerd at execution | the image was imported under its plain tag only | `ctr ... images tag <NAME> <NAME>@<DIGEST>`, then `images ls "name==<NAME>@<DIGEST>"` |
 | `--destination is required` | `claim-refund` without a destination | add `--destination <REFUND_ADDRESS>` |
 | `claim-refund` refused on chain | the refund-claim deadline passed (`status` shows `lapsed`) | run `sweep-expired-request`, which returns the price to the caller. Send `expire` and `claim-refund` early; the window is only one hour at the minimum |

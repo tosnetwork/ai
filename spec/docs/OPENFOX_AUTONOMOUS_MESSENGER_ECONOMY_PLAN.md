@@ -115,13 +115,13 @@ neither is allowed to create new identity, commerce, or settlement authority.
 
 | Repository | Owns | Must not own |
 |---|---|---|
-| `tos-messenger` | recipient canonicalization; finalized contact discovery; AgentID-keyed direct-conversation record; device/prekey selection; pair-session bootstrap; encryption; replay; transport; offline delivery | marketplace ranking; spending policy; custody; chain settlement |
+| `messenger/` | recipient canonicalization; finalized contact discovery; AgentID-keyed direct-conversation record; device/prekey selection; pair-session bootstrap; encryption; replay; transport; offline delivery | marketplace ranking; spending policy; custody; chain settlement |
 | `OpenFox` | human/model intent; local opportunity scheduler; non-authoritative scoring; owner policy orchestration; calls into Messenger and buyer/provider SDKs; user-visible progress | DNS/finality proof validation; Endpoint/Device/Session selection; chain keys; Gateway facts as authority |
-| `tos-service-protocol` | typed finalized-state, Gateway discovery, Quote, buyer, Receipt and settlement clients | AgentLoop scheduling; model policy; private custody |
-| `tos-service-gateway` | bounded derived Capability search and Quote Proposal exchange | canonical ownership, ranking authority, escrow or settlement truth |
-| `tos-ai` | provider execution adapter and shared execution Gate | buyer policy; Messenger identity; settlement authority |
+| `protocol/` | typed finalized-state, Gateway discovery, Quote, buyer, Receipt and settlement clients | AgentLoop scheduling; model policy; private custody |
+| `gateway/` | bounded derived Capability search and Quote Proposal exchange | canonical ownership, ranking authority, escrow or settlement truth |
+| `execution/` | provider execution adapter and shared execution Gate | buyer policy; Messenger identity; settlement authority |
 | `tos` / `tosctl` | chain state, contracts, transaction signing and broadcast | OpenFox objectives or opportunity ranking |
-| `tos-service-spec` | normative boundaries, milestone status and independently reproducible acceptance evidence | runtime authority or private operator state |
+| `spec/` | normative boundaries, milestone status and independently reproducible acceptance evidence | runtime authority or private operator state |
 
 ## 4. First-contact Messenger design
 
@@ -290,7 +290,7 @@ intent -> prepared -> funding_lease -> funded -> execution
 
 The opportunity projection never advances the purchase journal. On any
 disagreement, the purchase journal plus finalized chain state win and the
-projection is rebuilt or marked inconsistent. The `tos-service-protocol`
+projection is rebuilt or marked inconsistent. The `protocol/`
 funding budget journal covers only its bounded funding responsibility; it is
 not confused with OpenFox's multi-phase purchase journal.
 
@@ -339,7 +339,7 @@ funding budget, safe-handoff verification and execution-Gate primitives. It
 does not assume one existing end-to-end Buyer SDK: dispatch, Receipt checking
 and settlement execution still require explicit integration deliverables.
 
-The provider path reuses the `tos-ai` bounded executor and shared execution
+The provider path reuses the `execution/` bounded executor and shared execution
 Gate, including the existing Messenger event bridge, but automated canonical
 Receipt production, execution-signer custody, a production `Settler`, and
 provider publication wiring are new deliverables. The current manual Receipt
@@ -374,7 +374,7 @@ test constructors or tests; production cannot silently fall back to them.
 
 ### Phase A — route-independent first contact
 
-Primary repository: `tos-messenger`; thin caller change: `OpenFox`.
+Primary repository: `messenger/`; thin caller change: `OpenFox`.
 
 - freeze the AgentID-keyed direct-conversation record and atomic lifecycle;
 - expose daemon-owned ensure/send semantics without low-level route fields;
@@ -388,7 +388,7 @@ Primary repository: `tos-messenger`; thin caller change: `OpenFox`.
 - prove loopback/queue behavior without claiming production delivery.
 
 Status on 2026-08-22: **implementation complete; local acceptance complete**.
-`tos-messenger` commits `af8ef48`, `242097d`, `1649e68`, `542f283`, and
+`messenger/` commits `af8ef48`, `242097d`, `1649e68`, `542f283`, and
 `ce552e8` retain exact verified prekeys, persist daemon-owned asynchronous
 sessions, create one independently sealed/retried copy per verified device,
 apply ordinary admission through an atomic Event+ratchet commit, and derive
@@ -413,7 +413,7 @@ independent-operator acceptance.
 
 ### Phase B — M0-R and production transport
 
-Primary repository: `tos-messenger`; modify `tos` only for a proven missing
+Primary repository: `messenger/`; modify `tos` only for a proven missing
 native primitive.
 
 - complete representative multi-operator reachability measurements;
@@ -424,7 +424,7 @@ native primitive.
 
 Status on 2026-08-22: **deployable fallback implementation and local TLS
 acceptance complete; final M0-R selection and independent evidence open**.
-`tos-messenger` commit `13b5ccc` binds the daemon transport interface to a
+`messenger/` commit `13b5ccc` binds the daemon transport interface to a
 strict Descriptor-selected HTTPS fallback. The carrier accepts only public
 port-443 exact-path URLs from verified Contact Descriptors, disables proxies
 and redirects, pins checked public DNS answers, requires TLS, and accepts only
@@ -458,7 +458,7 @@ read-only and cannot request a Quote, custody action or execution. Protocol
 
 ### Phase D — policy-gated commercial loop
 
-Primary repository: `OpenFox`; reuse `tos-service-protocol`, `tos-ai` and
+Primary repository: `OpenFox`; reuse `protocol/`, `execution/` and
 `tosctl` boundaries.
 
 - connect verified Quote, exact owner policy/mandate and buyer journal;
@@ -495,7 +495,7 @@ remains opt-in only.
 
 ### Phase E — independent acceptance
 
-Evidence repository: `tos-service-spec`.
+Evidence repository: `spec/`.
 
 - fresh OpenFox buyer and provider under separate operators;
 - independently operated Gateway/resolver and Messenger endpoints;
@@ -579,7 +579,7 @@ so an unfrozen Messenger carrier cannot block or weaken Gate D/E evidence.
 ## 10. Completed first implementation slice
 
 The first code slice after design review was Phase A's route-independent durable
-direct-conversation boundary in `tos-messenger`, plus a local API operation and
+direct-conversation boundary in `messenger/`, plus a local API operation and
 tests. It must accept only recipient intent, resolve to AgentID, create or reuse
 an AgentID-keyed conversation record atomically, return no low-level routing
 authority, and leave delivery pending when no production transport exists.
@@ -588,7 +588,7 @@ This slice is intentionally smaller than session cryptography or transport
 selection. It establishes the identity-continuity boundary that both later
 bootstrap and OpenFox proactive send require, without pre-deciding M0-R.
 
-Initial implementation evidence: `tos-messenger` commit `219ed91` added local API v9
+Initial implementation evidence: `messenger/` commit `219ed91` added local API v9
 `conversations.ensure-direct`, the AgentID-keyed durable record, monotonic
 finalized-directory evidence, restart/idempotency/alias-transfer/rotation and
 route-substitution tests. Its full `make verify` passed on 2026-08-22. That
@@ -601,8 +601,8 @@ report.
 ## 11. Design review record
 
 Claude Code performed a read-only review across the current
-`tos-service-spec`, `tos-messenger`, `OpenFox`, `tos-service-protocol`,
-`tos-service-gateway`, `tos-ai` and `tos` trees on 2026-08-22. The first pass
+`spec/`, `messenger/`, `OpenFox`, `protocol/`,
+`gateway/`, `execution/` and `tos` trees on 2026-08-22. The first pass
 returned `REVISE`. The design was then corrected to:
 
 - bind Messenger idempotency to canonical AgentID plus a runtime-owned delivery

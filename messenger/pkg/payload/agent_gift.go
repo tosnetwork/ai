@@ -10,7 +10,7 @@ import (
 const MaxGiftCanonicalBytes = 64 << 10
 
 // Gift payloads carry the exact canonical object produced by
-// tos-service-protocol. Messenger authenticates and durably transports those
+// protocol/. Messenger authenticates and durably transports those
 // bytes; it does not reinterpret an address or rebuild a signed BOC.
 type GiftAddressRequest struct{ CanonicalRequest []byte }
 

@@ -22,12 +22,17 @@ state with three agreeing endpoints. The record is
 implementation evidence only: it did not exercise the complete public buyer
 SDK session or establish external operator independence.
 
-The production asset read no longer requires a caller-supplied balance view.
-`tos-service-protocol/pkg/toschain.StablecoinResolver` authenticates the master code,
-extracts and verifies its wallet-code preimage, derives the buyer wallet, and
-checks the wallet code, owner, master, unlocked status, balance, genesis, and
-monotonic finalized checkpoint through strict-majority TOS RPC. Its local live
-result is included in the same deployment record.
+On the retired rail, the production asset read no longer required a
+caller-supplied balance view: a finalized stablecoin resolver in
+`protocol/pkg/toschain` authenticated the master code, extracted and verified
+its wallet-code preimage, derived the buyer wallet, and checked the wallet
+code, owner, master, unlocked status, balance, genesis, and monotonic finalized
+checkpoint through strict-majority TOS RPC. Its local live result is included
+in the same deployment record. That resolver was removed with the stablecoin
+rail (`protocol/` commit `b9ad8e17`) and has no replacement: a native-TOS buyer
+has no stablecoin to resolve. The current buyer path is
+`protocol/pkg/buyersdk` `ServiceActorBuyer`, whose `tosctl` sender preflights
+the amount, network and wallet bindings before the one native-TOS `call`.
 
 The complete buyer preflight was also run against that live state through the
 production SDK and the in-process `toschain.DirectNativeClient`. It resolved
@@ -96,12 +101,13 @@ procedure.
 - Go guide: [`protocol/docs/buyer-sdk.md`](../../protocol/docs/buyer-sdk.md)
 - exact prepared-message broadcast boundary: `tos` commit
   `d9d725534cb1a9120b1e49854b360c01f043c22a`
-- production `tosctl` funding adapter: `tos-service-protocol` commit
+- production `tosctl` funding adapter: `protocol/` commit
   `d1a845eb7808365a413106d075c7c6316be67e27`
-- production finalized stablecoin resolver: `tos-service-protocol` commit
+- production finalized stablecoin resolver (removed with the stablecoin rail
+  in `protocol/` commit `b9ad8e17`): `protocol/` commit
   `57f6429f2a0dc21b3292de8a27fa5d3a26255dd4`
 - direct finalized Native SDK adapter and full live Buyer SDK revalidation:
-  `tos-service-protocol` commit `a18162af3df971af265bf101ae9d40396e3c1370`
+  `protocol/` commit `a18162af3df971af265bf101ae9d40396e3c1370`
 - verified test-fixture custody import and exact-message submit CLI: `tos`
   commit `c8fbead6851cf63c4858035195045b4de0406302`
 - canonical Quote and escrow rules: `docs/ACCEPTED_QUOTE_TVM_V1.md` and the

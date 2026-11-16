@@ -204,7 +204,7 @@ The first production market should be machine-checkable software work:
 - reproducible build artifacts; and
 - bounded code transformation followed by tests.
 
-This wedge fits the existing `tos-ai` execution foundation and produces outputs
+This wedge fits the existing `execution/` execution foundation and produces outputs
 that can be bound by repository commit, input digest, toolchain image, exit
 status, test report, artifact digest, and execution Receipt.
 

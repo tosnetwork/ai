@@ -110,12 +110,12 @@ permission to retry under a new identity.
 The reference production deployment touches seven repositories when `tosctl`
 and custody are part of the `tos` codebase:
 
-1. `tos-service-spec`;
-2. `tos-service-protocol`;
+1. `spec/`;
+2. `protocol/`;
 3. `openfox`;
-4. `tos-messenger`;
-5. `tos-service-gateway`;
-6. `tos-ai` or another selected executor; and
+4. `messenger/`;
+5. `gateway/`;
+6. `execution/` or another selected executor; and
 7. `tos`, including custody or `tosctl` functionality.
 
 The reference deployment makes two ownership decisions:
@@ -126,9 +126,9 @@ The reference deployment makes two ownership decisions:
   plane against a strongly consistent backend reachable by every authorized
   OpenFox host. Custody independently persists its writer-generation high-water
   mark and never trusts the model process; and
-- `tos-service-spec` owns a standalone conformance reference verifier that does
-  not import `tos-service-protocol`, its generated code, or its canonicalization
-  implementation. `tos-service-protocol` is the production SDK implementation.
+- `spec/` owns a standalone conformance reference verifier that does
+  not import `protocol/`, its generated code, or its canonicalization
+  implementation. `protocol/` is the production SDK implementation.
 
 If custody or `tosctl`, the shared Action Authority, the independent verifier,
 the second Carrier, or the selected executor is maintained in a separate
@@ -140,9 +140,9 @@ repositories.
 
 | Outcome | Minimum repository scope | What it proves |
 |---|---|---|
-| protocol fixtures | `tos-service-spec`, `tos-service-protocol` | two implementations agree on exact objects, digests, errors, and recovery rules |
+| protocol fixtures | `spec/`, `protocol/` | two implementations agree on exact objects, digests, errors, and recovery rules |
 | read-only scout | protocol fixtures, `openfox`, one Carrier | OpenFox can safely find and evaluate signed Intents without external side effects |
-| negotiated Agreement | read-only foundation, `tos-messenger`, the `openfox` Owner Economic Action Authority | Agents can contact, negotiate, and satisfy every body-bound mandatory and proposer-added authorization predicate through its frozen evidence profile without requiring chain settlement |
+| negotiated Agreement | read-only foundation, `messenger/`, the `openfox` Owner Economic Action Authority | Agents can contact, negotiate, and satisfy every body-bound mandatory and proposer-added authorization predicate through its frozen evidence profile without requiring chain settlement |
 | trusted low-risk earning | negotiated Agreement, one executor, one selected payment Adapter if payment is promised | one bounded Agreement can be executed and honestly resolved as paid or unpaid |
 | resilient public discovery | trusted foundation plus a second independent Carrier | loss of one Carrier or its database does not remove public discovery availability |
 | optional TOS escrow | protocol, OpenFox, selected executor/Gate, `tos` and custody | untrusted counterparties can choose finalized funding and the released escrow lifecycle |
@@ -156,16 +156,16 @@ architecture normally involves seven, subject to the ownership choices above.
 
 | Repository or component | Requirement | Required changes | Must not become |
 |---|---|---|---|
-| `tos-service-spec` | always | freeze Intent, Agreement, body-bound authorization predicates, evidence profiles, semantic action identity registry, obligation, action, retrieval, private handoff, operation admission, billing, scheduling, Gate, authority, bounds, errors, vectors, and an implementation-independent reference verifier | an industry-specific workflow catalog |
-| `tos-service-protocol` | always | production canonical codecs, signatures, predicate/evidence verification, registry-derived deterministic IDs, admission and handoff helpers, references, clients, Adapter interfaces, and recovery vectors | a profitability engine or market database |
+| `spec/` | always | freeze Intent, Agreement, body-bound authorization predicates, evidence profiles, semantic action identity registry, obligation, action, retrieval, private handoff, operation admission, billing, scheduling, Gate, authority, bounds, errors, vectors, and an implementation-independent reference verifier | an industry-specific workflow catalog |
+| `protocol/` | always | production canonical codecs, signatures, predicate/evidence verification, registry-derived deterministic IDs, admission and handoff helpers, references, clients, Adapter interfaces, and recovery vectors | a profitability engine or market database |
 | `openfox` | always for the product | discovery, Inventory, AI assessment, economics, negotiation, Agreement coordination, Owner Economic Action Authority, transactional Portfolio, Gate, publication/pricing, scheduling, operations, accounting, and learning | custody, chain finality, or unrestricted model authority |
-| `tos-messenger` | required for Agent negotiation; optionally one Carrier | Intent-referenced contact, typed Agreement and private-handoff control events, action admission, deduplication, resolution, exact-object transport, replay-safe delivery, and the complete bounded Carrier profile when enabled | Agreement, execution, settlement, or global-market truth derived from chat or room state |
-| `tos-service-gateway` | required when Gateway is a Carrier; normally one of two production paths | bounded publish/search/subscribe, source-local cursor, operation admission, provenance, selective retrieval, idempotent status, and controlled writer admission | a global market head, winner, solvency oracle, or authoritative order database |
-| `tos-ai` or another executor | required when selected by an Agreement | receiver-selected private ingress when applicable, immutable resource capabilities, task-scoped effect broker, one-shot runner, evidence, and crash/takeover behavior | settlement selector, policy authority, credential owner, or remote-selected fetcher |
+| `messenger/` | required for Agent negotiation; optionally one Carrier | Intent-referenced contact, typed Agreement and private-handoff control events, action admission, deduplication, resolution, exact-object transport, replay-safe delivery, and the complete bounded Carrier profile when enabled | Agreement, execution, settlement, or global-market truth derived from chat or room state |
+| `gateway/` | required when Gateway is a Carrier; normally one of two production paths | bounded publish/search/subscribe, source-local cursor, operation admission, provenance, selective retrieval, idempotent status, and controlled writer admission | a global market head, winner, solvency oracle, or authoritative order database |
+| `execution/` or another executor | required when selected by an Agreement | receiver-selected private ingress when applicable, immutable resource capabilities, task-scoped effect broker, one-shot runner, evidence, and crash/takeover behavior | settlement selector, policy authority, credential owner, or remote-selected fetcher |
 | `tos` and custody/`tosctl` | required for TOS identity/value effects or escrow | writer-generation high-water, action admission, signing, broadcast, recovery, direct-payment evidence, and optional Quote/escrow/Receipt support | search, ranking, profitability logic, or category-specific commerce contracts |
 | optional market applications | independently optional | user experience, hosted search, ranking, moderation, support, KYC, fiat, and proprietary services | Agent, Agreement, execution, or settlement authority |
 
-## 4. `tos-service-spec` roadmap
+## 4. `spec/` roadmap
 
 The specification repository owns the portable contract. Documentation alone
 does not complete this phase. It must freeze wire-level definitions and
@@ -235,7 +235,7 @@ Exit criteria:
 4. no side-effect phase depends on prose that has not been frozen into a typed
    object or explicit implementation policy.
 
-## 5. `tos-service-protocol` roadmap
+## 5. `protocol/` roadmap
 
 The protocol SDK implements the shared mechanics so that individual products
 do not create incompatible versions. It must provide:
@@ -276,10 +276,10 @@ prove byte-for-byte compatibility. They must not independently reinterpret the
 canonical schemas.
 
 The second verifier lives under a standalone conformance package in
-`tos-service-spec`. It uses a separately maintained implementation language or
+`spec/`. It uses a separately maintained implementation language or
 toolchain, imports neither the production SDK nor generated production codec
 code, and consumes only frozen schemas and byte fixtures. Its CI compares
-success values and exact failure classes against `tos-service-protocol`. If
+success values and exact failure classes against `protocol/`. If
 these independence requirements cannot be met in that repository, the verifier
 moves to a separately named repository and the repository count is updated
 before Phase 0 exits.
@@ -604,9 +604,9 @@ replace this generic Adapter with a stricter profile, but cannot weaken these
 boundaries.
 
 The reference trusted path assigns canonical challenge, authorization,
-acknowledgement, and status messages to `tos-messenger`; the selected executor,
+acknowledgement, and status messages to `messenger/`; the selected executor,
 or `openfox` for an in-process Skill, owns the receiver-selected bulk ingress
-and immutable accepted-content store. `tos-service-protocol` supplies the shared
+and immutable accepted-content store. `protocol/` supplies the shared
 codec and verifier. A different Storage Adapter may replace the byte transport
 only after satisfying the same contract and cannot become Agreement authority.
 
@@ -658,7 +658,7 @@ fuzz, race, crash, partition, stale-writer, resource-exhaustion, hostile-content
 private-handoff, real-Adapter, and platform build/test results remain separately
 labelled; mocks never substitute for production evidence.
 
-## 7. `tos-messenger` roadmap
+## 7. `messenger/` roadmap
 
 ### 7.1 Negotiation transport
 
@@ -713,7 +713,7 @@ If Messenger does not release this profile, it remains the negotiation
 transport and cannot satisfy Phase 1 or the second-Carrier production gate. The
 roadmap must then name another independent Carrier implementation.
 
-## 8. `tos-service-gateway` and Carrier roadmap
+## 8. `gateway/` and Carrier roadmap
 
 Gateway is one replaceable Carrier implementation. When selected, it must
 provide:
@@ -772,7 +772,7 @@ implementations, operators, stores, upstreams, and failure domains. The
 acceptance campaign must remove one complete Carrier database and still
 rediscover and resolve already replicated signed content through the other.
 
-## 9. `tos-ai` or selected executor roadmap
+## 9. `execution/` or selected executor roadmap
 
 An executor enters scope only when an accepted Agreement selects it. It must:
 
@@ -795,7 +795,7 @@ The executor cannot select payment, expand permissions, obtain custody keys,
 reinterpret ordinary conversation as an Agreement, or mark itself paid.
 
 If the first trusted task uses an existing local OpenFox Skill, a separate
-`tos-ai` change may be deferred. The same Gate, capability, broker, and
+`execution/` change may be deferred. The same Gate, capability, broker, and
 at-most-once rules still apply inside OpenFox.
 
 ## 10. `tos`, custody, and `tosctl` roadmap
@@ -909,8 +909,8 @@ escrow without weakening the newest required authority checks.
 
 Repositories:
 
-- `tos-service-spec`;
-- `tos-service-protocol`.
+- `spec/`;
+- `protocol/`.
 
 Deliver:
 
@@ -919,8 +919,8 @@ Deliver:
   exact-byte vectors, operation-admission and private-handoff profiles, bounds,
   IDs, signatures, errors, and recovery vectors;
 - semantically unrelated fixtures; and
-- the standalone `tos-service-spec` reference verifier plus the production
-  `tos-service-protocol` codec/verifier.
+- the standalone `spec/` reference verifier plus the production
+  `protocol/` codec/verifier.
 
 Exit only when the two code-independent implementations agree on success and
 exact failure classes, admission/handoff attack vectors fail closed, and the
@@ -932,7 +932,7 @@ Repositories:
 
 - Phase 0 repositories;
 - `openfox`;
-- one complete Carrier profile, initially `tos-service-gateway` or the released
+- one complete Carrier profile, initially `gateway/` or the released
   Messenger Carrier profile.
 
 Deliver bounded discovery, consistent Inventory, deterministic filtering,
@@ -947,8 +947,8 @@ feature gates.
 Repositories:
 
 - `openfox`;
-- `tos-messenger`;
-- `tos-service-protocol`;
+- `messenger/`;
+- `protocol/`;
 - the `openfox` Owner Economic Action Authority and transactional Portfolio
   implementation.
 
@@ -990,7 +990,7 @@ negotiation.
 Repositories:
 
 - `openfox`;
-- `tos-service-protocol`;
+- `protocol/`;
 - `tos` and custody/`tosctl`;
 - the selected executor and Native Gate implementation.
 
@@ -1016,11 +1016,11 @@ bounded learning from verified outcomes.
 ## 13. Dependency graph
 
 ```text
-S0  tos-service-spec: canonical objects, admission/handoff, bounds, and vectors
+S0  spec/: canonical objects, admission/handoff, bounds, and vectors
  |
- +-> R0  tos-service-spec: code-independent reference verifier
+ +-> R0  spec/: code-independent reference verifier
  |
- +-> P0  tos-service-protocol: production codec, verifier, IDs, clients, helpers
+ +-> P0  protocol/: production codec, verifier, IDs, clients, helpers
       |
       +-> O0  openfox: read-only collector, Inventory, AI, and economics
       |
@@ -1029,7 +1029,7 @@ S0  tos-service-spec: canonical objects, admission/handoff, bounds, and vectors
 S0 + R0 + P0 + O0 + C0
   -> read-only Intent scout
 
-M1  tos-messenger: writer-fenced contact and profile-qualified Agreement actions
+M1  messenger/: writer-fenced contact and profile-qualified Agreement actions
 A1  openfox owner control plane: Action + Portfolio atomic admission/recovery
 O1  openfox: negotiation, Agreement, and operational controls
 
@@ -1206,13 +1206,13 @@ This roadmap does not require:
 
 The recommended first PR sequence is:
 
-1. `tos-service-spec`: freeze the Phase 0 wire objects, body-bound authorization
+1. `spec/`: freeze the Phase 0 wire objects, body-bound authorization
    predicates and evidence profiles, non-circular Agreement targets, the
    semantic action registry and exact-byte vectors, operation admission, private
    handoff, authority, recovery and conformance vectors;
-2. `tos-service-spec`: implement the standalone code-independent reference
+2. `spec/`: implement the standalone code-independent reference
    verifier and record its language/toolchain boundary;
-3. `tos-service-protocol`: implement the production canonical codec/verifier,
+3. `protocol/`: implement the production canonical codec/verifier,
    Agreement predicate/evidence validation, registry-derived action/execution
    IDs, clients, admission/handoff helpers and cross-verifier fixtures;
 4. `openfox`: implement read-only Inventory, privacy-preserving Collector,
@@ -1225,7 +1225,7 @@ The recommended first PR sequence is:
    plus transactionally coupled aggregate Portfolio, registered semantic action
    IDs, proof-carrying writer fences, resolved mandate/approval validation and
    atomic blocking-dependency cycle admission;
-7. `tos-messenger`: implement writer-fenced contact, typed Agreement actions,
+7. `messenger/`: implement writer-fenced contact, typed Agreement actions,
    profile-qualified acceptance evidence transport, `ResolveAction`, and the
    optional complete Messenger Carrier profile if it will count as a Carrier;
 8. `openfox` plus one handoff transport and executor: implement authenticated
@@ -1246,14 +1246,14 @@ The recommended first PR sequence is:
 
 The follow-on trusted-capability and owner-control sequence is:
 
-14. `tos-service-spec`: freeze executable-artifact identity, permission,
+14. `spec/`: freeze executable-artifact identity, permission,
     requirement, sourcing decision, evaluation, admission, revocation,
     promotion, capability-use, report, projection, device-session and owner-
     command objects, plus their registries, errors, vectors, a code-independent
     standalone reference verifier, and Gate S/M profiles;
-15. `tos-service-protocol`: implement the production codec/verifier and a
+15. `protocol/`: implement the production codec/verifier and a
     cross-verifier CI job that reproduces every identity and failure class
-    against the independent `tos-service-spec` verifier;
+    against the independent `spec/` verifier;
 16. `openfox`: enforce the consequential-use safety ceiling, build the
     append-only Inventory, reuse-first coordinator, quarantine, admission,
     promotion and revocation path, then pass Gate S;

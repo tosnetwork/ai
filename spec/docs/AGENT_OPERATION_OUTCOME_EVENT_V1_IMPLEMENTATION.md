@@ -42,12 +42,12 @@ query-before-retry resolution.
 
 | Repository | Implemented responsibility | Important boundary |
 |---|---|---|
-| `tos-service-spec` | Complete JSON Schema, profile registry, stable-error registry, Semantic Action entries, canonical fixture corpus, and an independent Python verifier | Specification artifacts contain no operational history and define no global head |
-| `tos-service-protocol` | Bounded event, evidence, authority, transport, privacy, economics, reporting, learning, Merkle/cohort, codec, digest, signature, and verifier APIs | Structural verification performs no network retrieval; issuer qualification is explicit |
+| `spec/` | Complete JSON Schema, profile registry, stable-error registry, Semantic Action entries, canonical fixture corpus, and an independent Python verifier | Specification artifacts contain no operational history and define no global head |
+| `protocol/` | Bounded event, evidence, authority, transport, privacy, economics, reporting, learning, Merkle/cohort, codec, digest, signature, and verifier APIs | Structural verification performs no network retrieval; issuer qualification is explicit |
 | `openfox` | Authority-side append high-water, durable journal, recovery, archive, signed checkpoint, local projection, learning cut, automatic Action-resolution capture, private send, directory Carrier, and HTTP Carrier client | Local projection is derived; public publication is a separate default-off declassification capability |
-| `tos-messenger` | Typed `operation.outcome` payload and local transport admission isolated from ordinary chat/model delivery | Exactly one recipient per Action; a chat message cannot become outcome authority |
-| `tos-service-gateway` | Authenticated bounded HTTP admission, retrieval, search, subscription, action resolution, signed Carrier receipts, quotas, and database-loss rebuild path | Carrier fields are recomputed from exact retained bytes; Carrier acknowledgement is not business truth |
-| `tos-ai` | Exact execution-Gate evidence and physical resource-meter evidence | Execution success does not imply acceptance, payment, profit, or monetary cost |
+| `messenger/` | Typed `operation.outcome` payload and local transport admission isolated from ordinary chat/model delivery | Exactly one recipient per Action; a chat message cannot become outcome authority |
+| `gateway/` | Authenticated bounded HTTP admission, retrieval, search, subscription, action resolution, signed Carrier receipts, quotas, and database-loss rebuild path | Carrier fields are recomputed from exact retained bytes; Carrier acknowledgement is not business truth |
+| `execution/` | Exact execution-Gate evidence and physical resource-meter evidence | Execution success does not imply acceptance, payment, profit, or monetary cost |
 | `tos` | No change | V1 needs no new opcode, contract, or consensus state; existing finalized evidence remains authoritative |
 
 The Gateway HTTP Carrier and OpenFox directory Carrier are separate code
