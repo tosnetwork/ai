@@ -390,6 +390,36 @@ func TestRoomAckSignsAndRefuses(t *testing.T) {
 	if _, err := relayframe.DecodeRoomAck(append(raw, 0)); err == nil {
 		t.Fatal("a trailing byte was accepted")
 	}
+	// A pending joiner refusing its Welcome has no MLS state: its rejection
+	// carries no authenticator and MLS epoch 0, and still signs and decodes.
+	stateless := ack
+	stateless.Outcome, stateless.Code, stateless.MLSEpoch, stateless.EpochAuthenticator = relayframe.OutcomeRejected, fault.CodeNotAuthentic, 0, nil
+	signedStateless, err := relayframe.SignRoomAck(stateless, roomKey)
+	if err != nil {
+		t.Fatalf("a stateless rejection: %v", err)
+	}
+	statelessRaw, err := relayframe.EncodeRoomAck(signedStateless)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := relayframe.DecodeRoomAck(statelessRaw); err != nil || len(decoded.EpochAuthenticator) != 0 ||
+		relayframe.VerifyRoomAck(decoded, roomKey.Public().(ed25519.PublicKey)) != nil {
+		t.Fatalf("a stateless rejection does not round-trip: %v", err)
+	}
+	for name, bad := range map[string]relayframe.RoomAck{
+		"accepted without authenticator": func() relayframe.RoomAck { v := ack; v.EpochAuthenticator, v.MLSEpoch = nil, 0; return v }(),
+		"duplicate without authenticator": func() relayframe.RoomAck {
+			v := ack
+			v.Outcome, v.EpochAuthenticator, v.MLSEpoch = relayframe.OutcomeDuplicate, nil, 0
+			return v
+		}(),
+		"stateless rejection with an epoch": func() relayframe.RoomAck { v := stateless; v.MLSEpoch = 3; return v }(),
+		"short authenticator":               func() relayframe.RoomAck { v := rejected; v.EpochAuthenticator = []byte{1}; return v }(),
+	} {
+		if _, err := relayframe.RoomAckSigningBytes(bad); err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
 }
 
 // members admits a fixed set of senders in a fixed set of rooms.
@@ -667,6 +697,50 @@ func TestReassemblerEnforcesEachBound(t *testing.T) {
 		}
 		if !errors.Is(err, relayframe.ErrReassemblyTotalBytes) || reassembler.Usage().TotalBytes > 16<<20 {
 			t.Fatalf("global bytes: %v, %d held", err, reassembler.Usage().TotalBytes)
+		}
+	})
+	t.Run("wrong-size part against a held object", func(t *testing.T) {
+		for _, change := range []string{"part count", "repeated index"} {
+			reassembler, _ := relayframe.NewReassembler(relayframe.DefaultReassemblyLimits(), admitAll(sender))
+			_, frames := splitFrames(t, 600_000, "w"+change)
+			if _, err := reassembler.Add(sender, frames[1], now); err != nil {
+				t.Fatal(err)
+			}
+			// A part of the wrong size, which the cut alone would refuse
+			// without touching the held object.
+			forged := frames[1]
+			forged.Part = forged.Part[:len(forged.Part)-7]
+			if change == "part count" {
+				forged = frames[2]
+				forged.Part = forged.Part[:len(forged.Part)-7]
+				forged.PartCount = 5
+			}
+			if _, err := reassembler.Add(sender, forged, now); !errors.Is(err, relayframe.ErrReassemblyInconsistent) {
+				t.Fatalf("%s with a wrong-size part: %v", change, err)
+			}
+			if usage := reassembler.Usage(); usage.Objects != 0 || usage.TotalBytes != 0 || len(usage.PeerCount) != 0 {
+				t.Fatalf("%s: the held object was not dropped and released: %+v", change, usage)
+			}
+		}
+	})
+	t.Run("expired objects do not count against the caps", func(t *testing.T) {
+		reassembler, _ := relayframe.NewReassembler(relayframe.DefaultReassemblyLimits(), admitAll(sender))
+		for index := 0; index < 4; index++ {
+			_, frames := splitFrames(t, 200_000, fmt.Sprint("old", index))
+			if _, err := reassembler.Add(sender, frames[1], now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, frames := splitFrames(t, 200_000, "new")
+		if _, err := reassembler.Add(sender, frames[1], now.Add(time.Hour)); !errors.Is(err, relayframe.ErrReassemblyPeerObjects) {
+			t.Fatalf("a fifth live object: %v", err)
+		}
+		later := now.Add(24*time.Hour + 5*time.Minute)
+		if _, err := reassembler.Add(sender, frames[1], later); err != nil {
+			t.Fatalf("a part after the held objects expired: %v", err)
+		}
+		if usage := reassembler.Usage(); usage.Objects != 1 || usage.PeerCount[sender] != 1 {
+			t.Fatalf("expired objects still counted: %+v", usage)
 		}
 	})
 	t.Run("expiry", func(t *testing.T) {

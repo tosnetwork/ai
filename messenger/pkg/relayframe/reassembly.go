@@ -167,13 +167,14 @@ func (r *Reassembler) Add(sender string, frame Frame, now time.Time) (PartResult
 	if frame.PartCount == 1 {
 		return r.single(sender, frame)
 	}
-	if err := r.checkCut(frame); err != nil {
-		return PartResult{}, err
-	}
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	// Expired objects never count against the caps a new part is judged by.
+	r.expire(now)
 	key := reassemblyKey{sender: sender, digest: frame.ObjectDigest}
 	object, held := r.objects[key]
+	// A part that contradicts a held object drops the whole object, whatever
+	// its size: the object can no longer complete honestly.
 	if held {
 		if object.count != frame.PartCount {
 			r.drop(key)
@@ -186,6 +187,10 @@ func (r *Reassembler) Add(sender string, frame Frame, now time.Time) (PartResult
 			}
 			return object.result(PartDuplicate), nil
 		}
+	}
+	// Only a new part is judged against the fixed cut.
+	if err := r.checkCut(frame); err != nil {
+		return PartResult{}, err
 	}
 	if !held && r.peerCount[sender] >= r.limits.MaxPeerObjects {
 		return PartResult{}, ErrReassemblyPeerObjects
@@ -338,10 +343,17 @@ func (r *Reassembler) ReplaceFirstPartEvidence(sender string, digest [sha256.Siz
 }
 
 // Sweep drops every incomplete object older than the lifetime and returns
-// how many it dropped.
+// how many it dropped. Add also expires objects before judging a part; Sweep
+// frees memory between parts, on the maintenance pass.
 func (r *Reassembler) Sweep(now time.Time) int {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	return r.expire(now)
+}
+
+// expire drops every incomplete object older than the lifetime. The mutex is
+// held.
+func (r *Reassembler) expire(now time.Time) int {
 	var expired []reassemblyKey
 	for key, object := range r.objects {
 		if now.Sub(object.first) >= r.limits.Lifetime {

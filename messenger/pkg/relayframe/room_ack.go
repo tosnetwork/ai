@@ -25,7 +25,8 @@ const RoomAckSchema = "tos.messaging.relay-room-ack.v1"
 // ErrRoomAckSignature reports a room ack not signed by the expected Endpoint.
 var ErrRoomAckSignature = errors.New("relay room ack signature is not from the member Endpoint")
 
-// RoomAck is one member's outcome for one handshake object.
+// RoomAck is one member's outcome for one handshake object. EpochAuthenticator
+// is empty only in a rejection by a member with no MLS state (validAckEpoch).
 type RoomAck struct {
 	RoomID              string
 	ObjectDigest        [sha256.Size]byte
@@ -53,12 +54,22 @@ func ValidRoomOutcome(outcome string, code fault.Code) bool {
 	}
 }
 
+// validAckEpoch requires the member's MLS epoch and epoch authenticator for
+// every outcome but one: a pending joiner refusing its Welcome holds no MLS
+// state yet, so a rejected ack may carry no authenticator, and then MLS epoch
+// 0. An authenticator, when present, is the 32 non-zero bytes of the suite.
+func validAckEpoch(ack RoomAck) bool {
+	if len(ack.EpochAuthenticator) == 0 {
+		return ack.Outcome == OutcomeRejected && ack.MLSEpoch == 0
+	}
+	return len(ack.EpochAuthenticator) == RoomAADEpochAuthenticatorBytes && !canon.IsZero(ack.EpochAuthenticator)
+}
+
 // RoomAckSigningBytes is the preimage the member Endpoint signs.
 func RoomAckSigningBytes(ack RoomAck) ([]byte, error) {
 	if !ids.Room.MatchString(ack.RoomID) || ack.ObjectDigest == ([sha256.Size]byte{}) ||
 		!ids.Endpoint.MatchString(ack.RecipientEndpointID) || !ids.Device.MatchString(ack.RecipientDeviceID) ||
-		len(ack.EpochAuthenticator) != RoomAADEpochAuthenticatorBytes || canon.IsZero(ack.EpochAuthenticator) ||
-		ack.AckedAtUnix == 0 || !ValidRoomOutcome(ack.Outcome, ack.Code) {
+		ack.AckedAtUnix == 0 || !ValidRoomOutcome(ack.Outcome, ack.Code) || !validAckEpoch(ack) {
 		return nil, ErrFrameMalformed
 	}
 	buffer := bytes.NewBufferString(canon.DomainRelayRoomAck)

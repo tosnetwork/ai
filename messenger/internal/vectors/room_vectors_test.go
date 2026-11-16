@@ -274,6 +274,19 @@ func buildRoom(t *testing.T) []RoomVector {
 		t.Fatal(err)
 	}
 	add("room-ack", ackObject, nil)
+	// A pending joiner refusing its Welcome holds no MLS state: no epoch
+	// authenticator and MLS epoch 0.
+	stateless, err := relayframe.SignRoomAck(relayframe.RoomAck{RoomID: vectorRoom, ObjectDigest: relayframe.ObjectDigest(welcome),
+		RecipientEndpointID: delegation(t).EndpointID, RecipientDeviceID: deviceOne,
+		Outcome: relayframe.OutcomeRejected, Code: fault.CodeNotAuthentic, AckedAtUnix: baseUnix + 31}, endpointKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	statelessObject, err := relayframe.EncodeRoomAck(stateless)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add("room-ack-rejected-without-state", statelessObject, nil)
 	aad, err := relayframe.EncodeRoomAAD(relayframe.RoomAAD{RoomID: vectorRoom, RoomEpoch: 2, MLSEpoch: 4,
 		EpochAuthenticator: bytes.Repeat([]byte{0xa7}, 32), SenderAgentID: vectorAgent(1), EventID: "evt_" + strings.Repeat("1a", 32)})
 	if err != nil {
