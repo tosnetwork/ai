@@ -2,7 +2,8 @@ package eventlog
 
 // Restart recovery and garbage collection of private-room records.
 //
-// The roots are every fused room record and every room-outbox head: an older
+// The roots are every fused room record, every room-outbox head and every
+// pending join (which names the identity state staged for its Welcome): an older
 // Commit stays re-depositable after the authority has moved on, and a roster
 // or Commit whose fused record has been superseded is named only by its head.
 // A staged state, delegation, membership or object chunk that no root names
@@ -143,6 +144,24 @@ func (j *Journal) namedRoomRecords() (namedRoomSet, bool, error) {
 		named.delegations[record.DelegationDigest] = struct{}{}
 		for _, digest := range record.PriorMemberships {
 			named.memberships[digest] = struct{}{}
+		}
+	}
+	// A pending join names the identity state it staged for its Welcome.
+	joinIDs, err := j.roomJoinIDs()
+	if err != nil {
+		return named, false, nil
+	}
+	for _, roomID := range joinIDs {
+		join, found, err := j.readRoomJoin(roomID)
+		if err != nil || !found {
+			return named, false, nil
+		}
+		for _, chunk := range join.IdentityStateChunks {
+			path, err := j.roomStatePath(roomID, chunk)
+			if err != nil {
+				return named, false, nil
+			}
+			named.state[filepath.Base(path)] = struct{}{}
 		}
 	}
 	entries, err := os.ReadDir(filepath.Join(j.root, roomOutboxDir))
