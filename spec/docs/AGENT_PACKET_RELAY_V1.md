@@ -198,10 +198,10 @@ The card's Agent:
 - SHOULD sign its cards with a dedicated card-signing controller, used for
   nothing else, so that revoking a card (by removing that controller from the
   finalized policy) does not stop its packets or require a full identity
-  rotation. The first OpenFox implementation signs cards with its packet
-  controller; revoking a card there means removing the packet controller,
-  which also stops every packet the node sends until a new controller is
-  registered on chain.
+  rotation. OpenFox signs its cards with its packet controller by choice
+  (section 11 gives the reason); revoking a card there means removing the
+  packet controller, which also stops every packet the node sends until a new
+  controller is registered on chain.
 
 ### 6.4 Distribution
 
@@ -262,8 +262,8 @@ The card's Agent:
   `not_after_unix`) becomes the normal case for the offer card, so an
   offer-file card SHOULD be signed by the dedicated card-signing controller of
   6.3: removing that controller is the only early revocation of a stale offer
-  card. The first OpenFox implementation signs it with its packet controller,
-  with the cost the OpenFox note in 6.3 describes.
+  card. OpenFox signs it with its packet controller by choice, with the cost
+  the OpenFox note in 6.3 describes.
 - **Relay directory: none in V1.** A relay without chain access cannot tell a
   genuine card from junk under the same Agent ID, so any card directory it kept
   could be filled or evicted by anyone. Cards therefore travel only inside
@@ -882,9 +882,19 @@ packet payload; the relay supplies only the authenticated-encryption transport.
   relays already hold for that key stay readable to whoever has the key until
   they expire (at most 24 hours) unless their senders withdraw them with their
   acknowledgement secrets, which 8.4 step 6 permits. That is why
-  cards SHOULD come from a dedicated card-signing controller; with the first
-  OpenFox implementation's packet controller, revocation also stops the node's
-  packets until a new controller is registered.
+  cards SHOULD come from a dedicated card-signing controller. This can be met
+  only once off-chain verification checks a card-signing purpose:
+  `VerifyKeyCard`, `agentpacket.VerifyContact` and `agentpacket.VerifySender`
+  accept a
+  signature by any controller of the finalized policy and check no purpose or
+  weight, so a second controller could sign any Agent Packet and any card
+  (rail, offer or chat) as the Agent. Held in the same custody, it would add
+  an impersonation key while isolating little. OpenFox therefore signs its
+  rail, offer and chat cards with its packet controller by choice, so for it
+  revocation also stops the node's packets until a new controller is
+  registered. A dedicated card-signing controller becomes worthwhile after a
+  protocol change: a card-signing purpose bit in the Agent policy, required
+  by the card verifiers and refused by the packet verifier.
 - Sender's ack secret: lets its holder delete one envelope; it is single-use
   and per envelope.
 - Controller ML-DSA-44 key: the attacker can sign cards for its own HPKE key

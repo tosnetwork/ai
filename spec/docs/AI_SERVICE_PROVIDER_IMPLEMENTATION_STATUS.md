@@ -534,4 +534,14 @@ runs as an ordinary user.
   `--allow-provider`; a command that closes a purchase whose call never
   landed.
 - A command that exports a bought artifact from the buyer's state directory.
+- A dedicated card-signing controller for key cards (the relay spec's
+  SHOULD, `AGENT_PACKET_RELAY_V1.md` 6.3). OpenFox signs its rail, offer and
+  chat cards with its packet controller by choice. Off-chain verification
+  (`VerifyKeyCard`, `agentpacket.VerifyContact`,
+  `agentpacket.VerifySender`) accepts any controller of the finalized policy
+  without a purpose or weight check, so a separate controller would add an
+  impersonation key with little isolation.
+  The follow-up is a protocol change: a card-signing purpose bit in the
+  Agent policy (registry, `nativecore`, tosctl), card verifiers that require
+  it, and a packet verifier that refuses it.
 - Gate F/G operation, independent operators, and production controls.
