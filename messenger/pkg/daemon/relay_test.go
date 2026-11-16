@@ -853,7 +853,7 @@ func TestDescriptorExpiredRetriesAtOnceOnlyWithNewerEvidence(t *testing.T) {
 			Outcome: relayframe.OutcomeRejected, Code: fault.CodeDescriptorExpired, AcceptedAtUnix: uint64(now.Unix())}
 		match := eventlog.RelayAckMatch{SessionID: delivery.SessionID, DeviceID: b.d.config.DeviceID,
 			CiphertextDigest: ack.CiphertextDigest}
-		if err := a.d.relay.applyAck(delivery.Key(), delivery, ack, match, now); err != nil {
+		if err := a.d.relay.applyAck(b.d.config.AgentID, delivery.Key(), delivery, ack, match, now); err != nil {
 			t.Fatal(err)
 		}
 		return copyState(t, a, eventID, b.d.config.EndpointID, b.d.config.DeviceID)

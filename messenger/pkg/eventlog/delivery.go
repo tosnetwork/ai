@@ -141,6 +141,9 @@ type Delivery struct {
 	// RejectedDescriptorDigest is the own descriptor the recipient last
 	// answered descriptor-expired for.
 	RejectedDescriptorDigest string `json:"rejected_descriptor_digest,omitempty"`
+	// AdmissionToken is the invite the owner presented for the recipient
+	// Agent, fixed on the first attempt so every generation carries it.
+	AdmissionToken string `json:"admission_token,omitempty"`
 }
 
 // Outbound is a request to deliver one event.
@@ -634,7 +637,8 @@ func readDelivery(path string) (Delivery, error) {
 		return Delivery{}, errors.New("invalid delivery record")
 	}
 	if len(delivery.Generations) > MaxRelayGenerations ||
-		delivery.RejectedDescriptorDigest != "" && !canon.ValidDigest(delivery.RejectedDescriptorDigest) {
+		delivery.RejectedDescriptorDigest != "" && !canon.ValidDigest(delivery.RejectedDescriptorDigest) ||
+		delivery.AdmissionToken != "" && !validAdmissionToken(delivery.AdmissionToken) {
 		return Delivery{}, errors.New("invalid delivery record")
 	}
 	for _, generation := range delivery.Generations {
@@ -736,4 +740,9 @@ func (j *Journal) ExpireDeliveries(now time.Time) (int, error) {
 		expired++
 	}
 	return expired, nil
+}
+
+func validAdmissionToken(token string) bool {
+	_, err := decodeAdmissionInvite(token)
+	return err == nil
 }

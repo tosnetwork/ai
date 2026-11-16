@@ -119,6 +119,26 @@ const (
 	// simply not caught up to can be re-admitted once it has, so the remedy is
 	// to reconcile membership rather than to give up.
 	CodeNotARoomMember Code = "not-a-room-member"
+	// CodeRoomEpochGap reports a room handshake object for an epoch beyond the
+	// next one this member can apply. It is peer-visible and a refresh: the
+	// authority learns the member is behind and delivers the missing Commit
+	// first.
+	CodeRoomEpochGap Code = "room-epoch-gap"
+	// CodeRoomFork reports a second, different Commit or Welcome for an MLS
+	// epoch this member already applied. Only the room's single authority can
+	// produce one (for example from a restored backup), so it is told; the
+	// room is forked and recovery is a new room.
+	CodeRoomFork Code = "room-fork"
+	// CodeRoomForkSuspected reports an authenticated current member's
+	// application message that does not open under this member's epoch
+	// secrets: the two hold different states of one epoch. It is an owner
+	// notice and never sent to a peer.
+	CodeRoomForkSuspected Code = "room-fork-suspected"
+	// CodeRoomRosterConflict reports a second, different roster for a room
+	// epoch this member already accepted a roster for. A roster carries no
+	// MLS state, so it is not a fork, but the authority sent two answers to one
+	// question; the authority is told and its owner is shown the cause.
+	CodeRoomRosterConflict Code = "room-roster-conflict"
 	// CodeContentTooLarge reports content beyond the accepted bound.
 	CodeContentTooLarge Code = "content-too-large"
 	// CodePayloadMalformed reports a body that is not what its own kind says
@@ -196,6 +216,10 @@ var registry = map[Code]spec{
 	CodeAdmissionRequired:  {Refresh, true, true},
 	CodeUnknownEventKind:   {Permanent, true, false},
 	CodeNotARoomMember:     {Refresh, true, false},
+	CodeRoomEpochGap:       {Refresh, true, false},
+	CodeRoomFork:           {Permanent, true, false},
+	CodeRoomForkSuspected:  {Permanent, false, false},
+	CodeRoomRosterConflict: {Permanent, true, false},
 	CodeContentTooLarge:    {Permanent, true, false},
 	CodePayloadMalformed:   {Permanent, true, false},
 	CodeEventOutsideWindow: {Permanent, true, false},

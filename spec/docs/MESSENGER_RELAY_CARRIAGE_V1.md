@@ -1199,8 +1199,8 @@ seal already carry any frame; nothing new is resolved on chain).
    in the registry with class `room` (`registry.go:71-74`,
    `envelope/event.go:132-135`); a `sequence` field in `RoomMessage`
    (`kinds_more.go:795-800`).
-7. `pkg/fault`: `room-epoch-gap`, `room-fork`, `room-fork-suspected`, with
-   their dispositions and peer visibility.
+7. `pkg/fault`: `room-epoch-gap`, `room-fork`, `room-fork-suspected` and
+   `room-roster-conflict`, with their dispositions and peer visibility.
 8. `pkg/admission`: room-scoped admission (11.2, D11), after the room
    overlay (`admit.go:304-317`) and with `JudgeMember`, checking the packet
    sender against the committed membership at the Event's epoch; on a spent
@@ -1563,8 +1563,9 @@ lives at most 24 h and is refused once now ≥ its expiry
 (`eventlog/rooms.go:105`), while catch-up may take up to the 7-day handshake
 retention. On the relay route the receiver therefore verifies the header's
 signature against the authority's delegation as finalized **now**, but checks
-its window as issued ≤ now < issued + handshake retention + the daemon's
-clock-skew bound, instead of its own expiry. The authorization is never
+its window as issued − skew ≤ now < issued + handshake retention + skew, with
+skew the daemon's clock-skew bound, instead of its own expiry (clocks drift
+both ways, so the skew applies at both ends). The authorization is never
 re-signed per generation: object bytes and digest stay identical. A test
 build MAY shorten the retention (`room_handshake_retention_seconds`;
 production 7 days) and the expiry the authority signs
@@ -1638,9 +1639,9 @@ authority named in the `room.invite`), with replay refused by the ledger
 
 Rosters are keyed by (roster, room epoch E) and checked as in 11.2: a digest
 among the last 64 applied rosters answers `duplicate`; a second, different
-roster for the same E to the same receiver answers `rejected` with an owner
-notice (a roster conflict, not `room-fork`, since a roster carries no MLS
-state). Welcome replay stays refused (`eventlog/mls.go:98`). On any `rejected` room
+roster for the same E to the same receiver answers `rejected` with the
+dedicated code `room-roster-conflict` and an owner notice naming it (a
+roster conflict, not `room-fork`, since a roster carries no MLS state). Welcome replay stays refused (`eventlog/mls.go:98`). On any `rejected` room
 ack the authority stops that member's queue with an owner notice.
 
 **Receiver, application.** Let e be the object's MLS epoch and r the
@@ -1778,7 +1779,14 @@ Every delivery to that Agent, first contact or an existing session, records
 the token on its `Delivery` and `dispatch` sets `Message.AdmissionToken`, so
 every re-deposit generation carries the same token for the same Event; this
 continues until one delivery to that Agent settles `accepted`, and the token
-is deleted then, or at its expiry. **Rejected: an `admission_token`
+is deleted then, or at its expiry. Only a verified relay delivery ack reports
+`accepted`; the HTTPS route's durable acceptance does not tell `accepted`
+from `duplicate` or `held`, so there the token is kept until its expiry. That
+is safe: the token is single use, and once it is spent the receiver re-runs
+its policy without it, under which the claim has already made the sender a
+contact (D12). The token is held per recipient Agent, not per Endpoint: if
+that Agent had several Endpoints, an `accepted` ack from any of them settles
+it (a V1 limit; V1 carries one device per Agent, D3). **Rejected: an `admission_token`
 field on `messages.send-direct`,** which would hand a bearer the recipient's
 owner issued to the runtime, able to spend it on any Event. **Carried only
 sealed:** inside the kind-1 object in the sealed packet (3), never in a
@@ -1803,7 +1811,17 @@ Today the known roster is only the daemon config's
 (`admission/policy.go:181`) and no operation removes a contact, so M-R2 adds a
 journaled invited-contact list that is never swept (unlike invite records),
 that `ContactPolicy.Admits` reads beside the config roster (blocked still
-wins), and an owner `contacts.remove` that deletes an entry from it.
+wins), and an owner `contacts.remove` that deletes an entry from it. A
+removal sticks: it leaves a tombstone naming the Agent and the invite, under
+which that invite never adds the contact again, and only a fresh claim (or
+the exact retry of an Event not yet committed) runs the contact-add step, so
+re-sending the claimed Event cannot undo the owner's removal. A racing second
+Event that loses the claim meets the policy without the token, like any
+spent token. The list holds at most 4,096 entries: if it is full when a
+claim succeeds, the claim stands and spends the invite, but the contact
+cannot be added, so that Event is refused `quota-exceeded`, and so is every
+later copy of it (a V1 limit; the owner frees entries with
+`contacts.remove`).
 **On refusal nothing is stored:** admission refuses before
 any journal write (`admit.go:323-331`), the card is not stored and
 `CheckPeer` writes nothing (2.3, 2.5).

@@ -191,6 +191,14 @@ const (
 	// bearer. It is an owner decision because it grants an unknown sender the
 	// ability to place exactly one authenticated event in this inbox.
 	OpCreateAdmissionInvite Operation = "invites.create"
+	// OpPresentInvite stores an invite another Agent's owner issued to this
+	// one, so every delivery to that Agent carries it sealed until one is
+	// accepted. It is an owner decision: the token is a bearer the runtime
+	// must never hold, since it could spend it on any Event.
+	OpPresentInvite Operation = "invites.present"
+	// OpRemoveContact removes a contact a claimed invite made; that Agent's
+	// later Events meet the contact policy again.
+	OpRemoveContact Operation = "contacts.remove"
 	// OpExportDeviceHistory is an explicit owner decision to disclose one
 	// bounded direct-conversation history page to another current device of
 	// this Endpoint. The Agent runtime may neither request nor receive it.
@@ -232,6 +240,8 @@ var permitted = map[Principal]map[Operation]struct{}{
 		OpPendingActions: {}, OpGrantAction: {}, OpDenyAction: {},
 		OpPlaceMandate: {}, OpRevokeMandate: {}, OpListMandates: {}, OpChallenge: {},
 		OpCreateAdmissionInvite: {},
+		OpPresentInvite:         {},
+		OpRemoveContact:         {},
 		OpExportDeviceHistory:   {},
 		OpListDeviceHistory:     {},
 	},
@@ -259,6 +269,8 @@ var operations = map[Operation]struct{}{
 	OpGrantAction: {}, OpDenyAction: {},
 	OpPlaceMandate: {}, OpRevokeMandate: {}, OpListMandates: {}, OpChallenge: {},
 	OpCreateAdmissionInvite: {},
+	OpPresentInvite:         {},
+	OpRemoveContact:         {},
 	OpExportDeviceHistory:   {},
 	OpListDeviceHistory:     {},
 }
@@ -358,6 +370,12 @@ type Request struct {
 	// InviteExpiresAtUnix is always explicit and owner-signed.
 	InvitedAgentID      string `json:"invited_agent_id,omitempty"`
 	InviteExpiresAtUnix uint64 `json:"invite_expires_at_unix,omitempty"`
+	// InviteRecipientAgentID and InviteToken are what invites.present stores:
+	// the Agent whose owner issued the invite and the invite_ token itself.
+	InviteRecipientAgentID string `json:"invite_recipient_agent_id,omitempty"`
+	InviteToken            string `json:"invite_token,omitempty"`
+	// ContactAgentID names the invited contact contacts.remove deletes.
+	ContactAgentID string `json:"contact_agent_id,omitempty"`
 
 	// Device-history export terms are all owner-signed. The source device,
 	// recipient Endpoint and pair-session identifier are daemon-derived.
@@ -731,9 +749,17 @@ func ValidateRequest(request Request) error {
 			len(request.ExactEconomicRequest) != 0 || request.EconomicStableID != "" || request.EconomicRequestDigest != "") {
 		return errors.New("only economic operations carry economic authorization")
 	}
-	if request.Op != OpCreateAdmissionInvite &&
-		(request.InvitedAgentID != "" || request.InviteExpiresAtUnix != 0) {
-		return errors.New("only admission invite creation carries invite terms")
+	if request.Op != OpCreateAdmissionInvite && request.InvitedAgentID != "" {
+		return errors.New("only admission invite creation carries an invite scope")
+	}
+	if request.Op != OpCreateAdmissionInvite && request.Op != OpPresentInvite && request.InviteExpiresAtUnix != 0 {
+		return errors.New("only admission invite creation and presentation carry an invite expiry")
+	}
+	if request.Op != OpPresentInvite && (request.InviteRecipientAgentID != "" || request.InviteToken != "") {
+		return errors.New("only invite presentation carries a presented invite")
+	}
+	if request.Op != OpRemoveContact && request.ContactAgentID != "" {
+		return errors.New("only contact removal names a contact to remove")
 	}
 	if request.Op != OpResolveContact && request.Op != OpEnsureDirectConversation && request.Op != OpSendDirect && request.Op != OpSendDirectApplication && request.Recipient != "" {
 		return errors.New("only contact or direct-conversation resolution carries a recipient input")
@@ -1018,6 +1044,17 @@ func ValidateRequest(request Request) error {
 			return errors.New("an admission invite needs an expiry")
 		}
 		return requireEmpty(request, "admission invite creation", request.EventID, request.LeaseID, request.SessionID)
+	case OpPresentInvite:
+		if !agentPattern.MatchString(request.InviteRecipientAgentID) || request.InviteToken == "" ||
+			len(request.InviteToken) > 128 || request.InviteExpiresAtUnix == 0 {
+			return errors.New("presenting an invite needs the recipient Agent, the token and its expiry")
+		}
+		return requireEmpty(request, "invite presentation", request.EventID, request.LeaseID, request.SessionID)
+	case OpRemoveContact:
+		if !agentPattern.MatchString(request.ContactAgentID) {
+			return errors.New("removing a contact needs its Agent")
+		}
+		return requireEmpty(request, "contact removal", request.EventID, request.LeaseID, request.SessionID)
 	case OpExportDeviceHistory:
 		validCursor := (request.HistorySequence == 1 && request.PreviousSegmentDigest == "" &&
 			request.AfterCreatedAtUnix == 0 && request.AfterEventID == "") ||

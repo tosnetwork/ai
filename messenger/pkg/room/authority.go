@@ -87,7 +87,7 @@ func VerifyMembershipAuthorization(membership Membership, value MembershipAuthor
 	if now.IsZero() || now.Unix() < 0 {
 		return errors.New("invalid room membership verification time")
 	}
-	if err := VerifyMembershipAuthorizationBinding(membership, value, delegation); err != nil {
+	if err := VerifyMembershipAuthorizationBindingTimeFree(membership, value, delegation); err != nil {
 		return err
 	}
 	if err := identity.CheckWindow(delegation, now); err != nil {
@@ -100,14 +100,60 @@ func VerifyMembershipAuthorization(membership Membership, value MembershipAuthor
 	return nil
 }
 
-// VerifyMembershipAuthorizationBinding checks everything about an
+// RoomHandshakeRetention is how long a room handshake object is re-deposited
+// to a member that has not acknowledged it, and so how long after issue an
+// authorization must still verify on the relay route.
+const RoomHandshakeRetention = 7 * 24 * time.Hour
+
+// MaxRoomAuthorizationSkew bounds the clock skew a receiver adds to the relay
+// window.
+const MaxRoomAuthorizationSkew = time.Hour
+
+// VerifyMembershipAuthorizationRelay is the relay route's check. A member
+// catching up may receive a Commit days after it was made, long after the
+// authorization's own 24 h expiry, and the object must not be re-signed per
+// re-deposit (its bytes and digest stay fixed). So the signature is checked
+// against the authority's delegation as finalized now, and the window is
+// issued <= now < issued + retention + skew instead of the authorization's
+// own expiry. Clocks drift both ways, so the skew applies at both ends:
+// issued - skew <= now < issued + retention + skew. retention is
+// RoomHandshakeRetention in production; a test MAY shorten it.
+func VerifyMembershipAuthorizationRelay(membership Membership, value MembershipAuthorization, delegation identity.Delegation,
+	now time.Time, retention, skew time.Duration) error {
+	if now.IsZero() || now.Unix() < 0 {
+		return errors.New("invalid room membership verification time")
+	}
+	if retention <= 0 || retention > RoomHandshakeRetention || skew < 0 || skew > MaxRoomAuthorizationSkew {
+		return errors.New("invalid relay authorization window")
+	}
+	if err := VerifyMembershipAuthorizationBindingTimeFree(membership, value, delegation); err != nil {
+		return err
+	}
+	if err := identity.CheckWindow(delegation, now); err != nil {
+		return err
+	}
+	window := uint64((retention + skew) / time.Second)
+	if value.IssuedAtUnix > ^uint64(0)-window {
+		return errors.New("room membership authorization window overflows")
+	}
+	early := uint64(skew / time.Second)
+	seconds := uint64(now.Unix())
+	if seconds > ^uint64(0)-early || seconds+early < value.IssuedAtUnix || seconds >= value.IssuedAtUnix+window {
+		return errors.New("room membership authorization is outside the relay window")
+	}
+	return nil
+}
+
+// VerifyMembershipAuthorizationBindingTimeFree checks everything about an
 // authorization that does not depend on the time it is checked at: its shape,
 // that it names exactly this membership, that its authority is a member and
 // the delegation's Agent and Endpoint, that the delegation key derives that
 // Endpoint, the network, that it does not outlive the delegation, and the
-// Endpoint signature. A caller applies its own time window on top; the journal
-// uses this alone when it records an authorization already judged current.
-func VerifyMembershipAuthorizationBinding(membership Membership, value MembershipAuthorization, delegation identity.Delegation) error {
+// Endpoint signature. It checks no time at all: it is for an authorization a
+// caller has already judged current under its route's window, such as the
+// journal recording or re-reading one. Every receive path applies its window
+// first (VerifyMembershipAuthorization or VerifyMembershipAuthorizationRelay).
+func VerifyMembershipAuthorizationBindingTimeFree(membership Membership, value MembershipAuthorization, delegation identity.Delegation) error {
 	if err := validateMembershipAuthorization(value, true); err != nil {
 		return err
 	}

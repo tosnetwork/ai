@@ -50,6 +50,24 @@ func (j *Journal) OpenModeration() (*ModerationLedger, error) {
 	return &ModerationLedger{journal: j}, nil
 }
 
+// Check runs every check Apply runs, writing nothing: the sender's
+// delegation, the epoch-bound role policy and the sender's moderation role,
+// the target message and the next decision revision. Admission runs it before
+// it spends an invite on a moderation Event, so a refused decision never
+// claims a bearer or makes a contact.
+func (l *ModerationLedger) Check(event envelope.Event, senderDelegation, authorityDelegation identity.Delegation, now time.Time) error {
+	if l == nil || l.journal == nil {
+		return errors.New("no moderation ledger")
+	}
+	if err := l.journal.usable(); err != nil {
+		return err
+	}
+	l.journal.mutex.Lock()
+	defer l.journal.mutex.Unlock()
+	_, _, err := l.judge(event, senderDelegation, authorityDelegation, now)
+	return err
+}
+
 // Apply authenticates the moderation Event's sender delegation, checks the
 // current epoch-bound role policy, requires the immutable target room.message
 // to be present, then commits exactly the next per-target decision revision.
@@ -60,100 +78,114 @@ func (l *ModerationLedger) Apply(event envelope.Event, senderDelegation, authori
 	if err := l.journal.usable(); err != nil {
 		return false, ModerationDecision{}, err
 	}
-	if now.IsZero() || now.Unix() < 0 {
-		return false, ModerationDecision{}, errors.New("invalid moderation time")
-	}
-	if event.Kind != "room.moderation" {
-		return false, ModerationDecision{}, errors.New("event is not room moderation")
-	}
-	if err := identity.CheckWindow(senderDelegation, now); err != nil {
-		return false, ModerationDecision{}, err
-	}
-	if err := envelope.AdmittedBy(senderDelegation, event); err != nil {
-		return false, ModerationDecision{}, err
-	}
-	decoded, err := payload.Decode(event.Kind, event.Content)
-	if err != nil {
-		return false, ModerationDecision{}, err
-	}
-	body, ok := decoded.(payload.RoomModeration)
-	if !ok {
-		return false, ModerationDecision{}, errors.New("invalid room moderation body")
-	}
-	if event.RoomID != body.RoomID {
-		return false, ModerationDecision{}, errors.New("moderation Event names another room")
-	}
 	l.journal.mutex.Lock()
 	defer l.journal.mutex.Unlock()
-	roomRecord, found, err := (&RoomLedger{journal: l.journal}).read(body.RoomID)
+	decision, repeat, err := l.judge(event, senderDelegation, authorityDelegation, now)
 	if err != nil {
 		return false, ModerationDecision{}, err
 	}
-	if !found {
-		return false, ModerationDecision{}, errors.New("moderation room is unknown")
-	}
-	membership := room.Membership{RoomID: roomRecord.RoomID, Epoch: roomRecord.Epoch, Members: roomRecord.Members, Digest: roomRecord.MembershipDigest}
-	authority := room.Authority{AgentID: roomRecord.AuthorityAgentID, EndpointID: roomRecord.AuthorityEndpointID}
-	policy, found, err := (&RoomRoleLedger{journal: l.journal}).read(body.RoomID)
-	if err != nil {
-		return false, ModerationDecision{}, err
-	}
-	if !found {
-		return false, ModerationDecision{}, errors.New("room has no role policy")
-	}
-	if body.MembershipEpoch != membership.Epoch || body.RolePolicyRevision != policy.Revision {
-		return false, ModerationDecision{}, errors.New("moderation names stale room authority")
-	}
-	if err := room.VerifyRolePolicy(policy, membership, authority, authorityDelegation, now); err != nil {
-		return false, ModerationDecision{}, err
-	}
-	if !policy.Allows(membership, event.SenderAgentID, room.ActionModerate) {
-		return false, ModerationDecision{}, errors.New("sender has no room moderation role")
-	}
-	targetRecord, err := readRecord(l.journal.path(body.TargetEventID))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, ModerationDecision{}, ErrModerationTargetMissing
-	}
-	if err != nil {
-		return false, ModerationDecision{}, err
-	}
-	targetRaw, err := targetRecord.Payload()
-	if err != nil {
-		return false, ModerationDecision{}, err
-	}
-	target, err := envelope.DecodeEventJSON(targetRaw)
-	if err != nil {
-		return false, ModerationDecision{}, err
-	}
-	if target.EventID != body.TargetEventID || target.RoomID != body.RoomID || target.Kind != "room.message" {
-		return false, ModerationDecision{}, errors.New("moderation target is not a message in this room")
-	}
-	decision := ModerationDecision{Schema: ModerationRecordSchema, RoomID: body.RoomID, TargetEventID: body.TargetEventID, DecisionEventID: event.EventID, DecisionRevision: body.DecisionRevision, MembershipEpoch: body.MembershipEpoch, RolePolicyRevision: body.RolePolicyRevision, ActorAgentID: event.SenderAgentID, Action: body.Action, Reason: body.Reason, DecidedAtUnix: uint64(now.Unix())}
-	prior, priorFound, err := l.read(body.TargetEventID)
-	if err != nil {
-		return false, ModerationDecision{}, err
-	}
-	if priorFound {
-		if prior.DecisionEventID == decision.DecisionEventID {
-			return false, prior, nil
-		}
-		if decision.DecisionRevision <= prior.DecisionRevision {
-			return false, ModerationDecision{}, ErrModerationRollback
-		}
-		if decision.DecisionRevision != prior.DecisionRevision+1 {
-			return false, ModerationDecision{}, ErrModerationGap
-		}
-	} else if decision.DecisionRevision != 1 {
-		return false, ModerationDecision{}, errors.New("first moderation decision revision must be 1")
+	if repeat {
+		return false, decision, nil
 	}
 	raw, err := json.Marshal(decision)
 	if err != nil {
 		return false, ModerationDecision{}, err
 	}
-	if err := l.journal.replace(l.path(body.TargetEventID), raw); err != nil {
+	if err := l.journal.replace(l.path(decision.TargetEventID), raw); err != nil {
 		return false, ModerationDecision{}, err
 	}
 	return true, decision, nil
+}
+
+// judge returns the decision a moderation Event would record, or the prior
+// decision and repeat=true for its exact repeat. It writes nothing. The
+// journal mutex is held.
+func (l *ModerationLedger) judge(event envelope.Event, senderDelegation, authorityDelegation identity.Delegation, now time.Time) (ModerationDecision, bool, error) {
+	if now.IsZero() || now.Unix() < 0 {
+		return ModerationDecision{}, false, errors.New("invalid moderation time")
+	}
+	if event.Kind != "room.moderation" {
+		return ModerationDecision{}, false, errors.New("event is not room moderation")
+	}
+	if err := identity.CheckWindow(senderDelegation, now); err != nil {
+		return ModerationDecision{}, false, err
+	}
+	if err := envelope.AdmittedBy(senderDelegation, event); err != nil {
+		return ModerationDecision{}, false, err
+	}
+	decoded, err := payload.Decode(event.Kind, event.Content)
+	if err != nil {
+		return ModerationDecision{}, false, err
+	}
+	body, ok := decoded.(payload.RoomModeration)
+	if !ok {
+		return ModerationDecision{}, false, errors.New("invalid room moderation body")
+	}
+	if event.RoomID != body.RoomID {
+		return ModerationDecision{}, false, errors.New("moderation Event names another room")
+	}
+	roomRecord, found, err := (&RoomLedger{journal: l.journal}).read(body.RoomID)
+	if err != nil {
+		return ModerationDecision{}, false, err
+	}
+	if !found {
+		return ModerationDecision{}, false, errors.New("moderation room is unknown")
+	}
+	membership := room.Membership{RoomID: roomRecord.RoomID, Epoch: roomRecord.Epoch, Members: roomRecord.Members, Digest: roomRecord.MembershipDigest}
+	authority := room.Authority{AgentID: roomRecord.AuthorityAgentID, EndpointID: roomRecord.AuthorityEndpointID}
+	policy, found, err := (&RoomRoleLedger{journal: l.journal}).read(body.RoomID)
+	if err != nil {
+		return ModerationDecision{}, false, err
+	}
+	if !found {
+		return ModerationDecision{}, false, errors.New("room has no role policy")
+	}
+	if body.MembershipEpoch != membership.Epoch || body.RolePolicyRevision != policy.Revision {
+		return ModerationDecision{}, false, errors.New("moderation names stale room authority")
+	}
+	if err := room.VerifyRolePolicy(policy, membership, authority, authorityDelegation, now); err != nil {
+		return ModerationDecision{}, false, err
+	}
+	if !policy.Allows(membership, event.SenderAgentID, room.ActionModerate) {
+		return ModerationDecision{}, false, errors.New("sender has no room moderation role")
+	}
+	targetRecord, err := readRecord(l.journal.path(body.TargetEventID))
+	if errors.Is(err, os.ErrNotExist) {
+		return ModerationDecision{}, false, ErrModerationTargetMissing
+	}
+	if err != nil {
+		return ModerationDecision{}, false, err
+	}
+	targetRaw, err := targetRecord.Payload()
+	if err != nil {
+		return ModerationDecision{}, false, err
+	}
+	target, err := envelope.DecodeEventJSON(targetRaw)
+	if err != nil {
+		return ModerationDecision{}, false, err
+	}
+	if target.EventID != body.TargetEventID || target.RoomID != body.RoomID || target.Kind != "room.message" {
+		return ModerationDecision{}, false, errors.New("moderation target is not a message in this room")
+	}
+	decision := ModerationDecision{Schema: ModerationRecordSchema, RoomID: body.RoomID, TargetEventID: body.TargetEventID, DecisionEventID: event.EventID, DecisionRevision: body.DecisionRevision, MembershipEpoch: body.MembershipEpoch, RolePolicyRevision: body.RolePolicyRevision, ActorAgentID: event.SenderAgentID, Action: body.Action, Reason: body.Reason, DecidedAtUnix: uint64(now.Unix())}
+	prior, priorFound, err := l.read(body.TargetEventID)
+	if err != nil {
+		return ModerationDecision{}, false, err
+	}
+	if priorFound {
+		if prior.DecisionEventID == decision.DecisionEventID {
+			return prior, true, nil
+		}
+		if decision.DecisionRevision <= prior.DecisionRevision {
+			return ModerationDecision{}, false, ErrModerationRollback
+		}
+		if decision.DecisionRevision != prior.DecisionRevision+1 {
+			return ModerationDecision{}, false, ErrModerationGap
+		}
+	} else if decision.DecisionRevision != 1 {
+		return ModerationDecision{}, false, errors.New("first moderation decision revision must be 1")
+	}
+	return decision, false, nil
 }
 
 // Visibility returns the durable presentation result without deleting or

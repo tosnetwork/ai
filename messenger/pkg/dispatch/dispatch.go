@@ -917,7 +917,25 @@ func (d *Dispatcher) attempt(ctx context.Context, delivery eventlog.Delivery, at
 			return sealed, fault.Wrap(fault.CodeInternal, bootstrapErr)
 		}
 	}
+	// An invite the owner presented for this recipient Agent rides on every
+	// delivery to it until one settles accepted. It is fixed on the delivery
+	// at its first attempt, so every generation carries the same token.
+	token := delivery.AdmissionToken
+	if token == "" && record.Authority != nil {
+		presented, found, inviteErr := d.config.Journal.PresentedInviteFor(record.Authority.PeerAgentID, now)
+		if inviteErr != nil {
+			return sealed, fault.Wrap(fault.CodeInternal, inviteErr)
+		}
+		if found {
+			updated, inviteErr := d.config.Journal.RecordDeliveryInvite(delivery.Key(), attemptID, presented)
+			if inviteErr != nil {
+				return sealed, fault.Wrap(fault.CodeInternal, inviteErr)
+			}
+			token = updated.AdmissionToken
+		}
+	}
 	message := Message{
+		AdmissionToken:      token,
 		EventID:             delivery.EventID,
 		SessionID:           delivery.SessionID,
 		RecipientEndpointID: delivery.RecipientEndpointID,

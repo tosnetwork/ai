@@ -103,7 +103,7 @@ func TestRoomOutboxPublishesWithTheAdvanceAndQueuesInEpochOrder(t *testing.T) {
 	// whose every member is settled.
 	evidence := canon.Digest([]byte("evidence"))
 	head := queue[0]
-	if _, err := journal.RoomOutboxAcked(head.ObjectDigest, bob, RoomAckAccepted, "", fixture.now); err == nil {
+	if _, err := journal.RoomOutboxAcked(head.ObjectDigest, bob, RoomAckAccepted, "", false, fixture.now); err == nil {
 		t.Fatal("an ack for an object never carried was applied")
 	}
 	if _, err := journal.RoomOutboxCarried(head.ObjectDigest, bob, 2, evidence, fixture.now.Add(time.Hour), fixture.now); err == nil {
@@ -115,12 +115,12 @@ func TestRoomOutboxPublishesWithTheAdvanceAndQueuesInEpochOrder(t *testing.T) {
 	if _, err := journal.RoomOutboxCarried(head.ObjectDigest, bob, 1, evidence, fixture.now.Add(time.Hour), fixture.now); err != nil {
 		t.Fatalf("a repeated generation after a crash: %v", err)
 	}
-	if _, err := journal.RoomOutboxAcked(head.ObjectDigest, bob, RoomAckDuplicate, "", fixture.now); err != nil {
+	if _, err := journal.RoomOutboxAcked(head.ObjectDigest, bob, RoomAckDuplicate, "", false, fixture.now); err != nil {
 		t.Fatal(err)
 	}
 	// The head is retired once its only member settled; a repeated ack then
 	// finds no object to settle.
-	if _, err := journal.RoomOutboxAcked(head.ObjectDigest, bob, RoomAckDuplicate, "", fixture.now); !errors.Is(err, ErrUnknown) {
+	if _, err := journal.RoomOutboxAcked(head.ObjectDigest, bob, RoomAckDuplicate, "", false, fixture.now); !errors.Is(err, ErrUnknown) {
 		t.Fatalf("a repeated ack after retirement: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(journal.root, roomOutboxDir, head.ObjectDigest+".json")); !errors.Is(err, os.ErrNotExist) {
@@ -131,10 +131,10 @@ func TestRoomOutboxPublishesWithTheAdvanceAndQueuesInEpochOrder(t *testing.T) {
 	if _, err := journal.RoomOutboxCarried(roster.ObjectDigest, bob, 1, evidence, fixture.now.Add(time.Hour), fixture.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := journal.RoomOutboxAcked(roster.ObjectDigest, bob, RoomAckRejected, "", fixture.now); err == nil {
+	if _, err := journal.RoomOutboxAcked(roster.ObjectDigest, bob, RoomAckRejected, "", false, fixture.now); err == nil {
 		t.Fatal("a rejected ack without a code was applied")
 	}
-	if _, err := journal.RoomOutboxAcked(roster.ObjectDigest, bob, RoomAckRejected, fault.CodeNotAuthentic, fixture.now); err != nil {
+	if _, err := journal.RoomOutboxAcked(roster.ObjectDigest, bob, RoomAckRejected, fault.CodeNotAuthentic, false, fixture.now); err != nil {
 		t.Fatal(err)
 	}
 	after, err := journal.RoomMemberQueue(fusedRoom, bob)
@@ -173,7 +173,7 @@ func TestRoomOutboxRemovedMemberGetsTheCommitOnceWithoutAck(t *testing.T) {
 	if _, err := journal.RoomOutboxCarried(digest, removed, 2, canon.Digest([]byte("e")), time.Time{}, fixture.now); !errors.Is(err, ErrNotPending) {
 		t.Fatalf("a second deposit to a removed member: %v", err)
 	}
-	if _, err := journal.RoomOutboxAcked(digest, removed, RoomAckAccepted, "", fixture.now); err == nil {
+	if _, err := journal.RoomOutboxAcked(digest, removed, RoomAckAccepted, "", false, fixture.now); err == nil {
 		t.Fatal("a removed member's ack was applied")
 	}
 	if _, err := journal.RoomOutboxCarried(digest, fusedAgent(1), 1, canon.Digest([]byte("e")), time.Time{}, fixture.now); err == nil {
@@ -497,20 +497,20 @@ func TestRoomOutboxRepeatedAckIsANoOp(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", fixture.now); err != nil {
+	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", false, fixture.now); err != nil {
 		t.Fatal(err)
 	}
-	head, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", fixture.now)
+	result, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", false, fixture.now)
 	if err != nil {
 		t.Fatalf("repeated ack: %v", err)
 	}
-	if member, _ := head.Member(fusedAgent(1)); member.State != RoomDeliveryDelivered {
+	if member, _ := result.Head.Member(fusedAgent(1)); member.State != RoomDeliveryDelivered {
 		t.Fatalf("member state %s", member.State)
 	}
-	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckRejected, fault.CodeNotAuthentic, fixture.now); !errors.Is(err, ErrNotPending) {
+	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckRejected, fault.CodeNotAuthentic, false, fixture.now); !errors.Is(err, ErrNotPending) {
 		t.Fatalf("a different outcome for a settled member: %v", err)
 	}
-	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(3), RoomAckAccepted, "", fixture.now); err == nil {
+	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(3), RoomAckAccepted, "", false, fixture.now); err == nil {
 		t.Fatal("an ack from a member the object is not addressed to was applied")
 	}
 	if queue, err := journal.RoomMemberQueue(fusedRoom, fusedAgent(2)); err != nil || len(queue) != 1 {
@@ -594,7 +594,7 @@ func TestRoomFailedStagedRemovalNeverRepublishesASettledObject(t *testing.T) {
 	if _, err := journal.RoomOutboxCarried(digest, fusedAgent(1), 1, canon.Digest([]byte("e")), fixture.now.Add(time.Hour), fixture.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", fixture.now); err != nil {
+	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", false, fixture.now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, roomOutboxDir, digest+".json")); err != nil {
@@ -637,7 +637,7 @@ func TestRoomRestartRetiresSettledHeadsOrphanedByACrash(t *testing.T) {
 	if _, err := journal.RoomOutboxCarried(digest, fusedAgent(1), 1, canon.Digest([]byte("e")), fixture.now.Add(time.Hour), fixture.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", fixture.now); err != nil {
+	if _, err := journal.RoomOutboxAcked(digest, fusedAgent(1), RoomAckAccepted, "", false, fixture.now); err != nil {
 		t.Fatal(err)
 	}
 	if err := journal.Close(); err != nil {
@@ -702,5 +702,59 @@ func TestRoomBlockedByStagedOutputNamesThePath(t *testing.T) {
 	garbage, err := journal.CollectRoomGarbage()
 	if err != nil || !garbage.FailedClosed || len(garbage.Unresolved) != 1 || garbage.Unresolved[0] != damaged {
 		t.Fatalf("collection report: %+v %v", garbage, err)
+	}
+}
+
+// A stateless rejection (no MLS state) refuses a Welcome normally; for a
+// Commit or roster it means the member lost its state, and is reported.
+func TestRoomOutboxStatelessRejection(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	bob, carol := fusedAgent(1), fusedAgent(2)
+	record, _ = addWithOutput(t, fixture, ledger, record, bob, "add bob")
+	_, _ = addWithOutput(t, fixture, ledger, record, carol, "add carol")
+	evidence := canon.Digest([]byte("evidence"))
+	carry := func(head RoomOutboxHead, member string) {
+		t.Helper()
+		if _, err := journal.RoomOutboxCarried(head.ObjectDigest, member, 1, evidence, fixture.now.Add(time.Hour), fixture.now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	carolQueue, err := journal.RoomMemberQueue(fusedRoom, carol)
+	if err != nil || carolQueue[0].Type != RoomObjectWelcome {
+		t.Fatalf("Carol's queue: %v", err)
+	}
+	carry(carolQueue[0], carol)
+	if _, err := journal.RoomOutboxAcked(carolQueue[0].ObjectDigest, carol, RoomAckAccepted, "", true, fixture.now); err == nil {
+		t.Fatal("a stateless accepted ack was applied")
+	}
+	welcome, err := journal.RoomOutboxAcked(carolQueue[0].ObjectDigest, carol, RoomAckRejected, fault.CodeNotAuthentic, true, fixture.now)
+	if err != nil || welcome.LostState {
+		t.Fatalf("a joiner refusing its Welcome: %+v %v", welcome, err)
+	}
+	bobQueue, err := journal.RoomMemberQueue(fusedRoom, bob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commit RoomOutboxHead
+	for _, head := range bobQueue {
+		if head.Type == RoomObjectCommit {
+			commit = head
+		}
+	}
+	carry(commit, bob)
+	lost, err := journal.RoomOutboxAcked(commit.ObjectDigest, bob, RoomAckRejected, fault.CodeNotAuthentic, true, fixture.now)
+	if err != nil || !lost.LostState {
+		t.Fatalf("a member without state rejecting a Commit: %+v %v", lost, err)
+	}
+	if member, _ := lost.Head.Member(bob); member.State != RoomDeliveryRejected {
+		t.Fatalf("the member was not settled rejected: %s", member.State)
+	}
+	// An ack settles only the slot of the member it names: Carol's ack of
+	// Bob's Commit does not touch Bob.
+	if _, err := journal.RoomOutboxAcked(commit.ObjectDigest, carol, RoomAckAccepted, "", false, fixture.now); err == nil {
+		t.Fatal("an ack settled a slot the object has not for that member")
 	}
 }

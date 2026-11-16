@@ -237,14 +237,23 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 	return ReceiveResult{Outcome: decision.Outcome, Code: decision.Code, EventID: event.EventID}, nil
 }
 
-// refuseOnRoute closes the loop on the relay route: an Event class that
-// carries an Agent Packet is refused there before anything is committed, so
-// a rail packet can never reach the rail inbox inside a chat copy.
+// refuseOnRoute closes two doors on the relay route before anything is
+// committed. An Event class that carries an Agent Packet is refused, so a
+// rail packet can never reach the rail inbox inside a chat copy. A
+// room-addressed Event is refused too: room content crosses the relay only
+// sealed to the room (kind 3), so a pairwise copy naming a room could carry
+// content past an MLS removal.
 func refuseOnRoute(route admission.Route, event envelope.Event) (ReceiveResult, bool) {
-	if route != admission.RouteRelay || !carriesAgentPacket(event.Kind) {
+	if route != admission.RouteRelay {
 		return ReceiveResult{}, false
 	}
-	return ReceiveResult{Outcome: admission.Rejected, Code: fault.CodeClassNotDelegated, EventID: event.EventID}, true
+	if carriesAgentPacket(event.Kind) {
+		return ReceiveResult{Outcome: admission.Rejected, Code: fault.CodeClassNotDelegated, EventID: event.EventID}, true
+	}
+	if event.RoomID != "" {
+		return ReceiveResult{Outcome: admission.Rejected, Code: fault.CodePayloadMalformed, EventID: event.EventID}, true
+	}
+	return ReceiveResult{}, false
 }
 
 // carriesAgentPacket reports Event classes whose content is an Agent Packet.

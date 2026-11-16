@@ -117,7 +117,10 @@ type RoomMemberDelivery struct {
 	EvidenceDigest      string            `json:"evidence_digest,omitempty"`
 	AckOutcome          RoomAckOutcome    `json:"ack_outcome,omitempty"`
 	Code                fault.Code        `json:"code,omitempty"`
-	SettledAtUnix       uint64            `json:"settled_at_unix,omitempty"`
+	// Stateless records a rejection that carried no MLS state, so a repeat of
+	// the same ack reports the same lost-state finding.
+	Stateless     bool   `json:"stateless,omitempty"`
+	SettledAtUnix uint64 `json:"settled_at_unix,omitempty"`
 }
 
 func (d RoomMemberDelivery) settled() bool {
@@ -562,27 +565,48 @@ func (j *Journal) RoomOutboxCarried(objectDigest, agentID string, generation uin
 	})
 }
 
-// RoomOutboxAcked applies a verified room ack: accepted or duplicate settle
-// the member as delivered, rejected settles it with the ack's code.
-func (j *Journal) RoomOutboxAcked(objectDigest, agentID string, outcome RoomAckOutcome, code fault.Code, now time.Time) (RoomOutboxHead, error) {
+// RoomAckResult says what an applied room ack meant beyond its outcome.
+type RoomAckResult struct {
+	Head RoomOutboxHead
+	// LostState is set when a member answered a Commit or roster with a
+	// rejection that carries no MLS state: it lost its group state. The member
+	// is settled rejected and the caller raises an owner notice.
+	LostState bool
+}
+
+// RoomOutboxAcked applies a verified room ack. agentID is the authenticated
+// packet sender whose own Endpoint signed the ack: an ack settles only that
+// member's own slot, so a member can stop only its own queue.
+//
+// Accepted or duplicate settle the member as delivered; rejected settles it
+// with the ack's code. A stateless rejection (no epoch authenticator, MLS
+// epoch 0) is what a pending joiner sends to refuse its Welcome. For a Commit
+// or roster it means the member lost its MLS state: it is applied as a
+// rejection and reported as LostState.
+func (j *Journal) RoomOutboxAcked(objectDigest, agentID string, outcome RoomAckOutcome, code fault.Code, stateless bool, now time.Time) (RoomAckResult, error) {
 	switch outcome {
 	case RoomAckAccepted, RoomAckDuplicate:
 		if code != "" {
-			return RoomOutboxHead{}, errors.New("a delivered room ack carries no code")
+			return RoomAckResult{}, errors.New("a delivered room ack carries no code")
+		}
+		if stateless {
+			return RoomAckResult{}, errors.New("only a rejection may carry no MLS state")
 		}
 	case RoomAckRejected:
 		if !fault.Known(code) {
-			return RoomOutboxHead{}, errors.New("a rejected room ack needs a known code")
+			return RoomAckResult{}, errors.New("a rejected room ack needs a known code")
 		}
 	default:
-		return RoomOutboxHead{}, errors.New("unknown room ack outcome")
+		return RoomAckResult{}, errors.New("unknown room ack outcome")
 	}
-	return j.updateRoomMember(objectDigest, agentID, now, func(member *RoomMemberDelivery, seconds uint64) error {
+	lost := false
+	head, err := j.updateRoomMemberOf(objectDigest, agentID, now, func(head RoomOutboxHead, member *RoomMemberDelivery, seconds uint64) error {
 		if member.Once {
 			return errors.New("a removed member's Commit is not acknowledged")
 		}
 		if member.settled() {
-			if member.AckOutcome == outcome && member.Code == code {
+			if member.AckOutcome == outcome && member.Code == code && member.Stateless == stateless {
+				lost = member.Stateless && head.Type != RoomObjectWelcome
 				return errRoomNoChange
 			}
 			return ErrNotPending
@@ -590,8 +614,10 @@ func (j *Journal) RoomOutboxAcked(objectDigest, agentID string, outcome RoomAckO
 		if member.State != RoomDeliveryCarried {
 			return errors.New("a room ack for an object never carried")
 		}
+		lost = stateless && head.Type != RoomObjectWelcome
 		member.AckOutcome = outcome
 		member.Code = code
+		member.Stateless = stateless
 		member.NextRedepositAtUnix = 0
 		member.SettledAtUnix = seconds
 		if outcome == RoomAckRejected {
@@ -601,6 +627,10 @@ func (j *Journal) RoomOutboxAcked(objectDigest, agentID string, outcome RoomAckO
 		}
 		return nil
 	})
+	if err != nil {
+		return RoomAckResult{}, err
+	}
+	return RoomAckResult{Head: head, LostState: lost}, nil
 }
 
 // RoomOutboxAbandon settles a member that can no longer be reached, for
@@ -627,6 +657,13 @@ var errRoomNoChange = errors.New("room outbox member is unchanged")
 // deletes it once every member is settled: the head is a garbage-collection
 // root only while some member may still need the object.
 func (j *Journal) updateRoomMember(objectDigest, agentID string, now time.Time, change func(*RoomMemberDelivery, uint64) error) (RoomOutboxHead, error) {
+	return j.updateRoomMemberOf(objectDigest, agentID, now, func(_ RoomOutboxHead, member *RoomMemberDelivery, seconds uint64) error {
+		return change(member, seconds)
+	})
+}
+
+// updateRoomMemberOf is updateRoomMember for a change that needs the head.
+func (j *Journal) updateRoomMemberOf(objectDigest, agentID string, now time.Time, change func(RoomOutboxHead, *RoomMemberDelivery, uint64) error) (RoomOutboxHead, error) {
 	if err := j.usable(); err != nil {
 		return RoomOutboxHead{}, err
 	}
@@ -658,7 +695,7 @@ func (j *Journal) updateRoomMember(objectDigest, agentID string, now time.Time, 
 	if index < 0 {
 		return RoomOutboxHead{}, errors.New("room object is not addressed to this member")
 	}
-	if err := change(&head.Members[index], uint64(now.Unix())); err != nil {
+	if err := change(head, &head.Members[index], uint64(now.Unix())); err != nil {
 		if errors.Is(err, errRoomNoChange) {
 			return head, nil
 		}
@@ -845,6 +882,9 @@ func validateRoomHead(head RoomOutboxHead) error {
 		case "", RoomAckAccepted, RoomAckDuplicate, RoomAckRejected:
 		default:
 			return errors.New("invalid room delivery ack outcome")
+		}
+		if member.Stateless && member.AckOutcome != RoomAckRejected {
+			return errors.New("only a rejected room delivery is stateless")
 		}
 	}
 	return nil

@@ -588,13 +588,34 @@ func TestAdmissionInviteHasDirectRelayParityAndIsOneShot(t *testing.T) {
 				t.Fatalf("other-route retry=%+v err=%v", retry, err)
 			}
 
+			// The claim made the sender a contact (D12): its next Event is
+			// admitted although the token is spent.
+			if invited, err := journal.IsInvitedContact(senderID); err != nil || !invited {
+				t.Fatalf("the claim made no contact: %v %v", invited, err)
+			}
 			other := testEvent(t, delegation, func(e *envelope.Event) {
 				e.Content = textBody(t, "another event")
 			})
 			request.Event = other
+			later, err := gate.Admit(request)
+			if err != nil || later.Outcome != Accepted {
+				t.Fatalf("a contact's later event decision=%+v err=%v", later, err)
+			}
+			// Once the owner removes the contact, the spent token re-runs the
+			// policy without it and the Event meets the policy again.
+			if removed, err := journal.RemoveInvitedContact(senderID); err != nil || !removed {
+				t.Fatalf("remove contact: %v %v", removed, err)
+			}
+			third := testEvent(t, delegation, func(e *envelope.Event) {
+				e.Content = textBody(t, "a third event")
+			})
+			request.Event = third
 			spent, err := gate.Admit(request)
 			if err != nil || spent.Outcome != Held || spent.Code != fault.CodeApprovalRequired {
 				t.Fatalf("spent invite decision=%+v err=%v", spent, err)
+			}
+			if invited, err := journal.IsInvitedContact(senderID); err != nil || invited {
+				t.Fatal("a spent token made a contact again")
 			}
 		})
 	}

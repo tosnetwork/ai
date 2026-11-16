@@ -797,10 +797,14 @@ type RoomMessage struct {
 	Epoch     uint64
 	MediaType string
 	Body      string
+	// Sequence numbers one sender's messages in one private room, from 1. A
+	// member that sees a sequence missing reports a gap; zero is a room that
+	// keeps no per-sender sequence.
+	Sequence uint64
 }
 
 // Schema implements Payload.
-func (RoomMessage) Schema() string { return "tos.messaging.payload.room-message.v1" }
+func (RoomMessage) Schema() string { return "tos.messaging.payload.room-message.v2" }
 
 // Validate implements Payload.
 func (r RoomMessage) Validate() error {
@@ -821,6 +825,7 @@ func (r RoomMessage) encode(buffer *bytes.Buffer) {
 	canon.Uint64(buffer, r.Epoch)
 	canon.Text(buffer, r.MediaType)
 	canon.Text(buffer, r.Body)
+	canon.Uint64(buffer, r.Sequence)
 }
 
 func decodeRoomMessage(reader *canon.Reader) Payload {
@@ -829,6 +834,46 @@ func decodeRoomMessage(reader *canon.Reader) Payload {
 		Epoch:     reader.Uint64(),
 		MediaType: reader.Text(MaxShortTextBytes),
 		Body:      reader.Text(MaxTextBytes),
+		Sequence:  reader.Uint64(),
+	}
+}
+
+// MaxRoomKeyPackageCredentialBytes bounds the DeviceCredential JSON a
+// room.key-package carries: a 64 KiB KeyPackage in base64 and its fields.
+const MaxRoomKeyPackageCredentialBytes = 96 << 10
+
+// RoomKeyPackage answers a room.invite: the joining member's Endpoint-signed
+// DeviceCredential, which binds its MLS leaf key and one-time KeyPackage. It
+// names the room only inside the payload. The authority verifies the
+// credential against finalized state before it adds the member.
+type RoomKeyPackage struct {
+	RoomID               string
+	DeviceCredentialJSON []byte
+}
+
+// Schema implements Payload.
+func (RoomKeyPackage) Schema() string { return "tos.messaging.payload.room-key-package.v1" }
+
+// Validate implements Payload.
+func (r RoomKeyPackage) Validate() error {
+	if err := requireMatch("room", r.RoomID, ids.Room); err != nil {
+		return err
+	}
+	if len(r.DeviceCredentialJSON) == 0 || len(r.DeviceCredentialJSON) > MaxRoomKeyPackageCredentialBytes {
+		return errors.New("a room KeyPackage carries no bounded device credential")
+	}
+	return nil
+}
+
+func (r RoomKeyPackage) encode(buffer *bytes.Buffer) {
+	canon.Text(buffer, r.RoomID)
+	canon.Bytes(buffer, r.DeviceCredentialJSON)
+}
+
+func decodeRoomKeyPackage(reader *canon.Reader) Payload {
+	return RoomKeyPackage{
+		RoomID:               reader.Text(MaxShortTextBytes),
+		DeviceCredentialJSON: reader.Bytes(MaxRoomKeyPackageCredentialBytes),
 	}
 }
 

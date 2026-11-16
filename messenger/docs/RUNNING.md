@@ -59,12 +59,12 @@ ceremony:
 ```sh
 # Online, on the Messenger host.
 tos-messenger-owner -socket /run/tos-messengerd/owner.sock pending
-tos-messenger-owner -socket /run/tos-messengerd/owner.sock \
-  prepare-grant act_... > prepared.json
+tos-messenger-owner -socket /run/tos-messengerd/owner.sock -out prepared.json \
+  prepare-grant act_...
 
 # Offline or on the isolated owner signer. The key file is exactly 128
 # lowercase hex digits (the standard 64-byte Ed25519 private key), mode 0600.
-tos-messenger-owner sign -key owner.key -decision prepared.json > signed.json
+tos-messenger-owner -out signed.json sign -key owner.key -decision prepared.json
 
 # Back online before the challenge expires.
 tos-messenger-owner -socket /run/tos-messengerd/owner.sock \
@@ -75,6 +75,10 @@ Use `prepare-deny -reason TEXT act_...` for a refusal. The prepared envelope
 contains the exact domain-separated signing bytes as hex; `sign` recomputes
 them from the strict request and refuses any mismatch. `submit` repeats that
 check and the daemon finally verifies the signature and consumes its challenge.
+`-out FILE` writes a new file with mode 0600 and refuses to overwrite one; a
+command that fails leaves no file. Without `-out` the output goes to standard
+output, and a shell redirection creates the file under the caller's umask, so
+use `umask 077` first if you redirect.
 Production deployments should replace the file-backed offline example with a
 hardware or separately custodied Ed25519 signer. Keeping `owner.key` readable
 by the Agent runtime collapses the approval boundary even if its mode is 0600.
@@ -85,18 +89,44 @@ the signed decision is submitted does the daemon generate and return the
 256-bit bearer:
 
 ```sh
-tos-messenger-owner -socket /run/tos-messengerd/owner.sock \
-  prepare-invite -agent agent_... -expires-at 1900000000 > prepared.json
-tos-messenger-owner sign -key owner.key -decision prepared.json > signed.json
+tos-messenger-owner -socket /run/tos-messengerd/owner.sock -out prepared.json \
+  prepare-invite -agent agent_... -expires-at 1900000000
+tos-messenger-owner -out signed.json sign -key owner.key -decision prepared.json
 tos-messenger-owner -socket /run/tos-messengerd/owner.sock \
   submit -decision signed.json
 ```
 
 Transmit the returned `invite_...` value out of band. The daemon persists only
 its domain-separated SHA-256 digest. The first valid authenticated event binds
-it durably to that sender and Event ID; an exact retry is idempotent, while any
-other event falls back to owner hold. Relay deposit signatures commit the
-opaque token, so a Relay cannot substitute it.
+it durably to that sender and Event ID, and makes that sender a known contact
+in a journaled list that is never swept; an exact retry is idempotent. The
+same token on any other event is spent: the policy is re-run without it, so the
+sender's later events pass as a contact's, and anyone else's meet the policy.
+`prepare-remove-contact -agent agent_...` removes such a contact; its later
+events meet the policy again. The removal sticks: re-sending the Event that
+claimed the invite does not make the sender a contact again. Relay deposit signatures commit the opaque
+token, so a Relay cannot substitute it.
+
+On the sending side the owner presents an invite it received, once per
+recipient Agent:
+
+```sh
+# token.txt holds the invite_ token, mode 0600, owned by this user; or pass
+# -token-file - and the token on standard input.
+tos-messenger-owner -socket /run/tos-messengerd/owner.sock -out prepared.json \
+  prepare-present-invite -recipient agent_... -token-file token.txt -expires-at 1900000000
+```
+
+followed by `sign` and `submit` as above. The token is a bearer, so it is
+never taken from the command line, where other local users can read it, and
+the prepared and signed files that carry it are written with mode 0600. The
+runtime never holds the token.
+Every delivery to that Agent then carries it sealed, every re-deposit of an
+Event the same token, until one delivery is acknowledged `accepted` over the
+relay; the token is then deleted. The HTTPS route cannot tell `accepted` from
+`duplicate` or `held`, so there the token is kept until its expiry, which is
+safe because it is single use and the claim has already made the sender a
+contact.
 
 The escrow funding locator and runtime `quotes.verify` were removed with
 stablecoin escrow: software work settles on the Service Actor rail, and the
