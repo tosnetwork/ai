@@ -446,17 +446,20 @@ targets and key paths are replaced by labels.
 Proven by these records (section 8 gate items):
 
 - **1. Relay only.** No connection opens between the nodes on any node port
-  in either direction, A sits behind NAT, A and C are isolated from each
-  other, and both nodes reach only the relays' TLS port. Both cards name both
-  relays and pin the test CA; system trust refuses the relays.
+  in either direction, A sits behind NAT, and A and C are isolated from each
+  other. A and C reach only the relays' TLS port and the chain RPC forwarder;
+  B's host firewall is unchanged apart from the run's own cut-off table. Both
+  cards name both relays and pin the test CA; system trust refuses the
+  relays.
 - **2. Conversation.** A texts B and B answers with `messages.reply-direct`.
   Each copy goes `carried` then `delivered` only on a verified kind-2 ack and
   is applied once. The received text is compared byte for byte with the sent
   text, including a 98,304-byte message, together with its media type, reply
-  link and sender.
+  link and sender (the gate's `applied` condition requires exact content
+  equality; the record shows the frame bucket, not the content).
 - **3. First contact.** B admits A's first frame and learns A's card and
-  evidence in band, without a contact file of A. Admission is by B's
-  allow-list (contact-file import): an admission invite cannot yet be
+  evidence in band; B holds no contact file of A. Admission is by B's
+  configured admission allow-list. An admission invite cannot yet be
   attached to an outbound copy, so invite-based first contact moves to M-R2
   (section 8).
 - **4. Relay outage.** relay-1's installed unit is stopped for the whole
@@ -474,8 +477,11 @@ Proven by these records (section 8 gate items):
 - **6. Crash windows.** B's serve is killed while its carrier call is queued
   and answers `duplicate` after restart; A's daemon is killed between the
   relay accepting a deposit and its journal write and gets `carried` with no
-  new deposit after restart. In the four-machine record A's deposit is held
-  by dropping A's packets in its own namespace rather than pausing the
+  new deposit after restart. A's daemon is killed while its carrier's
+  deposit is held in flight; the relays accept it after the kill, A's journal
+  never recorded `carried`, and after restart the same generation key gets
+  `carried` with no new deposit. In the four-machine record the deposit is
+  held by dropping A's packets in its own namespace rather than pausing the
   relays.
 - **7. Refusals.** A rail packet sealed to the chat key, `agent.packet` on
   the relay route, a packet sender differing from the Event sender, a kind-2
@@ -507,7 +513,10 @@ with the unit tests that cover them where they exist):
   chat and task traffic** (D2; required before production), **multi-device**
   (D3), **M0 freeze evidence**, third-party relays or hosts, a public chain,
   and sender unlinkability.
-- **B ran as uid 0 on its VPS** in the four-machine record.
+
+Also recorded, outside `not_verified`: in the four-machine record **B ran as
+uid 0 on its VPS** (`topology.b_host`); in the local record every process
+runs as an ordinary user.
 
 ## Not delivered by these changes
 
