@@ -882,19 +882,20 @@ packet payload; the relay supplies only the authenticated-encryption transport.
   relays already hold for that key stay readable to whoever has the key until
   they expire (at most 24 hours) unless their senders withdraw them with their
   acknowledgement secrets, which 8.4 step 6 permits. That is why
-  cards SHOULD come from a dedicated card-signing controller. This can be met
-  only once off-chain verification checks a card-signing purpose:
+  cards SHOULD come from a dedicated card-signing controller. That is worth
+  meeting only once off-chain verification checks a signing purpose:
   `VerifyKeyCard`, `agentpacket.VerifyContact` and `agentpacket.VerifySender`
-  accept a
-  signature by any controller of the finalized policy and check no purpose or
-  weight, so a second controller could sign any Agent Packet and any card
-  (rail, offer or chat) as the Agent. Held in the same custody, it would add
-  an impersonation key while isolating little. OpenFox therefore signs its
-  rail, offer and chat cards with its packet controller by choice, so for it
-  revocation also stops the node's packets until a new controller is
-  registered. A dedicated card-signing controller becomes worthwhile after a
-  protocol change: a card-signing purpose bit in the Agent policy, required
-  by the card verifiers and refused by the packet verifier.
+  accept a signature by any controller of the finalized policy and check no
+  purpose or weight, so a second controller could sign any Agent Packet and
+  any card (rail, offer or chat) as the Agent. Held in the same custody, it
+  would add an impersonation key while isolating little. OpenFox therefore
+  signs its rail, offer and chat cards with its packet controller by choice,
+  so for it revocation also stops the node's packets until a new controller
+  is registered. A dedicated card-signing controller becomes worthwhile after
+  a protocol change that gives the policy two positive off-chain purposes, a
+  packet-signing purpose that packet verification requires and a
+  card-signing purpose that `VerifyKeyCard` requires; the implementation
+  status document lists it as a follow-up.
 - Sender's ack secret: lets its holder delete one envelope; it is single-use
   and per envelope.
 - Controller ML-DSA-44 key: the attacker can sign cards for its own HPKE key

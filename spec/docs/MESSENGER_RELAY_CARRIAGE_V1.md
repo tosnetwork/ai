@@ -177,9 +177,8 @@ choice, as it does its rail and offer cards. The verifiers
 (`VerifyKeyCard`, `agentpacket.VerifyContact`, `agentpacket.VerifySender`)
 accept any controller of the finalized policy and check no purpose or weight,
 so a second controller in the same custody would only add a key that can sign
-any packet or card as the Agent. The recommendation can be met only after a protocol change: a
-card-signing purpose bit, required by the card verifiers and refused by the
-packet verifier.
+any packet or card as the Agent. The recommendation is worth meeting only
+once off-chain verification checks a signing purpose (relay spec section 11).
 
 **Purpose is enforced at the key.** An envelope that opens under the chat key
 MUST carry a relay frame, and one under the rail key an `OFR1` frame; anything
