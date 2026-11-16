@@ -103,14 +103,15 @@ relay_frame =
   D("tos.messaging.relay-frame.v1")   29 bytes
   frame_kind      u8    1 = copy, 2 = delivery-ack, 3 = room (M-R2), 4 = evidence
   part_index      u8    0 .. part_count-1
-  part_count      u8    1 .. 8; kinds 1, 2 and 4 require 1 (kind 4: 1 = request, 2 = response)
+  part_count      u8    1 .. 8; kinds 1, 2 and 4 require 1
   object_digest   32    SHA-256(D("tos.messaging.relay-object.v1") || object)
-  card_length     u16   0, or 1 .. 9,216
+  card_length     u16   0, or 1 .. 9,216; at least 1 in kind 4
   card            exact key-card packet JSON (2.3)
   evidence_length u16   1 .. 18,432 (required in kinds 1, 2, 4)
   evidence        the sender's current relay identity evidence (2.5)
   part_length     u32
   part            this part of the object
+                  (kind 4: a one-byte object, 1 = request, 2 = response)
   padding         zero bytes up to the frame's size bucket (6)
 ```
 
@@ -301,10 +302,17 @@ The `pin` is the session's pinned peer Endpoint and device, or on first
 contact the bootstrap's sender bundle. `CheckPeer` writes nothing durable, so
 verifying a stranger's evidence costs no storage and moves no rollback state.
 
+**"Newer", defined once.** Evidence E is *newer* than evidence F only if E's
+descriptor digest differs from F's **and** E's descriptor issue time is later.
+Both `CommitPeer` and the `descriptor-expired` retry rule use this definition.
+
+**Publisher invariant.** Each descriptor a node publishes has a strictly later
+issue time than its previous one. So a node's successive evidences are totally
+ordered by "newer".
+
 **`CommitPeer`: the only durable step.** It stores the evidence and calls
 `AdmitPublishedSet` (`refresh.go:26-28`) only when the evidence is newer than
-the stored one: a different descriptor digest and a later issue time.
-Otherwise it is a no-op. It runs only under the admission rule of 2.3:
+the stored one. Otherwise it is a no-op. It runs only under the admission rule of 2.3:
 
 - after `carrier.deliver` answers `accepted`, `duplicate` or `held`;
 - or for a peer with an established session;
@@ -349,18 +357,22 @@ On the network route it is noticed within the cached refresh window, at most
   outer frame takes fresh evidence while the inner ciphertext stays
   byte-identical. The daemon keeps its own descriptor fresh on its existing
   publication schedule.
-- **Kind 4: pulled evidence, a request and a response.** A kind-4 frame carries
-  no object, only the sender's evidence (as every frame does) and optionally a
-  card. A one-byte object marks it as a request or a response.
-  - **Request.** A node sends one kind-4 request to a peer only while it holds
-    a kind-1 copy for that peer `pending` because the stored evidence fails
-    `CheckPeer`. The request is re-deposited on the copy's 20 h schedule. It
-    ends when the copy is sent or abandoned, or when the request is answered.
-    No kind-4 frame is ever sent to a peer with no pending copy.
+- **Kind 4: pulled evidence, a request and a response.** A kind-4 frame's
+  object is one byte, 1 for a request and 2 for a response. Besides the
+  sender's evidence (as every frame has), it MUST carry the sender's current
+  chat card, request and response alike. A responder holding only the
+  requester's expired card can therefore still answer.
+  - **Request.** A node holds at most one outstanding kind-4 request per peer,
+    however many content copies (kinds 1 and 3) it holds `pending` for that
+    peer because the stored evidence fails `CheckPeer`. It follows the
+    earliest pending copy's 20 h re-deposit schedule, and ends when no copy is
+    pending any more, or when it is answered. No kind-4 *request* is ever sent
+    to a peer with no pending copy; responses go only to requesters.
   - **Receiving a request.** The node runs `CheckPeer` on the frame's evidence,
     read-only. If the sender is an established or admitted peer and the check
-    passes, it runs `CommitPeer` and answers with one kind-4 response carrying
-    its own current evidence. It sends at most one response per (peer, own
+    passes, it runs `CommitPeer` (for the frame's evidence and card) and
+    answers with one kind-4 response carrying its own current evidence and
+    card. It sends at most one response per (peer, own
     descriptor digest) per hour. A stranger gets the relay ack only: no
     response and no write.
   - **Receiving a response.** It is checked and committed the same way, and is
@@ -383,8 +395,8 @@ On the network route it is noticed within the cached refresh window, at most
     this exchange is blocked by the staleness it repairs.
 
   What remains: the exchange fails if a node cannot renew its own descriptor
-  (for example, its Endpoint signer is unavailable), if the peer's chat card
-  has expired, or if the requester is a stranger to the responder (first
+  (for example, its Endpoint signer is unavailable), if the requester holds
+  only the responder's expired card, or if the requester is a stranger to the responder (first
   contact needs a current contact file).
 - **Retained message whose evidence expired.** The receiver accepts the
   message if the frame's evidence passes `CheckPeer`. Otherwise it answers a
@@ -393,7 +405,8 @@ On the network route it is noticed within the cached refresh window, at most
   sender's journal records the code and the descriptor digest of the evidence
   it had sent.
   - It retries at once only if its current evidence is newer than the one
-    rejected, meaning a different descriptor digest or a later issue time.
+    rejected, in the single sense defined above (a different digest and a
+    later issue time).
   - Otherwise it waits for its own renewal, with the normal 30 s to 5 min
     backoff, every attempt counted against the 24-envelope cap.
 
@@ -716,8 +729,9 @@ Record `messenger-relay-one-to-one-<date>.json`, schema
    - Responder offline: the same with B offline for more than 24 h. The
      request is re-deposited and answered when B returns.
    - A stranger's request gets a relay ack only: no response and no write.
-   - No kind-4 frame is ever sent to a peer without a pending copy, and
-     publishing a descriptor sends none (checked from the chat outbox).
+   - No kind-4 *request* is ever sent to a peer without a pending copy, and
+     at most one is outstanding per peer with several pending copies.
+     Publishing a descriptor sends none (checked from the chat outbox).
 6. **Crash windows.** B killed between Messenger commit and relay ack; A killed
    between `carried` and its journal write. One runtime application; on
    restart the same envelope (`200`).
@@ -813,9 +827,11 @@ imports `messenger/`; OpenFox imports both.
    `CheckPeer` gates kinds 1 and 3 only; kinds 2 and 4 need only the peer's
    card. `CommitPeer` writes only newer evidence.
 
-   Also: the kind-4 pull (a request while a copy is held `pending`,
-   re-deposited on its schedule; a response to an admitted requester, at most
-   one per peer and own descriptor per hour; never sent unprompted), the
+   Also: the kind-4 pull (at most one outstanding request per peer while any
+   content copy is held `pending`, on the earliest copy's schedule; a response
+   to an admitted requester, at most one per peer and own descriptor per hour;
+   the sender's card mandatory in both; never sent unprompted); the single
+   "newer" predicate and the publisher's strictly-increasing issue time; the
    `descriptor-expired`
    retry rule (retry at once only with newer evidence, else 30 s to 5 min
    backoff), and a publication sink that writes the node's own current
