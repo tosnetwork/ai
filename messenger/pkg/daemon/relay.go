@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -68,6 +69,11 @@ type relayRuntime struct {
 	listener net.Listener
 	signer   crypto.Signer
 	interval time.Duration
+
+	// ttlReported is set once a carried answer without a valid relay TTL
+	// has been reported, so a carrier built against an older API shows on
+	// the owner surface once per process rather than only as unreachable.
+	ttlReported atomic.Bool
 
 	// pulls serializes read-modify-write of evidence pull records.
 	pulls sync.Mutex
@@ -223,6 +229,9 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 	case carrierapi.ResultCarried:
 		delay, err := r.redepositDelay(response.RelayTTLSeconds)
 		if err != nil {
+			if errors.Is(err, carrierapi.ErrRelayTTL) && r.ttlReported.CompareAndSwap(false, true) {
+				r.daemon.report("relay carrier reported no valid relay TTL", err)
+			}
 			// The same generation key is retried; the carrier answers carried
 			// again without a new deposit.
 			return fault.Wrap(fault.CodeUnreachable, err)
@@ -336,8 +345,10 @@ type peerIndex struct {
 	// envelopes counts this node's copy envelopes a relay may still hold for
 	// each peer: a carried copy, a copy moved back to pending whose last
 	// deposit may still be stored, and a previous generation that may not be
-	// withdrawn yet. Delivery acks are counted by the carrier, which alone
-	// sees them stored.
+	// withdrawn yet. It is an early deferral, not the bound: the carrier,
+	// which alone sees what each relay still stores (delivery acks, and older
+	// generations a longer-TTL relay keeps after a failed withdrawal),
+	// enforces the cap with peer-cap.
 	envelopes map[string]int
 	// onEvidence lists the pending copies held because the peer's stored
 	// evidence failed CheckPeer.

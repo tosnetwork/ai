@@ -169,7 +169,11 @@ func TestACarriedAnswerWithoutAValidTTLIsRetried(t *testing.T) {
 	importContact(t, a, b)
 	importContact(t, b, a)
 	eventID := sendText(t, a, b, "ttl", "a", now)
-	for _, ttl := range []uint64{0, carrierapi.MaxRelayTTLSeconds + 1} {
+	observer := &recorder{}
+	a.d.observer = observer
+	for index, ttl := range []uint64{0, carrierapi.MaxRelayTTLSeconds + 1} {
+		at := now.Add(time.Duration(index) * time.Minute)
+		a.d.now = func() time.Time { return at }
 		a.carrier.answer = &carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultCarried,
 			RelayTTLSeconds: ttl}
 		if summary, err := a.d.dispatch.Sweep(context.Background(), 0); err != nil || summary.Carried != 0 {
@@ -180,10 +184,22 @@ func TestACarriedAnswerWithoutAValidTTLIsRetried(t *testing.T) {
 			t.Fatalf("ttl %d recorded: state=%s next=%d", ttl, state.State, state.NextRedepositAtUnix)
 		}
 	}
+	if attempts := a.carrier.take(); len(attempts) != 2 {
+		t.Fatalf("carry attempts: %d, want 2", len(attempts))
+	}
+	// An older carrier shows on the owner surface, once per process.
+	reported := 0
+	for _, stage := range observer.failures {
+		if stage == "relay carrier reported no valid relay TTL" {
+			reported++
+		}
+	}
+	if reported != 1 {
+		t.Fatalf("missing-TTL reports: %d, want 1 (%v)", reported, observer.failures)
+	}
 	a.carrier.answer = nil
-	a.carrier.take()
 	// The retry still has generation 1's key.
-	a.d.now = func() time.Time { return now.Add(time.Minute) }
+	a.d.now = func() time.Time { return now.Add(2 * time.Minute) }
 	if summary, err := a.d.dispatch.Sweep(context.Background(), 0); err != nil || summary.Carried != 1 {
 		t.Fatalf("retry: %+v %v", summary, err)
 	}

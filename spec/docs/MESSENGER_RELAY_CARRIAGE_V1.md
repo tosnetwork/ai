@@ -534,23 +534,32 @@ production relays.
 
   Deposits are counted from the first one at time 0 up to, not including, the
   delivery's expiry (a re-deposit due at or after the expiry is not made). The
-  generation number is a 32-bit counter, and the journal records only the
-  latest 16 generations; under the 80 % rule every older one has been
-  withdrawn or has expired at the relays, since 16 intervals exceed one TTL.
-- **The in-flight cap does not depend on the rate.** A relay keeps generation
-  k until its receipt plus the TTL at the latest. Generation k+2 is deposited
-  at least two intervals after generation k, that is at least 1.6 TTL later
-  under the 80 % rule (more where the 10-minute floor applies), when
-  generation k has expired even if its withdrawal failed. So at most two
-  generations of one copy are ever stored, with or without withdrawal, which
-  is exactly what the daemon counts per copy against the cap of 24 per peer
-  (section 7). The daemon counts a previous generation as possibly stored for
-  24 h after its deposit, whatever TTL was reported, so the count never runs
-  low. A shorter TTL changes how often a copy is deposited, not how many of its
-  envelopes are stored, so the cap and its arithmetic are the same with 1 h,
-  3 h and 24 h relays. Only a configured interval below half the TTL (a test
-  setting 10 min against a 24 h relay) relies on the withdrawal to stay within
-  two. The relay's own deposit rate (60 per minute per client address) is far
+  generation number is a 32-bit counter. The journal records only the latest
+  16 generations of a delivery. That is a bound on the record, not on what
+  the relays store: every generation carries the same ciphertext, and a
+  delivery ack matches the Event, session, device and ciphertext digest
+  (5.3), not a generation, so an older generation still held at a relay is
+  answered like any other.
+- **How many generations a relay holds.** Let d be the re-deposit interval
+  (80 % of the smallest TTL of the card, within the 10-minute floor and the
+  configured cap). Relay R keeps generation k until its receipt plus R's own
+  TTL at the latest, and generation k+j is deposited at least j·d later.
+  Without a successful withdrawal, R therefore holds up to ⌈TTL_R / d⌉
+  generations of one copy. That is at most two only when **every relay of the
+  card has a TTL of at most 2d**, which holds whenever all the card's relays
+  advertise the same TTL (2d = 1.6 TTL) and for any mix within a factor of
+  1.6. A card that mixes, say, a 1 h and a 24 h relay re-deposits every
+  48 minutes, and the 24 h relay would hold up to 30 generations if every
+  withdrawal failed. In that case, and for a configured interval below half
+  the TTL, staying within two generations relies on the withdrawal of
+  generation N once N+1 is accepted (5.3, 9.5), and the per-peer cap of 24
+  (section 7) is enforced by the carrier, which alone knows what is still
+  stored or still being withdrawn at each relay. The daemon counts two
+  envelopes per copy, each previous generation for 24 h after its deposit;
+  that count defers early and can undercount for such a card, and it is not
+  the authority.
+- **The rate.** A shorter TTL changes how often a copy is deposited, not the
+  cap. The relay's own deposit rate (60 per minute per client address) is far
   above what the cap allows: 24 envelopes re-deposited every 48 minutes is one
   deposit every 2 minutes.
 - **Room application messages: loss with notice.** One deposit, kept for the
@@ -735,12 +744,17 @@ Recipient protections, strongest first:
    still stored, including earlier generations not yet withdrawn and the
    node's own kind-2 ack and kind-4 evidence envelopes to that peer, which
    share the same relay bound; the rest stay `pending` and are not deposited.
-   The count is split by who can see each envelope: the Messenger daemon
-   counts its carried copies (with a previous generation that may not yet be
-   withdrawn) and its kind-4 envelopes, and defers a copy at the cap; the
-   carrier (OpenFox), which alone sees its stored kind-2 ack envelopes, counts
-   those as well and answers `carrier.carry` with the fixed refusal `peer-cap`
-   when the full count would exceed 24. The relay caps one client address at 64
+   **The carrier enforces the 24.** OpenFox alone sees what is stored at each
+   relay: its outbox holds every envelope it deposited and has not seen
+   expire, including kind-2 acks, earlier generations whose withdrawal is
+   still pending or failed, and envelopes kept longer by a relay with a
+   longer TTL than the card's smallest. It counts all of them, per relay, and
+   answers `carrier.carry` with the fixed refusal `peer-cap` when the deposit
+   would take any relay's count for that peer above 24. The Messenger daemon
+   counts what it can see (its carried copies, each with a previous
+   generation that may not yet be withdrawn, and its kind-4 envelopes) and
+   defers a copy at the cap before asking. That early deferral saves a round
+   trip; it can undercount (section 4) and is not the bound. The relay caps one client address at 64
    envelopes per recipient (`:641`). On shared relays, 24 chat envelopes leave
    at least 40 of that 64 for the same sender's rail deposits (tasks, results,
    acks) to the same peer.
