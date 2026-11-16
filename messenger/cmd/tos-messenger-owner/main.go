@@ -366,13 +366,14 @@ func readPrivateKey(path string) (ed25519.PrivateKey, error) {
 }
 
 func readRegular(path string, maximum int64, secret bool) ([]byte, error) {
-	raw, err := securefile.ReadBoundedRegular(path, maximum)
+	raw, info, err := securefile.ReadBoundedRegularInfo(path, maximum)
 	if err != nil {
 		return nil, err
 	}
 	if secret {
-		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		// The owner and mode are those of the file that was opened and read,
+		// not of whatever the path names now.
+		if info == nil || !info.Mode().IsRegular() {
 			return nil, errors.New("a secret file must remain a regular file")
 		}
 		if !osguard.CurrentUserOwns(info) || info.Mode().Perm() != 0o600 {

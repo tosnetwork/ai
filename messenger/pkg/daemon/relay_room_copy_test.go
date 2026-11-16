@@ -12,6 +12,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 )
 
 // A room-addressed device copy is never sealed or carried on the relay
@@ -74,5 +75,94 @@ func TestRelayReceiverRefusesARoomAddressedEvent(t *testing.T) {
 	event.RoomID = ""
 	if _, ok := refuseOnRoute(admission.RouteRelay, event); ok {
 		t.Fatal("an Event naming no room was refused")
+	}
+}
+
+// openSealGate lets every copy through, standing in for a sender that skips
+// the relay route's own refusal, so the receiver's is tested on its own.
+type openSealGate struct{}
+
+func (openSealGate) CheckCopy(context.Context, eventlog.Delivery, bool) error { return nil }
+
+// A first-contact copy naming a room is refused by the receiver with a
+// signed payload-malformed rejection before anything is committed: no
+// session and no inbound record.
+func TestRelayFirstContactRoomAddressedEventIsRefused(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0)
+	nodes := newRelayNodes(t, now, [2]string{"2", "4"}, [2]string{"7", "9"})
+	a, b := nodes[0], nodes[1]
+	importContact(t, a, b)
+	importContact(t, b, a)
+	delegation := a.d.prekeys.planner.delegation
+	dispatcher, err := dispatch.New(dispatch.Config{Journal: a.d.journal, Identity: a.d.config.Identity(),
+		Network: a.d.config.Network(), Now: a.d.clock, AllowedEventClasses: delegation.AllowedOutboundEventClasses})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatcher.ConfigureTransport(a.d.prekeys.suite, relaySender{relay: a.d.relay},
+		dispatch.SessionBindings{Journal: a.d.journal, Identity: a.d.config.Identity(), Network: a.d.config.Network()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatcher.ConfigureSealGate(openSealGate{}); err != nil {
+		t.Fatal(err)
+	}
+	a.d.dispatch = dispatcher
+	// The first-contact text fixes the session and bootstrap; it is never
+	// delivered, so B has no session when the room-addressed copy arrives.
+	first := sendText(t, a, b, "first contact", "a", now)
+	target := copyState(t, a, first, b.d.config.EndpointID, b.d.config.DeviceID)
+	content, err := payload.Encode(payload.Text{MediaType: "text/plain; charset=utf-8", Body: "room content"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := envelope.NewEvent(envelope.Event{Network: a.d.config.Network(), ConversationID: target.ConversationID,
+		SenderAgentID: a.d.config.AgentID, SenderEndpointID: a.d.config.EndpointID, SenderDeviceID: a.d.config.DeviceID,
+		RoomID:        "room_" + strings.Repeat("c", 64),
+		CreatedAtUnix: uint64(now.Unix()), ExpiresAtUnix: uint64(now.Add(time.Hour).Unix()), Kind: "text",
+		IdempotencyKey: strings.Repeat("9", 64), Content: content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.d.dispatch.QueueCopies(event, []dispatch.CopyTarget{{SessionID: target.SessionID,
+		RecipientEndpointID: b.d.config.EndpointID, RecipientDeviceID: b.d.config.DeviceID}}, event.ExpiresAtUnix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.d.dispatch.Sweep(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	var roomFrame []byte
+	for _, frame := range a.carrier.take() {
+		decoded, err := relayframe.Decode(frame.frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := relayframe.DecodeCopy(decoded.Part)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.EventID == event.EventID {
+			if len(value.Bootstrap) == 0 {
+				t.Fatal("the room-addressed copy is not a first contact")
+			}
+			roomFrame = frame.frame
+		}
+	}
+	if roomFrame == nil {
+		t.Fatal("the room-addressed copy was not carried")
+	}
+	answer := deliver(t, a, b, roomFrame)
+	ack, err := relayframe.Decode(ackFrameOf(t, answer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := relayframe.DecodeAck(ack.Part)
+	if err != nil || decoded.Outcome != relayframe.OutcomeRejected || decoded.Code != fault.CodePayloadMalformed {
+		t.Fatalf("answer: %+v %v", decoded, err)
+	}
+	if _, found, err := b.d.journal.SessionState(target.SessionID); err != nil || found {
+		t.Fatalf("the refused first contact left a session: %v %v", found, err)
+	}
+	if _, found, _ := b.d.journal.Lookup(event.EventID); found {
+		t.Fatal("the refused first contact was committed")
 	}
 }

@@ -1817,7 +1817,11 @@ which that invite never adds the contact again, and only a fresh claim (or
 the exact retry of an Event not yet committed) runs the contact-add step, so
 re-sending the claimed Event cannot undo the owner's removal. A racing second
 Event that loses the claim meets the policy without the token, like any
-spent token.
+spent token. The list holds at most 4,096 entries: if it is full when a
+claim succeeds, the claim stands and spends the invite, but the contact
+cannot be added, so that Event is refused `quota-exceeded`, and so is every
+later copy of it (a V1 limit; the owner frees entries with
+`contacts.remove`).
 **On refusal nothing is stored:** admission refuses before
 any journal write (`admit.go:323-331`), the card is not stored and
 `CheckPeer` writes nothing (2.3, 2.5).

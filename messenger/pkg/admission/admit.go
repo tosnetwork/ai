@@ -151,6 +151,11 @@ type Config struct {
 	MaxContentBytes     int
 	MaxClockSkewSeconds uint64
 	InstallSalt         []byte
+
+	// beforeInviteClaim is a test seam: a package test sets it to run between
+	// an invite's check and its claim, the window in which a racing Event can
+	// spend the token first. Nothing outside the package can set it.
+	beforeInviteClaim func()
 }
 
 // Gate admits inbound events.
@@ -419,10 +424,22 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 			decision.Delegation = delegation
 			return decision, nil
 		}
+		// Every check the decision's Apply makes (role, role-policy revision,
+		// target, revision order) runs read-only here, so a decision that
+		// would be refused never claims an invite or makes a contact.
+		moderation, err := g.config.Journal.OpenModeration()
+		if err != nil {
+			return Decision{}, err
+		}
+		if err := moderation.Check(inbound.Event, delegation, liveAuthority, time.Unix(int64(inbound.ReceivedAtUnix), 0)); err != nil {
+			decision := g.refuse(inbound, fault.CodeNotAuthentic, class)
+			decision.Delegation = delegation
+			return decision, nil
+		}
 	}
 	if usedInvite {
-		if beforeInviteClaim != nil {
-			beforeInviteClaim()
+		if g.config.beforeInviteClaim != nil {
+			g.config.beforeInviteClaim()
 		}
 		claimed, err := g.config.Journal.ClaimAdmissionInvite(
 			inbound.AdmissionToken, g.config.LocalEndpointID,
@@ -578,10 +595,6 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 	decision.Record = g.record(inbound, class, outcome, "")
 	return decision, nil
 }
-
-// beforeInviteClaim, when set by a test, runs between the invite check and its
-// claim: the window in which a racing Event can spend the token first.
-var beforeInviteClaim func()
 
 // withoutInvite is the policy answer when no invite satisfies first contact:
 // invite-or-hold holds for the owner, every other answer stands.

@@ -2,9 +2,11 @@ package admission
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,10 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
 
 func issueInvite(t *testing.T, journal *eventlog.Journal, policy ContactPolicy, seed byte) string {
@@ -175,8 +181,8 @@ func TestInviteClaimLostToAnotherEventMeetsThePolicy(t *testing.T) {
 		local := testLocalDelegation(t, policy)
 		winner := "evt_" + string(bytes.Repeat([]byte("6"), 64))
 		at := time.Unix(int64(baseUnix)+60, 0)
-		beforeInviteClaim = func() {
-			beforeInviteClaim = nil
+		gate.config.beforeInviteClaim = func() {
+			gate.config.beforeInviteClaim = nil
 			if _, err := journal.ClaimAdmissionInvite(token, local.EndpointID, senderID, winner, at); err != nil {
 				t.Errorf("winner claim: %v", err)
 			}
@@ -189,7 +195,7 @@ func TestInviteClaimLostToAnotherEventMeetsThePolicy(t *testing.T) {
 		request := inbound(testEvent(t, delegation, nil), encoded)
 		request.AdmissionToken = token
 		decision, err := gate.Admit(request)
-		beforeInviteClaim = nil
+		gate.config.beforeInviteClaim = nil
 		want := Held
 		if winnerAddsContact {
 			want = Accepted
@@ -238,5 +244,126 @@ func removeTombstones(t *testing.T, journal *eventlog.Journal) {
 		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// A room.moderation Event that its Apply would refuse (here a member with no
+// moderation role) is refused before an invite is claimed for it: the
+// sender gains no contact and the invite stays unclaimed.
+func TestRefusedModerationClaimsNoInvite(t *testing.T) {
+	now := time.Unix(int64(baseUnix)+30, 0)
+	policy := allowList(t, InviteOrAskOwner)
+	journal, err := eventlog.Open(filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	sender, _ := testDelegation(t)
+	sender.AllowedOutboundEventClasses = []string{"room", "text"}
+	senderRaw, err := identity.EncodeJSON(sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderDigest, _ := identity.Digest(sender)
+	local, localRaw, localAgent := localState(t, policy)
+	localKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x77}, ed25519.SeedSize))
+	rooms, _ := journal.OpenRooms()
+	membership, err := room.Found(overlayRoom, []string{senderID, localID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := room.Authority{AgentID: local.AgentID, EndpointID: local.EndpointID}
+	authorization, err := room.SignMembershipAuthorization(room.MembershipAuthorization{
+		Network: testNetwork(), RoomID: overlayRoom, Epoch: 1, MembershipDigest: membership.Digest,
+		Authority: authority, IssuedAtUnix: baseUnix + 1, ExpiresAtUnix: baseUnix + 3600,
+	}, localKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rooms.Advance(membership, authorization, local, now); err != nil {
+		t.Fatal(err)
+	}
+	rolePolicy, err := room.SignRolePolicy(room.RolePolicy{Network: testNetwork(), RoomID: overlayRoom,
+		MembershipEpoch: 1, MembershipDigest: membership.Digest, Revision: 1,
+		Assignments: []room.RoleAssignment{{AgentID: localID, Role: room.RoleAdministrator}},
+		Authority:   authority, IssuedAtUnix: baseUnix + 1, ExpiresAtUnix: baseUnix + 3600}, localKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roles, _ := journal.OpenRoomRoles()
+	if _, err := roles.Advance(rolePolicy, local, now); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := New(Config{Network: testNetwork(), Chain: testChain(),
+		Resolver: stubResolver{states: map[string]*nativev1.NativeStateV1{
+			senderID: nativeState(&nativev1.AgentStateV1{AgentId: senderID,
+				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{senderDigest}}),
+			localID: localAgent}}, Journal: journal, Devices: mustDevices(t, journal), Rooms: rooms,
+		Policy: policy, LocalDelegationJSON: localRaw, LocalAgentID: local.AgentID,
+		LocalEndpointID: local.EndpointID, Now: func() time.Time { return now },
+		InstallSalt: bytes.Repeat([]byte{0x5a}, MinInstallSaltBytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := issueInvite(t, journal, policy, 0x59)
+	body, _ := payload.Encode(payload.RoomModeration{RoomID: overlayRoom, MembershipEpoch: 1,
+		RolePolicyRevision: 1, TargetEventID: "evt_" + strings.Repeat("6", 64), DecisionRevision: 1,
+		Action: "hide", Reason: "not mine to decide"})
+	moderation := testEvent(t, sender, func(event *envelope.Event) {
+		event.RoomID, event.Kind, event.Content = overlayRoom, "room.moderation", body
+	})
+	request := inbound(moderation, senderRaw)
+	request.AdmissionToken = token
+	decision, err := gate.Admit(request)
+	if err != nil || decision.Outcome != Rejected || decision.Code != fault.CodeNotAuthentic {
+		t.Fatalf("a non-moderator's decision: %+v %v", decision, err)
+	}
+	if invited, err := journal.IsInvitedContact(senderID); err != nil || invited {
+		t.Fatal("a refused moderation decision made a contact")
+	}
+	// The invite is still unclaimed: another Event can still spend it.
+	other := "evt_" + strings.Repeat("8", 64)
+	if err := journal.CheckAdmissionInvite(token, local.EndpointID, senderID, other, now); err != nil {
+		t.Fatalf("the invite was claimed: %v", err)
+	}
+}
+
+// A later removal's tombstone sweep keeps every tombstone whose invite record
+// still exists: replaying a claimed Event that was never committed (a crash
+// between the claim and the commit) still does not re-add the removed
+// contact.
+func TestTombstoneSweepKeepsLiveInvitesTombstones(t *testing.T) {
+	policy := allowList(t, InviteOrAskOwner)
+	gate, journal, delegation, encoded := testGate(t, policy)
+	local := testLocalDelegation(t, policy)
+	at := time.Unix(int64(baseUnix)+60, 0)
+	tokenX := issueInvite(t, journal, policy, 0x5a)
+	request := inbound(testEvent(t, delegation, nil), encoded)
+	request.AdmissionToken = tokenX
+	// The claim and the contact add happened, the commit did not.
+	if claimed, err := journal.ClaimAdmissionInvite(tokenX, local.EndpointID, senderID, request.Event.EventID, at); err != nil || !claimed {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	if _, err := journal.AddInvitedContact(senderID, request.Event.EventID, tokenX, at); err != nil {
+		t.Fatal(err)
+	}
+	other := "agent_" + strings.Repeat("9", 64)
+	tokenY := issueInvite(t, journal, policy, 0x5b)
+	if _, err := journal.AddInvitedContact(other, "evt_"+strings.Repeat("9", 64), tokenY, at); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := journal.RemoveInvitedContact(senderID); err != nil || !removed {
+		t.Fatal("remove X")
+	}
+	// Y's removal sweeps the tombstones; X's invite record still exists.
+	if removed, err := journal.RemoveInvitedContact(other); err != nil || !removed {
+		t.Fatal("remove Y")
+	}
+	decision, err := gate.Admit(request)
+	if err != nil || decision.Outcome != Accepted {
+		t.Fatalf("replayed claimed Event: %+v %v", decision, err)
+	}
+	if invited, err := journal.IsInvitedContact(senderID); err != nil || invited {
+		t.Fatal("the swept tombstone let the claimed Event re-add the contact")
 	}
 }
