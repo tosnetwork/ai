@@ -53,6 +53,10 @@ type RoomRecord struct {
 	// an Agent ID and endpoint alone contain no verification key.
 	AuthorityDelegationJSON []byte `json:"authority_delegation_json"`
 	UpdatedAtUnix           uint64 `json:"updated_at_unix"`
+
+	// fused marks a record answered from a private room's fused record. Such
+	// a room advances only through RoomMLSLedger.
+	fused bool
 }
 
 // RoomLedger records room membership epochs, one record per room.
@@ -125,6 +129,9 @@ func (l *RoomLedger) Advance(next room.Membership, authorization room.Membership
 		return RoomTransition{}, err
 	}
 	var prior []string
+	if found && record.fused {
+		return RoomTransition{}, ErrRoomKind
+	}
 	if !found {
 		if next.Epoch != 1 {
 			return RoomTransition{}, errors.New("a room's first epoch must be epoch 1")
@@ -207,6 +214,9 @@ func (l *RoomLedger) TransferAuthority(next room.Membership, transfer room.Autho
 	}
 	if !found {
 		return RoomTransition{}, errors.New("cannot transfer authority for an unknown room")
+	}
+	if record.fused {
+		return RoomTransition{}, ErrRoomKind
 	}
 	if next.Epoch <= record.Epoch {
 		return RoomTransition{}, ErrRoomRollback
@@ -419,7 +429,7 @@ func (l *RoomLedger) CurrentAuthorityDelegation(roomID string) (identity.Delegat
 func (l *RoomLedger) read(roomID string) (RoomRecord, bool, error) {
 	raw, err := os.ReadFile(l.path(roomID))
 	if errors.Is(err, os.ErrNotExist) {
-		return RoomRecord{}, false, nil
+		return l.fromFused(roomID)
 	}
 	if err != nil {
 		return RoomRecord{}, false, errors.New("read room record")
@@ -460,6 +470,27 @@ func (l *RoomLedger) read(roomID string) (RoomRecord, bool, error) {
 		return RoomRecord{}, false, errors.New("room authority is not a current member")
 	}
 	return record, true, nil
+}
+
+// fromFused answers for a private room from its verified fused record, so
+// admission and moderation judge MLS rooms exactly as logical rooms. The
+// journal mutex is held.
+func (l *RoomLedger) fromFused(roomID string) (RoomRecord, bool, error) {
+	fused, found, err := (&RoomMLSLedger{journal: l.journal}).read(roomID)
+	if err != nil || !found {
+		return RoomRecord{}, false, err
+	}
+	delegationJSON, err := l.journal.loadDelegation(fused.DelegationDigest)
+	if err != nil {
+		return RoomRecord{}, false, err
+	}
+	return RoomRecord{
+		Schema: RoomRecordSchema, RoomID: fused.RoomID, Epoch: fused.RoomEpoch,
+		MembershipDigest: fused.MembershipDigest, Members: append([]string(nil), fused.Members...),
+		AuthorityAgentID: fused.AuthorityAgentID, AuthorityEndpointID: fused.AuthorityEndpointID,
+		AuthorityDelegationJSON: delegationJSON, UpdatedAtUnix: fused.UpdatedAtUnix,
+		fused: true,
+	}, true, nil
 }
 
 func decodeRoomAuthorityDelegation(raw []byte) (identity.Delegation, error) {

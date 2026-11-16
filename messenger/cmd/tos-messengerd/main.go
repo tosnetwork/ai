@@ -194,6 +194,11 @@ func (reporter) Swept(summary dispatch.Summary) {
 }
 
 func (reporter) Maintained(expired int, report eventlog.PruneReport) {
+	for _, path := range report.UnresolvedStagedRoomOutputs {
+		// Every private room is blocked until this is resolved, so it is
+		// reported on every pass, with what to do about it.
+		fmt.Printf("unresolved staged room output blocks private rooms: %s; %s\n", path, eventlog.StagedRoomOutputGuidance)
+	}
 	if expired == 0 && report.ClaimsRemoved == 0 && report.DeliveriesRemoved == 0 && len(report.Unreadable) == 0 {
 		return
 	}

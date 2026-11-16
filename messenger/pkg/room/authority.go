@@ -87,6 +87,27 @@ func VerifyMembershipAuthorization(membership Membership, value MembershipAuthor
 	if now.IsZero() || now.Unix() < 0 {
 		return errors.New("invalid room membership verification time")
 	}
+	if err := VerifyMembershipAuthorizationBinding(membership, value, delegation); err != nil {
+		return err
+	}
+	if err := identity.CheckWindow(delegation, now); err != nil {
+		return err
+	}
+	seconds := uint64(now.Unix())
+	if seconds < value.IssuedAtUnix || seconds >= value.ExpiresAtUnix {
+		return errors.New("room membership authorization is outside its validity window")
+	}
+	return nil
+}
+
+// VerifyMembershipAuthorizationBinding checks everything about an
+// authorization that does not depend on the time it is checked at: its shape,
+// that it names exactly this membership, that its authority is a member and
+// the delegation's Agent and Endpoint, that the delegation key derives that
+// Endpoint, the network, that it does not outlive the delegation, and the
+// Endpoint signature. A caller applies its own time window on top; the journal
+// uses this alone when it records an authorization already judged current.
+func VerifyMembershipAuthorizationBinding(membership Membership, value MembershipAuthorization, delegation identity.Delegation) error {
 	if err := validateMembershipAuthorization(value, true); err != nil {
 		return err
 	}
@@ -100,15 +121,18 @@ func VerifyMembershipAuthorization(membership Membership, value MembershipAuthor
 		!membership.Contains(value.Authority.AgentID) {
 		return errors.New("room authorization is not from a member authority")
 	}
-	if err := verifyAuthorityDelegation(delegation, now); err != nil {
-		return err
+	if len(delegation.IdentityPublicKey) != ed25519.PublicKeySize {
+		return errors.New("room authority delegation has no Endpoint key")
+	}
+	derived, err := identity.DeriveEndpointID(delegation.Network, delegation.AgentID, delegation.IdentityPublicKey)
+	if err != nil || derived != delegation.EndpointID {
+		return errors.New("room authority delegation key does not derive its Endpoint")
 	}
 	if !sameAuthorityNetwork(value.Network, delegation.Network) {
 		return errors.New("room authorization belongs to another network")
 	}
-	seconds := uint64(now.Unix())
-	if seconds < value.IssuedAtUnix || seconds >= value.ExpiresAtUnix || value.ExpiresAtUnix > delegation.ExpiresAtUnix {
-		return errors.New("room membership authorization is outside its validity window")
+	if value.ExpiresAtUnix > delegation.ExpiresAtUnix {
+		return errors.New("room membership authorization outlives its delegation")
 	}
 	preimage, err := MembershipAuthorizationSigningBytes(value)
 	if err != nil {

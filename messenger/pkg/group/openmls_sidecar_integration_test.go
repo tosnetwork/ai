@@ -224,3 +224,83 @@ func TestOpenMLSSidecarIntegrationThreeMemberRestartChat(t *testing.T) {
 		t.Fatalf("remaining members failed after removal: %q %v", plaintext, err)
 	}
 }
+
+// The sidecar names the committer and the sender of every processed message,
+// reports the epoch authenticator, and opens messages of the two retained past
+// epochs but not older ones.
+func TestOpenMLSSidecarIntegrationAttributionAndPastEpochs(t *testing.T) {
+	binary := os.Getenv("TOS_OPENMLS_DRIVER")
+	if binary == "" {
+		t.Skip("TOS_OPENMLS_DRIVER is set by make test-openmls")
+	}
+	driver := &OpenMLSSidecar{Command: []string{binary}, Timeout: 10 * time.Second}
+	alice, err := driver.NewIdentity([]byte("alice-authority"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := driver.NewIdentity([]byte("bob-member"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceState, err := driver.CreateGroup(alice.State, alice.KeyPackage, bytes.Repeat([]byte{0x24}, MLSGroupIDBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobRef := canon.Digest(bob.KeyPackage)
+	aliceState, _, welcomes, err := driver.Commit(aliceState, []LeafOperation{{Kind: LeafAdd, Next: &Leaf{KeyPackageRef: bobRef, KeyPackage: bob.KeyPackage, CredentialIdentity: []byte("bob-member"), LeafSignaturePublicKey: bob.LeafSignaturePublicKey}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobState, err := driver.Join(bob.State, welcomes[bobRef])
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceInfo, err := driver.Inspect(aliceState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobInfo, err := driver.Inspect(bobState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(aliceInfo.EpochAuthenticator) != MLSEpochAuthenticatorBytes || !bytes.Equal(aliceInfo.EpochAuthenticator, bobInfo.EpochAuthenticator) {
+		t.Fatal("members of one epoch report different epoch authenticators")
+	}
+
+	aad := []byte("room binding")
+	bobState, sealed, err := driver.Seal(bobState, aad, []byte("sealed before two commits"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresh := func() {
+		t.Helper()
+		var commit []byte
+		aliceState, commit, _, err = driver.Commit(aliceState, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var committer []byte
+		bobState, committer, err = driver.ApplyAttributed(bobState, commit)
+		if err != nil || string(committer) != "alice-authority" {
+			t.Fatalf("committer %q: %v", committer, err)
+		}
+	}
+	refresh()
+	refreshed, err := driver.Inspect(aliceState)
+	if err != nil || bytes.Equal(refreshed.EpochAuthenticator, aliceInfo.EpochAuthenticator) {
+		t.Fatalf("epoch authenticator did not change with the epoch: %v", err)
+	}
+	refresh()
+	beforeThird := append([]byte(nil), aliceState...)
+	_, plaintext, sender, err := driver.OpenAttributed(aliceState, aad, sealed)
+	if err != nil || string(plaintext) != "sealed before two commits" || string(sender) != "bob-member" {
+		t.Fatalf("two-epoch-old message: %q from %q: %v", plaintext, sender, err)
+	}
+	refresh()
+	if _, _, _, err := driver.OpenAttributed(aliceState, aad, sealed); err == nil {
+		t.Fatal("a message three epochs old was opened")
+	}
+	if _, _, _, err := driver.OpenAttributed(beforeThird, aad, sealed); err != nil {
+		t.Fatalf("control: the same message opens two epochs later: %v", err)
+	}
+}

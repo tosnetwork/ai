@@ -16,3 +16,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tls_codec = "0.4"
 
+
+# The 64-leaf state-bound tests run thousands of MLS operations; optimizing
+# the dependencies keeps them to seconds in the debug profile without changing
+# what the driver crate itself is compiled as.
+[profile.dev.package."*"]
+opt-level = 2

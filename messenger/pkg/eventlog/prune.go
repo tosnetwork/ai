@@ -30,6 +30,10 @@ type PruneReport struct {
 	// Unreadable names records the sweep could not parse. They are left in
 	// place; see Prune for why.
 	Unreadable []string
+	// UnresolvedStagedRoomOutputs names, by full path, staged room Commit
+	// outputs that cannot be read or resolved. While any exists no private
+	// room commits; see StagedRoomOutputGuidance.
+	UnresolvedStagedRoomOutputs []string
 }
 
 // Prune removes records whose purpose has ended.
@@ -117,6 +121,12 @@ func (j *Journal) Prune(now time.Time, retention time.Duration) (PruneReport, er
 		}
 	}
 	sort.Strings(report.Unreadable)
+	// The journal mutex is held here, so the resolver is called directly.
+	staged, err := j.resolveRoomStaged("")
+	if err != nil {
+		return PruneReport{}, err
+	}
+	report.UnresolvedStagedRoomOutputs = staged
 	return report, nil
 }
 

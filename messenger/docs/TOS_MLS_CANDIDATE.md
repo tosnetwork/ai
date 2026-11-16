@@ -33,12 +33,21 @@ match its BasicCredential identity and LeafNode signing key;
   `0x0001`. It uses strict TLS decoding, a bounded deterministic full-storage
   snapshot, exact BasicCredential/leaf-key validation, canonical group IDs,
   founder/join, mixed Add/Remove replacement commits, encrypted application
-  messages, and public group-id/epoch inspection;
-- `group.OpenMLSSidecar` and `eventlog.MLSController`, which bound process I/O,
-  reject wrong AAD and state bindings, derive the Commit reference from exact
-  wire bytes, and persist the next private state before returning a Commit,
-  Welcome, ciphertext, or plaintext. Same-epoch send/receive ratchets and
-  epoch-changing commits both use old-state-digest compare-and-swap;
+  messages, two retained past epochs (`max_past_epochs(2)`) with an
+  out-of-order tolerance of 8 and a forward distance of 1,000 (the worst-case
+  state at 32 leaves is 272,968 bytes, under the 512 KiB bound), the
+  committer and sender identity of every
+  processed message, and public group-id/epoch/epoch-authenticator inspection;
+- `group.OpenMLSSidecar` and `eventlog.RoomMLSController`, which bound process
+  I/O, reject wrong AAD and state bindings, refuse a Commit or message whose MLS
+  sender is not the expected member before anything is written, derive the
+  Commit reference from exact wire bytes, and persist the next private state
+  before returning a Commit, Welcome, ciphertext, or plaintext. The room epoch,
+  the MLS epoch and the state advance in one write of a small fused record
+  (at most 8,192 bytes) that names the staged state chunks, the authority
+  delegation and the authority's staged Commit output by digest. Same-epoch
+  send/receive ratchets and epoch-changing commits both use old-state-digest
+  compare-and-swap;
 - a durable single-authority room ledger. Every founding/successor membership
   carries the recorded Endpoint's bounded signature over the exact digest;
   transfer is one adjacent room epoch signed by the old delegated Endpoint and
@@ -111,11 +120,14 @@ RFC 9420 KeyPackage against suite `0x0001` and the credential's leaf key. A
 syntactically valid MLS credential or KeyPackage is never TOS authority by
 itself.
 
-Production callers use `eventlog.MLSController`: `CreateFounder`/`Join` verify
-the actual OpenMLS group ID and epoch before installation; `Commit` derives and
-validates the randomized wire Commit reference; `Apply` checks it; and
-`Seal`/`Open` durably CAS the same-epoch ratchet before exposing ciphertext or
-plaintext. Direct `MLSLedger` methods remain lower-level persistence primitives.
+Production callers use `eventlog.RoomMLSController`: `CreateRoom`/`Join`
+verify the actual OpenMLS group ID and epoch before installation; `Commit`
+derives and validates the randomized wire Commit reference and publishes its
+output with the same write that advances the room; `Apply` checks the
+reference and the committer's leaf; and `Seal`/`Open` durably CAS the
+same-epoch ratchet before exposing ciphertext or plaintext, `Open` only for
+the expected sender. Direct `RoomMLSLedger` methods remain lower-level
+persistence primitives.
 Relays may deliver these bytes, but Relay order never chooses a commit.
 
 `group.ValidatePrivateRoomCapacity` enforces the stable-state resource shape.

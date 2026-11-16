@@ -24,6 +24,24 @@ const MAX_KEY: usize = 64 * 1024;
 const MAX_VALUE: usize = 512 * 1024;
 const MAX_IDENTITY: usize = 4096;
 const MAX_MESSAGE: usize = 1024 * 1024;
+// Application messages sealed just before a Commit arrive after it, because
+// the authority's fan-out takes minutes. Two past epochs cover that window at
+// little forward-secrecy cost; anything older is reported as a gap.
+const MAX_PAST_EPOCHS: usize = 2;
+// The out-of-order tolerance is how many skipped generations each sender
+// ratchet keeps, in the current and each retained epoch; a message further
+// behind is a gap. It is what bounds the state: 31 other members x 8 keys x
+// 3 epochs stays well inside MAX_STATE at the relay room bound of 32 leaves.
+const OUT_OF_ORDER_TOLERANCE: u32 = 8;
+// The forward distance is how far ahead of a sender's ratchet a message may
+// be. Jumping ahead derives every skipped secret but keeps only the last
+// OUT_OF_ORDER_TOLERANCE of them, so it does not change the state bound; it
+// bounds the work one message can cost a receiver (1,000 ratchet steps).
+const MAXIMUM_FORWARD_DISTANCE: u32 = 1000;
+
+fn sender_ratchet() -> SenderRatchetConfiguration {
+    SenderRatchetConfiguration::new(OUT_OF_ORDER_TOLERANCE, MAXIMUM_FORWARD_DISTANCE)
+}
 
 #[derive(Default)]
 struct Provider {
@@ -106,6 +124,10 @@ struct Response {
     group_id: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     secret: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    sender_identity: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    epoch_authenticator: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     epoch: Option<u64>,
 }
@@ -238,6 +260,24 @@ fn group(provider: &Provider, snapshot: &Snapshot) -> Result<MlsGroup, String> {
         .ok_or("missing group state".into())
 }
 
+// member_identity returns the BasicCredential identity of a message sent by a
+// current group member. Commits and application messages from any other
+// sender type (external joiners, preconfigured senders) have no member leaf and
+// are refused, because a room accepts content only from members.
+fn member_identity(sender: &Sender, credential: &Credential) -> Result<Vec<u8>, String> {
+    if !matches!(sender, Sender::Member(_)) {
+        return Err("message sender is not a group member".into());
+    }
+    if credential.credential_type() != CredentialType::Basic {
+        return Err("unsupported sender credential".into());
+    }
+    let identity = credential.serialized_content();
+    if identity.is_empty() || identity.len() > MAX_IDENTITY {
+        return Err("invalid sender identity".into());
+    }
+    Ok(identity.to_vec())
+}
+
 fn handle(req: Request) -> Result<Response, String> {
     if req.schema != SCHEMA {
         return Err("unsupported request schema".into());
@@ -253,6 +293,7 @@ fn handle(req: Request) -> Result<Response, String> {
             let group = group(&provider, &snapshot)?;
             out.group_id = B64.encode(group.group_id().as_slice());
             out.epoch = Some(group.epoch().as_u64());
+            out.epoch_authenticator = B64.encode(group.epoch_authenticator().as_slice());
         }
         "export" => {
             if req.label.is_empty() || req.label.len() > 255 || req.length == 0 {
@@ -335,6 +376,8 @@ fn handle(req: Request) -> Result<Response, String> {
             let config = MlsGroupCreateConfig::builder()
                 .ciphersuite(SUITE)
                 .use_ratchet_tree_extension(true)
+                .max_past_epochs(MAX_PAST_EPOCHS)
+                .sender_ratchet_configuration(sender_ratchet())
                 .build();
             let group = MlsGroup::new_with_group_id(
                 &provider,
@@ -431,6 +474,8 @@ fn handle(req: Request) -> Result<Response, String> {
             };
             let config = MlsGroupJoinConfig::builder()
                 .use_ratchet_tree_extension(true)
+                .max_past_epochs(MAX_PAST_EPOCHS)
+                .sender_ratchet_configuration(sender_ratchet())
                 .build();
             let group = StagedWelcome::new_from_welcome(&provider, &config, welcome, None)
                 .map_err(|_| "Welcome processing failed")?
@@ -452,6 +497,7 @@ fn handle(req: Request) -> Result<Response, String> {
                         .map_err(|_| "message is not an MLS protocol message")?,
                 )
                 .map_err(|_| "commit processing failed")?;
+            let committer = member_identity(processed.sender(), processed.credential())?;
             let staged = match processed.into_content() {
                 ProcessedMessageContent::StagedCommitMessage(v) => v,
                 _ => return Err("message is not a commit".into()),
@@ -460,6 +506,7 @@ fn handle(req: Request) -> Result<Response, String> {
                 .merge_staged_commit(&provider, *staged)
                 .map_err(|_| "commit merge failed")?;
             let public = decode("signer public key", &snapshot.signer_public, 64)?;
+            out.sender_identity = B64.encode(committer);
             out.epoch = Some(group.epoch().as_u64());
             out.state = save_snapshot(&provider, &public, Some(group.group_id()))?;
         }
@@ -503,12 +550,14 @@ fn handle(req: Request) -> Result<Response, String> {
             let processed = group
                 .process_message(&provider, protocol)
                 .map_err(|_| "message decryption failed")?;
+            let sender = member_identity(processed.sender(), processed.credential())?;
             let plaintext = match processed.into_content() {
                 ProcessedMessageContent::ApplicationMessage(v) => v.into_bytes(),
                 _ => return Err("message is not application data".into()),
             };
             let public = decode("signer public key", &snapshot.signer_public, 64)?;
             out.plaintext = B64.encode(plaintext);
+            out.sender_identity = B64.encode(sender);
             out.epoch = Some(group.epoch().as_u64());
             out.state = save_snapshot(&provider, &public, Some(group.group_id()))?;
         }
@@ -605,6 +654,246 @@ mod tests {
         wrong_aad.aad = B64.encode(b"different event");
         wrong_aad.message = sealed.message;
         assert!(handle(wrong_aad).is_err());
+    }
+
+    fn state_len(encoded: &str) -> usize {
+        B64.decode(encoded).unwrap().len()
+    }
+
+    fn seal_as(state: &str, aad: &[u8], text: &[u8]) -> Response {
+        let mut seal = request("seal");
+        seal.state = state.to_string();
+        seal.aad = B64.encode(aad);
+        seal.plaintext = B64.encode(text);
+        handle(seal).unwrap()
+    }
+
+    fn open_as(state: &str, aad: &[u8], message: &str) -> Result<Response, String> {
+        let mut open = request("open");
+        open.state = state.to_string();
+        open.aad = B64.encode(aad);
+        open.message = message.to_string();
+        handle(open)
+    }
+
+    fn apply_as(state: &str, commit: &str) -> Response {
+        let mut apply = request("apply");
+        apply.state = state.to_string();
+        apply.message = commit.to_string();
+        handle(apply).unwrap()
+    }
+
+    // Builds a group of `leaves` leaves in Add Commits of at most 32 (the Go
+    // adapter caps one Commit at 32 leaf operations) and returns every
+    // member's state, founder first.
+    fn full_group(leaves: usize) -> Vec<String> {
+        let names: Vec<Vec<u8>> = (0..leaves)
+            .map(|i| format!("member-{i:02}").into_bytes())
+            .collect();
+        let ids: Vec<Response> = names.iter().map(|n| identity(n)).collect();
+        let mut create = request("create");
+        create.state = ids[0].state.clone();
+        create.key_package = ids[0].key_package.clone();
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let mut states = vec![handle(create).unwrap().state];
+        let batches: Vec<std::ops::Range<usize>> = (1..leaves)
+            .step_by(32)
+            .map(|start| start..(start + 32).min(leaves))
+            .collect();
+        for batch in batches {
+            let mut add = request("commit");
+            add.state = states[0].clone();
+            add.key_packages = batch.clone().map(|i| ids[i].key_package.clone()).collect();
+            let added = handle(add).unwrap();
+            for existing in 1..states.len() {
+                states[existing] = apply_as(&states[existing], &added.commit).state;
+            }
+            states[0] = added.state;
+            for i in batch {
+                let mut join = request("join");
+                join.state = ids[i].state.clone();
+                join.welcome = added.welcome.clone();
+                states.push(handle(join).unwrap().state);
+            }
+        }
+        states
+    }
+
+    fn refresh_all(states: &mut [String]) -> String {
+        let mut refresh = request("refresh");
+        refresh.state = states[0].clone();
+        let refreshed = handle(refresh).unwrap();
+        for state in states.iter_mut().skip(1) {
+            *state = apply_as(state, &refreshed.commit).state;
+        }
+        states[0] = refreshed.state;
+        refreshed.commit
+    }
+
+    // Runs `epochs` epochs of traffic. In each, every member but the observer
+    // seals `per_sender` messages; the observer opens all of them in order, or
+    // only the last when `skip` is set, which leaves `per_sender - 1` skipped
+    // keys in that sender's ratchet. Returns the largest state seen and the
+    // observer's final state.
+    fn traffic(
+        states: &mut [String],
+        epochs: usize,
+        per_sender: usize,
+        skip: bool,
+    ) -> Result<usize, String> {
+        let observer = 1usize;
+        let aad = b"room binding";
+        let mut largest = 0usize;
+        for _ in 0..epochs {
+            for sender in 0..states.len() {
+                if sender == observer {
+                    continue;
+                }
+                for index in 0..per_sender {
+                    let sealed = seal_as(&states[sender], aad, b"m");
+                    states[sender] = sealed.state;
+                    if !skip || index + 1 == per_sender {
+                        states[observer] = open_as(&states[observer], aad, &sealed.message)?.state;
+                    }
+                }
+            }
+            for state in states.iter() {
+                largest = largest.max(state_len(state));
+            }
+            refresh_all(states);
+        }
+        Ok(largest)
+    }
+
+    // The relay room bound is 32 Agents with one device each: 32 leaves.
+    const RELAY_ROOM_LEAVES: usize = 32;
+
+    // The worst case the configuration allows at the relay room bound: in the
+    // current and both retained epochs every other member's ratchet holds the
+    // most skipped keys the tolerance keeps. It must fit the 512 KiB state
+    // bound, two 262,144-byte journal chunks, with at least 20 % headroom.
+    #[test]
+    fn worst_case_state_fits_at_the_relay_room_bound() {
+        let mut in_order = full_group(RELAY_ROOM_LEAVES);
+        let base = traffic(&mut in_order, MAX_PAST_EPOCHS + 2, 1, false).unwrap();
+        let mut skipping = full_group(RELAY_ROOM_LEAVES);
+        let per_sender = OUT_OF_ORDER_TOLERANCE as usize + 1;
+        let worst = traffic(&mut skipping, MAX_PAST_EPOCHS + 2, per_sender, true).unwrap();
+        eprintln!("32 leaves: in-order {base} bytes, maximal skipped keys {worst} bytes, bound {MAX_STATE}");
+        assert!(
+            worst <= MAX_STATE * 4 / 5,
+            "{worst} leaves less than 20 % of {MAX_STATE}"
+        );
+        assert!(worst.div_ceil(262_144) <= 2);
+    }
+
+    // A sender far ahead (one message just inside the forward distance) costs
+    // the receiver no more stored keys than the tolerance allows; one beyond
+    // it is refused.
+    #[test]
+    fn forward_jump_keeps_only_the_tolerance() {
+        let aad = b"room binding";
+        let growth = |skipped: usize| -> (usize, Result<Response, String>) {
+            let states = full_group(4);
+            let mut sender = states[2].clone();
+            let mut last = String::new();
+            for _ in 0..=skipped {
+                let sealed = seal_as(&sender, aad, b"m");
+                sender = sealed.state;
+                last = sealed.message;
+            }
+            (state_len(&states[1]), open_as(&states[1], aad, &last))
+        };
+        let (before, jumped) = growth(MAXIMUM_FORWARD_DISTANCE as usize);
+        let jump_growth = state_len(&jumped.unwrap().state) - before;
+        let (before, skipped) = growth(OUT_OF_ORDER_TOLERANCE as usize);
+        let tolerance_growth = state_len(&skipped.unwrap().state) - before;
+        eprintln!("forward jump of {MAXIMUM_FORWARD_DISTANCE}: +{jump_growth} bytes; skip of {OUT_OF_ORDER_TOLERANCE}: +{tolerance_growth} bytes");
+        assert!(
+            jump_growth <= tolerance_growth + 64,
+            "{jump_growth} > {tolerance_growth}"
+        );
+        let (_, beyond) = growth(MAXIMUM_FORWARD_DISTANCE as usize + 1);
+        assert!(beyond.is_err());
+    }
+
+    // The driver refuses an operation whose state would exceed the bound
+    // rather than return a state the journal cannot hold. The profile allows
+    // 64 leaves (several devices per Agent, not carried over the relay), and
+    // there the same maximal skipping exceeds 512 KiB.
+    #[test]
+    fn state_over_bound_fails_closed() {
+        let mut states = full_group(64);
+        let per_sender = OUT_OF_ORDER_TOLERANCE as usize + 1;
+        let error = traffic(&mut states, MAX_PAST_EPOCHS + 1, per_sender, true).unwrap_err();
+        assert_eq!(error, "state snapshot exceeds bound");
+    }
+
+    #[test]
+    fn past_epochs_open_and_report_the_sender() {
+        let alice = identity(b"alice-authority");
+        let bob = identity(b"bob-member");
+        let mut create = request("create");
+        create.state = alice.state;
+        create.key_package = alice.key_package;
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let founder = handle(create).unwrap();
+        let mut add = request("commit");
+        add.state = founder.state;
+        add.key_packages = vec![bob.key_package];
+        let added = handle(add).unwrap();
+        let mut join = request("join");
+        join.state = bob.state;
+        join.welcome = added.welcome;
+        let mut states = vec![added.state, handle(join).unwrap().state];
+
+        let authenticators = |states: &[String]| -> Vec<String> {
+            states
+                .iter()
+                .map(|state| {
+                    let mut inspect = request("inspect");
+                    inspect.state = state.clone();
+                    handle(inspect).unwrap().epoch_authenticator
+                })
+                .collect()
+        };
+        let first = authenticators(&states);
+        assert!(!first[0].is_empty());
+        assert_eq!(first[0], first[1]);
+
+        let aad = b"room binding";
+        let sealed = seal_as(&states[1], aad, b"before the commits");
+        states[1] = sealed.state;
+        let mut refresh = request("refresh");
+        refresh.state = states[0].clone();
+        let refreshed = handle(refresh).unwrap();
+        let applied = apply_as(&states[1], &refreshed.commit);
+        assert_eq!(
+            B64.decode(&applied.sender_identity).unwrap(),
+            b"alice-authority"
+        );
+        states = vec![refreshed.state, applied.state];
+        let second = authenticators(&states);
+        assert_eq!(second[0], second[1]);
+        assert_ne!(first[0], second[0]);
+        refresh_all(&mut states);
+
+        // Two epochs later the message is still opened, and names its sender.
+        let opened = open_as(&states[0], aad, &sealed.message).unwrap();
+        assert_eq!(
+            B64.decode(&opened.plaintext).unwrap(),
+            b"before the commits"
+        );
+        assert_eq!(B64.decode(&opened.sender_identity).unwrap(), b"bob-member");
+
+        // A third epoch is beyond max_past_epochs and fails.
+        let late = seal_as(&states[1], aad, b"sealed at the older epoch");
+        let state_before = states[0].clone();
+        refresh_all(&mut states);
+        refresh_all(&mut states);
+        refresh_all(&mut states);
+        assert!(open_as(&states[0], aad, &late.message).is_err());
+        assert!(open_as(&state_before, aad, &late.message).is_ok());
     }
 
     #[test]

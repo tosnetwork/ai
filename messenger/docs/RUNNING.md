@@ -630,3 +630,33 @@ rather than a maintenance interval later.
 Damaged records are reported and kept. A corrupt claim fails closed and blocks
 its own event; deleting corrupt files would turn damaging a record into
 replaying it.
+
+### A staged room output that blocks private rooms
+
+A private room's Commit output is staged under `room-staged/` before the
+room's fused record (`room-mls/<room>.json`) is written, and published as
+outbox heads right after. If a staged output cannot be read, no private room
+commits or answers a repeated Commit until it is resolved: the file names no
+room, and it may be the output of a Commit a room already accepted, which
+must be published before anything later. This is fail-closed by design.
+
+The daemon names each such file, by full path, on every maintenance pass:
+
+```text
+unresolved staged room output blocks private rooms: <path>; inspect it; remove it only if no room's fused record ...
+```
+
+and a refused room operation carries the same path. To resolve it:
+
+1. Stop the daemon and keep a copy of the file.
+2. Its file name without `.json` is the hex of the Commit reference. Look for
+   `"accepted_commit_ref":"sha256:<that hex>"` in `room-mls/*.json`.
+3. If no fused record names it, nothing was accepted from it: remove the file
+   and restart. Collection then deletes the chunks only it named.
+4. If a fused record names it, do not remove it. The room accepted that
+   Commit, and its output must reach the members; restore the file from a
+   backup of the state directory or treat the room as lost (a new room).
+
+A state directory that still holds a non-empty `mls/` directory was written by
+the earlier two-write MLS ledger; the daemon refuses it ("legacy MLS ledger
+present; reset the journal"). There is no migration before launch.

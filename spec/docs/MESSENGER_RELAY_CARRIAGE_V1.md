@@ -11,6 +11,8 @@ to `tosnetwork/openfox` `main` `edd88e11`.
 
 **Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
 
+**Errata (M-R2 journal implementation).** The MLS state bound is derived from the worst case the driver configuration allows at the relay room bound of 32 leaves, not from in-order traffic at 64: with an out-of-order tolerance of 32, 63 senders skipping 7 generations in each retained epoch exceed 512 KiB at 64 leaves. The tolerance is therefore 8 and the forward distance 1,000, and the measured worst case at 32 leaves is 272,968 bytes (sections 8 item 17, 9.2 item 2, 11.3). The fused record names the memberships of the two earlier room epochs by digest, because three member lists do not fit its 8,192 bytes; those content-addressed membership records are named by the fused record and collected with the other staged records (sections 9.2 item 4, 11.3, 11.7).
+
 MUST, MUST NOT, SHOULD and MAY are normative. Citations are `path:line` in this
 repository at the commit this document lands on, and `openfox path:line` in
 `tosnetwork/openfox` `main` `3e26dc24`.
@@ -981,8 +983,12 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
 16. **Renewal among non-contacts (live, 11.2).** With test-shortened card and
     descriptor lifetimes, B and C (no contacts) keep exchanging room messages
     across several expiries, renewed only by kind-3 part 0.
-17. **Driver bounds (unit).** The 512 KiB state bound holds at 64 leaves with
-    `max_past_epochs(2)` and fits 2 state chunks; a maximal fused record
+17. **Driver bounds (unit).** The 512 KiB state bound holds, with at least
+    20 % headroom, for the worst case at 32 leaves with `max_past_epochs(2)`:
+    every other member's ratchet holding the 8 skipped keys the tolerance keeps
+    in the current and both retained epochs, and a sender jumping the 1,000
+    generation forward distance; it fits 2 state chunks, and an operation whose
+    state would exceed the bound is refused; a maximal fused record
     (32 members, maximal authorization and IDs) encodes within its 8,192-byte
     cap; a record over the cap is refused on write and on read; a chunk or
     state digest mismatch fails the read closed; garbage collection keeps an
@@ -1141,12 +1147,16 @@ seal already carry any frame; nothing new is resolved on chain).
    6-part object, each refusal of section 4, and the room ack (with the
    epoch authenticator); `internal/canon` domains for the room object, room
    AAD and room ack.
-2. `rust/openmls-driver` and `pkg/group`: `max_past_epochs(2)` and an
-   out-of-order tolerance of 32 in both group configs (`src/main.rs:335-338`,
-   `:432-434`); `open` and `apply` return the sender's credential identity
-   (`:443-465`, `:484-520`) and `inspect` the epoch authenticator; the Go
-   `Driver` gains those results; a vector test of the 512 KiB state bound at
-   64 leaves with `max_past_epochs(2)`.
+2. `rust/openmls-driver` and `pkg/group`: `max_past_epochs(2)`, an
+   out-of-order tolerance of 8 and a maximum forward distance of 1,000 in
+   both group configs (`src/main.rs:335-338`, `:432-434`). A message more
+   than 8 generations behind its sender's ratchet is a gap (11.3). A message
+   ahead derives the skipped secrets but keeps only the last 8, so the
+   forward distance bounds the work per message, not the state. `open` and
+   `apply` return the sender's credential identity (`:443-465`, `:484-520`)
+   and `inspect` the epoch authenticator; the Go `Driver` gains those
+   results; a vector test of the 512 KiB state bound for the worst case at
+   32 leaves with `max_past_epochs(2)` (item 17).
 3. `pkg/room`: a relay-route authorization check (11.3: signature against
    the delegation as finalized now, window issued + retention + skew);
    `pkg/directory`: the `CheckPeer` pin taken from a member's MLS leaf
@@ -1154,8 +1164,9 @@ seal already carry any frame; nothing new is resolved on chain).
    beside the session pin of 2.5.
 4. `pkg/eventlog`: the fused room and MLS record (≤ 8,192 bytes, digests
    only) with exact-repeat no-op (11.3, replacing the two writes for MLS
-   rooms) and its bound test; staged MLS state chunks (≤ 2 of 262,144 bytes)
-   and delegation records by digest; a room outbox of chunk records, with
+   rooms) and its bound test; staged MLS state chunks (≤ 2 of 262,144 bytes),
+   delegation records and the memberships of the two earlier room epochs by
+   digest; a room outbox of chunk records, with
    the Commit, Welcome and an Add's rosters staged under the `CommitRef`
    before the fused record and queues rebuilt as (Commit or Welcome, then
    roster) on restart (11.7); the fused record's
@@ -1531,16 +1542,30 @@ first as content-addressed records:
   chunks, named by the state digest;
 - the authority delegation (≤ 65,536 bytes,
   `directory/file_delegations.go:13`) as one record named by its digest;
+- the memberships of the two earlier retained room epochs, one record each
+  named by its membership digest (three member lists would not fit the
+  record's cap);
 - Commit, Welcome and roster objects as the chunk records of 11.7.
 
+The state bound is set by the worst case the driver configuration allows at
+the relay room bound of 32 leaves: every other member's ratchet holding the 8
+skipped keys the out-of-order tolerance keeps, in the current and both
+retained epochs. Measured, that is 272,968 bytes (144,600 with in-order
+traffic), 48 % under 524,288. A sender far ahead within the 1,000-generation
+forward distance stores no more than the tolerance (item 17). The profile's
+64-leaf bound (several devices per Agent, not carried over the relay, D3) can
+exceed 512 KiB under the same skipping; the driver then refuses the operation
+rather than return a state the journal cannot hold.
+
 The fused record holds only: room ID, room and MLS epochs, membership digest
-and the ≤ 32 member IDs, the authority's Agent and Endpoint, the
+and the ≤ 32 member IDs, the digests of the two earlier retained
+memberships, the authority's Agent and Endpoint, the
 MembershipAuthorization, the prior and accepted `CommitRef`, the state digest
 and its chunk digests, the delegation digest, the consumed KeyPackage ref and
 the processed Welcome ref (one digest each, today in `eventlog/mls.go:45-46`,
 checked by `keyPackageConsumed` `:336-358` and the replay refusal `:98`), and
 the epoch authenticators of the current and 2 previous epochs. Worst case
-about **5.2 KB** (2,336 bytes for 32 member IDs, about 900 for an
+about **5.2 KB**, measured 5,056 bytes (2,336 bytes for 32 member IDs, about 900 for an
 authorization with a maximal network ID, about 150 for the two refs, the rest
 digests and IDs, plus field names); the codec caps it at **8,192 bytes**,
 leaving 778,240 bytes (99 %) of the 768 KiB record bound
@@ -1785,11 +1810,12 @@ authority never queues a roster for E after a Commit for E + 1.
 **Garbage collection.** The roots are every fused record and every
 room-outbox head record: an older Commit stays re-depositable for up to
 7 days after the authority has moved on, and a roster or Commit whose fused
-record has been superseded is named only by its outbox head. A staged state, delegation or object chunk that no root names is
+record has been superseded is named only by its outbox head. A staged state, delegation, membership or object chunk that no root names is
 deleted at restart (nothing was published from it and the old state stands);
 the state chunks a successful fused write supersedes are deleted right after
-that write. Collection fails closed: if any root record is unreadable,
-nothing is deleted. The part store and the future-epoch buffer are separate
+that write. Collection fails closed: if any root record, or any staged
+Commit output that restart could not resolve, is unreadable, nothing is
+deleted. The part store and the future-epoch buffer are separate
 stores with their own bounds (section 4, 11.3).
 Idempotency keys are `idem_` + SHA-256 of (object
 digest, member, generation, part index), so a retry reuses the journaled

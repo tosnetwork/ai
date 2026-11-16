@@ -74,6 +74,25 @@ type ProvisioningDriver interface {
 type MLSStateInfo struct {
 	GroupID []byte
 	Epoch   uint64
+	// EpochAuthenticator is the RFC 9420 epoch_authenticator of Epoch. Two
+	// members holding the same value are in the same epoch of the same group;
+	// a room ack reports it so the authority sees a diverged member.
+	EpochAuthenticator []byte
+}
+
+// MLSEpochAuthenticatorBytes is the epoch authenticator length of suite 0x0001
+// (its hash length).
+const MLSEpochAuthenticatorBytes = 32
+
+// AttributedDriver is a Driver that also reports who produced a processed
+// handshake or application message: the BasicCredential identity of the
+// committing or sending member's leaf. A room receiver compares it with the
+// authenticated packet sender, so content sealed by one member cannot be
+// presented as another's.
+type AttributedDriver interface {
+	Driver
+	ApplyAttributed(opaqueState, commit []byte) (nextState, committerIdentity []byte, err error)
+	OpenAttributed(opaqueState, authenticatedData, privateMessage []byte) (nextState, plaintext, senderIdentity []byte, err error)
 }
 
 // StateInspector exposes only the public binding needed to keep an opaque
