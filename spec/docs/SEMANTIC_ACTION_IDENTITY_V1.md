@@ -446,7 +446,7 @@ Every implementation must also pass generated entry-specific vectors covering:
 - accepted private-content deletion uses `content.delete`, and conflicting
   manifest or retention-policy bytes cannot reuse the action identity.
 
-Phase 0 cannot exit until `tos-service-protocol` and a code-independent
+Phase 0 cannot exit until `protocol/` and a code-independent
 reference verifier consume the same registry data and reproduce every exact
 preimage, identity, mutation result, failure class, and execution-lineage
 decision.

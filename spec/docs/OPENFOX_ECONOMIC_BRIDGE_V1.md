@@ -56,7 +56,7 @@ not create a second marketplace, ledger, trust mode, or settlement protocol.
 ## Responsibilities
 
 OpenFox owns local intent, task scheduling, execution, artifacts, and owner
-policy. `tos-service-protocol`/`tos-service-gateway` owns finalized-state
+policy. `protocol/`/`gateway/` owns finalized-state
 resolution, Quote preimage validation, relay, and escrow construction. TOS
 contracts own canonical Agent, Capability, Accepted Quote, escrow, Receipt, and
 settlement state.

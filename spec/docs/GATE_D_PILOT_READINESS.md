@@ -64,7 +64,7 @@ shown as shape reference only — **do not reuse them**.
 |---|---|---|
 | network_id | public network id | `tos-local-gate-c-20260814` |
 | genesis_root_hash / genesis_file_hash | of the public network | `sha256:fbd138d3…e37cfc2c` / `sha256:bdd806fc…23e0683d8` |
-| release commits (tos, tos-service-protocol, tos-service-spec) | exact reviewed release SHAs | pin at pilot time |
+| release commits (tos, ai) | exact reviewed release SHAs | pin at pilot time |
 | Capability id | provider re-registers → new derived id | `cap_c17458247d4699cd745d76dd3d20df7dafd56cbff23e85956af1259b77d9e657` |
 | tUSDT master + wallet-code hash | stablecoin deployed on public net | `EQDKESAKfUo8aCKvB38DUTGGhYT0D0j7G3t7GImuUfmSamgP` |
 | escrow address | derived from the new Accepted Quote | generated during pilot |

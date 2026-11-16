@@ -7,9 +7,9 @@ incubation design subject to the existing expansion gate.
 **Date:** 2026-11-14  
 **Specification baseline reviewed:** `3d94e459d55c3d8f56c56c0c299df716f4378b14`  
 **Implementation baseline reconciled (`main`):** `tos`
-`5af405dcb1f523be0ff3b812e9f6945275c4945b`, `tos-service-protocol`
-`62f5b740bc7778b809ad136fca7fc4f222a7be03`, `tos-service-gateway`
-`7cefe92d0c9075a69d12eaa4964973e2e7ed0323`, `tos-ai`
+`5af405dcb1f523be0ff3b812e9f6945275c4945b`, `protocol/`
+`62f5b740bc7778b809ad136fca7fc4f222a7be03`, `gateway/`
+`7cefe92d0c9075a69d12eaa4964973e2e7ed0323`, `execution/`
 `b41e7496d26e64db5cee114c6c5c320aa2030278`, OpenFox
 `6eb93009d24e9e390f1659871ecac07541abea82`. Statements below about current
 behavior refer to these commits; reconciliation is source reading, not
@@ -105,18 +105,18 @@ Reuse these foundations rather than creating parallel authority:
 | Provider publication SDK | [Provider SDK](../../protocol/docs/provider-sdk.md) | Reuse prepare, external signing, exact submission, and finalized resolution. |
 | Provider onboarding | [Gate E provider onboarding](GATE_E_PROVIDER_ONBOARDING.md) | Turn the public procedure into a repeatable operator workflow. |
 | Native-TOS purchase and settlement | [Settlement](SETTLEMENT.md) | Use Service Actor `call`, `respond`, and refund paths, not the retired stablecoin escrow. |
-| Local execution and provider deployment | [TOS AI foundation](../../execution/README.md) and [deployment template](../../execution/deploy/provider/README.md) | Reuse container isolation and bounded resources (`pkg/executor`), the single-owner at-most-once job journal (`pkg/softwarework`), content-addressed artifacts (`pkg/artifactstore`), and finalized pending-request admission (`pkg/railgate`). Custody separation is a documented deployment boundary; `tos-ai` itself holds no signer. |
-| Provider runtime loop and buyer composition | OpenFox `pkg/servicebridge` | Reuse the existing admit/execute/respond/redeliver provider loop (which drives `tos-ai` and signs through pinned `tosctl`) and the policy-gated Service Actor buyer flow rather than building a parallel runtime. |
-| Discovery and alternative delivery paths | [Gateway discovery](GATEWAY_DISCOVERY_V1.md) (`tos-service-gateway`, `tos-service-protocol/pkg/capabilitycatalog`) and [federation](GATEWAY_FEDERATION_V1.md) (`tos-service-protocol/pkg/gatewayfederation`; the Gateway currently serves only its well-known descriptor) | Keep catalogs and routing replaceable and non-authoritative. |
+| Local execution and provider deployment | [TOS AI foundation](../../execution/README.md) and [deployment template](../../execution/deploy/provider/README.md) | Reuse container isolation and bounded resources (`pkg/executor`), the single-owner at-most-once job journal (`pkg/softwarework`), content-addressed artifacts (`pkg/artifactstore`), and finalized pending-request admission (`pkg/railgate`). Custody separation is a documented deployment boundary; `execution/` itself holds no signer. |
+| Provider runtime loop and buyer composition | OpenFox `pkg/servicebridge` | Reuse the existing admit/execute/respond/redeliver provider loop (which drives `execution/` and signs through pinned `tosctl`) and the policy-gated Service Actor buyer flow rather than building a parallel runtime. |
+| Discovery and alternative delivery paths | [Gateway discovery](GATEWAY_DISCOVERY_V1.md) (`gateway/`, `protocol/pkg/capabilitycatalog`) and [federation](GATEWAY_FEDERATION_V1.md) (`protocol/pkg/gatewayfederation`; the Gateway currently serves only its well-known descriptor) | Keep catalogs and routing replaceable and non-authoritative. |
 
 Source presence, historical tests, and current-domain product acceptance are
-separate. The `tos-ai` documentation records removal of old inference and
+separate. The `execution/` documentation records removal of old inference and
 stablecoin-escrow-bound transport surfaces. Neither their old documentation nor
 an archived successful run proves a current inference, A2A, or MCP path works.
 No model adapter, A2A binding, or MCP binding is currently wired to the Service
 Actor rail. Conversely, current-rail pending-request admission does exist
-(`tos-ai/pkg/railgate`, composed by OpenFox `pkg/servicebridge`), although the
-`tos-ai` README still says such a gate "is not provided here" and its own
+(`execution/pkg/railgate`, composed by OpenFox `pkg/servicebridge`), although the
+`execution/` README still says such a gate "is not provided here" and its own
 `cmd/software-work-execute` does not use it. The first implementation task must
 reconcile current code, documentation, release hashes, and executable evidence
 for the exact Service Actor path. A component's presence must not be used to
@@ -393,7 +393,7 @@ The UI and documentation must disclose this trust boundary before purchase.
 Enforce finite CPU, RAM, GPU/VRAM, concurrency, queue, context/input, output,
 wall-clock, disk, artifact, network, and retention limits appropriate to the
 backend. GPU visibility must follow operator-approved device assignments; a
-claim of isolation requires backend-specific evidence. Current `tos-ai` assigns
+claim of isolation requires backend-specific evidence. Current `execution/` assigns
 GPUs through operator-fixed CDI device mappings with exclusive leases and
 enforces a device count only; it has no per-job VRAM limit (its resource guard
 checks host-level VRAM capacity, not per-job use). Run no unbounded queue
@@ -410,7 +410,7 @@ One semantic purchase must map to one durable execution claim across direct
 calls and all enabled adapters. Persist the canonical actor/request and Quote
 identity, exact input binding, execution identity, and state transitions. Use a
 process-independent atomic claim when several workers share the same service.
-The current `tos-ai/pkg/softwarework` journal is durable and crash-safe but is
+The current `execution/pkg/softwarework` journal is durable and crash-safe but is
 owned by one process per directory (an exclusive lock makes a second process
 fail rather than share claims), and the reference deployment uses a per-job
 state directory; a shared multi-worker claim store remains to be built.
@@ -642,14 +642,14 @@ preview of actor, attestor, terms and costs with restartable publication
 
 | Work package | Primary repository | Exists at baseline | Remaining deliverable |
 |---|---|---|---|
-| WP-01: current-rail inventory | `tos-service-spec`, with all implementers | Source-level reconciliation recorded in this document. | Executable evidence matrix bound to exact commits and release hashes; fix stale component docs (for example the `tos-ai` README gate statement) without inflating gate status. |
-| WP-02: onboarding and service publication | `tos-service-protocol` | External-signing prepare/apply CLI (`cmd/tos-service-provider-publish`), exact manifest publication (`PublishManifest`), finalized-state check, no private-key option. | Persisted publication state for restart (PRV-04), pre-signing preview of actor/attestor/terms/costs, and a clean-room operator guide. |
-| WP-03: bounded provider execution | `tos-ai` (execution) and OpenFox `pkg/servicebridge` (provider loop) | Container executor with digest pinning and resource limits, single-owner job journal, artifact store, `pkg/railgate` admission, OpenFox admit/execute/respond/redeliver loop. | Shared multi-worker execution claim, artifact retention and deletion, `railgate` use in `tos-ai`'s own CLI, independent review, per-job VRAM limits where GPUs are offered; approved model adapters belong to WP-08. |
-| WP-04: discovery and public interfaces | `tos-service-gateway`, `tos-service-protocol` | Derived catalog (`capabilitycatalog`), actor index and verified offers (`serviceactorindex`, `cmd/tos-service-discovery`), manifest retrieval and federation package. | Harden the public Gateway: its Connect handlers currently have no request-body cap or rate limit, only the server's 30 s read timeout, despite an advertised 1 MiB bound (the Capability Carrier has both a body cap and a rate limit; the Intent Carrier has body caps only). |
+| WP-01: current-rail inventory | `spec/`, with all implementers | Source-level reconciliation recorded in this document. | Executable evidence matrix bound to exact commits and release hashes; fix stale component docs (for example the `execution/` README gate statement) without inflating gate status. |
+| WP-02: onboarding and service publication | `protocol/` | External-signing prepare/apply CLI (`cmd/tos-service-provider-publish`), exact manifest publication (`PublishManifest`), finalized-state check, no private-key option. | Persisted publication state for restart (PRV-04), pre-signing preview of actor/attestor/terms/costs, and a clean-room operator guide. |
+| WP-03: bounded provider execution | `execution/` (execution) and OpenFox `pkg/servicebridge` (provider loop) | Container executor with digest pinning and resource limits, single-owner job journal, artifact store, `pkg/railgate` admission, OpenFox admit/execute/respond/redeliver loop. | Shared multi-worker execution claim, artifact retention and deletion, `railgate` use in `execution/`'s own CLI, independent review, per-job VRAM limits where GPUs are offered; approved model adapters belong to WP-08. |
+| WP-04: discovery and public interfaces | `gateway/`, `protocol/` | Derived catalog (`capabilitycatalog`), actor index and verified offers (`serviceactorindex`, `cmd/tos-service-discovery`), manifest retrieval and federation package. | Harden the public Gateway: its Connect handlers currently have no request-body cap or rate limit, only the server's 30 s read timeout, despite an advertised 1 MiB bound (the Capability Carrier has both a body cap and a rate limit; the Intent Carrier has body caps only). |
 | WP-05: custody and contract gaps | `tos` / `tosctl` | Registry, wallet, and Service Actor `tosctl` commands. | Change contracts only for a demonstrated invariant gap with separate review and vectors. |
-| WP-06: buyer/runtime composition | `tos-service-protocol` Buyer SDK and OpenFox | Single `call` with re-verified terms and attestor binding, crash-safe buyer journal that never re-sends an ambiguous call, rolling-window budgets, OpenFox owner confirmation and refund recovery. | One purchase identity across more than the Agent Packet transport. |
-| WP-07: independent commercial acceptance | `tos-service-spec` evidence plus participating repositories | Current-domain paid execution, refund, withdrawal, and independent reconstruction under the existing roadmap. |
-| WP-08: inference expansion | `tos-service-spec`, then `tos-ai` and protocol/adapters | New inference profile, canonical vectors, at least one reviewed backend, and fresh acceptance; locked until expansion eligibility. |
+| WP-06: buyer/runtime composition | `protocol/` Buyer SDK and OpenFox | Single `call` with re-verified terms and attestor binding, crash-safe buyer journal that never re-sends an ambiguous call, rolling-window budgets, OpenFox owner confirmation and refund recovery. | One purchase identity across more than the Agent Packet transport. |
+| WP-07: independent commercial acceptance | `spec/` evidence plus participating repositories | Current-domain paid execution, refund, withdrawal, and independent reconstruction under the existing roadmap. |
+| WP-08: inference expansion | `spec/`, then `execution/` and protocol/adapters | New inference profile, canonical vectors, at least one reviewed backend, and fresh acceptance; locked until expansion eligibility. |
 
 WP-01 through WP-07 complete and package the existing commercial direction.
 WP-08 must not delay its acceptance. None of these work packages requires an

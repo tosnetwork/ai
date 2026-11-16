@@ -78,27 +78,27 @@ were produced under `tos_service_v1`.
 
 A gate is complete only when every delivery item and its acceptance condition
 are complete. The final 2026-08-14 independent Gate B review evaluated
-`tos-service-spec` commit `e72bab245a47b0f87a82977629cc03b1dfc64995`, `tos` commit
-`a787cb02dd6bc386be053ab233d0581cc1a14ef3`, and `tos-service-protocol` commit
+`spec/` commit `e72bab245a47b0f87a82977629cc03b1dfc64995`, `tos` commit
+`a787cb02dd6bc386be053ab233d0581cc1a14ef3`, and `protocol/` commit
 `7a21c070c1160fc0a4278e1a086c0682eb2d3d31`. It found no P0, P1, or P2,
 confirmed the chain-time recovery remediation and crash-safe relay journal, and
 independently reproduced the complete Native Registry TVM lifecycle matrix.
 Gate C deployment evidence must continue to bind exact reviewed commits and
 release hashes.
 
-The initial Gate C deployment record is published by `tos-service-spec` commit
+The initial Gate C deployment record is published by `spec/` commit
 `7a6cc02360e4cc8c2d95f80d433704cd72b0dc32`. Persistent validator JSON-RPC
 configuration is in `tos` commit
 `145bf7de195ac6105c630510ab51912f4b9e92ca`; the production quorum checker,
 live-node transaction response compatibility, and diagnostic-only quorum error
-detail are in `tos-service-protocol` commit
+detail are in `protocol/` commit
 `6bb42b8968d4bbc374a89b7b61ea2c0e958d91ca`. These operational additions do
 not change the frozen Registry BOC, action encoding, authorization, state
 machine, or quorum decision rule reviewed at Gate B.
 
-The pre-escrow Gate D design and test-evidence baseline is `tos-service-spec` commit
+The pre-escrow Gate D design and test-evidence baseline is `spec/` commit
 `11464a84d0dec985f22636a8a94b3770c0cc2418`, `tos` commit
-`dc71dc8712f58e3d11ed973f4980ff6ae71de845`, and `tos-service-protocol` commit
+`dc71dc8712f58e3d11ed973f4980ff6ae71de845`, and `protocol/` commit
 `6bb42b8968d4bbc374a89b7b61ea2c0e958d91ca`. It freezes the first
 software-work manifest and Accepted Quote encodings, records the finalized
 Capability binding and test-only stablecoin deployment, and provides
@@ -107,8 +107,8 @@ Quote-acceptance, execution, Receipt, or settlement claim; the implementation
 status below supersedes that historical baseline and must be bound to new exact
 commit hashes before public deployment.
 
-The shared Gate E execution-admission implementation is `tos-service-protocol` commit
-`92d8d1f114f984c5a1348318f7859b564428a3b4` and `tos-ai` commit
+The shared Gate E execution-admission implementation is `protocol/` commit
+`92d8d1f114f984c5a1348318f7859b564428a3b4` and `execution/` commit
 `7456cc22c22cc5105c9fe5beac48a3513a91fb4c`. It adds canonical Accepted Quote
 decode, finalized escrow/Agent/Capability verification, one atomic durable
 purchase-intent record shared by transports, monotonic three-object finality
@@ -117,7 +117,7 @@ implementation evidence, not the fresh external interoperability evidence
 required to accept Gate E.
 
 The production buyer funding boundary is `tos` commit
-`d9d725534cb1a9120b1e49854b360c01f043c22a` and `tos-service-protocol` commit
+`d9d725534cb1a9120b1e49854b360c01f043c22a` and `protocol/` commit
 `d1a845eb7808365a413106d075c7c6316be67e27`. The SDK validates one exact
 `tosctl`-signed stablecoin funding message before acquiring its one-way
 broadcast lease, then submits those same bytes without rebuilding or
@@ -128,7 +128,7 @@ proves that a `tosctl`-native V1R3 wc=0 buyer can fund the exact new escrow and
 reach three-vote finalized funded state; it is not the complete public buyer
 session and does not establish external independence.
 
-Finalized buyer asset resolution is implemented in `tos-service-protocol` commit
+Finalized buyer asset resolution is implemented in `protocol/` commit
 `57f6429f2a0dc21b3292de8a27fa5d3a26255dd4`. It derives the exact buyer wallet
 from the authenticated stablecoin master's wallet-code preimage and verifies
 both accounts, balance, ownership, network genesis, strict-majority finality,
@@ -136,7 +136,7 @@ and a durable monotonic checkpoint. The live three-node result is attached to
 the local Gate E buyer-funding record.
 
 Direct buyer-side Native resolution and the full live Buyer SDK revalidation
-are implemented in `tos-service-protocol` commit
+are implemented in `protocol/` commit
 `a18162af3df971af265bf101ae9d40396e3c1370`. The SDK reproduced the finalized
 Capability/manifest binding, Quote commitment, deterministic escrow, buyer
 stablecoin wallet, and funded amount from the three-node chain at checkpoint
@@ -149,7 +149,7 @@ The OpenFox autonomous orchestration implementation is recorded in
 OpenFox `8d52b817`, `42268bd3`, and `ab356fc1` add bounded observe-only
 finalized discovery and an opt-in policy-gated projection onto the existing
 authoritative buyer journal. OpenFox `129ec08d`/`d3a64104` and
-`tos-service-protocol` `284fc3a` pin autonomous `tosctl` executable identity,
+`protocol/` `284fc3a` pin autonomous `tosctl` executable identity,
 execute the opened descriptor, pass pinned configuration by descriptor, scrub
 ambient environment, and require production provider signer custody. Protocol
 `3809bb7` supplies the reviewed prepare/sign/apply Capability and immutable
@@ -158,23 +158,23 @@ to be operator-owned. These close local implementation items only;
 the external Gate D/E parties and finalized live settlement evidence remain
 mandatory.
 
-Gateway-local Capability search is defined in `tos-service-spec` commit
-`c3ed72086798275021e1a45964f3b7d6d9d3eb5c`, implemented in `tos-service-protocol`
-commit `f3223ed7f9ceca54fd03298ce60aabd666b1e76c`, and exposed by `tos-service-gateway` commit
+Gateway-local Capability search is defined in `spec/` commit
+`c3ed72086798275021e1a45964f3b7d6d9d3eb5c`, implemented in `protocol/`
+commit `f3223ed7f9ceca54fd03298ce60aabd666b1e76c`, and exposed by `gateway/` commit
 `2981f6484e5310d2176717649cf41c50828c99ab`. Every result freshly resolves finalized Registry state and keeps its
 chain-selected version and manifest digest separate from explicitly local
 manifest metadata and match score. Pagination is Capability-ID ordered, so no
 gateway ranking becomes a cursor or protocol fact.
 
 The public-interface discovery example is implemented by
-`tos-service-protocol/cmd/tos-service-discovery` at commit
+`protocol/cmd/tos-service-discovery` at commit
 `96bb82a3670270169650324a1c54397110b17e72`. It publishes, lists, searches,
 and retrieves manifests only through authenticated Connect methods, reads its
 credential from the environment, has no catalog-directory option, and is
 covered by the full race/vet/build suite. No operator database edit or hidden
 control service is part of the example.
 
-The shared A2A/MCP public listener boundary is implemented in `tos-ai` commit
+The shared A2A/MCP public listener boundary is implemented in `execution/` commit
 `97ef0cb31f598c298923f73b5959016603c54287`. The supported public constructors
 require TLS 1.3, a strong constant-time-checked bearer credential, protected
 certificate files, bounded request bodies/headers/concurrency/read time, and
@@ -182,7 +182,7 @@ default rejection of browser-origin requests. Optional client-CA configuration
 enforces mTLS. This closes listener hardening; it is not fresh interoperability
 or external operator evidence.
 
-Local cross-transport acceptance is implemented in `tos-ai` commit
+Local cross-transport acceptance is implemented in `execution/` commit
 `2dcb7d9210f8163224459ee21644a7acc75e6636`. Official A2A JSON-RPC and MCP
 streamable-HTTP clients connect to separate TLS 1.3 servers through the
 hardened boundary. A2A claims and executes one purchase; the same Quote/escrow
@@ -431,43 +431,45 @@ Deliver:
 
 - ✅ gateway discovery document — `docs/GATEWAY_DISCOVERY_V1.md` freezes the
   bounded `/.well-known/tos-service.json` locator and its non-authority,
-  expiry, failover, downgrade, credential, and SSRF rules; `tos-service-gateway` commit
+  expiry, failover, downgrade, credential, and SSRF rules; `gateway/` commit
   `657bd4a` implements the explicit-origin well-known response without trusting
-  request forwarding headers, and `tos-service-protocol` commit `4e7b45c` adds strict
+  request forwarding headers, and `protocol/` commit `4e7b45c` adds strict
   client validation with bounded reads, authority-domain matching, redirect
   rejection, HTTPS enforcement, address filtering, and DNS-pinned dialing;
 - ✅ interoperable search and Quote Proposal exchange —
   `docs/GATEWAY_FEDERATION_V1.md` freezes authority-neutral client-side search
-  composition and content-addressed manifest failover; `tos-service-protocol` commit
+  composition and content-addressed manifest failover; `protocol/` commit
   `ec145a9` implements bounded multi-Gateway aggregation, source preservation,
-  malformed peer isolation, and exact-digest retrieval. `tos-service-protocol` commit
+  malformed peer isolation, and exact-digest retrieval. `protocol/` commit
   `aedc832` adds the `RequestQuoteProposal` wire method and strict complete-
-  preimage validator; `tos-service-gateway` commit `1e2a812` adds the authenticated provider
-  source boundary and rejects conflicting packages. `tos-service-protocol` commit
+  preimage validator; `gateway/` commit `1e2a812` adds the authenticated provider
+  source boundary and rejects conflicting packages. `protocol/` commit
   `6a9582d` constructs packages only from freshly finalized provider-owned
-  Capability state, and `tos-service-gateway` commit `7f88298` loads bounded commercial policy
+  Capability state, and `gateway/` commit `7f88298` loads bounded commercial policy
   from owner-private files. Two isolated local Gateways returned independently
   validated packages and Gateway B continued after Gateway A stopped, recorded
   in `deployments/archive/pre-tos-service-v1/local-gate-f-federated-quote-conformance-2026-08-15.json`;
 - ✅ canonical error and retry semantics — `docs/PUBLIC_ERRORS_V1.md` freezes
   codes `2300..2308`, Connect mappings, bounded backoff, fail-closed parsing,
-  and mandatory resolution after ambiguous mutations. `tos-service-protocol` commit
+  and mandatory resolution after ambiguous mutations. `protocol/` commit
   `5c091f9` implements creation/parsing and private Native classification;
-  `tos-service-gateway` commit `7a0b58f` applies it to every public Gateway boundary and
+  `gateway/` commit `7a0b58f` applies it to every public Gateway boundary and
   verifies detail survival across the Connect wire;
 - ✅ pre-acceptance routing and post-acceptance failover rules —
   `docs/SAFE_HANDOFF_V1.md` froze the portable boundary for escrow version 1
   (retired with that escrow on 2026-10-05); the production
   verifier reconstructs Quote, Accepted Quote, Receipt, and settlement intent
   solely from owner-held inputs and finalized escrow, covers funded and
-  release-pending recovery, and fails closed on every authority boundary; the
-  `native-safe-handoff-check` CLI emits quorum-bound external evidence with
-  zero Gateway inputs;
+  release-pending recovery, and fails closed on every authority boundary. The
+  `native-safe-handoff-check` CLI that emitted quorum-bound external evidence
+  with zero Gateway inputs was removed with escrow version 1 (`protocol/`
+  commit `3a4ceca9`) and is not in this repository yet for the current rail;
 - 🟡 public relay, resolver, Quote, and Receipt conformance tests — local relay
   and resolver tests exist; public Quote conformance and portable Receipt
-  conformance now exist locally. `tos-service-protocol` commits `f000e6d` and `b83515b`
-  add the strict bundle packer, quorum checker, and parser negative tests;
-  `tos-service-spec` commits `92129a5` and `e0ea5c6` publish the template and operator
+  conformance now exist locally. `protocol/` commits `f000e6d` and `b83515b`
+  added the strict bundle packer, quorum checker, and parser negative tests
+  (removed with escrow version 1 in `3a4ceca9`);
+  `spec/` commits `92129a5` and `e0ea5c6` publish the template and operator
   runbook. The live two-process failover rehearsal is recorded in
   `deployments/archive/pre-tos-service-v1/local-gate-f-safe-handoff-conformance-2026-08-15.json`.
   An independently operated public Receipt session still does not exist;
@@ -675,7 +677,7 @@ gate item.
 8. 🟡 **Active Gate D workstream:**
    1. ✅ freeze the bounded software-work manifest schema, canonical byte
       encoding, media type, digest rule, positive vector, and negative corpus;
-   2. ✅ implement the manifest in `tos-service-spec`, `tos-service-protocol`, and one
+   2. ✅ implement the manifest in `spec/`, `protocol/`, and one
       independent vector implementation, then bind its digest to a Capability
       version on the initial public test network — the non-revoked Capability
       and three-endpoint evidence are recorded in
@@ -710,7 +712,7 @@ gate item.
     is explicitly non-authoritative; terminal settlement resolution remains in
     item 13's multi-account transaction proof. *(superseded by the Service Actor rail; the escrow rail is retired)*
 12. ✅ Integrate the bounded executor and content-addressed artifact delivery —
-    `tos-ai` now maps the provider-fixed image, invocation, workspace, and
+    `execution/` now maps the provider-fixed image, invocation, workspace, and
     limits into containerd; safely extracts source archives; produces
     deterministic reports and USTAR artifacts; stores and reverifies immutable
     SHA-256 objects; and journals at-most-once execution across crashes. The
@@ -768,21 +770,23 @@ is not implied by Gate C's initial profile.
 15. 🟡 **Active Gate F external acceptance only:** client-side federated Capability search,
     exact-digest manifest failover, complete-preimage Quote Proposal exchange,
     finalized provider-state construction, and local two-Gateway failover are
-    complete. Canonical public error/retry details, portable safe-handoff
-    verification, the bundle packer, and the quorum checker are also complete.
-    No additional local protocol implementation is required for this item. The
-    next executable task is an independent buyer/provider/resolver session:
-    create a complete bundle with `native-safe-handoff-pack`, stop the original
-    Gateway, and verify it with `native-safe-handoff-check` against three
-    validator endpoints. Then recruit two independently operated Gateways,
+    complete. Canonical public error/retry details are also complete. The
+    portable safe-handoff verifier, the bundle packer
+    (`native-safe-handoff-pack`), and the quorum checker
+    (`native-safe-handoff-check`) were built for escrow version 1 and removed
+    with it; they are not in this repository yet for the current rail
+    (see `deployments/README.md`). Once they exist, the next executable task
+    is an independent buyer/provider/resolver session: create a complete
+    bundle, stop the original Gateway, and verify it against three validator
+    endpoints. Then recruit two independently operated Gateways,
     three providers, ten useful Capabilities, and recurring buyers. Until that
     evidence exists, Gate F must remain not accepted.
-16. ✅ **Chain-authenticated off-chain Agent messaging:** `tos-service-protocol` commits
+16. ✅ **Chain-authenticated off-chain Agent messaging:** `protocol/` commits
     `7aa6f86`, `9603c9d`, `ee25dea`, `e689536`, `79ab13d`, and `2537154`
     implement the signed Agent Packet, strict JSON wire format, replay guard,
     direct HTTPS/loopback HTTP transport, signed Contact Card discovery,
     network-tuple binding, and bounded Contact Card issuance lifetime.
-    `tos-service-spec` commits `41e01a9`, `4306efe`, `54e2b4d`, `df9194c`, and
+    `spec/` commits `41e01a9`, `4306efe`, `54e2b4d`, `df9194c`, and
     `804ba08` define the envelope, locator, wire exchange, and security
     boundary. Payloads remain off-chain; finalized Agent policy authorizes
     keys; no Gateway, Managed mode, or arbitrary on-chain message store is
@@ -820,7 +824,7 @@ is not implied by Gate C's initial profile.
     supply, rankings,
     coverage, and
     separately labelled operational availability. The **deterministic
-    network-level aggregator** is implemented in `tos-service-protocol`
+    network-level aggregator** is implemented in `protocol/`
     `pkg/economic` (commit `f6639b6`): it consumes the verification layer's
     verified job records and computes, per exact asset over a half-open
     window, released cash flow and its attributed / unattributed /

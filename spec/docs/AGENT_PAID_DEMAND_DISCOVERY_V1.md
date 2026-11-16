@@ -163,7 +163,7 @@ its typed handoff into that rail. In particular, the following are missing:
    envelopes;
 2. frozen content-identity, canonical encoding, digest, signature, delegation,
    expiry, and Demand Mutation domains with cross-implementation vectors;
-3. a typed `paid-demand` public-channel event profile in `tos-messenger`;
+3. a typed `paid-demand` public-channel event profile in `messenger/`;
 4. bounded Gateway publication, withdrawal, lookup, search, mutation-
    resolution, cursor, and provenance interfaces;
 5. an OpenFox multi-source synchronizer with durable per-source cursors,
@@ -1431,13 +1431,13 @@ and work-square loss must not prevent independent reconstruction.
 
 | Repository | Responsibility |
 |---|---|
-| `tos-service-spec` | Paid Demand/Mutation, Provider Offer, market delegation, carrier/query schemas, bounds, signatures/digests, public errors, vectors, and discovery acceptance evidence; the separate binding profile owns the existing-rail adapter |
-| `tos-service-protocol` | canonical artifact codecs and verification, finalized buyer/provider checks, federation client, offer/Quote SDK, error classification, and recovery helpers |
-| `tos-service-gateway` | optional authenticated Demand Mutation/relay endpoints, bounded derived search, source provenance, cursors, filtering, and federation conformance |
+| `spec/` | Paid Demand/Mutation, Provider Offer, market delegation, carrier/query schemas, bounds, signatures/digests, public errors, vectors, and discovery acceptance evidence; the separate binding profile owns the existing-rail adapter |
+| `protocol/` | canonical artifact codecs and verification, finalized buyer/provider checks, federation client, offer/Quote SDK, error classification, and recovery helpers |
+| `gateway/` | optional authenticated Demand Mutation/relay endpoints, bounded derived search, source provenance, cursors, filtering, and federation conformance |
 | `tos` | generic DHT, Overlay, ADNL/RLDP, Storage, Agent, and the existing Accepted Quote, escrow, Receipt, and settlement primitives/contracts; no market search, ranking, or demand-wide selection contract in V1 |
-| `tos-messenger` | paid-demand public-channel profile, verification, synchronization and persistence integration over TOS networking primitives; direct offer transport; event replay protection; moderation projection |
+| `messenger/` | paid-demand public-channel profile, verification, synchronization and persistence integration over TOS networking primitives; direct offer transport; event replay protection; moderation projection |
 | `openfox` | source configuration, local durable aggregation, typed matching, economics, portfolio policy, owner-private process lock, Provider writer-lease client/recovery, Provider Offer/later-bid authorization, explanation, and commercial orchestration |
-| `tos-ai` | implementation and operation of spec-defined task/execution/validator/evidence/private-input profiles, estimates, durable Offer-bound runtime capacity leases, bounded execution, validation, and artifacts |
+| `execution/` | implementation and operation of spec-defined task/execution/validator/evidence/private-input profiles, estimates, durable Offer-bound runtime capacity leases, bounded execution, validation, and artifacts |
 | `freecity` | optional work-square experience, local social discovery, moderation, approvals, and labelled projections |
 | custody tools | Provider-wide exclusive writer lease/fencing generation, durable unresolved-Offer/obligation and aggregate-exposure admission ledger, stable-action replay/conflict handling, exact market/Quote semantic confirmation, delegated signing, broadcast, ambiguous-submit resolution, and revocation without exposing keys to OpenFox |
 

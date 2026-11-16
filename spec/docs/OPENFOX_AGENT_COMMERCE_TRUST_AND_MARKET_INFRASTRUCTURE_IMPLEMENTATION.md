@@ -33,10 +33,10 @@ the required qualified source is not installed, the implementation returns
 
 | Repository | Implemented delta | Authority limit |
 |---|---|---|
-| `tos-service-spec` | Corrected the existing Cost Observation V1 lineage condition: a non-`contra` genesis has an empty original reference, while `contra` requires one exact canonical original reference. Expanded deterministic positive and negative vectors and the independent JSON Schema reference verifier. | No new profile or business-specific schema. |
-| `tos-service-protocol` | Added a public exact-successor validator for Agreement revisions; enforced Agreement-body, predicate, and signed-acceptance validity windows during authorization; implemented the corrected Cost Observation lineage validation and fixtures. | A successor validator proves lineage only. It does not establish a global latest proposal head. |
+| `spec/` | Corrected the existing Cost Observation V1 lineage condition: a non-`contra` genesis has an empty original reference, while `contra` requires one exact canonical original reference. Expanded deterministic positive and negative vectors and the independent JSON Schema reference verifier. | No new profile or business-specific schema. |
+| `protocol/` | Added a public exact-successor validator for Agreement revisions; enforced Agreement-body, predicate, and signed-acceptance validity windows during authorization; implemented the corrected Cost Observation lineage validation and fixtures. | A successor validator proves lineage only. It does not establish a global latest proposal head. |
 | `openfox` | Added predecessor-bound Agreement revision construction, durable negotiation conflict handling, qualified Outcome import and local risk/economic projections, and local sequential composition admission for independent Paid Demand child escrows. | Every projection and composition object is Owner-local and non-authoritative. Existing profile verifiers remain the authority boundary. |
-| `tos`, `tosctl`, `tos-messenger` | No implementation change was required for this checkpoint. | Escrow V1 and Messenger transport meanings remain unchanged. |
+| `tos`, `tosctl`, `messenger/` | No implementation change was required for this checkpoint. | Escrow V1 and Messenger transport meanings remain unchanged. |
 
 ## 3. Work-package status
 

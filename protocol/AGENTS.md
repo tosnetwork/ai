@@ -1,11 +1,11 @@
-# Working on tos-service-protocol
+# Working on protocol/
 
 ## Instruments lie by staying silent
 
 A measurement that returns nothing is not an answer. Before trusting silence,
 prove the instrument speaks.
 
-This repository defines a wire boundary. Its failure mode is not a crash — it is
+This directory defines a wire boundary. Its failure mode is not a crash — it is
 two implementations that both believe they agree, and a test suite that agrees
 with whichever one it was generated from.
 

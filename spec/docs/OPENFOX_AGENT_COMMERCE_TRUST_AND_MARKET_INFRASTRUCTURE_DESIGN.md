@@ -450,10 +450,10 @@ permission to implement locked expansions.
 
 | Repository or component | Delta responsibility |
 |---|---|
-| `tos-service-spec` | Own this reconciliation; freeze a genuinely missing portable profile only after a recorded reuse failure and normal versioning/review |
-| `tos-service-protocol` | Reuse canonical codecs/verifiers; provide portable helpers and projections only for released or candidate profiles |
+| `spec/` | Own this reconciliation; freeze a genuinely missing portable profile only after a recorded reuse failure and normal versioning/review |
+| `protocol/` | Reuse canonical codecs/verifiers; provide portable helpers and projections only for released or candidate profiles |
 | `tos` and `tosctl` | Keep escrow V2 unchanged; implement a future version only after its separate specification, gate, and security review |
-| `tos-messenger` | Carry authenticated conversation and existing typed commerce objects; do not create commercial truth from delivery or read state |
+| `messenger/` | Carry authenticated conversation and existing typed commerce objects; do not create commercial truth from delivery or read state |
 | `openfox` | AI reasoning, demand drafting, Owner policy, orchestration, Portfolio admission, local negotiation/outcome-risk/accounting projections, meters, UX, and campaigns |
 | Carriers and Gateways | Bounded transport, indexes, provenance, availability, and optional ranking; never Agreement, trust, acceptance, or settlement authority |
 | Independent operators | Cross-implementation verification, adverse-path execution, evidence retention, and external acceptance |

@@ -1220,14 +1220,14 @@ A likely repository split is:
 
 | Repository | Responsibility |
 |---|---|
-| **`tos-service-spec`** | Architecture, canonical manifest/Quote/Receipt/evidence profiles, vectors, negative corpus, acceptance gates |
-| **`tos-service-protocol`** | Canonical codecs, identifier/digest derivation, finalized-state verification, client/provider SDKs |
+| **`spec/`** | Architecture, canonical manifest/Quote/Receipt/evidence profiles, vectors, negative corpus, acceptance gates |
+| **`protocol/`** | Canonical codecs, identifier/digest derivation, finalized-state verification, client/provider SDKs |
 | **future `tos-edge-cdn`** | Worker daemon, cache engine, scheduler/control plane reference implementation, evidence collector, customer adapters |
-| **`tos-service-gateway`** | Optional hosted discovery, proposal construction, customer API, routing and operations without semantic authority |
-| **`tos-ai`** | Reusable bounded journals, artifact, update, metrics, and isolation primitives where appropriate; not the CDN execution authority by default |
+| **`gateway/`** | Optional hosted discovery, proposal construction, customer API, routing and operations without semantic authority |
+| **`execution/`** | Reusable bounded journals, artifact, update, metrics, and isolation primitives where appropriate; not the CDN execution authority by default |
 | **`tosnetwork/doc`** | Worker installation, IDC/NAS/home-box deployment, customer CNAME/API integration, operations and troubleshooting guides |
 
-The CDN Worker should remain a narrow service. It must not expose `tos-ai`'s
+The CDN Worker should remain a narrow service. It must not expose `execution/`'s
 privileged container runtime or resurrect a retired general Edge gateway.
 
 ---

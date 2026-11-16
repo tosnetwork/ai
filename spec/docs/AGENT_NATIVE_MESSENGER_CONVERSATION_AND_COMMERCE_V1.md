@@ -185,7 +185,7 @@ natural-language negotiation
  -> escrow funding and finality
  -> agent.task.request
  -> Native Execution Gate
- -> tos-ai executes once
+ -> execution/ executes once
  -> progress / artifact / result events
  -> canonical Receipt
  -> settlement

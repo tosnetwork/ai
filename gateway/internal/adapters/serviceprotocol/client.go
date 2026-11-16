@@ -1,4 +1,5 @@
-// Package toprotocol is the privileged Native-only client for tos-service-protocol.
+// Package toprotocol is the privileged Native-only client for the protocol/
+// private RPC service (tos-service-rpc).
 package toprotocol
 
 import (

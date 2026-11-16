@@ -299,7 +299,7 @@ pkg/settlementadapter/
   external.go         # explicit non-TOS evidence integration
 ```
 
-Do not duplicate protocol codecs in OpenFox. `tos-service-protocol` owns exact
+Do not duplicate protocol codecs in OpenFox. `protocol/` owns exact
 Agent Operation, Intent payload, Agreement, Gift, Quote, Receipt, and settlement
 encodings.
 
@@ -1446,7 +1446,7 @@ resolved transfer evidence; the same evidence cannot close another obligation.
 ### 11.3 TOS escrow
 
 The adapter is disabled unless the Agreement fits a released TOS profile. It
-uses `tos-service-protocol` for canonical construction and verification and
+uses `protocol/` for canonical construction and verification and
 delegates signing to custody.
 
 The fixed-price machine-checkable Paid Demand profile retains its complete
@@ -1806,8 +1806,8 @@ or unrestricted model context.
   Discovery Card, detail descriptor, publisher/derived-field boundary, query,
   content retrieval policy, canonical Agreement/obligation/acceptance,
   `AuthorizedActionV1`, settlement-obligation state, local Gate/start-ticket,
-  scheduler/dependency, and recovery vectors in `tos-service-spec` and
-  `tos-service-protocol`;
+  scheduler/dependency, and recovery vectors in `spec/` and
+  `protocol/`;
 - freeze coarse modes/classes, taxonomy and region identifier syntax, keyword/
   language rules, capability-hint identifiers, canonical decimal value hints,
   schedule ordering, and all card/detail/attachment bounds;

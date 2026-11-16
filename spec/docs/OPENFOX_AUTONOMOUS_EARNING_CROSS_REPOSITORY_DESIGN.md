@@ -733,12 +733,12 @@ side-effect class. These product-facing names map to the released
 
 | Repository | Core responsibility | Enters scope when |
 |---|---|---|
-| `tos-service-spec` | common Agent Operation Envelope, opcode/profile boundaries, Discovery Card, retrieval policy, canonical Agreement/predicate/evidence/obligation, semantic action identity registry, Authorized Action, billing obligation, local Gate/start-ticket contracts, authority rules, and vectors | always for the common protocol |
-| `tos-service-protocol` | operation, Agreement, predicate/evidence, action, and obligation codecs; bounded verification; registry-derived IDs; references; conflict/recovery vectors; clients; and adapter interfaces | always for portable implementation |
+| `spec/` | common Agent Operation Envelope, opcode/profile boundaries, Discovery Card, retrieval policy, canonical Agreement/predicate/evidence/obligation, semantic action identity registry, Authorized Action, billing obligation, local Gate/start-ticket contracts, authority rules, and vectors | always for the common protocol |
+| `protocol/` | operation, Agreement, predicate/evidence, action, and obligation codecs; bounded verification; registry-derived IDs; references; conflict/recovery vectors; clients; and adapter interfaces | always for portable implementation |
 | `openfox` | search-profile generation, consistent Capability Inventory, staged acquisition, service publication, pricing, filtering, AI matching, economics, risk, contact, typed Agreement coordination, Portfolio projection, durable scheduling, local execution coordination, accounting, and learning | always for the autonomous product |
-| `tos-service-gateway` | one replaceable bounded card index, selective detail retrieval, and optional market-application adapters | when Gateway publication/search is enabled |
-| `tos-messenger` | rooms, direct first contact, conversation, typed Agreement proposal and applicable generic evidence delivery, action-ID deduplication/resolution, controlled writer admission or outbox, and Gift transport | when Messenger is a carrier or negotiation transport |
-| `tos-ai` | optional bounded execution profiles, immutable resource capabilities, task-scoped effect broker, one-shot runner, and evidence | when an Agreement selects those executors |
+| `gateway/` | one replaceable bounded card index, selective detail retrieval, and optional market-application adapters | when Gateway publication/search is enabled |
+| `messenger/` | rooms, direct first contact, conversation, typed Agreement proposal and applicable generic evidence delivery, action-ID deduplication/resolution, controlled writer admission or outbox, and Gift transport | when Messenger is a carrier or negotiation transport |
+| `execution/` | optional bounded execution profiles, immutable resource capabilities, task-scoped effect broker, one-shot runner, and evidence | when an Agreement selects those executors |
 | `tos` / `tosctl` | Agent state, Gift and direct value transfer, optional Quote/escrow/Receipt contracts, rollback-resistant writer-generation/action admission in custody, signing, broadcast, and recovery | when the selected action or settlement mode needs chain state |
 | optional market app | hosted board, search, ranking, moderation, KYC, support, fiat, proprietary services | independently optional |
 
@@ -770,7 +770,7 @@ delivery phase determines the actual PR set.
 
 ### Phase 0 — generic specification
 
-Repositories: `tos-service-spec`, then `tos-service-protocol`.
+Repositories: `spec/`, then `protocol/`.
 
 - freeze the common Agent Operation Envelope and the minimal Intent payload
   profile: signed Discovery Card, modes/classes, taxonomy paths, keywords,
@@ -799,7 +799,7 @@ digest, exact-byte vector and error.
 
 ### Phase 1 — read-only Intent scout
 
-Repositories: `openfox`, `tos-service-protocol`, and one carrier adapter.
+Repositories: `openfox`, `protocol/`, and one carrier adapter.
 
 - generate a bounded local search profile from current owner policy and a
   timestamped, expiring, revision-bound consistent Capability Inventory;
@@ -820,7 +820,7 @@ advertised as resilient decentralized public discovery.
 
 ### Phase 2 — Messenger negotiation
 
-Repositories: `openfox`, `tos-messenger`, and protocol helpers.
+Repositories: `openfox`, `messenger/`, and protocol helpers.
 
 - contact an issuer using an exact Intent reference;
 - support open-ended bounded negotiation;
@@ -899,9 +899,9 @@ market application, or settlement mode becomes universally mandatory.
 ## 15. PR dependency graph
 
 ```text
-I0  tos-service-spec: Intent + Agreement/acceptance/obligation + Action/Gate vectors
+I0  spec/: Intent + Agreement/acceptance/obligation + Action/Gate vectors
  |
- +-> P0  tos-service-protocol: codec, verifier, references, adapter interfaces
+ +-> P0  protocol/: codec, verifier, references, adapter interfaces
       |
       +-> O0  openfox: read-only Intent scout + AI assessment
       |
@@ -910,7 +910,7 @@ I0  tos-service-spec: Intent + Agreement/acceptance/obligation + Action/Gate vec
 P0 + O0 + C0
   -> read-only Intent MVP
 
-M1  tos-messenger: writer-fenced contact + typed Agreement actions + resolution
+M1  messenger/: writer-fenced contact + typed Agreement actions + resolution
 A1  owner/Agent action authority: generation high-water + admission/recovery
 O1  openfox: negotiation + typed Agreement coordinator
 

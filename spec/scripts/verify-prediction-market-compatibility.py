@@ -92,7 +92,7 @@ def verify_checkout_tuple(document, tosctl, protocol_root, openfox_root):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tosctl", type=Path, help="current tosctl binary")
-    parser.add_argument("--protocol-root", type=Path, help="tos-service-protocol checkout")
+    parser.add_argument("--protocol-root", type=Path, help="protocol/ directory of an ai checkout")
     parser.add_argument("--openfox-root", type=Path, help="OpenFox checkout")
     args = parser.parse_args()
     supplied = [args.tosctl, args.protocol_root, args.openfox_root]

@@ -62,7 +62,7 @@ An optional Quote commitment binds the packet to an Accepted Quote. It does not
 authorize payment by itself: escrow funding, execution admission, Receipt, and
 settlement still require their existing finalized-chain checks.
 
-`tos-service-protocol/pkg/agentpacket` implements signing, finalized-state verification,
+`protocol/pkg/agentpacket` implements signing, finalized-state verification,
 replay protection, and strict JSON wire encoding/decoding for transport
 interoperability. It performs ML-DSA-44 signing and verification by calling
 `tosctl` rather than linking a Go ML-DSA library; controller private keys stay

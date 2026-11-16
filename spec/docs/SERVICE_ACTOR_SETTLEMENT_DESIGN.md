@@ -28,7 +28,7 @@ the same file at `4c62edcae`, the changed contract. Where the two differ,
 is `tosctl/src/node-control/contracts/src/service_actor.rs`. `CMD:N` is
 `tosctl/src/node-control/commands/src/commands/nodectl/service_actor_cmd.rs`.
 `SBX` is `tosctl/src/node-control/contracts/tests/service_actor_sandbox.rs`.
-Spec references are to `tos-service-spec` main `80739a8`.
+Spec references are to `spec/` main `80739a8`.
 
 ## 1. What the contract enforces
 
@@ -503,7 +503,7 @@ Pointers for follow-up changes; no code is written here.
 | protocol | `pkg/providersdk/provider.go` | manifest key 21; deploy, register, `update_policy` sequencing |
 | protocol | `pkg/economic`, `cmd/native-receipt-release` | inputs from actor transactions (`pkg/paiddemand` stays escrow-bound, out of scope) |
 | gateway | `internal/nativegateway/server.go`, `internal/quotesource` | Quote Proposal contents only; no authority |
-| tos-ai | `pkg/a2aadapter/adapter.go`, `pkg/mcpadapter/adapter.go` | carry `(actor, request_id)` instead of `EscrowAddress`; settler submits `respond`; attestor signing keeps the Receipt document's two-stage custody (emit the 32-byte SRP2 hash, verify the signature before building `respond`); `pkg/softwarework` unchanged |
+| execution | `pkg/a2aadapter/adapter.go`, `pkg/mcpadapter/adapter.go` | carry `(actor, request_id)` instead of `EscrowAddress`; settler submits `respond`; attestor signing keeps the Receipt document's two-stage custody (emit the 32-byte SRP2 hash, verify the signature before building `respond`); `pkg/softwarework` unchanged |
 | openfox | `pkg/servicebridge/interfaces.go`, `buyer.go`, `provider.go`, `nativeimpl/purchase_coordinator.go`, `nativeimpl/tosctl_runner.go` | `call` instead of fund (`ResolveEscrow`, `SignAndFundEscrow`); new buyer duty to `expire` and `claim_refund` before `refund_claim_deadline` (`pkg/earning/paid_demand_*` stays escrow-bound) |
 
 ## 8. Owner decisions (taken 2026-11-07)

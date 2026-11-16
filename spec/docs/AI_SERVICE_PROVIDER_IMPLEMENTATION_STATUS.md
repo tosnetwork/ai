@@ -63,7 +63,7 @@ failed-execution refund was attempted after its refund window had closed,
 which the contract correctly refused), fixed in `3eb4dd3` before the M1 record.
 
 The private containerd host deployment used for these runs was installed from
-`tos-ai` `deploy/provider` and surfaced three defects that are fixed in
+`execution/deploy/provider` and surfaced three defects that are fixed in
 `tos-ai` #15 (socket mode, layer-root permissions under the unit umask, and
 the digest-qualified image name); the live backend conformance suite now passes
 on containerd v2.0.13.
@@ -142,7 +142,7 @@ Not covered by this record:
   test user.
 - The executor service has not been run under load or with
   `--max-executions` above 1.
-- Retention of the service's copy: the `tos-ai` runbook says a provider
+- Retention of the service's copy: the `execution/` runbook says a provider
   runtime should ask the service to keep its copy until the end of the
   response window plus the manifest's `retention_seconds`, while OpenFox asks
   only until the response deadline and serves results from its own copy.
@@ -224,16 +224,20 @@ evidence.
 - OpenFox `main`: a data race in `web/backend/api`
   (`TestStartGatewayLocked_ForwardsWildcardHostForPublicLauncher`) under
   `-race`. CI does not run `-race`.
-- `tos-messenger` still mentions `tos-service-protocol` in prose (three places:
-  `docs/AGENT_PACKET_BRIDGE.md`, `pkg/chainagent/resolver.go`,
-  `pkg/payload/agent_gift.go`).
-- Two stale references predate the move and were left unchanged by it:
-  `spec/docs/GATE_E_BUYER_ONBOARDING.md` names
-  `tos-service-protocol/pkg/toschain.StablecoinResolver`, which no longer
-  exists, and `spec/docs/ROADMAP.md` names `native-safe-handoff-pack` and
-  `native-safe-handoff-check`, which are not in `protocol/cmd`
-  (`spec/deployments/README.md` now says these tools are not in this
-  repository yet). Correct or remove them in a separate change.
+- Fixed in the stale-references docs change (`docs/stale-references`): the
+  messenger prose that still named the protocol repository
+  (`messenger/docs/AGENT_PACKET_BRIDGE.md`, `messenger/pkg/chainagent/resolver.go`,
+  `messenger/pkg/payload/agent_gift.go`) now names `protocol/`.
+- Fixed in the same change: the two stale references that predated the move.
+  `spec/docs/GATE_E_BUYER_ONBOARDING.md` no longer names the removed
+  `StablecoinResolver` as current; it records that the resolver was removed
+  with the stablecoin rail (`b9ad8e17`) and points to the Service Actor buyer
+  in `protocol/pkg/buyersdk`. `spec/docs/ROADMAP.md` now says
+  `native-safe-handoff-pack` and `native-safe-handoff-check` were removed with
+  escrow version 1 (`3a4ceca9`) and are not in this repository yet, as
+  `spec/deployments/README.md` says. The same change replaces former
+  repository names used as current components in other docs and code
+  comments with their directories.
 - Planned later, each as its own reviewed change: make `spec/proto` the single
   schema source and remove `protocol/api`, and reconcile the diverged copies of
   `internal/osguard` and `internal/actionauthoritytest`.

@@ -32,9 +32,9 @@ Record exact commit IDs and reproducible binary SHA-256 digests:
 |---|---|---|---|
 | OpenFox Alice | TODO | TODO | TODO |
 | OpenFox Bob/provider | TODO | TODO | TODO |
-| `tos-messenger` Alice | TODO | TODO | TODO |
-| `tos-messenger` Bob | TODO | TODO | TODO |
-| `tos-service-protocol` | TODO | TODO | TODO |
+| `messenger/` Alice | TODO | TODO | TODO |
+| `messenger/` Bob | TODO | TODO | TODO |
+| `protocol/` | TODO | TODO | TODO |
 | Gateway/resolver | TODO | TODO | TODO |
 
 Attach redacted strict configuration documents or their canonical digests.

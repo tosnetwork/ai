@@ -1718,12 +1718,12 @@ semantic effect.
 
 | Repository or component | Required responsibility | Must not become |
 |---|---|---|
-| `tos-service-spec` | This design, machine-readable schemas/registries/errors/vectors (including `trusted-capability-bodies-v1.json`), code-independent reference verifier, Gate S/M profiles, and transport-neutral owner-control API | OpenFox UI or local ranking policy |
-| `tos-service-protocol` | Production codecs, signatures, subject/profile verification, identities, state mutations, command/action helpers, projection/report verification, and cross-verifier CI | Catalog trust oracle, second copy of the reference verifier, or promotion authority |
+| `spec/` | This design, machine-readable schemas/registries/errors/vectors (including `trusted-capability-bodies-v1.json`), code-independent reference verifier, Gate S/M profiles, and transport-neutral owner-control API | OpenFox UI or local ranking policy |
+| `protocol/` | Production codecs, signatures, subject/profile verification, identities, state mutations, command/action helpers, projection/report verification, and cross-verifier CI | Catalog trust oracle, second copy of the reference verifier, or promotion authority |
 | `openfox` | Consequential-use classifier, Inventory, reuse-first coordinator, quarantine, verification/admission journals, promotion enforcement, deterministic report queries/Skills, owner projection and command sink | Custody, global capability database, unrestricted model authority |
 | Skills/MCP catalogs and optional Carriers | Bounded listings, signed metadata/revocation observations, retrieval, provenance, source-local cursors | Owner trust, complete market, admission, promotion, execution authority |
-| `tos-ai` or selected executor | Quarantined tests, immutable capability handles, atomic start, task-scoped broker, execution/resource evidence | Candidate promoter, permission expander, settlement authority |
-| `tos-messenger` | Optional typed private transport for owner events/commands with authentication, deduplication and resolution | Owner state or command authority derived from chat |
+| `execution/` or selected executor | Quarantined tests, immutable capability handles, atomic start, task-scoped broker, execution/resource evidence | Candidate promoter, permission expander, settlement authority |
+| `messenger/` | Optional typed private transport for owner events/commands with authentication, deduplication and resolution | Owner state or command authority derived from chat |
 | `openfox/web` | Web SDK/client: render projection and submit typed commands through the shared server API | Separate authority semantics or mutable history |
 | Future `tosnetwork/openfox-ios` | iOS SDK/client: device sessions, encrypted cache, projection convergence, confirmation and command submission | Custody key holder or independent business logic |
 | Future `tosnetwork/openfox-android` | Android SDK/client: the same released client contract and vectors | Custody key holder or independent business logic |
@@ -1739,7 +1739,7 @@ The OpenFox server owns transport implementations for `GetProjectionSnapshot`,
 `ResolveNotificationReference`, and `NegotiateFeatures`. Phase 0 freezes their
 transport-neutral request/response schemas, authentication, audience/channel
 binding, stable errors, pagination and source-local cursors, retry/idempotency,
-and expiry. `tos-service-protocol` owns portable Go types/verification helpers;
+and expiry. `protocol/` owns portable Go types/verification helpers;
 each client repository owns its SDK and UI. The future mobile repositories add
 two repositories to this profile's implementation count and are not present
 evidence. The existing seven-repository earning-loop count is unchanged.
@@ -2023,7 +2023,7 @@ The V1 release requires:
   absent/null/empty, Unicode, domain, owner, kind, profile, predecessor, proof,
   collision, replay, expiry, rollback, takeover, and revocation mutations;
 - an implementation-independent reference verifier;
-- a production codec/verifier in `tos-service-protocol`;
+- a production codec/verifier in `protocol/`;
 - a cross-repository commit and build manifest;
 - a versioned deployment compatibility matrix and negative harness covering
   partial import, dual-write divergence, crash at every migration transition,

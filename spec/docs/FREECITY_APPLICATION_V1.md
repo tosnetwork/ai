@@ -76,7 +76,7 @@ It is not responsible for inventing:
 | Layer | Responsibility | Authority boundary |
 |---|---|---|
 | **FreeCity** | Society, human experience, social graph, organizations, places, workspaces, discovery, civic activity, and public projection | Authoritative only for FreeCity-local application state |
-| **OpenFox and `tos-ai`** | Always-on Agent operation, tools, scheduling, bounded execution, artifact production, and approval checkpoints | Execute work; cannot rewrite accepted terms or canonical state |
+| **OpenFox and `execution/`** | Always-on Agent operation, tools, scheduling, bounded execution, artifact production, and approval checkpoints | Execute work; cannot rewrite accepted terms or canonical state |
 | **TOS Service Protocol** | Agent and Capability lifecycle, relay and resolution, Quote acceptance, escrow binding, Receipt verification, settlement workflow, A2A/MCP adapters, and Agent Packet | Protocol rules derive authority only from finalized TOS state |
 | **TOS Network** | Finalized typed state, contracts, TOS fees, TOS-network stablecoin assets, escrow, and settlement | Sole canonical authority for TOS protocol facts |
 
@@ -177,7 +177,7 @@ before causing a TOS action.
 | **Offer or estimate** | Quote Proposal | Temporary and non-authoritative; never label as accepted or funded |
 | **Work contract** | Accepted Quote | Exact finalized terms control execution and settlement |
 | **Funded job** | Escrow-bound job | Admit execution only after finality and exact funding checks |
-| **Execution** | OpenFox or `tos-ai` bounded run | Follow the accepted manifest, execution authority, policy, and execution Gate |
+| **Execution** | OpenFox or `execution/` bounded run | Follow the accepted manifest, execution authority, policy, and execution Gate |
 | **Delivery** | Content-addressed artifacts plus signed Receipt | Bulk bytes remain off-chain; committed digests bind the result |
 | **Payment** | Finalized release or refund in the exact accepted asset | Show asset contract, atomic amount, transaction, and finality |
 | **Economic city event** | Derived projection of finalized TOS history | Must be independently resolvable and provenance-labelled |
@@ -223,7 +223,7 @@ not be shown as a verified TOS Agent until resolution succeeds.
 4. The buyer accepts the Quote and funds escrow through TOS.
 5. The execution Gate verifies finalized Agent, Capability, Accepted Quote,
    escrow funding, signer authorization, and execution claim.
-6. OpenFox or `tos-ai` performs the bounded job and produces content-addressed
+6. OpenFox or `execution/` performs the bounded job and produces content-addressed
    artifacts.
 7. The authorized execution signer produces the canonical Receipt.
 8. The escrow reaches a finalized release, refund, or dispute state.
@@ -295,7 +295,7 @@ results. Ranking never changes Capability authority.
 
 OpenFox is the preferred always-on resident runtime. The economic bridge
 controls discovery, owner policy, Quote approval, funding, dispatch, Receipt,
-and reconciliation. `tos-ai` provides the bounded execution worker for the
+and reconciliation. `execution/` provides the bounded execution worker for the
 first software-work vertical.
 
 FreeCity may use a separate model gateway for conversation or generated UI.
@@ -348,7 +348,7 @@ their security and canonicality rules.
 - one externally useful software-work Capability;
 - Quote Proposal review and Accepted Quote finality;
 - escrow funding in one exact TOS-network test stablecoin asset;
-- OpenFox or `tos-ai` bounded execution;
+- OpenFox or `execution/` bounded execution;
 - content-addressed artifacts and canonical Receipt;
 - finalized release or refund; and
 - FreeCity project and resident histories that another resolver can reproduce.
@@ -409,11 +409,11 @@ or recurring demand until the corresponding roadmap evidence exists.
 
 | Concern | Primary repository |
 |---|---|
-| TOS protocol rules and this application profile | `tos-service-spec` |
-| Canonical encodings, relay, resolution, and verification | `tos-service-protocol` |
+| TOS protocol rules and this application profile | `spec/` |
+| Canonical encodings, relay, resolution, and verification | `protocol/` |
 | Contracts and finalized execution | `tos` |
-| Gateway reference implementation | `tos-service-gateway` |
-| Bounded software-work execution | `tos-ai` |
+| Gateway reference implementation | `gateway/` |
+| Bounded software-work execution | `execution/` |
 | Always-on Agent runtime | `openfox` |
 | FreeCity product, city UI, social application, and civic data | `freecity` |
 

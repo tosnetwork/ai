@@ -908,13 +908,13 @@ Provider-private admission ledger.
 
 | Repository or component | Extension responsibility |
 |---|---|
-| `tos-service-spec` | paid-demand Quote-binding fields, proof contexts, private-input profile, mappings into existing rail schemas, vectors, and invariants |
-| `tos-service-protocol` | canonical construction/verification, deterministic handoff into the existing Quote builder, finalized resolver output, Gate comparisons, reuse of the existing Receipt binding, and safe-handoff helpers |
+| `spec/` | paid-demand Quote-binding fields, proof contexts, private-input profile, mappings into existing rail schemas, vectors, and invariants |
+| `protocol/` | canonical construction/verification, deterministic handoff into the existing Quote builder, finalized resolver output, Gate comparisons, reuse of the existing Receipt binding, and safe-handoff helpers |
 | `tos` | versioned existing Accepted Quote/escrow representation; no market database or new selection coordinator in this profile |
 | `openfox` | body proposal, private reservations, custody admission client, Offer orchestration, and recovery; no custody or settlement authority |
-| `tos-ai` | Offer-bound capacity lease, private ingress profile, existing bounded execution, validation, evidence, and artifacts |
+| `execution/` | Offer-bound capacity lease, private ingress profile, existing bounded execution, validation, evidence, and artifacts |
 | custody tools | Provider-wide writer fencing, aggregate admission, exact semantic confirmation, purpose-limited signing, and rollback-safe issuance history |
-| `tos-messenger` and Gateways | exact-byte Offer/selection transport only; no accepted-state authority |
+| `messenger/` and Gateways | exact-byte Offer/selection transport only; no accepted-state authority |
 
 No repository may implement an application-private paid-demand transaction
 and later present it as the canonical TOS Service rail.
