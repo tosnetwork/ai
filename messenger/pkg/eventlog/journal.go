@@ -302,18 +302,30 @@ func OpenWith(root string, quota Quota) (*Journal, error) {
 	return openJournalAt(root, quota)
 }
 
-func openJournalAt(root string, quota Quota) (*Journal, error) {
+// PrepareRoot makes root a private journal root carrying the canonical state
+// marker, creating the marker only when root is missing or empty. It takes no
+// lock and runs no recovery, so it is safe beside a live daemon that owns the
+// journal. A non-empty root without the marker is refused as Open refuses it.
+func PrepareRoot(root string) error {
+	return prepareRoot(root)
+}
+
+func prepareRoot(root string) error {
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
-		return nil, errors.New("invalid event journal root")
+		return errors.New("invalid event journal root")
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return nil, errors.New("create event journal root")
+		return errors.New("create event journal root")
 	}
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o700 {
-		return nil, errors.New("event journal root must be a private directory")
+		return errors.New("event journal root must be a private directory")
 	}
-	if err := ensureCanonicalStateMarker(root); err != nil {
+	return ensureCanonicalStateMarker(root)
+}
+
+func openJournalAt(root string, quota Quota) (*Journal, error) {
+	if err := prepareRoot(root); err != nil {
 		return nil, err
 	}
 	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, mandateDir, budgetDir, mandateBudgetDir, negotiationDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, mlsDir, executionDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayPullDir} {

@@ -76,17 +76,16 @@ func VerifyFinalizedDelegation(config Config, now time.Time) (identity.Delegatio
 	return finalizedVerifier{}.Verify(config, now)
 }
 
-// prepareStateDir initializes the event journal root before anything else
-// writes into it. The finalized read stores the rollback checkpoint inside
-// state_dir, and the journal refuses to adopt a non-empty root it did not
-// mark, so verifying first on a fresh directory would leave the daemon
-// unable to open it.
+// prepareStateDir marks a fresh state directory as an event journal root
+// before anything else writes into it. The finalized read stores the
+// rollback checkpoint inside state_dir, and the journal refuses to adopt a
+// non-empty root it did not mark. It takes no journal lock and runs no
+// recovery, so a caller beside a live daemon is unaffected.
 func prepareStateDir(stateDir string) error {
-	journal, err := eventlog.Open(stateDir)
-	if err != nil {
+	if err := eventlog.PrepareRoot(stateDir); err != nil {
 		return errors.New("prepare state directory: " + err.Error())
 	}
-	return journal.Close()
+	return nil
 }
 
 func finalizedResolver(config Config) (*chainagent.Resolver, identity.ChainPolicy, error) {
