@@ -24,31 +24,6 @@ protocol library remain separate programs. `make boundary-lint` enforces that
 that `messenger/` imports `protocol/` only, and that nothing imports
 `messenger/`.
 
-## Origin
-
-This repository supersedes five repositories. Each was imported with its full
-history (every original commit keeps its SHA) at the following point:
-
-| Directory | Former repository | Import point |
-|---|---|---|
-| `spec/` | `tosnetwork/tos-service-spec` | `a67148cc969d26c637bf6f88e1c3c544432c6dc0` |
-| `protocol/` | `tosnetwork/tos-service-protocol` | `49a25714e971f3f5b5ad7ad3fe8915936752efd4` |
-| `gateway/` | `tosnetwork/tos-service-gateway` | `4561e4ac44a3de1245a60f81f9061ca92756dc1c` |
-| `execution/` | `tosnetwork/tos-ai` | `9e0728c8e53bcd4c4c71eb02d676021e4d4d9d1b` |
-| `messenger/` | `tosnetwork/tos-messenger` | `5668b3a2b5f12f8454abf35ba241eb8c454ec6cb` |
-
-Go import paths changed by prefix only:
-
-| Former module | Package path here |
-|---|---|
-| `github.com/tosnetwork/tos-service-protocol` | `github.com/tosnetwork/ai/protocol` |
-| `github.com/tosnetwork/tos-service-gateway` | `github.com/tosnetwork/ai/gateway` |
-| `github.com/tosnetwork/tos-ai` | `github.com/tosnetwork/ai/execution` |
-| `github.com/tosnetwork/tos-messenger` | `github.com/tosnetwork/ai/messenger` |
-
-Evidence records under `spec/deployments/` are hash-pinned and still name the
-former repositories; their commits resolve in this repository unchanged.
-
 ## Build and test
 
 The repository is one Go module (`github.com/tosnetwork/ai`, Go 1.26.11).

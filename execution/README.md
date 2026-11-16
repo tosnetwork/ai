@@ -1,6 +1,6 @@
 # TOS AI Execution Foundation
 
-`tos-ai` contains the reusable local execution substrate for the Native TOS Service Protocol
+`execution/` contains the reusable local execution substrate for the Native TOS Service Protocol
 software-work market. It is not a second registry, an authority over payments,
 or a public network authority. Finalized TOS state remains canonical; this module
 executes work bound by an Accepted Quote and produces off-chain outputs and
@@ -58,8 +58,8 @@ go test ./...
 
 The provider-local `software-work-execute` command composes the frozen V1 job
 with the bounded executor. The execution contract is frozen in
-`tos-service-spec/docs/SOFTWARE_WORK_EXECUTION_V1.md`; settlement follows
-`tos-service-spec/docs/SERVICE_ACTOR_TVM_V1.md`. It does not resurrect the
+`spec/docs/SOFTWARE_WORK_EXECUTION_V1.md`; settlement follows
+`spec/docs/SERVICE_ACTOR_TVM_V1.md`. It does not resurrect the
 deleted inference RPC. Its `paid` subcommand is the standalone paid path: it
 admits a finalized pending Service Actor request through `pkg/railgate`
 before executing it at most once. The default mode runs a job whose admission

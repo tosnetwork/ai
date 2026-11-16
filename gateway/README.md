@@ -27,7 +27,7 @@ The product and protocol specification lives in
   package. The gateway validates the non-canonical proposal but cannot accept
   terms for the buyer.
 - `GET /livez` reports process liveness.
-- `GET /readyz` verifies that the authoritative `tos-service-protocol` boundary is
+- `GET /readyz` verifies that the authoritative protocol boundary (`protocol/`) is
   reachable.
 
 These tokens grant transport permissions only. They cannot create or change
@@ -35,8 +35,8 @@ canonical state without a valid signed Native action accepted by TOS.
 
 ## Run locally
 
-The module uses Go 1.26.11. Start a configured Native-only `tos-service-protocol` RPC
-server, then run:
+The module uses Go 1.26.11. Start a configured Native-only protocol RPC server
+(`protocol/cmd/tos-service-rpc`), then run:
 
 ```bash
 export TOS_SERVICE_READ_TOKEN='<read-token>'
@@ -137,7 +137,7 @@ TOS_SERVICE_CAPABILITY_CATALOG_MAX_ENTRIES
 ```
 
 Client certificate and key must be configured together. Startup and readiness
-fail closed when `tos-service-protocol` is unavailable; there is no mock or Managed
+fail closed when the protocol RPC service is unavailable; there is no mock or Managed
 fallback.
 
 Capability discovery is derived and explicitly incomplete. The gateway keeps
