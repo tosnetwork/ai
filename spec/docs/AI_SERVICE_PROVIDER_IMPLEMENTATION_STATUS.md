@@ -475,9 +475,7 @@ Proven by these records (section 8 gate items):
   send is refused by A's daemon with the revocation code and a copy queued
   before the revocation is never re-deposited.
 - **6. Crash windows.** B's serve is killed while its carrier call is queued
-  and answers `duplicate` after restart; A's daemon is killed between the
-  relay accepting a deposit and its journal write and gets `carried` with no
-  new deposit after restart. A's daemon is killed while its carrier's
+  and answers `duplicate` after restart. A's daemon is killed while its carrier's
   deposit is held in flight; the relays accept it after the kill, A's journal
   never recorded `carried`, and after restart the same generation key gets
   `carried` with no new deposit. In the four-machine record the deposit is
