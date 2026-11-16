@@ -11,6 +11,15 @@ to `tosnetwork/openfox` `main` `edd88e11`.
 
 **Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
 
+**Errata (M-R2 relay frame implementation).** Section 11.1 gains the
+normative room-object header layout. The largest valid header is 2,653 bytes,
+so the largest valid object is 1,051,319 bytes: five 190,464-byte frames and
+one 131,072-byte frame, 1,485,354 stored bytes per member. The 8,192-byte
+header and 1,056,858-byte object limits stay as codec bounds; the six full
+frames and 1,564,542 bytes the section stated before are an upper bound no
+valid object reaches. A room ack (11.7) of a pending joiner refusing its
+Welcome carries no epoch authenticator and MLS epoch 0.
+
 **Errata (M-R2 journal implementation).** The MLS state bound is derived from the worst case the driver configuration allows at the relay room bound of 32 leaves, not from in-order traffic at 64: with an out-of-order tolerance of 32, 63 senders skipping 7 generations in each retained epoch exceed 512 KiB at 64 leaves. The tolerance is therefore 8 and the forward distance 1,000, and the measured worst case at 32 leaves is 272,968 bytes (sections 8 item 17, 9.2 item 2, 11.3). The fused record names the memberships of the two earlier room epochs by digest, because three member lists do not fit its 8,192 bytes; those content-addressed membership records are named by the fused record and collected with the other staged records (sections 9.2 item 4, 11.3, 11.7).
 
 MUST, MUST NOT, SHOULD and MAY are normative. Citations are `path:line` in this
@@ -958,7 +967,7 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     bytes, stored envelopes match 1,373 + F + 4·⌈B/3⌉. Frames cut at a test P
     are only checked to be buckets. A separate local record
     (`local-messenger-relay-rooms-<date>.json`, one host, a local relay)
-    carries a production-cut maximal 6-part object and checks the same.
+    carries a production-cut largest valid object (6 parts, 11.1) and checks the same.
 11. **Nothing readable (live).** As M-R1 item 9, also searching for the room
     ID, members, KeyPackages, roster contents and the invite token.
 12. **Room admission stays in the room (live, D11).** B, a member of the room
@@ -1341,6 +1350,31 @@ card, relay evidence) of members: at most 31 × (70 + 4 + 9,216 + 18,432) =
 859,382 bytes; it is separate because a Welcome with its ratchet tree plus a
 full roster could exceed 1 MiB.
 
+**The header** (normative; room ID and room epoch come from the object, and
+the membership digest is recomputed from them and the members):
+
+```text
+room_header =
+  member_count  u8   1 .. 32
+  members            agent_ IDs, 70 bytes each, ascending
+  network_id    u16-prefixed, 1 .. 128 bytes
+  genesis_root  32
+  genesis_file  32
+  authority     agent_ ID (70) and mep_ ID (68)
+  issued_at     u64
+  expires_at    u64
+  signature     64
+```
+
+The network-ID bytes are exactly the authority delegation's `network_id`
+(and so its characters): an authorization whose network differs from the
+delegation's is refused. A decoder re-encodes the header and refuses any
+other encoding of the same values. The largest valid header is therefore
+1 + 32·70 + 2 + 128 + 32 + 32 + 70 + 68 + 8 + 8 + 64 = **2,653 bytes**, and
+the largest valid object 90 + 2,653 + 1,048,576 = **1,051,319 bytes**. The
+codec limits stay 8,192 header bytes and 1,056,858 object bytes: a safe upper
+bound that no valid object reaches.
+
 **The cut is fixed, not size-driven.** The frame's fixed part is 72 bytes
 (29 + 3 + 32 + 2 + 2 + 4, `messenger/pkg/relayframe/frame.go:53-58`). Part 0
 carries the evidence and, while unacknowledged, the card; the other parts
@@ -1358,9 +1392,14 @@ do not depend on the actual card or evidence size, so every re-deposit
 generation has byte-identical parts and the same digest although part 0's
 card is dropped once acknowledged. Every non-final part is exactly the
 190,464-byte bucket; a full part stores 1,373 + 5,432 + 4·63,488 = 260,757
-bytes at a relay (≤ 262,144). The last part is padded to its bucket (6). A
-maximal object (last part 132,546 bytes) is six 190,464-byte frames,
-1,564,542 stored bytes per member. **Test part size:** a test build MAY set
+bytes at a relay (≤ 262,144). The last part is padded to its bucket (6). The
+largest valid object (1,051,319 bytes) is five 190,464-byte frames and a last
+part of 127,007 object bytes, a 127,079-byte frame in the 128 KiB bucket:
+5 · 260,757 + (1,373 + 5,432 + 4 · 43,691) = **1,485,354 stored bytes per
+member**. (An object at the 1,056,858-byte codec limit, which no valid header
+reaches, would be six 190,464-byte frames with a last part of 132,546 bytes
+and 1,564,542 stored bytes; that figure is an upper bound, never reached.)
+**Test part size:** a test build MAY set
 `room_part_bytes` P in 1,024 .. 162,744, cutting every part of a *handshake*
 object at P (application objects keep the production rule); an object that
 would need more than 8 parts at P is refused at the sender. The record states
@@ -1775,7 +1814,9 @@ any journal write (`admit.go:323-331`), the card is not stored and
 ack, schema `tos.messaging.relay-room-ack.v1`: room ID, object digest,
 recipient Endpoint and device, the recipient's MLS epoch and epoch
 authenticator after handling the object (so the authority sees a diverged
-state), outcome, code and time, signed by the
+state; a pending joiner that refuses its Welcome holds no MLS state, so its
+`rejected` ack, and only a rejection, carries no authenticator and MLS epoch
+0), outcome, code and time, signed by the
 recipient Endpoint under a new domain `DomainRelayRoomAck`, verified like
 5.2. It is sent only for handshake objects (types 1, 2 and 4), never for
 application objects (31 acks per message would double the deposits).

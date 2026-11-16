@@ -55,6 +55,7 @@ jobs:
           - ./messenger/pkg/attachmentops
           - ./messenger/pkg/relayframe
           - ./messenger/pkg/carrierapi
+          - ./messenger/pkg/eventlog
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

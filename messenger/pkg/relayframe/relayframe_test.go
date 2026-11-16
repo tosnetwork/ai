@@ -22,7 +22,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
-func evidence(t *testing.T) []byte {
+func evidence(t testing.TB) []byte {
 	t.Helper()
 	raw, err := relayframe.EncodeEvidence(relayframe.Evidence{Delegation: []byte(`{"delegation":1}`),
 		Policy: []byte(`{"policy":1}`), Descriptor: []byte(`{"descriptor":1}`), BundleSet: []byte(`{"set":1}`)})
@@ -127,7 +127,14 @@ func TestEncodeRefusesInvalidFrames(t *testing.T) {
 	}{
 		{"unknown kind", relayframe.Frame{Kind: 9, PartCount: 1, Evidence: ev, Part: []byte{1}}, relayframe.ErrFrameKind},
 		{"zero kind", relayframe.Frame{Kind: 0, PartCount: 1, Evidence: ev, Part: []byte{1}}, relayframe.ErrFrameKind},
-		{"room kind", relayframe.Frame{Kind: relayframe.KindRoom, PartCount: 1, Evidence: ev, Part: []byte{1}}, relayframe.ErrFrameKindUnsupported},
+		{"room part index past count", relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 2, PartCount: 2, ObjectDigest: [32]byte{1}, Part: []byte{1}}, relayframe.ErrFrameMalformed},
+		{"room nine parts", relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 9, ObjectDigest: [32]byte{1}, Part: []byte{1}}, relayframe.ErrFrameMalformed},
+		{"room zero parts", relayframe.Frame{Kind: relayframe.KindRoom, PartCount: 0, Evidence: ev, Part: []byte{1}}, relayframe.ErrFrameMalformed},
+		{"room later part with evidence", relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2, ObjectDigest: [32]byte{1}, Evidence: ev, Part: []byte{1}}, relayframe.ErrFrameMalformed},
+		{"room later part with card", relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2, ObjectDigest: [32]byte{1}, Card: []byte{1}, Part: []byte{1}}, relayframe.ErrFrameMalformed},
+		{"room part 0 without evidence", relayframe.Frame{Kind: relayframe.KindRoom, PartCount: 2, ObjectDigest: [32]byte{1}, Part: []byte{1}}, relayframe.ErrEvidenceRequired},
+		{"room split without its object digest", relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2, Part: []byte{1}}, relayframe.ErrFrameMalformed},
+		{"room part above the frame", relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2, ObjectDigest: [32]byte{1}, Part: make([]byte, relayframe.MaxPartBytes+1)}, relayframe.ErrContentTooLarge},
 		{"two parts", relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 2, Evidence: ev, Part: []byte{1}}, relayframe.ErrFrameMalformed},
 		{"part index", relayframe.Frame{Kind: relayframe.KindCopy, PartIndex: 1, PartCount: 1, Evidence: ev, Part: []byte{1}}, relayframe.ErrFrameMalformed},
 		{"no evidence", relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1, Part: []byte{1}}, relayframe.ErrEvidenceRequired},
@@ -179,7 +186,8 @@ func TestDecodeRefusesEveryMalformation(t *testing.T) {
 		{"trailing byte", append(append([]byte(nil), good...), 0), relayframe.ErrFrameSize},
 		{"other domain", mutate(func(b []byte) []byte { b[0] ^= 1; return b }), relayframe.ErrFrameMalformed},
 		{"unknown kind", mutate(func(b []byte) []byte { b[domain] = 7; return b }), relayframe.ErrFrameKind},
-		{"room kind", mutate(func(b []byte) []byte { b[domain] = relayframe.KindRoom; return b }), relayframe.ErrFrameKindUnsupported},
+		{"room kind with nine parts", mutate(func(b []byte) []byte { b[domain] = relayframe.KindRoom; b[domain+1] = 1; b[domain+2] = 9; return b }), relayframe.ErrFrameMalformed},
+		{"room later part with evidence", mutate(func(b []byte) []byte { b[domain] = relayframe.KindRoom; b[domain+1] = 1; b[domain+2] = 2; return b }), relayframe.ErrFrameMalformed},
 		{"part count", mutate(func(b []byte) []byte { b[domain+2] = 2; return b }), relayframe.ErrFrameMalformed},
 		{"part index", mutate(func(b []byte) []byte { b[domain+1] = 1; return b }), relayframe.ErrFrameMalformed},
 		{"digest", mutate(func(b []byte) []byte { b[domain+3] ^= 1; return b }), relayframe.ErrFrameDigest},
