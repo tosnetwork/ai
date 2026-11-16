@@ -157,8 +157,7 @@ Not covered by this record:
 
 `tos-service-spec`, `tos-service-protocol`, `tos-service-gateway` and `tos-ai`
 were merged into `tosnetwork/ai` as `spec/`, `protocol/`, `gateway/` and
-`execution/`, with their full history (every original commit keeps its SHA;
-the mapping is in [`deployments/README.md`](../deployments/README.md#former-repositories)).
+`execution/`, with their full history (every original commit keeps its SHA).
 The move changes paths only. Binary names, the `tos.service.v1` schema, protocol
 domains and signing domains are unchanged.
 
@@ -231,9 +230,10 @@ evidence.
 - Two stale references predate the move and were left unchanged by it:
   `spec/docs/GATE_E_BUYER_ONBOARDING.md` names
   `tos-service-protocol/pkg/toschain.StablecoinResolver`, which no longer
-  exists, and `spec/deployments/README.md` and `spec/docs/ROADMAP.md` name
-  `native-safe-handoff-pack` and `native-safe-handoff-check`, which are not in
-  `protocol/cmd`. Correct or remove them in a separate change.
+  exists, and `spec/docs/ROADMAP.md` names `native-safe-handoff-pack` and
+  `native-safe-handoff-check`, which are not in `protocol/cmd`
+  (`spec/deployments/README.md` now says these tools are not in this
+  repository yet). Correct or remove them in a separate change.
 - Planned later, each as its own reviewed change: make `spec/proto` the single
   schema source and remove `protocol/api`, and reconcile the diverged copies of
   `internal/osguard` and `internal/actionauthoritytest`.
