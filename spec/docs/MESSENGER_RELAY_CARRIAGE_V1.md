@@ -1189,7 +1189,9 @@ seal already carry any frame; nothing new is resolved on chain).
    with the roster window [current − 2, current] and per-entry skipping
    (11.2, 11.3); and
    received application digests (24 h 5 min); per (room, sender) sequence
-   state and `room.gap` records; pending joins; presented invites with
+   state and `room.gap` records; pending joins (each a garbage-collection
+   root, since it names the joiner's staged identity state), with the
+   implementation bounds of 11.3; presented invites with
    `AdmissionToken` on `Delivery` (`delivery.go:109-144`); the unswept
    invited-contact list; schema bumps, no migration.
 5. `pkg/dispatch`: set `Message.AdmissionToken` on every delivery to the
@@ -1680,6 +1682,20 @@ node's own chat relays plus 5 minutes (a missing envelope can only still be
 waiting at one of them). An object dropped unopened reveals no sequence, so
 its gap record names only the sender until a later sequence fixes the range.
 Loss at a sender's tail is noticed at that sender's next message.
+
+**Implementation bounds of the receive state.** None of the following
+records may grow without limit, so each has a fixed bound:
+
+- At most **65,536** live received-application digests across all rooms.
+  At the bound, the expired ones are swept first. If the live ones still
+  fill it, the digest is not recorded and the object is answered `retry`
+  (left unacknowledged at the relay), so nothing is dropped unrecorded.
+- At most **64** pending joins. Expired invites are swept before a new one
+  is refused.
+- At most **1,024** `room.gap` records per room; the oldest are pruned
+  first.
+- At most **64** undeclared missing ranges per sender. A range beyond that
+  is declared lost at once, without waiting T.
 
 **Parts.** Part 0's evidence is checked (`CheckPeer`, read-only) when part 0
 arrives; when several generations deliver part 0, the evidence that is newest
