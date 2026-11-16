@@ -31,7 +31,7 @@ current acceptance gate and must never be relabeled as current evidence.
 
 For a post-acceptance Gateway handoff, retain the complete Quote package and
 the output of `native-receipt-release`, then assemble the portable bundle with
-`tos-service-protocol/cmd/native-safe-handoff-pack`. Use
+`protocol/cmd/native-safe-handoff-pack`. Use
 `safe-handoff.template.json` only as a field guide: it is not evidence. Verify
 the resulting bundle with `native-safe-handoff-check` against at least three
 validator endpoints and an absolute durable checkpoint path. The checker must

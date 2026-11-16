@@ -55,10 +55,10 @@ implementation order, and acceptance gates.
 - TOS contracts validate registry transitions and store canonical state.
 - Agent Operation profiles define signed off-chain authorization, replay,
   ordering, payload, and resource semantics.
-- `tos-service-protocol` builds canonical cells and operation encodings,
+- `protocol/` builds canonical cells and operation encodings,
   verifies signatures, relays messages, and resolves finalized state through
   independent endpoints.
-- `tos-service-gateway` authenticates transport clients and exposes the Native service.
+- `gateway/` authenticates transport clients and exposes the Native service.
 - Carriers and Gateways provide delivery, discovery, indexing, moderation, and
   orchestration without semantic authority.
 - OpenFox and other runtimes interpret content and invoke skills under
@@ -250,15 +250,14 @@ metadata and is never sufficient asset identity.
 
 | Component | Responsibility |
 |---|---|
-| `spec/` (this directory, formerly `tos-service-spec`) | Normative schema, rules, and frozen vectors |
+| `spec/` (this directory) | Normative schema, rules, and frozen vectors |
 | `tos` repository | TVM contract and consensus execution |
-| `protocol/` (formerly `tos-service-protocol`) | Canonical encoding, relaying, resolution, and verification |
-| `gateway/` (formerly `tos-service-gateway`) | Reference Native gateway and transport authentication |
-| `execution/` (formerly `tos-ai`) | Execution workers and result production |
+| `protocol/` | Canonical encoding, relaying, resolution, and verification |
+| `gateway/` | Reference Native gateway and transport authentication |
+| `execution/` | Execution workers and result production |
 
 `spec/`, `protocol/`, `gateway/` and `execution/` are directories of the `ai`
-repository; see `deployments/README.md` for the former repositories and their
-import points.
+repository.
 
 ## Repository layout
 
