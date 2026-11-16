@@ -982,6 +982,12 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     state digest mismatch fails the read closed; garbage collection keeps an
     older Commit and a roster named only by outbox heads, deletes
     superseded state chunks, and deletes nothing when a root is unreadable.
+18. **Roster to an already-joined member (live, 11.2 case b).** B has
+    joined; A adds C; B applies the Add Commit, accepts the roster of added
+    members, learns C's card and evidence from it, and exchanges a room
+    message with C (no contact between them). A roster naming an Agent that
+    is not in the committed membership, one from a non-authority, and one
+    for another epoch are refused (unit).
 
 Not proven: more than 3 live members (32 is a unit bound), multi-device
 (D3), concurrent authorities, authority transfer over the relay, fork
@@ -1287,13 +1293,14 @@ room_object =
   D("tos.messaging.relay-room-object.v1")   35 bytes
   object_type   u8   1 = Commit, 2 = Welcome, 3 = application, 4 = roster
   room_id       32   the raw digest of the room_ ID
-  room_epoch    u64  the epoch the object produces (1, 2) or was sealed in (3, 4)
+  room_epoch    u64  the epoch the object produces (1, 2), was sealed in (3),
+                     or describes (4)
   mls_epoch     u64  likewise for the MLS clock (group.Clock, mls_profile.go:88-91)
   header_length u16  0 .. 8,192
-  header        a Commit or Welcome that changes the room epoch: the
-                successor Membership and its MembershipAuthorization
-                (room/authority.go:41-50); an MLS-only refresh Commit: empty;
-                otherwise empty
+  header        a Commit or Welcome that changes the room epoch, and every
+                roster: the Membership of that epoch and its
+                MembershipAuthorization (room/authority.go:41-50);
+                an MLS-only refresh Commit and an application object: empty
   body_length   u32  1 .. 1,048,576
   body          the MLS Commit, Welcome or PrivateMessage; or the roster
 ```
@@ -1358,8 +1365,27 @@ registry with class `room`, like `room.invite`
 authority checks it with
 `BindDeviceCredential` (`mls_profile.go:280`) against finalized state and
 commits the Add (its owner already decided). Create, add, remove and join are
-owner-only (D13); the runtime only sends and reads room messages. A Welcome or roster
-is accepted only from the authority of a room with a pending join.
+owner-only (D13); the runtime only sends and reads room messages. A Welcome
+is accepted only from the authority named in the `room.invite` of a room
+with a pending join.
+
+**Accepting a roster** for room R, in both cases below, requires that its
+packet sender is R's authority, that its header carries a valid
+MembershipAuthorization (relay-route window, 11.3) for room epoch E, that E
+is exactly the receiver's current committed room epoch (the epoch of the
+Commit or Welcome it follows, which the in-order queue delivers first; an
+older E takes the receive order of 11.3, a newer one `room-epoch-gap`), that
+the header's membership digest matches the committed membership of E, and
+that every entry names a member of E other than the receiver, so a roster
+can never add an Agent the Commits did not. Cards and evidence from it are
+learned under D11.
+
+- (a) **During a pending join:** R's authority is the one named in the
+  `room.invite`; the roster is accepted once the Welcome has been applied
+  (the join then ends and E is the Welcome's epoch).
+- (b) **Already joined:** R's authority is the current one of the
+  receiver's `RoomLedger`; this is the roster of added members that follows
+  an Add Commit.
 
 **Senders.** Only the authority sends Commits, Welcomes and rosters (11.5):
 a Commit to every member but itself, and once to a removed member (11.4); a
@@ -1467,7 +1493,9 @@ build MAY shorten the retention (`room_handshake_retention_seconds`;
 production 7 days) and the expiry the authority signs
 (`room_authorization_seconds`; production 24 h); the record states both.
 
-**Receiver, handshake.** For a Commit or Welcome the daemon checks the
+**Receiver, handshake.** A roster is checked as in 11.2 and then takes the
+numbered receive order below (its digest joins the 64 applied). For a
+Commit or Welcome the daemon checks the
 sender (11.5) and the authorization as above, then advances the room epoch
 and the MLS state in **one journal write**, the fused room record, which is
 the single commit point. Large values never live in it; they are staged
