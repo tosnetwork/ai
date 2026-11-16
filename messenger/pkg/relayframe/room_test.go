@@ -505,12 +505,16 @@ func TestReassemblerEnforcesEachBound(t *testing.T) {
 		set := admitAll(sender)
 		set.inRoom = map[string]bool{}
 		reassembler, _ := relayframe.NewReassembler(relayframe.DefaultReassemblyLimits(), set)
-		_, frames := splitFrames(t, 300_000, "b")
+		// Three parts, so part 0 does not complete the object.
+		_, frames := splitFrames(t, 400_000, "b")
 		if _, err := reassembler.Add(sender, frames[1], now); err != nil {
 			t.Fatalf("a later part before the room is known: %v", err)
 		}
 		if _, err := reassembler.Add(sender, frames[0], now); !errors.Is(err, relayframe.ErrReassemblyNotAdmitted) {
 			t.Fatalf("part 0 in a room the sender is not admitted in: %v", err)
+		}
+		if usage := reassembler.Usage(); usage.TotalBytes != len(frames[1].Part) {
+			t.Fatal("a refused part 0 was held")
 		}
 	})
 	t.Run("membership ends before completion", func(t *testing.T) {
