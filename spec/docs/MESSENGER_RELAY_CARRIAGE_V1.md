@@ -974,7 +974,9 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     descriptor lifetimes, B and C (no contacts) keep exchanging room messages
     across several expiries, renewed only by kind-3 part 0.
 17. **Driver bounds (unit).** The 512 KiB state bound holds at 64 leaves with
-    `max_past_epochs(2)`; the fused record fits its bound at maximal sizes.
+    `max_past_epochs(2)` and fits 2 state chunks; a maximal fused record
+    (32 members, maximal authorization and IDs) encodes within its 8,192-byte
+    cap; a record over the cap is refused on write and on read.
 
 Not proven: more than 3 live members (32 is a unit bound), multi-device
 (D3), concurrent authorities, authority transfer over the relay, fork
@@ -1121,10 +1123,12 @@ seal already carry any frame; nothing new is resolved on chain).
    64 leaves with `max_past_epochs(2)`.
 3. `pkg/room`: a relay-route authorization check (11.3: signature against
    the delegation as finalized now, window issued + retention + skew).
-4. `pkg/eventlog`: the fused room and MLS record with exact-repeat no-op
-   (11.3, replacing the two writes for MLS rooms) and its bound test; a room
-   outbox of chunk records, staged under the `CommitRef` before the fused
-   record (11.7); a durable part store and a future-epoch buffer with the
+4. `pkg/eventlog`: the fused room and MLS record (≤ 8,192 bytes, digests
+   only) with exact-repeat no-op (11.3, replacing the two writes for MLS
+   rooms) and its bound test; staged MLS state chunks (≤ 2 of 262,144 bytes)
+   and delegation records by digest; a room outbox of chunk records, staged
+   under the `CommitRef` before the fused record (11.7); deletion of unnamed
+   staged records on restart; a durable part store and a future-epoch buffer with the
    bounds of section 4 and 11.3 (per-sender share, k = 4); the committed
    membership of the last 3 epochs; applied handshake digests (last 64) and
    received application digests (24 h 5 min); per (room, sender) sequence
@@ -1238,8 +1242,11 @@ M-R2 decisions (2026-11-16, delegated by the owner):
   On the relay route a header authorization is checked against the
   delegation as finalized now, within issued + handshake retention + skew,
   never re-signed per generation; the room and MLS advance is one journal
-  write; Commit output is staged and committed with it as chunk records
-  (11.3, 11.7).
+  write of a small fused record (≤ 8,192 bytes) holding only digests,
+  membership, authorization and `CommitRef`; the MLS state, delegation and
+  Commit output are staged first as chunk records it names, and unnamed
+  staged records are deleted on restart (11.3, 11.7). Reason: a record near
+  its bound becomes unreadable once a field is added.
 
 ## 11. M-R2: rooms and invites
 
@@ -1444,13 +1451,26 @@ production 7 days) and the expiry the authority signs
 
 **Receiver, handshake.** For a Commit or Welcome the daemon checks the
 sender (11.5) and the authorization as above, then advances the room epoch
-and the MLS state in **one journal write**: for an MLS room one record holds
-the membership record, the MLS binding and the opaque state (≤ 512 KiB,
-`eventlog/mls.go:24`; 4·⌈524,288/3⌉ = 699,052 bytes in base64), plus an
-authority delegation of at most 65,536 bytes
-(`directory/file_delegations.go:13`), leaving about
-21 KB of the 768 KiB record bound, `eventlog/journal.go:63`, for membership
-and fields; a vector test at maximal sizes pins it). Today they are two
+and the MLS state in **one journal write**, the fused room record, which is
+the single commit point. Large values never live in it; they are staged
+first as content-addressed records:
+
+- the opaque MLS state (≤ 512 KiB, `eventlog/mls.go:24`) as chunk records of
+  262,144 bytes (349,528 in base64), at most ⌈524,288 / 262,144⌉ = **2**
+  chunks, named by the state digest;
+- the authority delegation (≤ 65,536 bytes,
+  `directory/file_delegations.go:13`) as one record named by its digest;
+- Commit, Welcome and roster objects as the chunk records of 11.7.
+
+The fused record holds only: room ID, room and MLS epochs, membership digest
+and the ≤ 32 member IDs, the authority's Agent and Endpoint, the
+MembershipAuthorization, the prior and accepted `CommitRef`, the state digest
+and its chunk digests, and the delegation digest. Worst case about **4.9 KB**
+(about 3.9 KB of values: 2,336 for 32 member IDs, about 690 for the
+authorization, the rest digests and IDs, plus field names); the codec caps it
+at **8,192 bytes**, leaving 778,240 bytes (99 %) of the 768 KiB record bound
+(`eventlog/journal.go:63`) as headroom. On restart, staged state, delegation
+and object chunks that no fused record names are deleted. Today they are two
 writes that refuse a repeat (`eventlog/rooms.go:139-141` `ErrRoomRollback`,
 `mls_controller.go:108-110` `ErrMLSFork`), so a crash between them would
 strand the room. An exact repeat (same membership digest, authorization and
@@ -1657,11 +1677,12 @@ and the ack outcome and code.
 `MLSController.Commit` makes the next state durable before the caller can
 record the Commit (`mls_controller.go:64-95`); an authority crash in between
 would leave it in an epoch no member can reach. Instead the driver's output
-(next state, Commit, Welcome) is first written as staged chunks under the
-`CommitRef`, then the fused room record of 11.3 names that `CommitRef` and
-is the single commit point. On restart, staged chunks no fused record names
-are deleted (nothing was published and the old state stands); a named entry
-without per-member queues gets them rebuilt from the membership.
+is first staged: the next state as state chunks under its digest (11.3) and
+the Commit and Welcome as object chunks under the `CommitRef`; then the fused
+room record of 11.3, naming both, is the single commit point. On restart,
+staged chunks no fused record names are deleted (nothing was published and
+the old state stands); a named entry without per-member queues gets them
+rebuilt from the membership.
 Idempotency keys are `idem_` + SHA-256 of (object
 digest, member, generation, part index), so a retry reuses the journaled
 envelope (1). A handshake object is kept until every member is settled; an
