@@ -4,8 +4,10 @@ How private chat between two OpenFox Agents crosses machines by reusing
 [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) ("relay spec") with no new
 transport, no relay change and no new authority.
 
-**Status: ⬜ Design only.** No code implements it. Section 8 states what each
-phase's live record must prove; section 9 lists the M-R1 changes.
+**Status: M-R1 ✅ accepted (section 8); M-R2 ⬜ design only (section 11).**
+Section 8 states what each phase's live record must prove; section 9 lists
+the code changes of M-R1 (9.1) and M-R2 (9.2). Citations added for M-R2 refer
+to `tosnetwork/openfox` `main` `edd88e11`.
 
 **Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
 
@@ -106,16 +108,22 @@ relay_frame =
   frame_kind      u8    1 = copy, 2 = delivery-ack, 3 = room (M-R2), 4 = evidence
   part_index      u8    0 .. part_count-1
   part_count      u8    1 .. 8; kinds 1, 2 and 4 require 1
-  object_digest   32    SHA-256(D("tos.messaging.relay-object.v1") || object)
-  card_length     u16   0, or 1 .. 9,216; at least 1 in kind 4
+  object_digest   32    SHA-256(D("tos.messaging.relay-object.v1") || object),
+                        of the whole object, the same in every part
+  card_length     u16   0, or 1 .. 9,216; at least 1 in kind 4;
+                        0 in kind-3 parts other than part 0
   card            exact key-card packet JSON (2.3)
-  evidence_length u16   1 .. 18,432 (required in kinds 1, 2, 4)
+  evidence_length u16   1 .. 18,432 in kinds 1, 2, 4 and kind-3 part 0;
+                        0 in every other kind-3 part
   evidence        the sender's current relay identity evidence (2.5)
-  part_length     u32
-  part            this part of the object
+  part_length     u32   1 .. 190,392
+  part            this part of the object (kind 3: cut as in 11.1)
                   (kind 4: a one-byte object, 1 = request, 2 = response)
   padding         zero bytes up to the frame's size bucket (6)
 ```
+
+A decoder checks `object_digest` against the part only when `part_count` is
+1; a multi-part kind-3 object is checked once, on reassembly (section 4).
 
 `D(x)` and big-endian integers as in relay spec section 4. Decoders reject
 unknown kinds, non-zero padding, a total that is not a bucket size or not
@@ -141,7 +149,8 @@ A kind-1 object is the canonical length-prefixed encoding of exactly the
 `dispatch.Message` fields (`dispatch.go:34-46`), schema
 `tos.messaging.relay-delivery.v1`; binary rather than the HTTPS JSON
 (`directhttps/transport.go:41-53`) so the ciphertext is not base64-encoded
-twice. A kind-2 object is the ack of 5.2.
+twice. A kind-2 object is the ack of 5.2, or the room ack of 11.7. A kind-3
+object is the room object of 11.1.
 
 ## 2. Addressing and keys
 
@@ -330,7 +339,8 @@ the stored one. Otherwise it is a no-op. It runs only under the admission rule o
 Only provisioned or admitted peers are ever committed.
 
 **Receiver.** `CheckPeer` runs on every frame. It uses the frame's evidence
-for kinds 1, 2 and 4, and the stored evidence for kind 3. This replaces
+for kinds 1, 2 and 4, and for kind 3 the evidence of part 0, checked once
+when the object is complete, pinned to the sender's MLS leaf (11.2). This replaces
 `Ensure` at `inbound.go:70` and `:160` on `RouteRelay`.
 
 **Sender: scope.** `CheckPeer` gates only the sealing and re-depositing of
@@ -472,18 +482,26 @@ spent.
 
 **Room handshake objects are split (M-R2).** MLS objects reach 1 MiB
 (`messenger/pkg/group/openmls_sidecar.go:28`). A kind-3 object above one frame
-is split into at most 8 parts, one packet each, sharing `object_digest`. The
-receiver:
+is split into at most 8 parts, one packet each, sharing `object_digest`; with
+the bounds of 11.1 a maximal object needs 6. The receiver (the daemon, in a
+durable part store; OpenFox only verifies packets and forwards frames):
 
-- holds parts only from admitted room members;
-- caps one object at 1 MiB (the sidecar bound), refusing a part whose declared
-  or accumulated size exceeds it;
+- holds parts only from current members of a room it belongs to, or from the
+  authority of a room it asked to join (11.2), keyed by (packet sender,
+  `object_digest`); a part with a different `part_count`, or a repeated index
+  with different bytes, drops the whole object;
+- caps one object at 1,056,858 bytes (1 MiB of MLS bytes plus the room-object
+  header, 11.1), refusing a part whose accumulated size exceeds it;
 - holds at most 4 incomplete objects and 4 MiB of incomplete parts per peer,
   and at most 16 MiB of incomplete parts in total, refusing (and
   relay-acknowledging) parts beyond any cap, so filling the global cap takes
-  at least four admitted peers;
+  at least four admitted peers (four maximal objects exceed 4 MiB; an honest
+  authority has one in flight per room and member, 11.3);
 - drops an incomplete object after 24 h 5 min;
 - releases an object only when its digest matches.
+
+Each held part is relay-acknowledged once stored; a lost or refused part
+costs the sender one re-deposit of the whole object (11.3).
 
 **Attachments stay out of band (M-R3)** in the existing encrypted attachment
 store (`messenger/docs/ENCRYPTED_ATTACHMENTS.md:1-40`; up to 2,048 chunks of
@@ -496,7 +514,8 @@ expire after the relay TTL (at most 24 h) at an offline recipient.
 **Fan-out is one envelope per recipient Agent**: per device for copies, per
 member Agent for room frames, each signed and sealed separately. M-R2 bounds
 relay rooms to **32 members** (32 signatures per message, one envelope in each
-member's quota).
+member's quota). The per-peer, deposit-rate and mailbox arithmetic of
+fan-out is in 11.2.
 
 **Offline beyond the relay TTL** (`AGENT_PACKET_RELAY_V1.md` sections 9.6,
 9.8 and 10). A relay keeps an unacknowledged envelope for its TTL, an operator
@@ -563,11 +582,13 @@ production relays.
   above what the cap allows: 24 envelopes re-deposited every 48 minutes is one
   deposit every 2 minutes.
 - **Room application messages: loss with notice.** One deposit, kept for the
-  relay TTL; a member detects the gap from the MLS per-sender generation and
-  the runtime is told. Re-depositing to N members would multiply the load
-  above by N.
-- **Room Commits and Welcomes** follow the one-to-one rule with a per-member
-  ack: a lost Commit cuts a member off.
+  relay TTL; a member detects the gap from the per-sender room sequence
+  number inside the sealed Event (11.3; the MLS generation restarts every
+  epoch and the driver does not expose it) and the runtime is told.
+  Re-depositing to N members would multiply the load above by N.
+- **Room Commits, Welcomes and rosters** follow the one-to-one rule with a
+  per-member room ack (11.7), re-deposited until acked or 7 days: a lost
+  Commit cuts a member off.
 
 A copy whose recipient card expired waits for a fresh card (contact file or in
 band) until its own expiry.
@@ -592,8 +613,9 @@ lease (`messenger/README.md:109-117`).
 - **MLS (M-R2).** The single room authority serializes Commits
   (`messenger/docs/OPEN_DECISIONS.md:147`); the ledger applies them in epoch
   order with persist-before-output and Welcome replay refusal. A frame for a
-  future epoch waits in a bounded buffer (256 per room) for its Commit; a
-  past-epoch or replayed object is refused and still relay-acknowledged.
+  future epoch waits in a bounded buffer (256 objects and 8 MiB per room,
+  32 MiB in total) for its Commit; a replayed object is answered `duplicate`
+  or dropped, and a too-old one is a gap, each relay-acknowledged (11.3).
 
 ### 5.2 Acknowledgements
 
@@ -658,6 +680,18 @@ listing, download and ack times. The operator also sees sender and recipient
 IP addresses, kept per stored envelope for quota (`:688-689`), and can infer
 room fan-out from one address depositing to N mailboxes at once.
 
+**Rooms (M-R2) reveal more.** Fan-out is one envelope per member (11.2): the
+operator, and anyone listing mailboxes, sees one address deposit equal-bucket
+envelopes to N mailboxes in one pacing window. Repeated, that reveals the
+room's size, its member Agent IDs, the authority (whose bursts precede the
+others' epoch changes) and each member's posting times; handshake objects
+show as runs of 190,464-byte frames. Hidden: room ID, epoch, content, and the
+type of a single-frame object. Mitigations, none touching the relay: a fresh
+random member order per object, kind-3 pacing (11.2), the fixed cut (11.1)
+so sizes leak only as a part count. Not provided: hiding membership, cover
+traffic; a room whose membership is itself sensitive should not use the relay
+route in V1.
+
 Evidence is pulled, never pushed. A node sends a kind-4 request only to a peer
 it holds a pending copy for, and a response only to a requester. Publishing a
 new descriptor therefore sends nothing to anyone, and the relay never sees a
@@ -708,7 +742,8 @@ Mitigations in V1, none touching the relay:
 > sizes, counts and times, and from the acknowledgement times when you are
 > online; the operator also sees IP addresses, and by matching the address
 > that deposits a message with the address that polls a mailbox it can
-> usually tell which Agent sent it. No relay sees which conversation a message
+> usually tell which Agent sent it. For a private room it can also see how
+> many members it has and which Agents they are. No relay sees which conversation a message
 > belongs to, or any content. Envelopes are kept until acknowledged or at most
 > for the relay's retention time (3 hours on the project's relays, never more
 > than 24 hours); an unacknowledged one-to-one message is re-deposited by its
@@ -758,7 +793,9 @@ Recipient protections, strongest first:
    trip; it can undercount (section 4) and is not the bound. The relay caps one client address at 64
    envelopes per recipient (`:641`). On shared relays, 24 chat envelopes leave
    at least 40 of that 64 for the same sender's rail deposits (tasks, results,
-   acks) to the same peer.
+   acks) to the same peer. **Rooms (M-R2)** live inside the 24: at most 16
+   kind-3 envelopes per peer, so at least 8 stay for kinds 1, 2 and 4, and
+   kind-3 deposits are paced to half the relay's deposit rate (11.2).
 4. **A malicious sender ignores its own cap.** Four IPv6 /64s at 64 envelopes
    each fill a 256-envelope mailbox. That is the open-deposit exposure the rail
    already has (`:790-800`): an availability attack that grants no authority.
@@ -860,18 +897,52 @@ sender unlinkability (section 6), multi-device, M0 freeze evidence
 (independent review and a second E2EE implementation,
 `messenger/docs/ROADMAP.md:25`), any Gate O claim.
 
-### M-R2: private rooms
+### M-R2: private rooms and invites
 
-Invite-based first contact: an admission invite attached to an outbound copy
-(no runtime operation sets it today) admits a stranger's first frame over the
-relay; the record shows the invite checked on receipt and refused when reused
-or expired.
+Record `messenger-relay-rooms-<date>.json`, same schema, design in section 11.
+Three OpenFox with `tos-messengerd` on three hosts (A behind NAT with no
+inbound port, B and C on separate VPSs), carriage only through the two test
+relays as in M-R1 item 1; A is the authority. *Live* items MUST be run
+steps; *unit* items MAY be named tests listed in `not_verified`.
 
-Three OpenFox on three hosts: room creation, two Welcomes (one split) and a
-Remove Commit over the relay; a member offline across a Commit catches up in
-epoch order; a member offline beyond 24 h gets a gap notice yet receives the
-Commit; the removed member cannot decrypt later messages. Not proven: rooms
-above 32 members, concurrent authorities.
+1. **Invites (live).** C refuses unknown senders without an invite and holds
+   no allow-list entry for A or B. A presents C's unscoped invite (11.6); A's first
+   copy carries it sealed, C admits it, every later generation of that Event
+   is `duplicate`. B presenting the spent token, and B presenting a second,
+   expired invite, are refused, and each refusal leaves C's journal, rollback
+   boundary and chat-card store unchanged.
+2. **Creation and two Welcomes (live).** A adds B, then C (two Commits, two
+   Welcomes, KeyPackages over the 1:1 sessions); C's Welcome is split by the
+   recorded test part size (11.1) and reassembled. All three exchange
+   messages, each applied once.
+3. **Catch-up in epoch order (live).** C stopped, A commits twice
+   (refreshes); on restart C gets the second only after acking the first,
+   applies both in order, and opens buffered newer-epoch messages.
+4. **Offline beyond the relay TTL (live).** B stopped beyond the 1 h TTL
+   while A commits and C posts; on restart B applies the re-deposited Commit
+   (generations and withdrawals recorded) and gets a `room.gap` naming C.
+5. **Remove (live).** A removes C: later objects are not addressed to C
+   (chat outboxes); C's driver fails to open one handed to it by the harness;
+   C's room messages are refused `not-a-room-member`; A's and B's pending
+   envelopes to C are withdrawn.
+6. **Authority only (unit, one live refusal).** A Commit from B is refused
+   `not-authentic`; a second Commit for one epoch is refused `room-fork`.
+7. **Reassembly caps (unit; the 4-object cap also live, by a test injector
+   signing with B's controller).** Each cap of section 4, an oversize object,
+   a non-member's part, inconsistent part counts and a digest mismatch are
+   refused and relay-acknowledged; an incomplete object expires.
+8. **States (live).** Each handshake object is `carried → delivered` per
+   member on a verified room ack; application copies end `carried`.
+9. **Caps and pacing (live counters).** No peer exceeds 16 kind-3 or 24 chat
+   envelopes; kind-3 deposits stay within 30 per minute per relay.
+10. **Sizes (live).** Every kind-3 frame is its smallest bucket, non-final
+    parts are 190,464 bytes, stored envelopes match 1,373 + F + 4·⌈B/3⌉.
+11. **Nothing readable (live).** As M-R1 item 9, also searching for the room
+    ID, members, KeyPackages, roster contents and the invite token.
+
+Not proven: more than 3 live members (32 is a unit bound), multi-device
+(D3), concurrent authorities, authority transfer over the relay, fork
+recovery (11.5), hiding membership (section 6), quota isolation (D2).
 
 ### M-R3: attachments
 
@@ -880,7 +951,9 @@ store while its reference event crosses the relay; the recipient fetches,
 verifies every tag and admits it through the scanner; no chunk ever appears in
 relay state. Not proven: a store run by anyone else, other media types.
 
-## 9. M-R1 code changes
+## 9. Code changes
+
+### 9.1 M-R1
 
 Boundaries hold: `messenger/` imports only `protocol/`; nothing in `ai`
 imports `messenger/`; OpenFox imports both.
@@ -986,6 +1059,69 @@ this document.
    `MessengerTransport` with this carriage.
 5. `scripts/messenger-relay-two-host-e2e.{sh,py}` producing the M-R1 record.
 
+### 9.2 M-R2
+
+Same boundaries. **`ai/protocol`: none** (the zero-Capability packet and the
+seal already carry any frame; nothing new is resolved on chain).
+**Relay program, relay spec: none.**
+
+**`ai/messenger`**
+
+1. `pkg/relayframe`: accept kind 3 (`frame.go:28-30`, `:286-297`); the
+   part rules of 1.1 (card and evidence only in part 0, digest checked per
+   part only when `part_count` is 1, `frame.go:280`); the room-object codec
+   and fixed cut of 11.1 with a test part size; `SplitRoomObject` and a
+   bounded `Reassembler`; the room ack (11.7) with
+   `canon.DomainRelayRoomAck`; the roster codec; vectors for a maximal
+   6-part object, each refusal of section 4, and the room ack.
+2. `rust/openmls-driver` and `pkg/group`: `max_past_epochs(2)` and an
+   out-of-order tolerance of 32 in both group configs (`src/main.rs:335-338`,
+   `:432-434`); `open` and `apply` return the sender's credential identity
+   (`:443-465`, `:484-520`); the Go `Driver` gains those results.
+3. `pkg/eventlog`: a room outbox (11.7); a durable part store and a
+   future-epoch buffer with the bounds of section 4 and 11.3; per-room
+   applied handshake digests (last 64) and received application digests
+   (24 h 5 min); per (room, sender) sequence state and `room.gap` records;
+   pending joins; presented invites with `AdmissionToken` on `Delivery`
+   (`delivery.go:109-144`); schema bumps, no migration.
+4. `pkg/dispatch`: set `Message.AdmissionToken` from the delivery
+   (`dispatch.go:920-930`); refuse a room-addressed kind-1 copy on the relay
+   route.
+5. `pkg/payload`: `room.key-package` (a `DeviceCredential`); a `sequence`
+   field in `RoomMessage` (`kinds_more.go:795-800`).
+6. `pkg/admission`: room-scoped admission (11.2), before the contact policy
+   and after the room overlay (`admit.go:304-317`).
+7. `pkg/localapi`: owner `rooms.create`, `rooms.add`, `rooms.remove`,
+   `rooms.join`, `invites.present`; runtime `rooms.list`, `rooms.gaps`;
+   `outbox.compose` with a `room_id` of an MLS room takes the kind-3 path.
+8. `pkg/carrierapi`: `carrier.room-cards` (admit or forget chat cards learned
+   from a roster) and `carrier.withdraw`; `carried` for kind-3 parts;
+   `peer-cap` also at 16 kind-3 envelopes.
+9. `pkg/daemon`: a room runtime beside `relayRuntime` (`relay.go:88-139`):
+   the joining flow, the authority's per-member in-order queue, fan-out with
+   per-recipient `CheckPeer`, the receive path of 11.3, `Deliver` for kind 3
+   (`relay.go:615-622`), room acks, and Remove's withdrawals and card
+   forgetting.
+10. `docs/RUNNING.md`, `docs/ROADMAP.md`: rooms over the relay, invites.
+
+**`openfox`**
+
+1. `pkg/servicebridge/relay_chat.go`: `carrier.carry` accepts kind 3
+   (`relay_chat.go:331`); a per-peer count of kind-3 envelopes (refuse above
+   16) beside the 24 (`:36`, `:471-481`, `:531-580`); a per-relay token
+   bucket for kind-3 deposits (30 per minute, burst 16); inbound kind 3 to
+   `carrier.deliver` and the room ack to `carrier.delivery-ack` (`:682-691`);
+   `carrier.room-cards` against the chat peer store (cards verified with
+   `VerifyKeyCard`; forgetting never removes a card stored under another
+   admission); `carrier.withdraw` through `RelayTransport.Withdraw`
+   (`relay_transport.go:1207`).
+2. CLI: `openfox chat room create|add|remove|join|list` and
+   `openfox chat invite present`, each through the owner socket;
+   `openfox chat contact import --invite` presenting the invite with the
+   contact file.
+3. `scripts/messenger-relay-three-host-rooms-e2e.{sh,py}` producing the M-R2
+   record.
+
 ## 10. Owner decisions
 
 - **D1. M0-R and Messenger's own Mailbox Relay are retired for the OpenFox
@@ -1002,3 +1138,308 @@ this document.
   comes from the signatures of the objects inside it and their binding to the
   finalized Agent, not from the channel. DHT discovery would need the stopped
   testnet.
+
+## 11. M-R2: rooms and invites
+
+**What exists** (paths under `messenger/`): one-authority membership epochs
+(`pkg/room/authority.go:24-29`, `pkg/eventlog/rooms.go:95`); an MLS ledger
+whose controller persists state before returning any Commit, Welcome or
+ciphertext (`pkg/eventlog/mls_controller.go:3-6`, `:65-125`); the OpenMLS
+sidecar and Rust driver (one Welcome per Commit,
+`rust/openmls-driver/src/main.rs:400-404`); the 32-Agent, 64-leaf bound
+(`pkg/group/mls_profile.go:37-40`); the `room.invite` payload
+(`pkg/payload/kinds_more.go:700-705`). The daemon drives no MLS: only the lab
+proxy does, with all states made on one host (`pkg/mlslab/bootstrap.go:18-20`),
+and `room.message` is a pairwise copy (`pkg/dispatch/dispatch.go:465-467`).
+M-R2 wires MLS rooms into the daemon, with kind 3 as their only carriage.
+Paths below without a repository are under `messenger/`.
+
+### 11.1 Room objects and the split
+
+**Decision.** A kind-3 object is one room object:
+
+```text
+room_object =
+  D("tos.messaging.relay-room-object.v1")   35 bytes
+  object_type   u8   1 = Commit, 2 = Welcome, 3 = application, 4 = roster
+  room_id       32   the raw digest of the room_ ID
+  room_epoch    u64  the epoch the object produces (1, 2) or was sealed in (3, 4)
+  mls_epoch     u64  likewise for the MLS clock (group.Clock, mls_profile.go:88-91)
+  header_length u16  0 .. 8,192
+  header        types 1 and 2: the successor Membership and its
+                MembershipAuthorization (room/authority.go:41-50);
+                otherwise empty
+  body_length   u32  1 .. 1,048,576
+  body          the MLS Commit, Welcome or PrivateMessage; or the roster
+```
+
+Fixed bytes are 35 + 1 + 32 + 8 + 8 + 2 + 4 = 90, so an object is at most
+90 + 8,192 + 1,048,576 = **1,056,858 bytes**. A roster lists (Agent ID, chat
+card, relay evidence) of members: at most 31 × (70 + 4 + 9,216 + 18,432) =
+859,382 bytes; it is separate because a Welcome with its ratchet tree plus a
+full roster could exceed 1 MiB.
+
+**The cut is fixed, not size-driven.** The frame's fixed part is 72 bytes
+(29 + 3 + 32 + 2 + 2 + 4, `messenger/pkg/relayframe/frame.go:53-58`). Part 0
+carries the evidence and, while unacknowledged, the card; the other parts
+carry neither (1.1). So part 0 always holds the first
+c0 = 190,464 − 72 − 9,216 − 18,432 = **162,744** object bytes and every later
+part c = 190,464 − 72 = **190,392**, the last part the rest:
+
+| Parts n | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| Object bytes up to c0 + (n−1)·c | 162,744 | 353,136 | 543,528 | 733,920 | 924,312 | 1,114,704 | 1,305,096 | 1,495,488 |
+
+A maximal object takes **6 parts**; the 8-part limit leaves 438,630 bytes
+spare and decoders still refuse any object above 1,056,858 bytes. Cut points
+do not depend on the actual card or evidence size, so every re-deposit
+generation has byte-identical parts and the same digest although part 0's
+card is dropped once acknowledged. Every non-final part is exactly the
+190,464-byte bucket; a full part stores 1,373 + 5,432 + 4·63,488 = 260,757
+bytes at a relay (≤ 262,144). The last part is padded to its bucket (6). A
+maximal object (last part 132,546 bytes) is six 190,464-byte frames,
+1,564,542 stored bytes per member. **Test part size:** a test build MAY set
+`room_part_bytes` P in 1,024 .. 162,744, cutting every part at P; the record
+states P, and a production build refuses the setting.
+
+**Application objects are never split.** Their Event plaintext is at most
+131,072 bytes, checked before the MLS seal (as 4 does for copies, refused
+`content-too-large`); with a PrivateMessage overhead bound of 4,096 bytes
+(vector-tested) the body is at most 135,168 ≤ 162,744 − 90. The plaintext is
+the canonical Event (kind `room.message` or `artifact.encrypted`) whose
+`RoomMessage` gains a per (room, sender) `sequence`, and the MLS AAD binds
+D("tos.messaging.room-aad.v1"), room ID, room and MLS epoch, sender Agent and
+Event ID.
+
+**Rejected:** size-driven cuts (parts would change between generations) and
+evidence in every part (up to 7 × 27,648 bytes per object for nothing).
+
+### 11.2 Joining and fan-out
+
+**Joining (1:1 first).** The authority's owner calls `rooms.add` (B), which
+sends `room.invite` to B as a kind-1 copy over their 1:1 session (an
+allow-listed contact, or an invite, 11.6). B's owner calls `rooms.join`: B's
+daemon makes an MLS identity and KeyPackage (`openmls_sidecar.go:111`), has
+its Endpoint sign a `DeviceCredential` (`mls_profile.go:150-160`; KeyPackage
+≤ 64 KiB, `:33`, within the 139,547-byte copy bound) and returns it as a new
+kind-1 event `room.key-package`. The authority checks it with
+`BindDeviceCredential` (`mls_profile.go:280`) against finalized state and
+commits the Add (its owner already decided). Joining is an owner decision
+because it opens the inbox to the other members (below). A Welcome or roster
+is accepted only from the authority of a room with a pending join.
+
+**Senders.** Only the authority sends Commits, Welcomes and rosters (11.5):
+a Commit to every member but itself, and once to a removed member (11.4); a
+Welcome to each joiner, then a full roster; after an Add, a roster of the
+added members to the others. Any member sends application objects to every
+other member of the epoch it seals in.
+
+**One envelope per member per part**, each signed and sealed separately.
+Kind 3 is content, so before every first deposit and re-deposit the sender
+runs `CheckPeer` (2.5) on that member's stored evidence, pinned to the
+Endpoint and device of the member's leaf credential; a member failing it
+gets nothing and the kind-4 pull starts, while the others proceed. Members
+learn each other's cards and evidence from rosters, checked with
+`VerifyKeyCard` and `CheckPeer` and committed (`CommitPeer`,
+`carrier.room-cards`) only after the Welcome or Commit that made that Agent a
+member is applied: an extension of 2.3's admission rule; a roster is
+rendezvous, not authority.
+
+**Room-scoped admission.** An Event naming a room, from a member of that
+room at the Event's epoch, is admitted for that room only, after the room
+overlay (`admission/admit.go:304-317`) and before the contact policy; the
+sender is not added to the allow-list. A room-addressed kind-1 copy is
+refused on the relay route, so room content cannot bypass MLS removal.
+
+**Per-peer cap.** Of the carrier's 24 chat envelopes per peer (openfox
+`pkg/servicebridge/relay_chat.go:36`, `:471-481`), kind 3 holds at most
+**16**, refused `peer-cap` by the carrier; at least 8 stay for copies, acks
+and evidence. Counters are per peer, not per room: a 32-member room × 8
+parts is 31 counters of at most 8 + 8 (current and not yet withdrawn
+generation). With one handshake object in flight per (room, member) (11.3) a
+maximal one needs 6 + 6 = 12, a single-part Commit 2, leaving at least 4 for
+application objects. The rail keeps at least 40 of the relay's 64 per
+(client, recipient) (7).
+
+**Deposit rate.** The relay allows 60 deposits per minute, burst 32, per
+client address, shared with the rail (`AGENT_PACKET_RELAY_V1.md:659`). The
+carrier paces kind 3 to **30 per minute per relay, burst 16**, so rail and
+kinds 1, 2, 4 keep at least half. A message or single-part Commit to 31
+members then takes about 30 s; a maximal Commit to 31 (186 parts) about
+5 min 40 s. Signing is not the bound: 186 × 0.043 s ≈ 8 s (M-R1 record,
+`signing_cost`).
+
+**Not bounded: an offline member's mailbox.** A relay holds 256 envelopes
+per recipient (`AGENT_PACKET_RELAY_V1.md:654`); 31 members × 16 is 496. A
+full mailbox answers `507`, the carrier `retry`: handshake objects keep their
+schedule, application objects not deposited within their TTL window become a
+gap. On shared relays it also blocks that member's rail, hence D2 before
+production. **Rejected: a room mailbox** (one deposit read by all): a relay
+change, and an envelope sealed to a shared key opens for removed members.
+
+### 11.3 Ordering, catch-up and retention
+
+**Handshake objects per member in epoch order.** The authority keeps one
+queue per (room, member) with at most one object in flight: the next is
+deposited only after a verified room ack (11.7) of the previous, `accepted`
+or `duplicate`. A member never sees a Commit before the one it follows,
+however long it was offline; catch-up costs one poll round trip per missed
+epoch, and one slow member delays no other.
+
+**Receiver, handshake.** For a Commit or Welcome the daemon checks the
+sender (11.5) and the MembershipAuthorization against the authority's
+finalized delegation (`room/authority.go:86`), then runs `RoomLedger.Advance`
+(on a room-epoch change) and `MLSController.Apply` or `Join`, each
+idempotent, so a crash between them is repaired by the next generation. A
+digest among the last 64 applied answers `duplicate`; another epoch than
+current + 1 `rejected` with `room-epoch-gap`; another digest for an applied
+epoch `room-fork` (11.5). Welcome replay stays refused (`eventlog/mls.go:98`).
+
+**Receiver, application.** Let e be the object's MLS epoch and r the
+member's:
+
+- e = r: opened; the MLS sender identity (new driver output) MUST equal the
+  packet sender, then the Event goes through admission and the journal as a
+  copy does, and the envelope is relay-acknowledged after the commit.
+- e > r: kept in a durable future-epoch buffer (at most 256 objects and
+  8 MiB per room, 32 MiB in total) and opened in arrival order once the
+  Commits up to e are applied.
+- r − 2 ≤ e < r: opened with the retained past-epoch secrets. The driver is
+  configured with `max_past_epochs(2)`: Commit fan-out takes up to minutes
+  (11.2), so messages sealed just before a Commit land after it. **Rejected:**
+  0 (the driver default today, `src/main.rs:335-338`, `:432-434`), which loses
+  every message in flight across a Commit, and a larger window, which keeps
+  more old epoch secrets on disk.
+- e < r − 2, a full buffer, or a buffered object older than 24 h 5 min:
+  dropped, relay-acknowledged, and counted as a gap.
+
+A received application digest seen within 24 h 5 min is relay-acknowledged
+and dropped before `Open` (a second relay or a replay), so it never spends
+a ratchet step.
+
+**Gap notice.** The daemon keeps, per (room, sender), the highest `sequence`
+it holds. A missing sequence is declared lost, as a `room.gap` record
+(room, sender, first and last missing sequence, reason) readable by the
+runtime through `rooms.gaps`, when it is dropped as above, or when it has not
+arrived T after a later one did, with T the largest `max_ttl_seconds` of this
+node's own chat relays plus 5 minutes (a missing envelope can only still be
+waiting at one of them). Loss at a sender's tail is noticed at that sender's
+next message.
+
+**Re-deposit (D10).** A handshake object is re-deposited to each member
+that has not acked it, at 80 % of the smallest TTL of that member's card
+(10-minute floor, as copies, 4), all parts together, the previous generation
+withdrawn, until acked or 7 days; then that member is `abandoned` with
+`retention-exceeded` on the owner surface, its queue stops, and its owner
+should remove it. Application objects are deposited once only.
+
+### 11.4 Remove
+
+The authority's owner calls `rooms.remove` (M). The authority derives
+`Membership.Remove` (`room/membership.go:134`), signs its
+MembershipAuthorization, and commits an MLS Remove of all of M's leaves (one
+in V1, D3), persisted before output (`mls_controller.go:65-96`).
+
+- **Cannot decrypt later messages.** The Remove Commit carries a fresh
+  UpdatePath encrypted only to the remaining tree, so the next epoch's secrets
+  are derived from a commit secret M never receives (RFC 9420 section 12.4.2);
+  the group refutation floor checks exactly this property (`pkg/group/group.go:17-22`).
+  No member addresses an object sealed in epoch ≥ N+1 to M, because fan-out
+  uses the sealing epoch's membership. M's events naming the room are refused
+  `not-a-room-member` once a member has advanced its ledger
+  (`admission/admit.go:310-317`).
+- **What M still reads:** objects sealed in epoch ≤ N, including those of
+  members not yet at N+1, which M was entitled to; the window is the
+  Commit's fan-out (11.2) plus a member's offline time.
+- **M's devices and cards.** Members forget M's chat card and evidence
+  (`carrier.room-cards`) unless held under another admission (contact,
+  session). M gets the Commit once (no re-deposit, no ack) so its runtime
+  learns of the removal; its daemon then marks the room removed.
+- **M's pending envelopes.** The authority withdraws its in-flight handshake
+  generations to M (`carrier.withdraw`); members withdraw stored kind-3
+  envelopes to M of epoch ≥ N+1 and drop undeposited ones; epoch ≤ N ones
+  stay until their TTL.
+
+### 11.5 One authority, no concurrent Commits
+
+**V1 rule:** the room's single authority is the only Agent that sends
+Commits, Welcomes and rosters, including MLS-only refreshes; members never
+commit or propose (`messenger/docs/OPEN_DECISIONS.md:147`,
+`messenger/docs/FIRST_PRINCIPLES_DECISIONS.md:76-82`). A receiver requires:
+the packet sender is the current authority Agent of its `RoomLedger`; the MLS
+committer identity (new driver output of `apply`) is that Agent's leaf; and a
+membership change carries the authority's MembershipAuthorization. Anything
+else is refused `not-authentic`, relay-acknowledged, and nothing is stored.
+
+**What V1 does not do.** Two honest members can never produce concurrent
+Commits, because only one may commit. Two different Commits for one epoch can
+come only from the authority itself (for example a restored backup): each
+member keeps the first it applied and refuses the other `room-fork` with an
+owner notice; the room is then forked, and recovery is a new room. Authority
+transfer (`eventlog/rooms.go:185`) is not carried over the relay in M-R2.
+**Rejected: MLS's own reject-and-retry among several committers,** which
+needs an ordering service; relay arrival order is not authority.
+
+### 11.6 Invites over the relay
+
+**Why M-R1 could not.** The receive side is complete: a kind-1 object
+carries `AdmissionToken` (`relayframe/copy.go:50`, `:66`), the daemon passes
+it to admission (`daemon/relay.go:641-644`), which checks and then claims it
+for exactly one authenticated Event (`admission/admit.go:333-347`, `:383-392`;
+`eventlog/admission_invite.go:31-65`, `:144-195`). Nothing sends one:
+`invites.create` returns the token to the recipient's owner once
+(`localapi/server.go:580-592`, `docs/RUNNING.md:82-99`) to give out of band,
+but no operation accepts a received token, `Delivery` has no field for it
+(`eventlog/delivery.go:109-144`), and `dispatch` builds every `Message`
+without it (`dispatch/dispatch.go:920-930`). The HTTPS route is the same.
+
+**Decision: a new owner operation, not a field on the send.**
+`invites.present` (owner principal) takes the recipient Agent, the
+`invite_…` token and its expiry, and stores them in the sender's journal.
+The next first-contact delivery to that Agent (one that carries a bootstrap)
+records the token on its `Delivery`, and `dispatch` sets
+`Message.AdmissionToken` for it, so every re-deposit generation carries the
+same token for the same Event. The token is deleted when that delivery
+settles or is abandoned, or at its expiry. **Rejected: an `admission_token`
+field on `messages.send-direct`,** which would hand a bearer the recipient's
+owner issued to the runtime, able to spend it on any Event. **Carried only
+sealed:** inside the kind-1 object in the sealed packet (3), never in a
+packet field, card or evidence.
+
+**Checked on receipt** exactly as on every route: the contact policy runs
+first; the token is consulted only when it answers `require-admission` or
+`invite-or-hold` (`admit.go:333`); it must be unexpired, scoped to the
+recipient Endpoint and, if scoped, to the sender Agent; the claim binds it to
+the first Event, an exact re-deposit is idempotent (`duplicate`), and any
+other Event falls back to the policy. **Relation to M-R1's allow-list:** an
+allow-listed sender never needs one; an invite admits one Event and does not
+add the sender to the allow-list, so under `invite-or-hold` later Events are
+held for the owner, and a held answer still admits the sender's card and
+evidence (2.3). **On refusal nothing is stored:** admission refuses before
+any journal write (`admit.go:323-331`), the card is not stored and
+`CheckPeer` writes nothing (2.3, 2.5).
+
+### 11.7 Room acks, delivery states and journals
+
+**Room ack.** A kind-2 frame carries either the copy ack of 5.2 or a room
+ack, schema `tos.messaging.relay-room-ack.v1`: room ID, object digest,
+recipient Endpoint and device, outcome, code and time, signed by the
+recipient Endpoint under a new domain `DomainRelayRoomAck`, verified like
+5.2. It is sent only for handshake objects (types 1, 2 and 4), never for
+application objects (31 acks per message would double the deposits).
+
+| Object | Per-member states | Settles on |
+|---|---|---|
+| Commit, Welcome, roster | `pending → carried → delivered`, or `rejected` with its code, or `abandoned` | a verified room ack (`accepted` or `duplicate` mean delivered); 7 days |
+| Removed member's Commit | `pending → carried` | one deposit |
+| Application | `pending → carried`, or `dropped` (not deposited within its relay TTL window) | the relay TTL; never `delivered` |
+
+**Sender journal (room outbox).** One record per object: its bytes once
+(not per member), digest, type, room and epochs, and per member: state,
+generation, last deposit, next re-deposit, the evidence digest sent, and the
+ack outcome and code. Idempotency keys are `idem_` + SHA-256 of (object
+digest, member, generation, part index), so a retry reuses the journaled
+envelope (1). A handshake record is kept until every member is settled; an
+application record keeps its ciphertext until every member's relay TTL has
+passed (at most 24 h), then only its digest and per-member states. The
+OpenFox chat outbox is unchanged (5.3).
