@@ -220,11 +220,24 @@ func (p *RoomParts) Add(sender string, frame relayframe.Frame, now time.Time) (r
 	// A part of a split object is stored before the Reassembler sees it, so
 	// a part the Reassembler holds, or an object it completes, is never only
 	// in memory: a store failure leaves the Reassembler unchanged and the
-	// caller answers retry. An identical stored part is left as it is.
-	wrote := false
+	// caller answers retry.
+	wrote, conflict := false, false
 	if split {
+		// An object the Reassembler no longer holds (never held, dropped, or
+		// past its lifetime, which Add would expire first) starts afresh: its
+		// stale stored parts go, so a redelivered part is stored with this
+		// arrival time and a restart does not replay it as expired.
+		p.reassembler.Sweep(now)
+		if _, settled := p.unsettled[key]; !settled && !p.reassembler.Holds(sender, frame.ObjectDigest) {
+			if err := p.journal.removeRoomObjectParts(key); err != nil {
+				return relayframe.PartResult{}, err
+			}
+		}
 		var err error
-		if wrote, err = p.journal.storeRoomPart(sender, frame, now); err != nil {
+		// A stored part with other bytes is never overwritten before the
+		// Reassembler has judged the new one: refused, it must leave the
+		// held part's copy in place.
+		if wrote, conflict, err = p.journal.storeRoomPart(sender, frame, now, false); err != nil {
 			return relayframe.PartResult{}, err
 		}
 	}
@@ -250,6 +263,13 @@ func (p *RoomParts) Add(sender string, frame relayframe.Frame, now time.Time) (r
 			}
 		}
 		return relayframe.PartResult{}, err
+	}
+	if conflict {
+		// Accepted although a stored copy differed (a stale record): the
+		// Reassembler's view wins and is stored.
+		if _, _, err := p.journal.storeRoomPart(sender, frame, now, true); err != nil {
+			return relayframe.PartResult{}, err
+		}
 	}
 	if result.Status == relayframe.PartComplete && split {
 		p.unsettled[key] = now
@@ -372,18 +392,25 @@ func parseRoomPartName(name string) (roomPartKey, uint8, bool) {
 	return key, uint8(index), true
 }
 
-// storeRoomPart writes one part and reports whether it wrote. An identical
-// stored part is left as it is; a damaged or different one is replaced.
-func (j *Journal) storeRoomPart(sender string, frame relayframe.Frame, arrived time.Time) (bool, error) {
+// storeRoomPart writes one part and reports whether it wrote, and whether
+// a stored part with other bytes was found. An identical stored part is left
+// as it is and a damaged one is replaced; a different valid one is replaced
+// only when overwrite is set, and otherwise reported as a conflict.
+func (j *Journal) storeRoomPart(sender string, frame relayframe.Frame, arrived time.Time, overwrite bool) (bool, bool, error) {
 	if !ids.Agent.MatchString(sender) || frame.PartCount < 2 || frame.PartIndex >= frame.PartCount || arrived.IsZero() {
-		return false, ErrRoomPartStore
+		return false, false, ErrRoomPartStore
 	}
 	key := roomPartKey{sender: sender, digest: frame.ObjectDigest}
 	path := filepath.Join(j.root, roomPartDir, roomPartName(key, frame.PartIndex))
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
-	if existing, err := readRoomPart(path, filepath.Base(path)); err == nil && bytes.Equal(existing.frame.Part, frame.Part) {
-		return false, nil
+	if existing, err := readRoomPart(path, filepath.Base(path)); err == nil {
+		if bytes.Equal(existing.frame.Part, frame.Part) && existing.frame.PartCount == frame.PartCount {
+			return false, false, nil
+		}
+		if !overwrite {
+			return false, true, nil
+		}
 	}
 	record := roomPartRecord{
 		Schema: roomPartSchema, SenderAgentID: sender, ObjectDigest: hex.EncodeToString(frame.ObjectDigest[:]),
@@ -396,12 +423,12 @@ func (j *Journal) storeRoomPart(sender string, frame relayframe.Frame, arrived t
 	}
 	encoded, err := json.Marshal(record)
 	if err != nil {
-		return false, ErrRoomPartStore
+		return false, false, ErrRoomPartStore
 	}
 	if err := j.replace(path, encoded); err != nil {
-		return false, errors.Join(ErrRoomPartStore, err)
+		return false, false, errors.Join(ErrRoomPartStore, err)
 	}
-	return true, nil
+	return true, false, nil
 }
 
 // replaceRoomPartEvidence rewrites the stored part 0 of an object with newer

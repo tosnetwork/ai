@@ -35,7 +35,7 @@ const (
 	// RoomReceivedWindow is how long a received application digest is kept.
 	RoomReceivedWindow = 24*time.Hour + 5*time.Minute
 	// MaxRoomReceivedDigests bounds the live markers of every room.
-	MaxRoomReceivedDigests = 1 << 16
+	MaxRoomReceivedDigests = 1 << 18
 	// MaxRoomReceivedPerRoom and MaxRoomReceivedPerSender are a room's share
 	// and one sender's share in a room.
 	MaxRoomReceivedPerRoom   = 1 << 14

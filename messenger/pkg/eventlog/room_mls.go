@@ -43,6 +43,9 @@ const (
 	MaxRoomMLSRecordBytes = 8192
 	// MaxMLSStateBytes bounds the opaque MLS state, as the driver does.
 	MaxMLSStateBytes = 512 << 10
+	// MaxRoomsHeld bounds the private rooms one installation holds or is
+	// joining, which bounds every per-room store.
+	MaxRoomsHeld = 64
 	// RetainedRoomEpochs is how many epochs a member keeps the epoch
 	// authenticator and the membership of: the current one and the two before
 	// it, which is as far back as it can still open (max_past_epochs 2).
@@ -69,6 +72,9 @@ var (
 	// ErrNotRoomAuthority reports a membership change authorized by anyone
 	// but the room's recorded authority.
 	ErrNotRoomAuthority = errors.New("only the current room authority may advance membership")
+	// ErrRoomsFull reports that this installation already holds the most
+	// private rooms (MaxRoomsHeld, joined or being joined).
+	ErrRoomsFull = errors.New("this installation holds the most private rooms")
 	// ErrRoomKind reports an operation of one room ledger on a room the other
 	// ledger holds. A private MLS room and a logical room never share an ID.
 	ErrRoomKind = errors.New("room is held by the other room ledger")
@@ -329,6 +335,11 @@ func (l *RoomMLSLedger) install(install RoomMLSInstall, now time.Time) (RoomMLSR
 	}
 	if consumed {
 		return RoomMLSRecord{}, ErrKeyPackageConsumed
+	}
+	if held, err := l.journal.roomsHeld(binding.RoomID); err != nil {
+		return RoomMLSRecord{}, err
+	} else if held >= MaxRoomsHeld {
+		return RoomMLSRecord{}, ErrRoomsFull
 	}
 	record := RoomMLSRecord{
 		Schema: RoomMLSRecordSchema, RoomID: binding.RoomID,

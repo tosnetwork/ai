@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 // joinCredential is the joiner's Endpoint-signed DeviceCredential.
@@ -191,5 +193,68 @@ func TestRoomInvitesCannotBePreempted(t *testing.T) {
 	}
 	if joins, err := journal.ListPendingRoomJoins(later); err != nil || len(joins) != 0 {
 		t.Fatalf("%d joins outlived their invites: %v", len(joins), err)
+	}
+}
+
+// Accepting one authority's invite deletes the room's other invites at
+// once, not only when they are next read.
+func TestAcceptingAJoinDiscardsTheOthersAtOnce(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, _ := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	now := fixture.now
+	authority := fixture.delegation.AgentID
+	for _, inviter := range []string{authority, fusedAgent(5), fusedAgent(6)} {
+		if _, err := journal.RecordRoomInvite(fusedRoom, inviter, inviteEvent, now.Add(time.Hour), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	credential, _ := joinCredential(t, fusedAgent(1), 0x73, uint64(now.Unix())-10, uint64(now.Add(24*time.Hour).Unix()))
+	if _, err := journal.BeginRoomJoin(fusedRoom, authority, []byte("identity"), credential, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, inviter := range []string{fusedAgent(5), fusedAgent(6)} {
+		if _, err := os.Stat(journal.roomJoinPath(fusedRoom, inviter)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("the invite of %s was kept on disk: %v", inviter, err)
+		}
+	}
+	if _, err := os.Stat(journal.roomJoinPath(fusedRoom, authority)); err != nil {
+		t.Fatalf("the accepted join is missing: %v", err)
+	}
+}
+
+// One installation holds at most MaxRoomsHeld private rooms, joined or
+// being joined.
+func TestRoomsHeldAreBounded(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	install := func(index int) error {
+		roomID := fmt.Sprintf("room_%064x", index+1)
+		membership, err := room.Found(roomID, []string{fusedAgent(0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ledger.InstallFounder(RoomMLSInstall{
+			Binding: group.State{RoomID: roomID, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: membership.Digest},
+			Proof:   fixture.proof(membership), State: []byte("founder state"), EpochAuthenticator: fusedAuthenticator(1),
+			KeyPackageRef: canon.Digest([]byte(fmt.Sprint("key package ", index))),
+		}, fixture.now)
+		return err
+	}
+	for index := 0; index < MaxRoomsHeld; index++ {
+		if err := install(index); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := install(MaxRoomsHeld); !errors.Is(err, ErrRoomsFull) {
+		t.Fatalf("a room beyond the bound: %v", err)
+	}
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, fixture.now.Add(time.Hour), fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	credential, _ := joinCredential(t, fusedAgent(1), 0x74, uint64(fixture.now.Unix())-10, uint64(fixture.now.Add(24*time.Hour).Unix()))
+	if _, err := journal.BeginRoomJoin(fusedRoom, fusedAgent(5), []byte("identity"), credential, fixture.now); !errors.Is(err, ErrRoomsFull) {
+		t.Fatalf("a join beyond the bound: %v", err)
 	}
 }

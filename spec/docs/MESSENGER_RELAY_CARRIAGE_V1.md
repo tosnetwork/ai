@@ -1233,6 +1233,16 @@ seal already carry any frame; nothing new is resolved on chain).
 12. `docs/RUNNING.md`, `docs/ROADMAP.md`: rooms over the relay, invites, and
     the limits of D15.
 
+**Still to change in the room runtime part (C3)**, beyond the items above:
+
+- D11's credential input (`admission.RoomCarriage.SenderCredential`)
+  changes from `group.DeviceCredential` and `CredentialSigningBytes` to the
+  member's leaf credential, with the same checks: Agent, Endpoint, device
+  and network, the Endpoint signature, and the validity window.
+- `BufferRoomObject` also holds objects at the current epoch (e = r) from a
+  member whose leaf credential is not yet known, counted against the room
+  and sender shares, until the roster that teaches it arrives.
+
 **`openfox`**
 
 1. `pkg/servicebridge/relay_chat.go`: `carrier.carry` accepts kind 3
@@ -1692,7 +1702,7 @@ Loss at a sender's tail is noticed at that sender's next message.
 **Implementation bounds of the receive state.** None of the following
 records may grow without limit, so each has a fixed bound:
 
-- At most **65,536** live received-application digests across all rooms,
+- At most **262,144** live received-application digests across all rooms,
   **16,384** per room and **2,048** per sender in a room. A digest is
   marked only after its sender is authenticated as a member. At a bound,
   the expired ones are swept first. If the live ones still fill it, the
@@ -1705,7 +1715,12 @@ records may grow without limit, so each has a fixed bound:
   stranger's invite for a room ID cannot pre-empt the real authority's.
   The owner's `rooms.join` names the authority it accepts (the signed
   decision commits it), and accepting one discards the room's other
-  invites. Expired invites are swept before a new one is refused.
+  invites. Expired invites are swept before a new one is refused. Eight
+  Agents with eight invites each fill the 64 slots; that costs each Agent
+  an on-chain registration, which is the Sybil cost this bound relies on.
+- At most **64** private rooms per installation, held or being joined;
+  creating or joining another is refused (`ErrRoomsFull`). It bounds every
+  per-room store.
 - At most **1,024** `room.gap` records per room, **128** per sender in a
   room and **16,384** across rooms; the oldest are pruned first.
 - At most **64** undeclared missing ranges per sender. A range beyond that

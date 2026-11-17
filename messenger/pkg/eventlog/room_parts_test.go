@@ -359,3 +359,72 @@ func TestRoomPartUnsettledObjectsAreBounded(t *testing.T) {
 		t.Fatalf("an unsettled object outlived the lifetime: %v", err)
 	}
 }
+
+// A part redelivered after its object's lifetime, before any sweep, starts
+// the object afresh with that arrival time: a restart replays it instead of
+// dropping it as expired.
+func TestRoomPartRedeliveredAfterExpirySurvivesARestart(t *testing.T) {
+	root := t.TempDir() + "/state"
+	journal, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := fusedAgent(1)
+	start := time.Unix(1_900_000_000, 0)
+	parts, _ := openParts(t, journal, allowSenders(sender), start)
+	frames, digest := splitObject(t, 9, 2500, 1024)
+	if _, err := parts.Add(sender, frames[0], start); err != nil {
+		t.Fatal(err)
+	}
+	later := start.Add(24*time.Hour + 6*time.Minute)
+	if result, err := parts.Add(sender, frames[0], later); err != nil || result.Status != relayframe.PartStored {
+		t.Fatalf("redelivery after expiry: %+v %v", result.Status, err)
+	}
+	journal = reopen(t, journal, root)
+	defer journal.Close()
+	parts, report := openParts(t, journal, allowSenders(sender), later.Add(time.Hour))
+	if report.Replayed != 1 || report.Expired != 0 || !parts.reassembler.Holds(sender, digest) {
+		t.Fatalf("the redelivered part was lost by a restart: %+v", report)
+	}
+}
+
+// A contradicting part the Reassembler refuses while it still holds the
+// object (here: its sender is no longer admitted) never replaces the stored
+// copy of the held part, so a restart still has it.
+func TestRoomPartRefusedContradictionKeepsTheHeldCopy(t *testing.T) {
+	root := t.TempDir() + "/state"
+	journal, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := fusedAgent(1)
+	now := time.Unix(1_900_000_000, 0)
+	senders := allowSenders(sender)
+	parts, _ := openParts(t, journal, senders, now)
+	frames, digest := splitObject(t, 10, 2500, 1024)
+	for _, frame := range frames[:2] {
+		if _, err := parts.Add(sender, frame, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := frames[1]
+	other.Part = bytes.Repeat([]byte{0x77}, len(frames[1].Part))
+	delete(senders.allowed, sender)
+	if _, err := parts.Add(sender, other, now); !errors.Is(err, relayframe.ErrReassemblyNotAdmitted) {
+		t.Fatalf("refused part: %v", err)
+	}
+	if !parts.reassembler.Holds(sender, digest) || storedPartCount(t, journal) != 2 {
+		t.Fatal("the refused part changed what is held or stored")
+	}
+	senders.allowed[sender] = true
+	journal = reopen(t, journal, root)
+	defer journal.Close()
+	parts, report := openParts(t, journal, senders, now)
+	if report.Replayed != 2 {
+		t.Fatalf("replay after a refused contradiction: %+v", report)
+	}
+	if result, err := parts.Add(sender, frames[2], now); err != nil || result.Status != relayframe.PartComplete ||
+		!bytes.Equal(result.Object[len(frames[0].Part):len(frames[0].Part)+len(frames[1].Part)], frames[1].Part) {
+		t.Fatalf("completion with the held copy: %+v %v", result.Status, err)
+	}
+}

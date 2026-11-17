@@ -232,6 +232,11 @@ func (j *Journal) BeginRoomJoin(roomID, authorityAgentID string, identityState [
 	if consumed {
 		return PendingRoomJoin{}, ErrKeyPackageConsumed
 	}
+	if held, err := j.roomsHeld(roomID); err != nil {
+		return PendingRoomJoin{}, err
+	} else if held >= MaxRoomsHeld {
+		return PendingRoomJoin{}, ErrRoomsFull
+	}
 	chunks, err := j.stageMLSState(roomID, identityState)
 	if err != nil {
 		return PendingRoomJoin{}, err
@@ -592,4 +597,33 @@ func (j *Journal) writeRoomJoin(join PendingRoomJoin) error {
 		return err
 	}
 	return j.replace(j.roomJoinPath(join.RoomID, join.AuthorityAgentID), encoded)
+}
+
+// roomsHeld counts the private rooms other than roomID that this
+// installation holds (a fused record) or is joining (an accepted join). The
+// journal mutex is held.
+func (j *Journal) roomsHeld(roomID string) (int, error) {
+	rooms := map[string]struct{}{}
+	fused, err := j.fusedRoomIDs()
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range fused {
+		rooms[id] = struct{}{}
+	}
+	keys, err := j.roomJoinKeys()
+	if err != nil {
+		return 0, err
+	}
+	for _, key := range keys {
+		join, found, err := j.readRoomJoin(key.room, key.authority)
+		if err != nil {
+			return 0, err
+		}
+		if found && join.State == JoinKeyPackageSent {
+			rooms[key.room] = struct{}{}
+		}
+	}
+	delete(rooms, roomID)
+	return len(rooms), nil
 }
