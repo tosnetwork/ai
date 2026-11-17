@@ -1307,7 +1307,9 @@ seal already carry any frame; nothing new is resolved on chain).
     (`relay.go:615-622`), room acks, removal notices, Remove's withdrawals
     and card forgetting; the test settings `room_part_bytes`,
     `room_handshake_retention_seconds` and `room_authorization_seconds`,
-    refused by a production build.
+    refused by a production build; and `relay_carriage.own_relay_max_ttl_seconds`
+    (1 .. 86,400, default 86,400), the largest TTL of this node's own chat
+    relays that T of 11.3 is derived from.
 12. `docs/RUNNING.md`, `docs/ROADMAP.md`: rooms over the relay, invites, and
     the limits of D15.
 
@@ -1925,7 +1927,11 @@ it holds. A missing sequence is declared lost, as a `room.gap` record
 runtime through `rooms.gaps`, when it is dropped as above, or when it has not
 arrived T after a later one did, with T the largest `max_ttl_seconds` of this
 node's own chat relays plus 5 minutes (a missing envelope can only still be
-waiting at one of them). An object dropped unopened reveals no sequence, so
+waiting at one of them). No carrier reports this node's own relays' TTL, so
+the daemon reads it from `relay_carriage.own_relay_max_ttl_seconds` (1 ..
+86,400; default 86,400, the relay V1 ceiling): a value above the real TTL
+only declares a gap later, never wrongly, and a record states the value it
+ran with (3,600 for the 1 h test relays). An object dropped unopened reveals no sequence, so
 its gap record names only the sender until a later sequence fixes the range.
 Loss at a sender's tail is noticed at that sender's next message.
 
@@ -1968,14 +1974,21 @@ arrives; when several generations deliver part 0, the evidence that is newest
 under 2.5's "newer" is kept. Parts 1..n that arrive first are checked against
 the sender set (current members, or the authority of a pending join) and
 checked again when part 0 arrives and at completion. The reassembly caps of
-section 4 count part bytes, not frame bytes.
+section 4 count part bytes, not frame bytes. An application object of a current
+member whose leaf credential is not yet known (11.8) has no credential to pin
+its evidence to: its part 0 evidence is checked by `CheckContact` (read-only,
+pinned to the evidence's own Endpoint and device), the object is only held in
+the future-epoch buffer and answered `ignored`, and nothing of it is committed
+(no `CommitPeer`, no card); handshake objects are always checked pinned.
 
 **Re-deposit (D10).** A handshake object is re-deposited to each member
 that has not acked it, at 80 % of the smallest TTL of that member's card
 (10-minute floor, as copies, 4), all parts together, the previous generation
 withdrawn, until acked or 7 days; then that member is `abandoned` with
 `retention-exceeded` on the owner surface, its queue stops, and its owner
-should remove it. Application objects are deposited once only. **Cost:** a
+should remove it. The re-deposit wait follows the TTL the carrier reports for
+the recipient's card; the gap delay T (above) follows this node's own relays'
+TTL, configured as `own_relay_max_ttl_seconds`. Application objects are deposited once only. **Cost:** a
 pending handshake object of p parts costs p signatures and deposits per
 member per generation: on 1 h test relays 30 generations a day, so a maximal
 object pending for all 31 members is at most 5,580 deposits a day, inside the
@@ -2285,7 +2298,12 @@ the list, and its record is collected. Objects of a current MLS member
 whose credential is not yet known (its roster has not arrived) are held in
 the future-epoch buffer (11.3; same caps, 24 h 5 min) and opened once the
 roster arrives. They are refused `not-authentic` only after a roster
-arrived without a verifying entry for that member.
+arrived without a verifying entry for that member. A held object keeps no
+frame evidence, so it is opened only against the sender's stored evidence
+checked by `CheckPeer` pinned to the now-known credential's Endpoint and
+device (`LeafPin`); if that check fails the object stays held, is tried again
+on the next roster, Commit or maintenance pass, and becomes a `buffer-expired`
+gap if it never passes.
 
 **Room end (D18).** Let `end` be the room's end time, `skew` the daemon's
 clock-skew bound, and d the re-deposit interval (80 % of the smallest relay
