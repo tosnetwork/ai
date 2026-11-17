@@ -106,6 +106,61 @@ func (m daemonDirectMessenger) ReplyDirectMessage(ctx context.Context, eventID, 
 	return m.daemon.ReplyDirectMessage(ctx, eventID, mediaType, body, idempotencyKey, expiresAt)
 }
 
+// daemonRoomOperator serves the owner's room operations through the room
+// runtime, which is installed after the local API is built. Until it is, or
+// on an installation without it, every operation is refused as not
+// configured.
+type daemonRoomOperator struct{ daemon *Daemon }
+
+var errRoomsNotConfigured = fault.New(fault.CodeClassNotDelegated, "private rooms over the relay are not configured")
+
+func (o daemonRoomOperator) rooms() (*roomRuntime, error) {
+	if o.daemon == nil || o.daemon.relay == nil || o.daemon.relay.rooms == nil {
+		return nil, errRoomsNotConfigured
+	}
+	return o.daemon.relay.rooms, nil
+}
+
+func (o daemonRoomOperator) CreateRoom(ctx context.Context, roomID string) error {
+	rooms, err := o.rooms()
+	if err != nil {
+		return err
+	}
+	return rooms.CreateRoom(ctx, roomID)
+}
+
+func (o daemonRoomOperator) AddRoomMember(ctx context.Context, roomID, agentID string) error {
+	rooms, err := o.rooms()
+	if err != nil {
+		return err
+	}
+	return rooms.AddRoomMember(ctx, roomID, agentID)
+}
+
+func (o daemonRoomOperator) RemoveRoomMember(ctx context.Context, roomID, agentID string) error {
+	rooms, err := o.rooms()
+	if err != nil {
+		return err
+	}
+	return rooms.RemoveRoomMember(ctx, roomID, agentID)
+}
+
+func (o daemonRoomOperator) JoinRoom(ctx context.Context, roomID, authorityAgentID string) error {
+	rooms, err := o.rooms()
+	if err != nil {
+		return err
+	}
+	return rooms.JoinRoom(ctx, roomID, authorityAgentID)
+}
+
+func (o daemonRoomOperator) ComposeRoomMessage(ctx context.Context, composition localapi.RoomComposition) (string, bool, error) {
+	rooms, err := o.rooms()
+	if err != nil {
+		return "", false, err
+	}
+	return rooms.ComposeRoomMessage(ctx, composition)
+}
+
 // ResolveContact accepts a human contact input at the daemon boundary. A .tos
 // name is reduced to a quorum-finalized Agent identifier and immediately run
 // through the same delegation, DHT, Contact Descriptor, and prekey verification
@@ -726,6 +781,9 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 		},
 	)
 	serverConfig.DirectMessageSender = daemonDirectMessenger{daemon: instance}
+	if config.RelayCarriage != nil && config.RelayCarriage.MLSDriverPath != "" {
+		serverConfig.RoomOperator = daemonRoomOperator{daemon: instance}
+	}
 	economicKeys, err := config.EconomicAuthorityKeys()
 	if err != nil {
 		_ = journal.Close()

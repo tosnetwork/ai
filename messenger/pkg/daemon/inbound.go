@@ -156,7 +156,10 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 	if refused, ok := refuseOnRoute(route, event); ok {
 		return refused, nil
 	}
-	invite := d.roomInviteStep(route, event, resolved, now)
+	roomStep := d.roomInviteStep(route, event, resolved, now)
+	if roomStep == nil {
+		roomStep = d.roomKeyPackageStep(route, event, resolved, now)
+	}
 	delegationJSON, err := identity.EncodeJSON(resolved.Delegation)
 	if err != nil {
 		return ReceiveResult{}, err
@@ -164,8 +167,8 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 	decision, err := d.admission.AdmitWithCommit(admission.Inbound{Event: event,
 		DelegationJSON: delegationJSON, AdmissionToken: message.AdmissionToken,
 		Route: route, ReceivedAtUnix: uint64(now.Unix())}, func(entry eventlog.Entry) (bool, error) {
-		if invite != nil {
-			if err := invite(); err != nil {
+		if roomStep != nil {
+			if err := roomStep(); err != nil {
 				return false, err
 			}
 		}
@@ -176,6 +179,7 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 	if err != nil {
 		return ReceiveResult{}, err
 	}
+	d.afterRoomEvent(route, event, decision.Outcome)
 	return ReceiveResult{Outcome: decision.Outcome, Code: decision.Code, EventID: event.EventID}, nil
 }
 
@@ -226,7 +230,10 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 		resolved.EndpointID != a.PeerEndpointID {
 		return ReceiveResult{}, errors.New("established sender no longer has verified Endpoint authority")
 	}
-	invite := d.roomInviteStep(route, event, resolved, now)
+	roomStep := d.roomInviteStep(route, event, resolved, now)
+	if roomStep == nil {
+		roomStep = d.roomKeyPackageStep(route, event, resolved, now)
+	}
 	delegationJSON, err := identity.EncodeJSON(resolved.Delegation)
 	if err != nil {
 		return ReceiveResult{}, err
@@ -234,8 +241,8 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 	decision, err := d.admission.AdmitWithCommit(admission.Inbound{Event: event,
 		DelegationJSON: delegationJSON, AdmissionToken: message.AdmissionToken,
 		Route: route, ReceivedAtUnix: uint64(now.Unix())}, func(entry eventlog.Entry) (bool, error) {
-		if invite != nil {
-			if err := invite(); err != nil {
+		if roomStep != nil {
+			if err := roomStep(); err != nil {
 				return false, err
 			}
 		}
@@ -246,6 +253,7 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 	if err != nil {
 		return ReceiveResult{}, err
 	}
+	d.afterRoomEvent(route, event, decision.Outcome)
 	return ReceiveResult{Outcome: decision.Outcome, Code: decision.Code, EventID: event.EventID}, nil
 }
 

@@ -107,6 +107,7 @@ const (
 	purposeCopy             = "copy"
 	purposeEvidenceRequest  = "evidence-request"
 	purposeEvidenceResponse = "evidence-response"
+	purposeRoom             = "room"
 )
 
 // CopyIdempotencyKey names one deposit generation of one device copy. A
@@ -135,6 +136,19 @@ func EvidenceResponseKey(peerAgentID, ownDescriptorDigest string, hour uint64) (
 		return "", errors.New("invalid relay evidence response window")
 	}
 	return idempotencyKey(purposeEvidenceResponse, peerAgentID+"\x00"+ownDescriptorDigest, hour)
+}
+
+// RoomIdempotencyKey names one part of one deposit generation of a room
+// object to one member: a digest of the object digest, the member, the
+// generation and the part index (section 11.7), so a retry reuses the
+// envelope the carrier journaled.
+func RoomIdempotencyKey(objectDigest, memberAgentID string, generation uint32, partIndex uint8) (string, error) {
+	if !canon.HashPattern.MatchString(objectDigest) || !ids.Agent.MatchString(memberAgentID) || generation == 0 ||
+		int(partIndex) >= MaxParts {
+		return "", errors.New("invalid room object deposit")
+	}
+	// The generation and the part index fit one counter without overlap.
+	return idempotencyKey(purposeRoom, objectDigest+"\x00"+memberAgentID, uint64(generation)<<8|uint64(partIndex))
 }
 
 func idempotencyKey(purpose, subject string, counter uint64) (string, error) {

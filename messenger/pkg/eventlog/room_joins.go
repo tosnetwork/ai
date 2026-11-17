@@ -100,6 +100,10 @@ type PendingRoomJoin struct {
 	CredentialBase64          string           `json:"device_credential_base64,omitempty"`
 	CredentialExpiresAt       uint64           `json:"credential_expires_at_unix,omitempty"`
 	JoinedAtUnix              uint64           `json:"joined_at_unix,omitempty"`
+	// LeafCredentialBase64 is the joiner's own leaf credential, sent with
+	// the DeviceCredential, kept so the room.key-package can be sent again
+	// after a crash.
+	LeafCredentialBase64 string `json:"leaf_credential_base64,omitempty"`
 }
 
 // AuthorityCredential returns the authority's leaf credential the
@@ -124,6 +128,27 @@ func (p PendingRoomJoin) Credential() (group.DeviceCredential, error) {
 		return group.DeviceCredential{}, errRoomJoinRecordValue
 	}
 	return group.DecodeDeviceCredentialJSON(raw)
+}
+
+// LeafCredential returns the joiner's own leaf credential a joined pending
+// join sent, if it was recorded.
+func (p PendingRoomJoin) LeafCredential() ([]byte, bool, error) {
+	if p.LeafCredentialBase64 == "" {
+		return nil, false, nil
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(p.LeafCredentialBase64)
+	if err != nil || len(raw) == 0 || len(raw) > group.MaxLeafCredentialBytes {
+		return nil, false, errRoomJoinRecordValue
+	}
+	leaf, err := group.DecodeLeafCredential(raw)
+	if err != nil {
+		return nil, false, errRoomJoinRecordValue
+	}
+	device, err := p.Credential()
+	if err != nil || group.MatchLeafToDeviceCredential(leaf, device) != nil {
+		return nil, false, errRoomJoinRecordValue
+	}
+	return raw, true, nil
 }
 
 // expiresAt is when the pending join is dropped: the invite's expiry while
@@ -208,10 +233,17 @@ func (j *Journal) RecordRoomInvite(roomID, authorityAgentID, inviteEventID strin
 
 // BeginRoomJoin records the owner's acceptance of one authority's invite:
 // the identity's private state (staged as chunks first), the KeyPackage
-// reference and the signed DeviceCredential sent as room.key-package. The
-// record write is the commit point; the room's other invites are then
-// discarded. A repeat with the same KeyPackage is a no-op.
+// reference and the signed DeviceCredential sent as room.key-package, with
+// the joiner's leaf credential when the caller has one (it must match the
+// DeviceCredential). The record write is the commit point; the room's other
+// invites are then discarded. A repeat with the same KeyPackage is a no-op.
 func (j *Journal) BeginRoomJoin(roomID, authorityAgentID string, identityState []byte, credentialJSON []byte, now time.Time) (PendingRoomJoin, error) {
+	return j.BeginRoomJoinWithLeaf(roomID, authorityAgentID, identityState, credentialJSON, nil, now)
+}
+
+// BeginRoomJoinWithLeaf is BeginRoomJoin recording the joiner's own leaf
+// credential, so the room.key-package can be sent again after a crash.
+func (j *Journal) BeginRoomJoinWithLeaf(roomID, authorityAgentID string, identityState, credentialJSON, leafCredential []byte, now time.Time) (PendingRoomJoin, error) {
 	if err := j.usable(); err != nil {
 		return PendingRoomJoin{}, err
 	}
@@ -234,6 +266,15 @@ func (j *Journal) BeginRoomJoin(roomID, authorityAgentID string, identityState [
 	}
 	if uint64(now.Unix()) < credential.IssuedAtUnix || uint64(now.Unix()) >= credential.ExpiresAtUnix {
 		return PendingRoomJoin{}, errors.New("the room join credential is outside its validity window")
+	}
+	if len(leafCredential) > 0 {
+		leaf, err := group.DecodeLeafCredential(leafCredential)
+		if err != nil {
+			return PendingRoomJoin{}, err
+		}
+		if err := group.MatchLeafToDeviceCredential(leaf, credential); err != nil {
+			return PendingRoomJoin{}, err
+		}
 	}
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
@@ -283,6 +324,9 @@ func (j *Journal) BeginRoomJoin(roomID, authorityAgentID string, identityState [
 	join.CredentialBase64 = base64.StdEncoding.EncodeToString(credentialJSON)
 	join.CredentialExpiresAt = credential.ExpiresAtUnix
 	join.JoinedAtUnix = uint64(now.Unix())
+	if len(leafCredential) > 0 {
+		join.LeafCredentialBase64 = base64.StdEncoding.EncodeToString(leafCredential)
+	}
 	if err := j.writeRoomJoin(join); err != nil {
 		return PendingRoomJoin{}, err
 	}
@@ -596,7 +640,7 @@ func validateRoomJoin(join PendingRoomJoin) error {
 	switch join.State {
 	case JoinInvited:
 		if join.KeyPackageRef != "" || join.IdentityStateDigest != "" || len(join.IdentityStateChunks) != 0 ||
-			join.CredentialBase64 != "" || join.CredentialExpiresAt != 0 || join.JoinedAtUnix != 0 {
+			join.CredentialBase64 != "" || join.CredentialExpiresAt != 0 || join.JoinedAtUnix != 0 || join.LeafCredentialBase64 != "" {
 			return errRoomJoinRecordValue
 		}
 	case JoinKeyPackageSent:
@@ -618,6 +662,9 @@ func validateRoomJoin(join PendingRoomJoin) error {
 			return ErrRoomJoinKeyPackage
 		}
 		if credential.ExpiresAtUnix != join.CredentialExpiresAt {
+			return errRoomJoinRecordValue
+		}
+		if _, _, err := join.LeafCredential(); err != nil {
 			return errRoomJoinRecordValue
 		}
 	default:

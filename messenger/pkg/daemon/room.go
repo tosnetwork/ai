@@ -48,6 +48,13 @@ type roomRuntime struct {
 	controller *eventlog.RoomMLSController
 	parts      *eventlog.RoomParts
 	cards      roomCarrier
+	// driver is the MLS driver; leafs is its part that makes a leaf before
+	// its identity, used to issue this installation's leaf credentials.
+	driver group.AttributedDriver
+	leafs  roomLeafMaker
+	// authorization is how long a MembershipAuthorization this installation
+	// signs as a room's authority lives.
+	authorization time.Duration
 	// skew is the daemon's clock-skew bound: the room end (D18) and the
 	// relay authorization window (D16) are applied with it at both ends.
 	skew time.Duration
@@ -93,6 +100,9 @@ type roomRuntimeSettings struct {
 	retention time.Duration
 	gapDelay  time.Duration
 	partBytes int
+	// authorization is the lifetime of the MembershipAuthorizations this
+	// installation signs; zero is the production 24 h.
+	authorization time.Duration
 }
 
 // installRoomRuntime builds the room runtime on an installed relay runtime:
@@ -106,6 +116,16 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 	}
 	if settings.driver == nil || settings.cards == nil {
 		return errors.New("room runtime needs an MLS driver and a carrier")
+	}
+	leafs, ok := settings.driver.(roomLeafMaker)
+	if !ok {
+		return errors.New("room runtime needs an MLS driver that makes leaf signers")
+	}
+	if settings.authorization == 0 {
+		settings.authorization = defaultRoomAuthorization
+	}
+	if settings.authorization < time.Minute || settings.authorization > room.MaxMembershipAuthorizationWindow {
+		return errors.New("room authorization lifetime is outside 1m..24h")
 	}
 	if settings.skew <= 0 || settings.skew > room.MaxRoomAuthorizationSkew {
 		return errors.New("room clock skew is outside 1s..1h")
@@ -125,6 +145,7 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 		return err
 	}
 	runtime := &roomRuntime{relay: d.relay, daemon: d, ledger: ledger, controller: controller, cards: settings.cards,
+		driver: settings.driver, leafs: leafs, authorization: settings.authorization,
 		skew: settings.skew, retention: settings.retention, gapDelay: settings.gapDelay, noticed: map[string]struct{}{},
 		forkNoticed: map[string]struct{}{}, pending: map[string]map[string]struct{}{}, forgotten: map[string]map[string]struct{}{}}
 	// Rooms past their retirement time are retired before anything else,
@@ -159,6 +180,8 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 	for _, completed := range replay.Completed {
 		runtime.handleReplayed(completed)
 	}
+	// A seal a crash left unfinished is finished before new compositions.
+	runtime.resumeSeals()
 	runtime.flushCardForgets(context.Background())
 	return nil
 }
@@ -596,6 +619,8 @@ func (r *roomRuntime) maintain() {
 	r.reconcileRemoved()
 	r.retireEnded()
 	r.sweepApplications()
+	r.commitAddsEverywhere()
+	r.sweepApplicationSends(context.Background())
 	r.flushCardForgets(context.Background())
 }
 
