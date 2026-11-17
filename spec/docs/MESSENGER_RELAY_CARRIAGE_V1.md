@@ -1277,9 +1277,12 @@ seal already carry any frame; nothing new is resolved on chain).
 M-R2 decisions (2026-11-16, delegated by the owner):
 
 - **D11. Room-scoped admission, narrowly.** Once the owner has joined a room,
-  an Event is admitted without the allow-list only if it names that room, its
-  packet sender is a member in the authority's latest committed roster at the
-  Event's epoch, and the room and peer caps still apply. It grants no 1:1
+  an Event is admitted without the allow-list only if it names that room, it
+  is room content (kind `room.message` or `artifact.encrypted`, the kinds a
+  room's application object carries, 11.1), its packet sender is a member in
+  the authority's latest committed roster at the Event's epoch, and the room
+  and peer caps still apply. Any other kind, even from a member and naming
+  the room, meets the normal policy. It grants no 1:1
   admission, and a member's card is stored only under the admission and
   roster rule (11.2). Reason: joining is the owner's explicit consent to hear
   from that room's members; scoping it to the room leaves 1:1 admission
@@ -1437,8 +1440,9 @@ authority checks it with
 `BindDeviceCredential` (`mls_profile.go:280`) against finalized state and
 commits the Add (its owner already decided). Create, add, remove and join are
 owner-only (D13); the runtime only sends and reads room messages. A Welcome
-is accepted only from the authority named in the `room.invite` of a room
-with a pending join.
+is accepted only from the authority whose `room.invite` the owner accepted
+with `rooms.join` (several Agents may have invited this installation to one
+room ID; the join names one, and the others are discarded).
 
 **Accepting a roster** for room R, in both cases below, requires that its
 packet sender is R's authority, that its header carries a valid
@@ -1493,9 +1497,11 @@ room ack confirms it (application objects are never acked, so a room-only
 peer gets the card in every part 0).
 
 **Room-scoped admission (D11).** Once the owner has joined a room, an Event
-is admitted without the allow-list only if it names that room and its packet
-sender is a member in the authority's latest committed roster at the Event's
-epoch; the room and peer caps still apply. The daemon keeps the committed
+is admitted without the allow-list only if it names that room, it is room
+content (`room.message` or `artifact.encrypted`), and its packet sender is a
+member in the authority's latest committed roster at the Event's epoch; the
+room and peer caps still apply. Any other kind meets the normal policy. The
+sender's credential must be of this installation's network. The daemon keeps the committed
 membership of the current and the 2 previous epochs (D14), so this can be
 judged for every epoch it can still open. It runs after the room overlay
 (`admission/admit.go:304-317`) and both must pass: D11 and
@@ -1686,16 +1692,31 @@ Loss at a sender's tail is noticed at that sender's next message.
 **Implementation bounds of the receive state.** None of the following
 records may grow without limit, so each has a fixed bound:
 
-- At most **65,536** live received-application digests across all rooms.
-  At the bound, the expired ones are swept first. If the live ones still
-  fill it, the digest is not recorded and the object is answered `retry`
-  (left unacknowledged at the relay), so nothing is dropped unrecorded.
-- At most **64** pending joins. Expired invites are swept before a new one
-  is refused.
-- At most **1,024** `room.gap` records per room; the oldest are pruned
-  first.
+- At most **65,536** live received-application digests across all rooms,
+  **16,384** per room and **2,048** per sender in a room. A digest is
+  marked only after its sender is authenticated as a member. At a bound,
+  the expired ones are swept first. If the live ones still fill it, the
+  digest is not recorded and the object is answered `retry` (left
+  unacknowledged at the relay), so nothing is dropped unrecorded. The
+  counts are kept in memory, so no marker costs a directory scan.
+- At most **64** pending joins, at most **8** per inviting Agent, each for
+  at most **7 days** (a `room.invite` expires within 7 days of its Event,
+  checked on receipt). Joins are keyed by (room, inviting Agent), so a
+  stranger's invite for a room ID cannot pre-empt the real authority's.
+  The owner's `rooms.join` names the authority it accepts (the signed
+  decision commits it), and accepting one discards the room's other
+  invites. Expired invites are swept before a new one is refused.
+- At most **1,024** `room.gap` records per room, **128** per sender in a
+  room and **16,384** across rooms; the oldest are pruned first.
 - At most **64** undeclared missing ranges per sender. A range beyond that
   is declared lost at once, without waiting T.
+- At most **4,096** per (room, sender) sequence records across rooms (128
+  rooms of 32 members); beyond it the object is answered `retry`.
+
+A removed member's sequence record is deleted. A room's sequence, gap,
+applied-digest, received-digest and future-epoch records are deleted when
+the room is neither held (no fused record) nor pending (no pending join),
+and at restart for any room in that state.
 
 **Parts.** Part 0's evidence is checked (`CheckPeer`, read-only) when part 0
 arrives; when several generations deliver part 0, the evidence that is newest
