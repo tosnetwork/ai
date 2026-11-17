@@ -646,3 +646,23 @@ func TestRoomApplicationHeldTooLongIsABufferExpiredGap(t *testing.T) {
 	b.d.relay.rooms.maintain()
 	requireGap(t, b, scene.a.agent(), eventlog.RoomGapBufferExpired, 1)
 }
+
+// Without a known credential to pin to, part 0's evidence is still checked,
+// against its own Endpoint and device: an object of a member whose credential
+// is not known yet, carried with another Agent's evidence, is refused at
+// intake and nothing of it is held.
+func TestRoomApplicationOfAnUnknownCredentialStillHasItsEvidenceChecked(t *testing.T) {
+	scene := newAddedScene(t, roomRetention)
+	b := scene.nodes[1]
+	c := memberSealer(t, scene)
+	message := c.message(1, "with another Agent's evidence", scene.clock.now(), sealOptions{})
+	forged := scene.c
+	forged.evidence = scene.a.evidence
+	response := send(t, b, scene.c.agent(), framesOf(t, forged, message.object, 0))
+	if response.Result != carrierapi.ResultRefused || response.Code != carrierapi.CodeEvidenceRefused {
+		t.Fatalf("an object with another Agent's evidence answered %s/%s", response.Result, response.Code)
+	}
+	if ready, waiting := buffered(t, b); ready != 0 || waiting != 0 {
+		t.Fatalf("an object whose evidence failed was held: %d %d", ready, waiting)
+	}
+}
