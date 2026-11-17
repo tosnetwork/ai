@@ -177,7 +177,30 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 		return controllers[index].Apply(transition, proof, result.Commit, committer)
 	}
 
+	// The founder's state before the Add, for a Commit made past the
+	// controller below.
+	founderState, err := ledgers[0].State(alice)
+	if err != nil {
+		t.Fatal(err)
+	}
 	addBob, alice, withBob := add(alice, 1, nil)
+	// A Welcome into a tree holding a leaf whose identity is not the compact
+	// binding (made with the driver directly, past the authority's own
+	// check) is refused before anything is installed.
+	{
+		mallory, err := driver.NewIdentity([]byte("mallory-leaf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, welcomes, err := driver.Commit(founderState, []group.LeafOperation{leaf(1), {Kind: group.LeafAdd, Next: &group.Leaf{CredentialIdentity: []byte("mallory-leaf"),
+			LeafSignaturePublicKey: mallory.LeafSignaturePublicKey, KeyPackageRef: canon.Digest(mallory.KeyPackage), KeyPackage: mallory.KeyPackage}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := controllers[1].Join(group.State{RoomID: fusedRoom, Clock: addBob.Transition.Next.Clock, MembershipDigest: withBob.Digest}, fixture.proof(withBob), groupID, identities[1].State, welcomes[canon.Digest(identities[1].KeyPackage)], canon.Digest(identities[1].KeyPackage), leaves[0]); !errors.Is(err, ErrRoomLeafIdentity) {
+			t.Fatalf("a Welcome into a tree with a foreign identity: %v", err)
+		}
+	}
 	// A Welcome is taken only from the leaf the invite's authority credential
 	// expects: under another member's credential it is refused and nothing
 	// is installed.
