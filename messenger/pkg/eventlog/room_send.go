@@ -68,8 +68,20 @@ const (
 	maxRoomSealEventBytes = 131_072
 )
 
-// maxRoomApplicationSends is MaxRoomApplicationSends; a test lowers it.
-var maxRoomApplicationSends = MaxRoomApplicationSends
+// LimitRoomApplicationSends lowers the per-room bound of application
+// records to n in 1 .. MaxRoomApplicationSends; it never raises it.
+func (j *Journal) LimitRoomApplicationSends(n int) error {
+	if err := j.usable(); err != nil {
+		return err
+	}
+	if n < 1 || n > MaxRoomApplicationSends {
+		return errors.New("the room application record bound is outside 1 .. 4096")
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	j.roomApplicationSends = n
+	return nil
+}
 
 // Application sender refusals.
 var (
@@ -283,6 +295,23 @@ func (j *Journal) RecordRoomApplicationSend(send RoomApplicationSend) error {
 	return nil
 }
 
+// ReserveRoomApplicationSlot makes room for one more application record of
+// a room before its object is sealed: the oldest record without an object
+// is deleted at the bound, and ErrRoomSendsFull is returned when every
+// record still holds its object. Checking before the seal means a full
+// outbox never spends an MLS generation on a message it cannot record.
+func (j *Journal) ReserveRoomApplicationSlot(roomID string) error {
+	if err := j.usable(); err != nil {
+		return err
+	}
+	if !ids.Room.MatchString(roomID) {
+		return errors.New("invalid room")
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	return j.makeRoomApplicationSlot(roomID)
+}
+
 // RoomApplicationSendFor returns the record of one composition of a room.
 func (j *Journal) RoomApplicationSendFor(roomID, idempotencyKey string) (RoomApplicationSend, bool, error) {
 	if err := j.usable(); err != nil {
@@ -456,7 +485,11 @@ func (j *Journal) makeRoomApplicationSlot(roomID string) error {
 	if err != nil {
 		return err
 	}
-	if len(all) < maxRoomApplicationSends {
+	bound := MaxRoomApplicationSends
+	if j.roomApplicationSends != 0 {
+		bound = j.roomApplicationSends
+	}
+	if len(all) < bound {
 		return nil
 	}
 	for _, send := range all {

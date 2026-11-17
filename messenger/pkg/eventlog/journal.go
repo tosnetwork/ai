@@ -291,6 +291,9 @@ type Journal struct {
 	// received counts the received room application digests on disk; nil
 	// until first use. Guarded by mutex.
 	received *roomReceivedIndex
+	// roomApplicationSends is the per-room bound of application records;
+	// zero is MaxRoomApplicationSends. Guarded by mutex.
+	roomApplicationSends int
 }
 
 // Open takes ownership of a private state directory. A second Open on the same
