@@ -118,8 +118,12 @@ func (d *Daemon) configureRelayCarriage(sink *directory.RelayEvidenceSink) error
 		return nil
 	}
 	driver := &group.OpenMLSSidecar{Command: []string{relay.MLSDriverPath}, Timeout: relay.MLSDriverTimeout()}
+	gapDelay, err := eventlog.RoomGapDelay(relay.OwnRelayMaxTTL())
+	if err != nil {
+		return err
+	}
 	return d.installRoomRuntime(roomRuntimeSettings{driver: driver, cards: client, skew: d.config.RoomClockSkew(),
-		retention: room.RoomHandshakeRetention})
+		retention: room.RoomHandshakeRetention, gapDelay: gapDelay})
 }
 
 // installRelayRuntime installs the relay sender, seal gate and inbound

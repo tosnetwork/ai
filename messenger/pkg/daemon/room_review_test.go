@@ -281,7 +281,7 @@ func TestRoomPartsCompletedBeforeACrashAreHandledAtStart(t *testing.T) {
 		t.Fatal("joined before the restart")
 	}
 	if err := receiver.d.installRoomRuntime(roomRuntimeSettings{driver: scene.driver, cards: scene.cards[1], skew: 5 * time.Minute,
-		retention: roomRetention, partBytes: relayframe.MinTestPartBytes}); err != nil {
+		retention: roomRetention, gapDelay: testRoomGapDelay, partBytes: relayframe.MinTestPartBytes}); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
 	if _, found := fused(t, receiver); !found {

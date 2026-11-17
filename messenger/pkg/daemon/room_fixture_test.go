@@ -27,6 +27,9 @@ import (
 // node's Endpoint, so each receiver check is exercised against an object
 // made to fail exactly that check.
 
+// testRoomGapDelay is T for 1 h test relays.
+const testRoomGapDelay = time.Hour + eventlog.RoomGapGrace
+
 const testRoomID = "room_" + "4d" + "000000000000000000000000000000000000000000000000000000000000c3"
 
 func openMLSDriver(t *testing.T) *group.OpenMLSSidecar {
@@ -476,7 +479,7 @@ func newRoomScene(t *testing.T, count int, retention time.Duration, partBytes in
 			continue
 		}
 		if err := node.d.installRoomRuntime(roomRuntimeSettings{driver: driver, cards: cards, skew: 5 * time.Minute,
-			retention: retention, partBytes: partBytes}); err != nil {
+			retention: retention, gapDelay: testRoomGapDelay, partBytes: partBytes}); err != nil {
 			t.Fatalf("install the room runtime: %v", err)
 		}
 	}

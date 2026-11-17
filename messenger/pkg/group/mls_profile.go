@@ -102,6 +102,12 @@ type AttributedDriver interface {
 	Driver
 	ApplyAttributed(opaqueState, commit []byte) (nextState []byte, committer MLSMember, err error)
 	OpenAttributed(opaqueState, authenticatedData, privateMessage []byte) (nextState, plaintext []byte, sender MLSMember, err error)
+	// OpenAttributedReadback opens a message without being told its
+	// authenticated data and returns the message's own, authenticated by the
+	// open, for the caller to judge (a room's AAD binds the Event ID, which a
+	// receiver learns only by opening). It is an explicit operation: an
+	// absent authenticated data never selects it.
+	OpenAttributedReadback(opaqueState, privateMessage []byte) (nextState, plaintext, authenticatedData []byte, sender MLSMember, err error)
 	// JoinAttributed processes a Welcome and reports the leaf that authored
 	// it, which a joiner authenticates as the authority's.
 	JoinAttributed(keyPackagePrivateState, welcome []byte) (opaqueState []byte, sender MLSMember, err error)

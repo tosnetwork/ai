@@ -89,11 +89,15 @@ const (
 	RoomGapBehindRatchet RoomGapReason = "behind-ratchet"
 	// RoomGapRecordDamaged: a buffered object's record did not verify.
 	RoomGapRecordDamaged RoomGapReason = "record-damaged"
+	// RoomGapRoomEnded: an application object arrived at or after the room's
+	// end plus the clock-skew bound (D18); it was sealed before the end, since
+	// senders stop at end - skew, and is refused room-ended unopened.
+	RoomGapRoomEnded RoomGapReason = "room-ended"
 )
 
 var roomGapReasons = map[RoomGapReason]struct{}{
 	RoomGapNotArrived: {}, RoomGapEpochTooOld: {}, RoomGapEpochTooNew: {}, RoomGapBufferFull: {},
-	RoomGapBufferExpired: {}, RoomGapBehindRatchet: {}, RoomGapRecordDamaged: {},
+	RoomGapBufferExpired: {}, RoomGapBehindRatchet: {}, RoomGapRecordDamaged: {}, RoomGapRoomEnded: {},
 }
 
 // RoomGap is one room.gap record. First and Last are zero while the range

@@ -22,3 +22,10 @@ tls_codec = "0.4"
 # what the driver crate itself is compiled as.
 [profile.dev.package."*"]
 opt-level = 2
+
+# The library asserts in debug builds where a message fails to decrypt
+# (framing/private_message_in.rs), and so aborts the driver where a release
+# build returns the error. A message that does not open is input, never a
+# driver fault: the debug profile reports it as a release build does.
+[profile.dev.package.openmls]
+debug-assertions = false

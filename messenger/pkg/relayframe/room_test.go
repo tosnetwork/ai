@@ -386,6 +386,51 @@ func TestRoomAADBindsEveryField(t *testing.T) {
 	}
 }
 
+// DecodeRoomAAD is the strict inverse of EncodeRoomAAD: every field reads
+// back, and a truncated, extended, re-prefixed or non-canonical encoding is
+// refused.
+func TestRoomAADDecodesStrictly(t *testing.T) {
+	const aadDomain = "tos.messaging.room-aad.v1\x00"
+	base := relayframe.RoomAAD{RoomID: testRoom, RoomEpoch: 2, MLSEpoch: 3, EpochAuthenticator: bytes.Repeat([]byte{1}, 32),
+		SenderAgentID: roomAgent(1), EventID: "evt_" + strings.Repeat("e", 64)}
+	raw, err := relayframe.EncodeRoomAAD(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := relayframe.DecodeRoomAAD(raw)
+	if err != nil || decoded.RoomID != base.RoomID || decoded.RoomEpoch != base.RoomEpoch || decoded.MLSEpoch != base.MLSEpoch ||
+		!bytes.Equal(decoded.EpochAuthenticator, base.EpochAuthenticator) || decoded.SenderAgentID != base.SenderAgentID ||
+		decoded.EventID != base.EventID {
+		t.Fatalf("decoded %+v %v", decoded, err)
+	}
+	if len(raw) > relayframe.MaxRoomAADBytes {
+		t.Fatalf("a valid AAD of %d bytes exceeds the decoder bound", len(raw))
+	}
+	refused := map[string][]byte{
+		"empty":     {},
+		"truncated": raw[:len(raw)-1],
+		"trailing":  append(bytes.Clone(raw), 0),
+	}
+	// Another version of the domain.
+	domain := bytes.Clone(raw)
+	domain[len(aadDomain)-2]++
+	refused["domain"] = domain
+	// A length prefix naming one byte more than the room ID takes.
+	longer := bytes.Clone(raw)
+	longer[len(aadDomain)+3]++
+	refused["length"] = longer
+	// A room ID that is not one (upper-case hex) re-encodes the same bytes but
+	// is refused by the encoder's own checks.
+	upper := bytes.Clone(raw)
+	upper[len(aadDomain)+4+len("room_")] = 'C'
+	refused["room"] = upper
+	for name, value := range refused {
+		if _, err := relayframe.DecodeRoomAAD(value); !errors.Is(err, relayframe.ErrRoomAADMalformed) {
+			t.Fatalf("%s AAD decoded: %v", name, err)
+		}
+	}
+}
+
 func TestRoomAckSignsAndRefuses(t *testing.T) {
 	ack := relayframe.RoomAck{RoomID: testRoom, ObjectDigest: sha256.Sum256([]byte("object")),
 		RecipientEndpointID: "mep_" + strings.Repeat("3c", 32), RecipientDeviceID: "dev_" + strings.Repeat("4d", 32),

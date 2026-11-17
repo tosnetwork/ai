@@ -35,6 +35,12 @@ func (d keySwapDriver) OpenAttributed(state, aad, message []byte) ([]byte, []byt
 	return next, plaintext, sender, err
 }
 
+func (d keySwapDriver) OpenAttributedReadback(state, message []byte) ([]byte, []byte, []byte, group.MLSMember, error) {
+	next, plaintext, aad, sender, err := d.OpenMLSSidecar.OpenAttributedReadback(state, message)
+	sender.SignatureKey = d.key
+	return next, plaintext, aad, sender, err
+}
+
 // relayLeaf makes member index's relay room leaf the way a joiner does: a
 // fresh leaf signature key, the Endpoint-signed leaf credential naming it,
 // then the KeyPackage under the compact identity naming that credential, and
@@ -374,9 +380,32 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	if after, _, _ := ledgers[2].Current(fusedRoom); after.StateDigest != carolBefore.StateDigest {
 		t.Fatal("a refused message spent Carol's ratchet step")
 	}
+	// The readback open returns the message's own authenticated data and
+	// writes nothing; only CommitOpened spends the step.
+	opened, err := controllers[2].OpenReadback(fusedRoom, early, leaves[1])
+	if err != nil || string(opened.Plaintext) != "sealed in epoch 2" || !bytes.Equal(opened.AAD, aad) {
+		t.Fatalf("readback open: %q %q %v", opened.Plaintext, opened.AAD, err)
+	}
+	if after, _, _ := ledgers[2].Current(fusedRoom); after.StateDigest != carolBefore.StateDigest {
+		t.Fatal("a readback open wrote Carol's state before it was committed")
+	}
+	if _, err := controllers[2].OpenReadback(fusedRoom, early, leaves[0]); !errors.Is(err, ErrMLSSenderMismatch) {
+		t.Fatalf("readback, wrong sender: %v", err)
+	}
+	if _, err := swappedCarol.OpenReadback(fusedRoom, early, leaves[1]); !errors.Is(err, ErrMLSSenderMismatch) {
+		t.Fatalf("readback, the sender's identity under another key: %v", err)
+	}
+	if _, err := controllers[2].CommitOpened(OpenedRoomMessage{}); !errors.Is(err, ErrRoomOpenedMessage) {
+		t.Fatalf("committing the zero opened message: %v", err)
+	}
 	plaintext, _, err := controllers[2].Open(fusedRoom, aad, early, leaves[1])
 	if err != nil || string(plaintext) != "sealed in epoch 2" {
 		t.Fatalf("past-epoch message after restart: %q %v", plaintext, err)
+	}
+	// The discarded readback cannot be committed over the state the compare
+	// open wrote since.
+	if _, err := controllers[2].CommitOpened(opened); !errors.Is(err, ErrMLSFork) {
+		t.Fatalf("committing an open made against an older state: %v", err)
 	}
 	plaintext, _, err = controllers[0].Open(fusedRoom, aad, early, leaves[1])
 	if err != nil || string(plaintext) != "sealed in epoch 2" {

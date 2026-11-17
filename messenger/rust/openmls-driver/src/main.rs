@@ -24,6 +24,8 @@ const MAX_KEY: usize = 64 * 1024;
 const MAX_VALUE: usize = 512 * 1024;
 const MAX_IDENTITY: usize = 4096;
 const MAX_MESSAGE: usize = 1024 * 1024;
+// MAX_AAD bounds a message's authenticated data, sealed or opened.
+const MAX_AAD: usize = 64 * 1024;
 // Application messages sealed just before a Commit arrive after it, because
 // the authority's fan-out takes minutes. Two past epochs cover that window at
 // little forward-secrecy cost; anything older is reported as a gap.
@@ -139,6 +141,23 @@ struct Response {
     sender_leaf_index: Option<u32>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     members: Vec<MemberOut>,
+    // aad is the authenticated data of a message `open_readback` opened; no
+    // other operation sets it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    aad: String,
+}
+
+// AadMode is how opening treats a PrivateMessage's authenticated data.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AadMode {
+    // Compare (`open`): the caller passes the exact authenticated data (an
+    // absent field is the empty value) and a message carrying any other is
+    // refused.
+    Compare,
+    // Readback (`open_readback`, never chosen by an absent field): the caller
+    // passes none, and the message's own authenticated data is returned once
+    // the message opened, for the caller to judge.
+    Readback,
 }
 
 // MemberOut is one leaf of the current ratchet tree as `members` reports it.
@@ -398,6 +417,68 @@ fn member_index(sender: &Sender) -> Result<LeafNodeIndex, String> {
         Sender::Member(index) => Ok(*index),
         _ => Err("message sender is not a group member".into()),
     }
+}
+
+// open decrypts one PrivateMessage of the current or a retained past epoch
+// and reports its sender leaf. In compare mode the caller's authenticated data
+// must equal the message's; in readback mode the caller passes none, and the
+// message's own is returned only after the message opened, so an
+// unauthenticated value never leaves the driver.
+fn open(req: &Request, out: &mut Response, mode: AadMode) -> Result<(), String> {
+    let (provider, snapshot) = load_snapshot(&req.state)?;
+    let mut group = group(&provider, &snapshot)?;
+    let expected = match mode {
+        AadMode::Compare if req.aad.is_empty() => Vec::new(),
+        AadMode::Compare => decode("aad", &req.aad, MAX_AAD)?,
+        AadMode::Readback if req.aad.is_empty() => Vec::new(),
+        AadMode::Readback => return Err("readback takes no authenticated data".into()),
+    };
+    let message: MlsMessageIn = decode_tls("message", &req.message, MAX_MESSAGE)?;
+    let protocol = message
+        .try_into_protocol_message()
+        .map_err(|_| "message is not an MLS protocol message")?;
+    let carried = match &protocol {
+        ProtocolMessage::PrivateMessage(value) => value.aad().to_vec(),
+        _ => return Err("application message is not private".into()),
+    };
+    match mode {
+        AadMode::Compare if carried != expected => return Err("authenticated data mismatch".into()),
+        AadMode::Readback if carried.is_empty() || carried.len() > MAX_AAD => {
+            return Err("message carries no bounded authenticated data".into())
+        }
+        AadMode::Compare | AadMode::Readback => {}
+    }
+    let processed = group
+        .process_message(&provider, protocol)
+        .map_err(|_| "message decryption failed")?;
+    let sender = member_identity(processed.sender(), processed.credential())?;
+    let sender_index = member_index(processed.sender())?;
+    let message_epoch = processed.epoch().as_u64();
+    let sender_key = if message_epoch == group.epoch().as_u64() {
+        current_leaf_key(&group, sender_index)?
+    } else {
+        past_leaf_key(&snapshot.past_leaves, message_epoch, sender_index)?
+    };
+    let plaintext = match processed.into_content() {
+        ProcessedMessageContent::ApplicationMessage(v) => v.into_bytes(),
+        _ => return Err("message is not application data".into()),
+    };
+    let public = decode("signer public key", &snapshot.signer_public, 64)?;
+    out.plaintext = B64.encode(plaintext);
+    out.sender_identity = B64.encode(sender);
+    out.sender_signature_key = B64.encode(sender_key);
+    out.sender_leaf_index = Some(sender_index.u32());
+    out.epoch = Some(group.epoch().as_u64());
+    if mode == AadMode::Readback {
+        out.aad = B64.encode(carried);
+    }
+    out.state = save_snapshot(
+        &provider,
+        &public,
+        Some(group.group_id()),
+        snapshot.past_leaves,
+    )?;
+    Ok(())
 }
 
 fn handle(req: Request) -> Result<Response, String> {
@@ -696,7 +777,7 @@ fn handle(req: Request) -> Result<Response, String> {
             let aad = if req.aad.is_empty() {
                 Vec::new()
             } else {
-                decode("aad", &req.aad, 64 * 1024)?
+                decode("aad", &req.aad, MAX_AAD)?
             };
             let plaintext = decode("plaintext", &req.plaintext, MAX_MESSAGE)?;
             group.set_aad(aad);
@@ -712,53 +793,8 @@ fn handle(req: Request) -> Result<Response, String> {
                 snapshot.past_leaves,
             )?;
         }
-        "open" => {
-            let (provider, snapshot) = load_snapshot(&req.state)?;
-            let mut group = group(&provider, &snapshot)?;
-            let aad = if req.aad.is_empty() {
-                Vec::new()
-            } else {
-                decode("aad", &req.aad, 64 * 1024)?
-            };
-            let message: MlsMessageIn = decode_tls("message", &req.message, MAX_MESSAGE)?;
-            let protocol = message
-                .try_into_protocol_message()
-                .map_err(|_| "message is not an MLS protocol message")?;
-            match &protocol {
-                ProtocolMessage::PrivateMessage(value) if value.aad() == aad => {}
-                ProtocolMessage::PrivateMessage(_) => {
-                    return Err("authenticated data mismatch".into())
-                }
-                _ => return Err("application message is not private".into()),
-            }
-            let processed = group
-                .process_message(&provider, protocol)
-                .map_err(|_| "message decryption failed")?;
-            let sender = member_identity(processed.sender(), processed.credential())?;
-            let sender_index = member_index(processed.sender())?;
-            let message_epoch = processed.epoch().as_u64();
-            let sender_key = if message_epoch == group.epoch().as_u64() {
-                current_leaf_key(&group, sender_index)?
-            } else {
-                past_leaf_key(&snapshot.past_leaves, message_epoch, sender_index)?
-            };
-            let plaintext = match processed.into_content() {
-                ProcessedMessageContent::ApplicationMessage(v) => v.into_bytes(),
-                _ => return Err("message is not application data".into()),
-            };
-            let public = decode("signer public key", &snapshot.signer_public, 64)?;
-            out.plaintext = B64.encode(plaintext);
-            out.sender_identity = B64.encode(sender);
-            out.sender_signature_key = B64.encode(sender_key);
-            out.sender_leaf_index = Some(sender_index.u32());
-            out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(
-                &provider,
-                &public,
-                Some(group.group_id()),
-                snapshot.past_leaves,
-            )?;
-        }
+        "open" => open(&req, &mut out, AadMode::Compare)?,
+        "open_readback" => open(&req, &mut out, AadMode::Readback)?,
         "members" => {
             let (provider, snapshot) = load_snapshot(&req.state)?;
             let group = group(&provider, &snapshot)?;
@@ -878,6 +914,90 @@ mod tests {
         wrong_aad.aad = B64.encode(b"different event");
         wrong_aad.message = sealed.message;
         assert!(handle(wrong_aad).is_err());
+    }
+
+    // pair returns the states of a founder and one joined member.
+    fn pair() -> (String, String) {
+        let alice = identity(b"alice-authority");
+        let bob = identity(b"bob-member");
+        let mut create = request("create");
+        create.state = alice.state;
+        create.key_package = alice.key_package;
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let founder = handle(create).unwrap();
+        let mut add = request("commit");
+        add.state = founder.state;
+        add.key_packages = vec![bob.key_package];
+        let added = handle(add).unwrap();
+        let mut join = request("join");
+        join.state = bob.state;
+        join.welcome = added.welcome;
+        (added.state, handle(join).unwrap().state)
+    }
+
+    fn readback(state: &str, message: &str) -> Result<Response, String> {
+        let mut open = request("open_readback");
+        open.state = state.to_string();
+        open.message = message.to_string();
+        handle(open)
+    }
+
+    #[test]
+    fn readback_returns_the_messages_own_authenticated_data() {
+        let (alice, bob) = pair();
+        let sealed = seal_as(&bob, b"room binding", b"hello");
+        let opened = readback(&alice, &sealed.message).unwrap();
+        assert_eq!(B64.decode(&opened.aad).unwrap(), b"room binding");
+        assert_eq!(B64.decode(&opened.plaintext).unwrap(), b"hello");
+        assert_eq!(B64.decode(&opened.sender_identity).unwrap(), b"bob-member");
+        assert!(!opened.state.is_empty());
+        // Compare mode never reports the authenticated data.
+        let compared = open_as(&alice, b"room binding", &sealed.message).unwrap();
+        assert!(compared.aad.is_empty());
+    }
+
+    #[test]
+    fn readback_takes_no_authenticated_data_and_refuses_a_message_without_any() {
+        let (alice, bob) = pair();
+        let sealed = seal_as(&bob, b"room binding", b"hello");
+        let mut both = request("open_readback");
+        both.state = alice.clone();
+        both.aad = B64.encode(b"room binding");
+        both.message = sealed.message;
+        assert!(handle(both).is_err());
+        let mut bare = request("seal");
+        bare.state = bob;
+        bare.plaintext = B64.encode(b"no binding");
+        let unbound = handle(bare).unwrap();
+        assert!(readback(&alice, &unbound.message).is_err());
+    }
+
+    #[test]
+    fn a_damaged_message_is_refused_in_both_modes() {
+        let (alice, bob) = pair();
+        let sealed = seal_as(&bob, b"room binding", b"hello");
+        let mut raw = B64.decode(&sealed.message).unwrap();
+        let last = raw.len() - 1;
+        raw[last] ^= 0x01;
+        let damaged = B64.encode(raw);
+        assert!(readback(&alice, &damaged).is_err());
+        assert!(open_as(&alice, b"room binding", &damaged).is_err());
+        // The state was not changed by the refusals.
+        assert!(readback(&alice, &sealed.message).is_ok());
+    }
+
+    #[test]
+    fn compare_refuses_another_or_an_absent_authenticated_data() {
+        let (alice, bob) = pair();
+        let sealed = seal_as(&bob, b"room binding", b"hello");
+        assert!(open_as(&alice, b"another binding", &sealed.message).is_err());
+        // An absent field is the empty value, never readback: a message
+        // carrying authenticated data does not open without it.
+        let mut absent = request("open");
+        absent.state = alice.clone();
+        absent.message = sealed.message.clone();
+        assert!(handle(absent).is_err());
+        assert!(open_as(&alice, b"room binding", &sealed.message).is_ok());
     }
 
     fn state_len(encoded: &str) -> usize {
