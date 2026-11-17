@@ -2007,6 +2007,19 @@ in V1, D3), journaled with its outbox entry as 11.7 requires.
   applying it to MLS. If that one deposit is lost, M is not told: its later
   room messages are refused at members and relay-acknowledged without an
   answer, and M learns of the removal only out of band.
+- **No re-add in V1.** A removed member cannot be added to the same room
+  again until the room retires: its removal marker stops it taking that
+  room's handshake objects, and a fresh Welcome into a room ID it held would
+  need a fused-ledger transition V1 does not have (the same one M-R2.1's
+  member re-key needs, 11.8). To include it again, the authority creates a
+  new room. Members also forget a removed member again on their own: the
+  card admission, sequence record and parts are reconciled against the
+  current membership at start and on the relay timer, so a crash or a
+  failed carrier call after the removing Commit leaves no card admission,
+  sequence record or part behind (relay evidence follows 2.5). A removed
+  member's card admission for the room ends at the latest when the room
+  retires (11.8), which bounds every leftover admission to the room's
+  lifetime.
 - **M's pending envelopes.** The authority withdraws its in-flight handshake
   generations to M (`carrier.withdraw`); members withdraw stored kind-3
   envelopes to M of epoch ≥ N+1 and drop undeposited ones; epoch ≤ N ones
@@ -2302,6 +2315,12 @@ room, in this order:
 2. delete the room's credential list;
 3. delete the fused record last, as the commit point, with a directory
    fsync.
+
+With retirement the daemon also drops the room's admission of every
+member's chat card (`carrier.room-cards` forget). That call is made outside
+the journal steps and never holds them back; a failed one is retried on the
+next maintenance pass while the daemon runs (V1 keeps no journal record of
+it, so a restart before it succeeds leaves the admission to the carrier).
 
 At restart the daemon retires again any room past that time whose fused
 record still exists, so a crash during retirement only repeats it. Ordinary
