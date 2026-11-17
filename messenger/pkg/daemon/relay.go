@@ -22,7 +22,6 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
-	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 const (
@@ -120,12 +119,35 @@ func (d *Daemon) configureRelayCarriage(sink *directory.RelayEvidenceSink) error
 		return nil
 	}
 	driver := &group.OpenMLSSidecar{Command: []string{relay.MLSDriverPath}, Timeout: relay.MLSDriverTimeout()}
-	gapDelay, err := eventlog.RoomGapDelay(relay.OwnRelayMaxTTL())
+	settings, err := d.configuredRoomSettings(driver, client)
 	if err != nil {
 		return err
 	}
-	return d.installRoomRuntime(roomRuntimeSettings{driver: driver, cards: client, skew: d.config.RoomClockSkew(),
-		retention: room.RoomHandshakeRetention, gapDelay: gapDelay})
+	return d.installRoomRuntime(settings)
+}
+
+// configuredRoomSettings derives the room runtime's settings from the relay
+// carriage configuration: the gap delay from the own relays' TTL, and the
+// part size, handshake retention and authorization lifetime from the test
+// settings, which a production build refuses. Config.Validate checked them
+// already; checking again here keeps a production build from running with
+// one whatever path built its configuration.
+func (d *Daemon) configuredRoomSettings(driver group.AttributedDriver, cards roomCarrier) (roomRuntimeSettings, error) {
+	relay := d.config.RelayCarriage
+	if relay == nil || relay.MLSDriverPath == "" {
+		return roomRuntimeSettings{}, errors.New("private rooms over the relay are not configured")
+	}
+	gapDelay, err := eventlog.RoomGapDelay(relay.OwnRelayMaxTTL())
+	if err != nil {
+		return roomRuntimeSettings{}, err
+	}
+	settings, err := relay.RoomSettings()
+	if err != nil {
+		return roomRuntimeSettings{}, err
+	}
+	return roomRuntimeSettings{driver: driver, cards: cards, skew: d.config.RoomClockSkew(),
+		retention: settings.HandshakeRetention, gapDelay: gapDelay, partBytes: settings.PartBytes,
+		authorization: settings.Authorization}, nil
 }
 
 // installRelayRuntime installs the relay sender, seal gate and inbound

@@ -34,6 +34,8 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/firewall"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 	"github.com/tosnetwork/ai/messenger/pkg/tosaddr"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
@@ -728,6 +730,90 @@ type RelayCarriageConfig struct {
 	// waiting at one of these relays. A value above the real TTL only
 	// declares a gap later, never wrongly.
 	OwnRelayMaxTTLSeconds uint64 `json:"own_relay_max_ttl_seconds,omitempty"`
+
+	// The three test settings below shorten what a live test cannot wait
+	// out (sections 11.1 and 11.3). Only a build with the roomtest tag
+	// accepts them; a production build refuses a configuration that names
+	// any of them, whatever its value. Each needs mls_driver_path.
+	//
+	// RoomPartBytes is the test part size P, 1,024..162,744: every part of
+	// a handshake object is cut at P; application objects keep the
+	// production cut. Unset is the production cut.
+	RoomPartBytes *uint64 `json:"room_part_bytes,omitempty"`
+	// RoomHandshakeRetentionSeconds is the handshake retention, 1 s..7 d:
+	// how long a handshake object is re-deposited, how long after its issue
+	// a header authorization is accepted on the relay route, and how long
+	// after its end a room is retired. Unset is the production 7 days.
+	RoomHandshakeRetentionSeconds *uint64 `json:"room_handshake_retention_seconds,omitempty"`
+	// RoomAuthorizationSeconds is the lifetime of the MembershipAuthorizations
+	// this installation signs as a room's authority, 1 min..24 h. Unset is
+	// the production 24 h.
+	RoomAuthorizationSeconds *uint64 `json:"room_authorization_seconds,omitempty"`
+}
+
+// RoomSettings are the effective values of the room settings a record
+// states: the part size (zero is the production cut), the handshake
+// retention, the authorization lifetime and the own relays' TTL.
+type RoomSettings struct {
+	PartBytes             int
+	HandshakeRetention    time.Duration
+	Authorization         time.Duration
+	OwnRelayMaxTTLSeconds uint64
+	// TestSettings is true when any test setting is named.
+	TestSettings bool
+}
+
+// ErrRoomTestSettingRefused is the refusal of a production build to run
+// with a room test setting.
+var ErrRoomTestSettingRefused = errors.New("is a test setting that only a build with the roomtest tag accepts; this production build refuses it")
+
+// RoomSettings checks the room test settings and returns the effective
+// values. A production build refuses any test setting that is named.
+func (r RelayCarriageConfig) RoomSettings() (RoomSettings, error) {
+	settings := RoomSettings{HandshakeRetention: room.RoomHandshakeRetention,
+		Authorization: room.MaxMembershipAuthorizationWindow, OwnRelayMaxTTLSeconds: r.OwnRelayMaxTTL()}
+	named := []struct {
+		name string
+		set  bool
+	}{
+		{"room_part_bytes", r.RoomPartBytes != nil},
+		{"room_handshake_retention_seconds", r.RoomHandshakeRetentionSeconds != nil},
+		{"room_authorization_seconds", r.RoomAuthorizationSeconds != nil},
+	}
+	for _, setting := range named {
+		if !setting.set {
+			continue
+		}
+		if !roomTestSettingsAllowed {
+			return RoomSettings{}, fmt.Errorf("relay_carriage %s %w", setting.name, ErrRoomTestSettingRefused)
+		}
+		if r.MLSDriverPath == "" {
+			return RoomSettings{}, fmt.Errorf("relay_carriage %s needs mls_driver_path", setting.name)
+		}
+		settings.TestSettings = true
+	}
+	if r.RoomPartBytes != nil {
+		value := *r.RoomPartBytes
+		if value < uint64(relayframe.MinTestPartBytes) || value > uint64(relayframe.MaxTestPartBytes) {
+			return RoomSettings{}, errors.New("relay_carriage room_part_bytes is outside 1,024..162,744")
+		}
+		settings.PartBytes = int(value)
+	}
+	if r.RoomHandshakeRetentionSeconds != nil {
+		value := *r.RoomHandshakeRetentionSeconds
+		if value < 1 || value > uint64(room.RoomHandshakeRetention/time.Second) {
+			return RoomSettings{}, errors.New("relay_carriage room_handshake_retention_seconds is outside 1s..7d")
+		}
+		settings.HandshakeRetention = time.Duration(value) * time.Second
+	}
+	if r.RoomAuthorizationSeconds != nil {
+		value := *r.RoomAuthorizationSeconds
+		if value < 60 || value > uint64(room.MaxMembershipAuthorizationWindow/time.Second) {
+			return RoomSettings{}, errors.New("relay_carriage room_authorization_seconds is outside 1m..24h")
+		}
+		settings.Authorization = time.Duration(value) * time.Second
+	}
+	return settings, nil
 }
 
 // OwnRelayMaxTTL is the largest relay TTL of this node's own chat relays, in
@@ -809,6 +895,9 @@ func (r RelayCarriageConfig) Validate(stateDir, contactDir string, others []stri
 	}
 	if err := carrierapi.ValidateRelayTTL(r.OwnRelayMaxTTL()); err != nil {
 		return errors.New("relay_carriage own_relay_max_ttl_seconds is outside 1s..24h")
+	}
+	if _, err := r.RoomSettings(); err != nil {
+		return err
 	}
 	return nil
 }
