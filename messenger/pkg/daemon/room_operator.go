@@ -588,6 +588,15 @@ func (d *Daemon) afterRoomEvent(route admission.Route, event envelope.Event, out
 // KeyPackage arrived, one joiner per Commit, in arrival order. A failure is
 // reported to the owner and tried again on the next maintenance pass.
 func (r *roomRuntime) commitReadyAdds(roomID string) {
+	// The Adds are committed under the handling lock; their objects go
+	// out after it, under the room's fan-out mutex.
+	r.commitReadyAddsLocked(roomID)
+	r.fanOutRoom(context.Background(), roomID)
+}
+
+// commitReadyAddsLocked commits the ready adds of a room under the
+// handling lock.
+func (r *roomRuntime) commitReadyAddsLocked(roomID string) {
 	r.handling.Lock()
 	defer r.handling.Unlock()
 	now := r.now()
@@ -604,9 +613,6 @@ func (r *roomRuntime) commitReadyAdds(roomID string) {
 			r.daemon.report("room add "+roomID, err)
 			return
 		}
-	}
-	if record, found, err := r.ledger.Current(roomID); err == nil && found {
-		r.fanOut(context.Background(), record)
 	}
 }
 
@@ -767,34 +773,57 @@ func (r *roomRuntime) RemoveRoomMember(ctx context.Context, roomID, agentID stri
 	if agentID == r.daemon.config.AgentID {
 		return fault.New(fault.CodePayloadMalformed, "the authority cannot remove itself")
 	}
+	// The Remove is committed under the handling lock. The withdrawals of
+	// the removed member's in-flight generations and the removing Commit's
+	// deposit follow under the room's fan-out mutex, after the handling
+	// lock is released. The Remove is committed by then: withdrawals the
+	// carrier did not confirm are retried by the fan-out, never by another
+	// Remove.
+	removed, err := r.removeLocked(roomID, agentID)
+	if err != nil || !removed {
+		return err
+	}
+	lock := r.roomFanoutLock(roomID)
+	lock.Lock()
+	defer lock.Unlock()
+	if !r.withdrawFromRemoved(ctx, roomID, agentID, r.now()) {
+		r.daemon.report("room "+roomID+" member "+agentID, ErrRoomWithdrawalsPending)
+	}
+	r.fanOut(ctx, roomID)
+	return nil
+}
+
+// removeLocked commits a Remove under the handling lock and reports whether
+// it removed a member.
+func (r *roomRuntime) removeLocked(roomID, agentID string) (bool, error) {
 	r.handling.Lock()
 	defer r.handling.Unlock()
 	now := r.now()
 	record, err := r.authorityRecord(roomID, now)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := r.daemon.journal.FinishRoomAdd(roomID, agentID); err != nil {
-		return err
+		return false, err
 	}
 	if !record.Membership().Contains(agentID) {
-		return nil
+		return false, nil
 	}
 	leaves, err := r.controller.Members(roomID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	leaf, found := memberLeaf(leaves, agentID)
 	if !found {
-		return fault.New(fault.CodeInternal, "the member has no leaf in the room's tree")
+		return false, fault.New(fault.CodeInternal, "the member has no leaf in the room's tree")
 	}
 	membership, err := record.Membership().Remove([]string{agentID})
 	if err != nil {
-		return fault.Wrap(fault.CodePayloadMalformed, err)
+		return false, fault.Wrap(fault.CodePayloadMalformed, err)
 	}
 	proof, err := r.authorize(membership, now)
 	if err != nil {
-		return err
+		return false, err
 	}
 	header := &relayframe.RoomHeader{Membership: membership, Authorization: proof.Authorization, EndsAtUnix: record.RoomEndsAtUnix}
 	remaining := r.othersOf(membership.Members)
@@ -817,21 +846,13 @@ func (r *roomRuntime) RemoveRoomMember(ctx context.Context, roomID, agentID stri
 			Object: commit, Recipients: recipients}}, nil
 	}
 	if _, _, err = r.controller.Commit(template, &proof, operations, build, now.Add(r.retention)); err != nil {
-		return err
+		return false, err
 	}
 	// The removed member's card goes with its credential.
 	if err := r.daemon.journal.ForgetRoomMemberCard(roomID, agentID); err != nil {
-		return err
+		return false, err
 	}
-	// Its in-flight generations are withdrawn, and the removing Commit goes
-	// out at once.
-	if err := r.withdrawFromRemoved(ctx, roomID, agentID, now); err != nil {
-		return err
-	}
-	if current, found, err := r.ledger.Current(roomID); err == nil && found {
-		r.fanOut(ctx, current)
-	}
-	return nil
+	return true, nil
 }
 
 // othersOf returns the members other than this installation, ascending.

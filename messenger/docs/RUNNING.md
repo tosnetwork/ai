@@ -621,6 +621,132 @@ The daemon configuration adds:
   worst-case frame before sealing (139,547 bytes); a larger one is refused
   with `content-too-large` and no key is spent.
 
+### Private rooms over the relay (M-R2)
+
+This is the Messenger half of milestone M-R2 of the same document (sections
+8, 9.2 and 11). A private room is an MLS group with one authority, the
+Agent that founded it; its objects travel as kind-3 frames through the same
+carrier and relays as one-to-one copies, and a relay sees only padded,
+sealed packets. The `relay_carriage` block enables rooms with:
+
+```json
+"mls_driver_path": "/usr/lib/tos-messengerd/tos-openmls-driver",
+"mls_driver_timeout_seconds": 10,
+"own_relay_max_ttl_seconds": 3600
+```
+
+- **Driver.** `mls_driver_path` is the absolute path of the OpenMLS driver
+  (`rust/openmls-driver`), outside `state_dir`; without it kind 3 is not
+  carried. `mls_driver_timeout_seconds` bounds one driver operation
+  (1..60 s, default 10 s).
+- **Own relays' TTL.** `own_relay_max_ttl_seconds` is the largest
+  `max_ttl_seconds` of this node's own chat relays (1..86,400, default
+  86,400). A room sequence still missing that long plus 5 minutes after a
+  later one arrived is recorded as a gap: a missing envelope can only still
+  be waiting at one of those relays. A value above the real TTL only declares
+  a gap later, never wrongly. Set 3,600 against 1 h test relays, and state it
+  in a record.
+- **Owner operations (D13).** `rooms.create`, `rooms.add`, `rooms.remove`,
+  `rooms.join`, `invites.present` and `contacts.remove` are owner decisions:
+  owner socket only, each signed by the owner key over a fresh challenge,
+  as the other decisions above. The runtime principal is refused all of
+  them. The runtime may send (`outbox.compose` with the `room_id` of a room
+  held here takes the kind-3 path) and read (`rooms.list`, `rooms.gaps`).
+  OpenFox's `openfox chat room` and `openfox chat invite present` commands
+  are the intended clients.
+- **Joining.** `rooms.add` sends the Agent a `room.invite` over the 1:1
+  session; it carries the authority's leaf credential, which the invitee
+  verifies against the finalized delegation before it records a pending
+  join. The invitee's owner accepts with `rooms.join`, naming the room and
+  the authority; the daemon makes a leaf credential and KeyPackage and sends
+  them back as `room.key-package`. The authority's daemon then commits the
+  Add and stages the Commit for the members, the Welcome and a full roster
+  for the joiner, and a roster of the added member for the others. A member
+  learns the other members' cards, relay evidence and leaf credentials from
+  rosters, so two members need not be contacts. The authority keeps each
+  member's chat card itself, taken from that member's own frames; the card's
+  signature is verified by each receiving member's carrier when it admits
+  it (`carrier.room-cards`), not by the daemon.
+- **Invites between strangers.** An allow-listed recipient admits a
+  `room.invite` from a contact. Otherwise the authority's owner first
+  presents the recipient's `invite_…` token with `invites.present` (see the
+  first-contact invite above): every delivery to that Agent then carries it
+  sealed, and its claim makes the sender a contact (D12) until
+  `contacts.remove`.
+- **Room admission stays in the room (D11).** A joined room admits only
+  `room.message` and `artifact.encrypted` Events naming it, from Agents in
+  the authority's latest committed membership at the Event's epoch. It grants
+  no 1:1 admission: a member who is no contact still meets the normal policy
+  on a direct copy.
+- **Delivery.** The authority keeps one in-order queue per member, with one
+  handshake object (Commit, Welcome, roster) in flight and the next only
+  after that member's Endpoint-signed room ack; `accepted` or `duplicate` is
+  `delivered`, and any `rejected` stops that member's queue with an owner
+  notice. An unacknowledged object is deposited again, byte-identical and
+  with every part, at 80 % of the smallest relay TTL of the member's card
+  (10-minute floor), the previous generation withdrawn, until acked or the
+  handshake retention (7 days) ends; then the member is abandoned with
+  `retention-exceeded` and should be removed. Handshake objects go before
+  application objects, a `peer-cap` answer leaves an object pending, and a
+  `retry` answer waits 30 s, doubling to 5 min. Application objects are
+  deposited once and end `carried`; a member missing one gets a `room.gap`.
+- **Catch-up.** A member that was offline applies the missed Commits in
+  order, one per round trip, and opens the messages of newer epochs it held
+  in its future-epoch buffer. On the relay route a header's authorization is
+  accepted until its issue time plus the handshake retention plus the
+  clock-skew bound, so catch-up outlasts the authorization's own 24 h.
+- **Remove.** `rooms.remove` commits the removal; the removed member gets
+  that Commit once, as its removal notice, and nothing later is addressed to
+  it. The authority withdraws its in-flight handshake generations to it, and
+  every member forgets its card admission and leaf credential.
+- **Room end (D18).** A room ends when the authority's leaf credential does
+  (at most 30 days, and not past its delegation), fixed at `rooms.create`.
+  The authority makes no Commit, Welcome or roster within the last re-deposit
+  interval before the end minus the clock-skew bound, and every sender stops
+  at the end minus the skew (`room-ended`). From the end plus the skew every
+  member refuses the room's objects with `room-ended` and one owner notice,
+  and an application object sealed before the end that arrives later is a
+  gap. At the end plus the handshake retention plus the skew the room is
+  retired: its outbox, parts, buffer and receive state, then its credential
+  list, then its fused record. To continue, the owner creates a new room.
+
+**V1 limits.**
+
+- No post-compromise security for members (D15): members never commit, so a
+  compromised member leaf is not healed before the room ends.
+- No credential renewal inside a room: a room lives no longer than its
+  authority's leaf credential, and a joiner is added only if its own
+  credential lasts until the room's end.
+- No re-add of a removed member to the same room until the room retires;
+  the authority creates a new room instead.
+- One device per Agent (D3), and at most 32 Agents per room.
+
+**Test settings, refused by a production build.** A live test cannot wait
+out the production values, so a build with the `roomtest` tag
+(`go build -tags roomtest ./cmd/tos-messengerd`) accepts three more
+`relay_carriage` settings. A production build refuses a configuration that
+names any of them, whatever the value:
+
+| Setting | Bounds | Production value |
+|---|---|---|
+| `room_part_bytes` | 1,024..162,744; cuts handshake objects only | production cut |
+| `room_handshake_retention_seconds` | 1 s..7 days | 7 days |
+| `room_authorization_seconds` | 1 min..24 h | 24 h |
+
+An object that would need more than 8 parts at the test part size is never
+deposited: pick a size at which the largest handshake object fits in 8
+parts (a roster entry is about 11 KiB). Startup and `-check` always print
+the build variant (`production` or `roomtest`) and, with private rooms, the
+values in force, for a record to state:
+
+```text
+room_settings build=production private_rooms=on room_part_bytes=0 room_handshake_retention_seconds=604800 room_authorization_seconds=86400 own_relay_max_ttl_seconds=3600 test_settings=false
+```
+
+`make messenger-test-roomtest` vets and builds the tagged variant and runs
+its tests, the multi-daemon room scenario of section 8 among them, against
+the in-tree driver.
+
 ## State
 
 The state directory holds the journal and the install salt, and one daemon owns

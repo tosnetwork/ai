@@ -96,7 +96,7 @@ func run(configPath, publicationPath, attachmentPath, httpsListen, httpsCert, ht
 		if attachmentPath != "" {
 			fmt.Println("attachment emission operator configuration is structurally valid; live delegation, storage authority, and signer are checked at startup")
 		}
-		return nil
+		return printRoomSettings(config)
 	}
 
 	var instance *daemon.Daemon
@@ -146,6 +146,9 @@ func run(configPath, publicationPath, attachmentPath, httpsListen, httpsCert, ht
 	if socket := instance.RelaySocketPath(); socket != "" {
 		fmt.Printf("relay_carrier_socket=%s\n", socket)
 	}
+	if err := printRoomSettings(config); err != nil {
+		return err
+	}
 	var httpsServer *http.Server
 	httpsErrors := make(chan error, 1)
 	if config.Transport == daemon.TransportHTTPSBootstrap {
@@ -181,6 +184,19 @@ func run(configPath, publicationPath, attachmentPath, httpsListen, httpsCert, ht
 }
 
 var errNoConfig = fmt.Errorf("a configuration file is required")
+
+// printRoomSettings states what a private-room record must state (sections
+// 8 and 11.3): always the build variant, and with private rooms the
+// handshake part size (0 is the production cut), the handshake retention,
+// the authorization lifetime and the own relays' TTL.
+func printRoomSettings(config daemon.Config) error {
+	line, err := config.RoomSettingsLine()
+	if err != nil {
+		return err
+	}
+	fmt.Println(line)
+	return nil
+}
 
 // reporter writes what the daemon did to standard output, one line per event.
 type reporter struct{}

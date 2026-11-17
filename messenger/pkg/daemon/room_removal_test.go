@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -418,5 +419,107 @@ func TestRoomCardForgetsAreSentInBatches(t *testing.T) {
 	r.flushCardForgets(context.Background())
 	if n := len(scene.cards[1].forgottenIn(testRoomID)); n != len(agents) {
 		t.Fatalf("a settled batch was sent again: %d", n)
+	}
+}
+
+// roomCardOf is the card admission of a member the way a roster teaches it.
+func roomCardOf(t *testing.T, member roomMember) carrierapi.RoomCard {
+	t.Helper()
+	return carrierapi.RoomCard{AgentID: member.agent(), CardBase64: base64.StdEncoding.EncodeToString(relayCard(t, member.agent()))}
+}
+
+// A card admission a roster queued before a removal is never sent after the
+// removal's forget: admissions and forgets are flushed one at a time, and an
+// admission is judged against the membership when it is sent. Here the
+// admission's first send fails, the removal's forget goes out, and the next
+// flush drops the removed member's card instead of re-admitting it.
+func TestRoomCardAdmissionQueuedBeforeARemovalNeverFollowsItsForget(t *testing.T) {
+	partBytes := 4 * relayframe.MinTestPartBytes
+	scene := newJoinedSceneCut(t, roomRetention, partBytes)
+	b := scene.nodes[1]
+	runtime := b.d.relay.rooms
+	record, _ := fused(t, b)
+	runtime.queueCardAdmission(roomCardAdmission{roomID: testRoomID, roomEndsAtUnix: record.RoomEndsAtUnix,
+		cards: []carrierapi.RoomCard{roomCardOf(t, scene.c), roomCardOf(t, scene.a)}})
+	scene.cards[1].mutex.Lock()
+	scene.cards[1].failAdmissions = 1
+	scene.cards[1].mutex.Unlock()
+	removal := removeCommit(t, scene, scene.c)
+	if ack := roomAckOf(t, b, send(t, b, scene.a.agent(), framesOf(t, scene.a, removal, partBytes))); ack.Outcome != relayframe.OutcomeAccepted {
+		t.Fatalf("the removal of C: %+v", ack)
+	}
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); !containsAgent(forgotten, scene.c.agent()) {
+		t.Fatalf("C's card was not forgotten: %v", forgotten)
+	}
+	runtime.maintain()
+	if containsAgent(scene.cards[1].of(testRoomID), scene.c.agent()) {
+		t.Fatal("a card admission queued before the removal re-admitted the removed member after its forget")
+	}
+	// The member still in the room is admitted by the retried flush.
+	if !containsAgent(scene.cards[1].of(testRoomID), scene.a.agent()) {
+		t.Fatal("the failed admission of a current member was not retried")
+	}
+	runtime.cardsMutex.Lock()
+	left := len(runtime.admissions)
+	runtime.cardsMutex.Unlock()
+	if left != 0 {
+		t.Fatalf("%d admissions still queued after a flush that succeeded", left)
+	}
+}
+
+// A card admission the carrier did not apply stays queued, in order, and is
+// sent by the next flush.
+func TestRoomCardAdmissionThatFailedIsSentByTheNextFlush(t *testing.T) {
+	scene := newJoinedSceneCut(t, roomRetention, 4*relayframe.MinTestPartBytes)
+	b := scene.nodes[1]
+	runtime := b.d.relay.rooms
+	record, _ := fused(t, b)
+	scene.cards[1].mutex.Lock()
+	scene.cards[1].failAdmissions = 1
+	before := len(scene.cards[1].admitted[testRoomID])
+	scene.cards[1].mutex.Unlock()
+	runtime.queueCardAdmission(roomCardAdmission{roomID: testRoomID, roomEndsAtUnix: record.RoomEndsAtUnix,
+		cards: []carrierapi.RoomCard{roomCardOf(t, scene.c)}})
+	runtime.flushCardAdmissions(context.Background())
+	scene.cards[1].mutex.Lock()
+	after := len(scene.cards[1].admitted[testRoomID])
+	scene.cards[1].mutex.Unlock()
+	if after != before {
+		t.Fatal("a failed admission was recorded")
+	}
+	runtime.flushCardAdmissions(context.Background())
+	scene.cards[1].mutex.Lock()
+	defer scene.cards[1].mutex.Unlock()
+	if len(scene.cards[1].admitted[testRoomID]) != before+1 {
+		t.Fatalf("the failed admission was not sent by the next flush: %v", scene.cards[1].admitted[testRoomID])
+	}
+}
+
+// Card admissions and forgets go to the carrier one call at a time, each
+// under the card flush serialization: neither can overtake the other.
+func TestRoomCardAdmissionsAndForgetsAreSentOneAtATime(t *testing.T) {
+	partBytes := 4 * relayframe.MinTestPartBytes
+	scene := newJoinedSceneCut(t, roomRetention, partBytes)
+	b := scene.nodes[1]
+	runtime := b.d.relay.rooms
+	record, _ := fused(t, b)
+	calls, unserialized := 0, 0
+	check := func() {
+		calls++
+		if runtime.cardFlush.TryLock() {
+			unserialized++
+			runtime.cardFlush.Unlock()
+		}
+	}
+	scene.cards[1].during, scene.cards[1].duringForget = check, check
+	runtime.queueCardAdmission(roomCardAdmission{roomID: testRoomID, roomEndsAtUnix: record.RoomEndsAtUnix,
+		cards: []carrierapi.RoomCard{roomCardOf(t, scene.a)}})
+	runtime.flushCardAdmissions(context.Background())
+	removal := removeCommit(t, scene, scene.c)
+	if ack := roomAckOf(t, b, send(t, b, scene.a.agent(), framesOf(t, scene.a, removal, partBytes))); ack.Outcome != relayframe.OutcomeAccepted {
+		t.Fatalf("the removal of C: %+v", ack)
+	}
+	if calls < 2 || unserialized != 0 {
+		t.Fatalf("of %d card calls, %d ran outside the card flush serialization", calls, unserialized)
 	}
 }

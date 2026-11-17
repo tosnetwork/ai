@@ -1,8 +1,9 @@
 .PHONY: verify fmt-check proto-check vet test-race build conformance boundary-lint spec-check fuzz test-privileged \
-	messenger-test-adnl messenger-test-openmls messenger-sandbox messenger-vectors messenger-cross-build messenger-fuzz
+	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors messenger-cross-build \
+	messenger-fuzz
 
 verify: fmt-check proto-check vet test-race build conformance boundary-lint spec-check \
-	messenger-test-adnl messenger-test-openmls messenger-sandbox messenger-vectors
+	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors
 
 fmt-check:
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
@@ -73,6 +74,17 @@ messenger-test-openmls:
 	cargo test --locked --manifest-path $(OPENMLS_DRIVER_MANIFEST)
 	cargo build --locked --manifest-path $(OPENMLS_DRIVER_MANIFEST)
 	TOS_OPENMLS_DRIVER="$(CURDIR)/messenger/rust/openmls-driver/target/debug/tos-openmls-driver" GOWORK=off go test -count=1 -run OpenMLS ./messenger/pkg/group ./messenger/pkg/eventlog ./messenger/pkg/mlslab
+
+# The room test settings (room_part_bytes, room_handshake_retention_seconds,
+# room_authorization_seconds) exist only in a build with the roomtest tag; a
+# production build refuses them. This builds and vets that variant and runs
+# its tests, the multi-daemon room e2e among them, against the in-tree
+# OpenMLS driver; without the driver they fail rather than skip.
+messenger-test-roomtest:
+	cargo build --locked --manifest-path $(OPENMLS_DRIVER_MANIFEST)
+	GOWORK=off go vet -tags roomtest ./messenger/...
+	GOWORK=off go build -tags roomtest ./messenger/...
+	TOS_OPENMLS_DRIVER="$(CURDIR)/messenger/rust/openmls-driver/target/debug/tos-openmls-driver" GOWORK=off go test -race -tags roomtest -count=1 -run '^TestRoomTest' ./messenger/pkg/daemon
 
 # The attachment scanner sandbox tests skip when bubblewrap, prlimit,
 # systemd-run or a user systemd manager is missing. Here they must run: a

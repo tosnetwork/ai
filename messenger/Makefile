@@ -1,6 +1,6 @@
-.PHONY: verify fmt-check vet test-race test-openmls test-storage-live test-attachment-corpus-live calibrate-public-channel calibrate-public-channel-concurrent build
+.PHONY: verify fmt-check vet test-race test-openmls test-roomtest test-storage-live test-attachment-corpus-live calibrate-public-channel calibrate-public-channel-concurrent build
 
-verify: fmt-check vet test-race test-adnl test-openmls build
+verify: fmt-check vet test-race test-adnl test-openmls test-roomtest build
 
 fmt-check:
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
@@ -22,6 +22,15 @@ test-openmls:
 	cargo test --locked --manifest-path rust/openmls-driver/Cargo.toml
 	cargo build --locked --manifest-path rust/openmls-driver/Cargo.toml
 	TOS_OPENMLS_DRIVER="$$(pwd)/rust/openmls-driver/target/debug/tos-openmls-driver" GOWORK=off go test -count=1 -run OpenMLS ./pkg/group ./pkg/eventlog ./pkg/mlslab
+
+# The room test settings exist only in a build with the roomtest tag; this
+# vets and builds that variant and runs its tests, the multi-daemon room e2e
+# among them, against the in-tree OpenMLS driver.
+test-roomtest:
+	cargo build --locked --manifest-path rust/openmls-driver/Cargo.toml
+	GOWORK=off go vet -tags roomtest ./...
+	GOWORK=off go build -tags roomtest ./...
+	TOS_OPENMLS_DRIVER="$$(pwd)/rust/openmls-driver/target/debug/tos-openmls-driver" GOWORK=off go test -race -tags roomtest -count=1 -run '^TestRoomTest' ./pkg/daemon
 
 # Explicit operator acceptance: starts two real storage-daemon processes and a
 # locally signed DHT bootstrap. It is intentionally outside verify because the

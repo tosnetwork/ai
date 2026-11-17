@@ -608,12 +608,6 @@ func (r *roomRuntime) admitRosterRendezvous(in roomInbound, roomEndsAtUnix uint6
 	if len(learned.cards) == 0 {
 		return
 	}
-	response, err := r.cards.RoomCards(in.ctx, in.object.RoomID, roomEndsAtUnix, learned.cards)
-	if err != nil {
-		r.daemon.report("room cards", err)
-		return
-	}
-	if response.Result != carrierapi.ResultApplied {
-		r.daemon.report("room cards", errors.New("the carrier did not apply the room's card admissions"))
-	}
+	// The caller holds the handling lock: the admission is sent after it.
+	r.queueCardAdmission(roomCardAdmission{roomID: in.object.RoomID, roomEndsAtUnix: roomEndsAtUnix, cards: learned.cards})
 }

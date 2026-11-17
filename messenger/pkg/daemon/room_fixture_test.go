@@ -69,10 +69,22 @@ type roomCardsCarrier struct {
 	// failForgets makes that many forget calls fail, as an unreachable
 	// carrier would.
 	failForgets int
+	// during, when set, runs at the start of every admission, outside the
+	// carrier's own mutex.
+	during func()
+	// failAdmissions makes that many admission calls fail, as an
+	// unreachable carrier would.
+	failAdmissions int
+	// duringForget, when set, runs at the start of every forget, outside
+	// the carrier's own mutex.
+	duringForget func()
 }
 
 func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, roomEndsAtUnix uint64,
 	cards []carrierapi.RoomCard) (carrierapi.Response, error) {
+	if c.during != nil {
+		c.during()
+	}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	// The client refuses an admission without a room end, before it
@@ -80,6 +92,10 @@ func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, roomEndsA
 	if err := carrierapi.ValidateRequest(carrierapi.Request{Schema: carrierapi.RequestSchema, Op: carrierapi.OpRoomCards,
 		RoomID: roomID, RoomCardsAction: carrierapi.RoomCardsAdmit, RoomEndsAtUnix: roomEndsAtUnix, RoomCards: cards}); err != nil {
 		return carrierapi.Response{}, err
+	}
+	if c.failAdmissions > 0 {
+		c.failAdmissions--
+		return carrierapi.Response{}, errors.New("the carrier is unreachable")
 	}
 	if c.admitted == nil {
 		c.admitted = map[string][]string{}
@@ -93,6 +109,9 @@ func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, roomEndsA
 }
 
 func (c *roomCardsCarrier) ForgetRoomCards(_ context.Context, roomID string, agentIDs []string) (carrierapi.Response, error) {
+	if c.duringForget != nil {
+		c.duringForget()
+	}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	// The client refuses a request naming more Agents than one may hold,

@@ -81,7 +81,7 @@ func (c *recordingCarrier) Withdraw(_ context.Context, recipient, key string) (c
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	c.withdrawn = append(c.withdrawn, carried{recipient: recipient, key: key})
-	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultApplied}, nil
+	return carrierapi.Withdrawn(), nil
 }
 
 func (c *recordingCarrier) withdrawals() []carried {
@@ -218,73 +218,81 @@ func newRelayNodesWith(t *testing.T, now time.Time, configure func(*Config), dig
 	chain := identity.ChainPolicy{RegistryCodeHashes: []string{registryCode}, Locator: phaseALocator{}}
 	nodes := make([]*relayNode, 0, len(daemons))
 	for _, d := range daemons {
-		d.config.Transport = TransportAgentPacketRelay
-		delegation := d.prekeys.planner.delegation
-		devices, err := d.journal.OpenDevices()
-		if err != nil {
-			t.Fatal(err)
-		}
-		verifier := &directory.RelayVerifier{Resolver: resolver, Network: d.config.Network(), Chain: chain,
-			Judge: devices, Admitter: devices, Store: d.journal, LocalAgentID: d.config.AgentID}
-		d.discovery = &discoveryRuntime{contacts: relayDirectory{verifier: verifier, now: d.clock}, chain: chain,
-			resolver: resolver, devices: devices, relay: verifier}
-		localRaw, _ := identity.EncodeJSON(delegation)
-		policy, _ := d.config.AdmissionPolicy()
-		roomMLS, err := d.journal.OpenRoomMLS()
-		if err != nil {
-			t.Fatal(err)
-		}
-		gate, err := admission.New(admission.Config{Network: d.config.Network(), Chain: chain, Resolver: resolver,
-			Journal: d.journal, Devices: devices, Policy: policy, RoomMLS: roomMLS,
-			MaxClockSkewSeconds: d.config.Admission.MaxClockSkewSeconds, LocalDelegationJSON: localRaw,
-			LocalAgentID: d.config.AgentID, LocalEndpointID: d.config.EndpointID, Now: d.clock,
-			InstallSalt: bytes.Repeat([]byte{0x5a}, admission.MinInstallSaltBytes)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		d.admission = gate
-		dispatcher, err := dispatch.New(dispatch.Config{Journal: d.journal, Identity: d.config.Identity(),
-			Network: d.config.Network(), Now: d.clock, AllowedEventClasses: delegation.AllowedOutboundEventClasses})
-		if err != nil {
-			t.Fatal(err)
-		}
-		d.dispatch = dispatcher
-		root := t.TempDir()
-		cardPath := filepath.Join(root, "card.json")
-		if err := os.WriteFile(cardPath, relayCard(t, d.config.AgentID), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		export := filepath.Join(root, "export")
-		sink, err := directory.NewRelayEvidenceSink(export, cardPath, localRaw, relayTestPolicy)
-		if err != nil {
-			t.Fatal(err)
-		}
-		delegationDigest, _ := identity.Digest(delegation)
-		publisher := &directory.GenerationPublisher{Signer: d.prekeys.signer, Delegation: delegation,
-			Policy: relayTestPolicy, PublishInterval: time.Minute, Relay: sink,
-			Descriptor: directory.Descriptor{Network: delegation.Network, AgentID: delegation.AgentID,
-				EndpointID: delegation.EndpointID, DelegationDigest: delegationDigest, SupportedMessagingVersions: []uint32{1},
-				ADNLID:             delegation.ADNLID,
-				PrekeyBundleDigest: "sha256:" + strings.Repeat("1", 64), InboxAdmissionPolicyDigest: delegation.InboxAdmissionPolicyDigest,
-				MaximumEnvelopeBytes: 64 << 10, IssuedAtUnix: 1, ExpiresAtUnix: 2}}
-		if err := publisher.Validate(); err != nil {
-			t.Fatalf("relay-only publisher: %v", err)
-		}
-		d.prekeys.publisher = publisher
-		if err := d.prekeys.publishCurrent(context.Background()); err != nil {
-			t.Fatalf("publish own relay evidence: %v", err)
-		}
-		carrier := &recordingCarrier{}
-		if err := d.installRelayRuntime(sink, carrier, MinRelayRedepositInterval, 30*time.Second); err != nil {
-			t.Fatalf("install relay: %v", err)
-		}
-		key, ok := d.prekeys.signer.(ed25519.PrivateKey)
-		if !ok {
-			t.Fatal("test signer is not an Ed25519 key")
-		}
-		nodes = append(nodes, &relayNode{d: d, carrier: carrier, key: key, export: export, cardPath: cardPath})
+		nodes = append(nodes, assembleRelayNode(t, d, resolver, chain, t.TempDir()))
 	}
 	return nodes
+}
+
+// assembleRelayNode installs a relay daemon's discovery, admission,
+// dispatcher, own relay evidence and relay runtime over its journal. root
+// holds its chat card and evidence export; a reopened daemon passes the
+// same root again.
+func assembleRelayNode(t *testing.T, d *Daemon, resolver phaseAResolver, chain identity.ChainPolicy, root string) *relayNode {
+	t.Helper()
+	d.config.Transport = TransportAgentPacketRelay
+	delegation := d.prekeys.planner.delegation
+	devices, err := d.journal.OpenDevices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := &directory.RelayVerifier{Resolver: resolver, Network: d.config.Network(), Chain: chain,
+		Judge: devices, Admitter: devices, Store: d.journal, LocalAgentID: d.config.AgentID}
+	d.discovery = &discoveryRuntime{contacts: relayDirectory{verifier: verifier, now: d.clock}, chain: chain,
+		resolver: resolver, devices: devices, relay: verifier}
+	localRaw, _ := identity.EncodeJSON(delegation)
+	policy, _ := d.config.AdmissionPolicy()
+	roomMLS, err := d.journal.OpenRoomMLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate, err := admission.New(admission.Config{Network: d.config.Network(), Chain: chain, Resolver: resolver,
+		Journal: d.journal, Devices: devices, Policy: policy, RoomMLS: roomMLS,
+		MaxClockSkewSeconds: d.config.Admission.MaxClockSkewSeconds, LocalDelegationJSON: localRaw,
+		LocalAgentID: d.config.AgentID, LocalEndpointID: d.config.EndpointID, Now: d.clock,
+		InstallSalt: bytes.Repeat([]byte{0x5a}, admission.MinInstallSaltBytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.admission = gate
+	dispatcher, err := dispatch.New(dispatch.Config{Journal: d.journal, Identity: d.config.Identity(),
+		Network: d.config.Network(), Now: d.clock, AllowedEventClasses: delegation.AllowedOutboundEventClasses})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.dispatch = dispatcher
+	cardPath := filepath.Join(root, "card.json")
+	if err := os.WriteFile(cardPath, relayCard(t, d.config.AgentID), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	export := filepath.Join(root, "export")
+	sink, err := directory.NewRelayEvidenceSink(export, cardPath, localRaw, relayTestPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegationDigest, _ := identity.Digest(delegation)
+	publisher := &directory.GenerationPublisher{Signer: d.prekeys.signer, Delegation: delegation,
+		Policy: relayTestPolicy, PublishInterval: time.Minute, Relay: sink,
+		Descriptor: directory.Descriptor{Network: delegation.Network, AgentID: delegation.AgentID,
+			EndpointID: delegation.EndpointID, DelegationDigest: delegationDigest, SupportedMessagingVersions: []uint32{1},
+			ADNLID:             delegation.ADNLID,
+			PrekeyBundleDigest: "sha256:" + strings.Repeat("1", 64), InboxAdmissionPolicyDigest: delegation.InboxAdmissionPolicyDigest,
+			MaximumEnvelopeBytes: 64 << 10, IssuedAtUnix: 1, ExpiresAtUnix: 2}}
+	if err := publisher.Validate(); err != nil {
+		t.Fatalf("relay-only publisher: %v", err)
+	}
+	d.prekeys.publisher = publisher
+	if err := d.prekeys.publishCurrent(context.Background()); err != nil {
+		t.Fatalf("publish own relay evidence: %v", err)
+	}
+	carrier := &recordingCarrier{}
+	if err := d.installRelayRuntime(sink, carrier, MinRelayRedepositInterval, 30*time.Second); err != nil {
+		t.Fatalf("install relay: %v", err)
+	}
+	key, ok := d.prekeys.signer.(ed25519.PrivateKey)
+	if !ok {
+		t.Fatal("test signer is not an Ed25519 key")
+	}
+	return &relayNode{d: d, carrier: carrier, key: key, export: export, cardPath: cardPath}
 }
 
 // importContact runs the contact-file import of peer's exported contact.
