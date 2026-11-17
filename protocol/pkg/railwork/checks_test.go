@@ -17,6 +17,7 @@ import (
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/internal/servicefixture"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/tosutils-go/tvm/cell"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -335,6 +336,31 @@ func tarOf(t *testing.T, members ...[2]string) []byte {
 		t.Fatal(err)
 	}
 	return buffer.Bytes()
+}
+
+// Section 7.2 requires a single-root Receipt BOC: a valid Receipt followed
+// by a second root is refused, not decoded from its first root.
+func TestAReceiptBOCWithTwoRootsIsRefused(t *testing.T) {
+	document := loadVectors(t)
+	root, err := cell.FromBOC(mustBase64(t, document.Receipt.ReceiptBOCBase64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := cell.BeginCell().MustStoreUInt(7, 8).EndCell()
+	boc := cell.ToBOCWithFlags([]*cell.Cell{root, extra}, false)
+	roots, err := cell.FromBOCMultiRoot(boc)
+	if err != nil || len(roots) != 2 || !bytes.Equal(roots[0].Hash(), root.Hash()) {
+		t.Fatalf("the test BOC does not hold the Receipt and a second root: %d roots, err=%v", len(roots), err)
+	}
+	if _, _, err = DecodeReceipt(boc); !errors.Is(err, ErrResultNotAccepted) {
+		t.Fatalf("DecodeReceipt err=%v", err)
+	}
+	result := vectorResult(t, document)
+	result.Receipt = boc
+	err = ValidateResult(result, vectorReceiptBinding(t, document), mustHex32(t, document.Receipt.ResponseHashHex))
+	if !errors.Is(err, ErrResultNotAccepted) {
+		t.Fatalf("ValidateResult err=%v", err)
+	}
 }
 
 func TestArtifactMustHoldExactlyItsOutputAndReport(t *testing.T) {

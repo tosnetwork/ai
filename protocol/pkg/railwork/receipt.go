@@ -83,10 +83,13 @@ func DecodeReceipt(boc []byte) (nativecore.SoftwareWorkReceiptV1, [32]byte, erro
 	if len(boc) == 0 || len(boc) > MaxReceiptBytes {
 		return nativecore.SoftwareWorkReceiptV1{}, hash, notAccepted("the Receipt is outside its bounds")
 	}
-	root, err := cell.FromBOC(boc)
-	if err != nil {
-		return nativecore.SoftwareWorkReceiptV1{}, hash, notAccepted("the Receipt BOC does not decode to one root")
+	// The single-root rule is checked here rather than left to the cell
+	// library's FromBOC, so it holds whatever that helper does.
+	roots, err := cell.FromBOCMultiRoot(boc)
+	if err != nil || len(roots) != 1 || roots[0] == nil {
+		return nativecore.SoftwareWorkReceiptV1{}, hash, notAccepted("the Receipt BOC does not decode to exactly one root")
 	}
+	root := roots[0]
 	receipt, err := nativecore.DecodeSoftwareWorkReceiptCellV1(root)
 	if err != nil {
 		return nativecore.SoftwareWorkReceiptV1{}, hash, refuseWith(RefusalResultNotAccepted, "the Receipt does not decode", err)
