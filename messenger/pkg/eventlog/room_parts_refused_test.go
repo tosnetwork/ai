@@ -114,7 +114,11 @@ func TestRoomPartTombstonesAreBounded(t *testing.T) {
 		digest[0], digest[1] = byte(n>>8), byte(n)
 		return digest
 	}
-	// Per sender: the oldest gives way.
+	// Per sender: the sender's oldest gives way, not another sender's older
+	// one.
+	if err := parts.Refuse(other, digestOf(0), now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	for n := 0; n <= MaxRefusedRoomObjectsPerSender; n++ {
 		if err := parts.Refuse(sender, digestOf(n), now.Add(time.Duration(n)*time.Second)); err != nil {
 			t.Fatal(err)
@@ -128,6 +132,9 @@ func TestRoomPartTombstonesAreBounded(t *testing.T) {
 		if !parts.RefusedObject(sender, digestOf(n), at) {
 			t.Fatalf("tombstone %d was dropped below the per-sender bound", n)
 		}
+	}
+	if !parts.RefusedObject(other, digestOf(0), at) {
+		t.Fatal("the per-sender bound dropped another sender's tombstone")
 	}
 	// In total: many senders, the oldest of all gives way.
 	senders := make([]string, 0, MaxRefusedRoomObjects)
@@ -149,8 +156,8 @@ func TestRoomPartTombstonesAreBounded(t *testing.T) {
 	if total != MaxRefusedRoomObjects {
 		t.Fatalf("%d tombstones held, bound %d", total, MaxRefusedRoomObjects)
 	}
-	if parts.RefusedObject(sender, digestOf(MaxRefusedRoomObjectsPerSender), at) {
-		t.Fatal("the total bound kept the oldest tombstone")
+	if parts.RefusedObject(other, digestOf(0), at) || parts.RefusedObject(sender, digestOf(MaxRefusedRoomObjectsPerSender), at) {
+		t.Fatal("the total bound kept the oldest tombstones")
 	}
 	last := senders[len(senders)-1]
 	if !parts.RefusedObject(last, digestOf((len(senders)-1)*MaxRefusedRoomObjectsPerSender+MaxRefusedRoomObjectsPerSender-1), at) {

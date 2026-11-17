@@ -162,3 +162,26 @@ func objectOf(t *testing.T, frames [][]byte) []byte {
 	}
 	return object
 }
+
+// The answers that refuse a complete object: a relay refusal, an ignored
+// object and a rejected room ack; an accepted or duplicate ack, an admitted
+// object and a retry refuse nothing.
+func TestRoomCompletionAnswersThatRefuseTheObject(t *testing.T) {
+	for _, answer := range []struct {
+		response carrierapi.Response
+		refuses  bool
+	}{
+		{carrierapi.Refusal(carrierapi.CodeEvidenceRefused), true},
+		{carrierapi.Response{Result: carrierapi.ResultIgnored}, true},
+		{carrierapi.Response{Result: carrierapi.ResultAck, AckOutcome: relayframe.OutcomeRejected}, true},
+		{carrierapi.Response{Result: carrierapi.ResultAck, AckOutcome: relayframe.OutcomeAccepted}, false},
+		{carrierapi.Response{Result: carrierapi.ResultAck, AckOutcome: relayframe.OutcomeDuplicate}, false},
+		{carrierapi.Response{Result: carrierapi.ResultAdmitted}, false},
+		{carrierapi.Retry(), false},
+	} {
+		if got := refusesObject(answer.response); got != answer.refuses {
+			t.Errorf("%s/%s %s refuses the object: %v, want %v", answer.response.Result, answer.response.Code,
+				answer.response.AckOutcome, got, answer.refuses)
+		}
+	}
+}
