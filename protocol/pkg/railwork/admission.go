@@ -143,14 +143,21 @@ func (p Provider) CheckTask(message Message) (*Admission, error) {
 }
 
 // CheckVerifiedBinding is section 7.1 item 6: the task's frames must be
-// bound to the actor and request hash that finalized state verified. The
-// caller passes the values its finalized-state check established.
+// bound to the actor and request hash that finalized state verified, and
+// those must be the actor and request hash this admission derived from the
+// task and its Quote. The second comparison means a caller that looked the
+// request up by the frames' own hash, rather than by the derived one, cannot
+// pass a request the task does not open. The caller passes the values its
+// finalized-state check established.
 func (a *Admission) CheckVerifiedBinding(verifiedActor string, verifiedRequestHash [32]byte) error {
 	if a == nil {
 		return ErrInvalidInput
 	}
 	if !walletPattern.MatchString(verifiedActor) || verifiedRequestHash == ([32]byte{}) {
 		return ErrInvalidInput
+	}
+	if verifiedRequestHash != a.RequestHash || verifiedActor != a.Actor {
+		return notAdmitted("the verified request is not the one the task and its Quote derive")
 	}
 	if a.Message.Binding.RequestHash != verifiedRequestHash || a.Message.Binding.Actor() != verifiedActor {
 		return notAdmitted("the task frames are bound to another request than the verified one")

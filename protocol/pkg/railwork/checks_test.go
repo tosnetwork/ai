@@ -218,6 +218,31 @@ func TestProviderRefusesAMalformedTaskAsMessageInvalid(t *testing.T) {
 	}
 }
 
+// A caller that looks the request up by the frames' own request hash or
+// actor, instead of the values the task derives, must not pass item 6:
+// the verified values must also be the derived ones.
+func TestVerifiedBindingMustBeTheDerivedRequest(t *testing.T) {
+	fixture := newTaskFixture(t)
+	message := fixture.message(t)
+	message.Binding.RequestHash = sha256.Sum256([]byte("another paid request"))
+	admission, err := fixture.provider.CheckTask(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = admission.CheckVerifiedBinding(message.Binding.Actor(), message.Binding.RequestHash); !errors.Is(err, ErrTaskNotAdmitted) {
+		t.Fatalf("frame request hash passed as verified: err=%v", err)
+	}
+	fixture = newTaskFixture(t)
+	message = fixture.message(t)
+	message.Binding.ActorAccount[0] ^= 1
+	if admission, err = fixture.provider.CheckTask(message); err != nil {
+		t.Fatal(err)
+	}
+	if err = admission.CheckVerifiedBinding(message.Binding.Actor(), message.Binding.RequestHash); !errors.Is(err, ErrTaskNotAdmitted) {
+		t.Fatalf("frame actor passed as verified: err=%v", err)
+	}
+}
+
 func TestFrameBindingMustEqualTheVerifiedRequest(t *testing.T) {
 	fixture := newTaskFixture(t)
 	message := fixture.message(t)
