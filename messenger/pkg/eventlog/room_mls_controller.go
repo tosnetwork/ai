@@ -7,6 +7,11 @@ package eventlog
 // returned only after its sender ratchet step is recorded. A message or Commit
 // whose sender is not the expected member is refused before anything is
 // written, so content cannot spend a ratchet step under another's name.
+//
+// The controller serves relay rooms only, so every leaf it handles carries
+// the 128-byte compact identity of section 11.2: the founder's own leaf, every
+// leaf a Commit adds, updates or removes, and the leaf a caller expects as a
+// committer or sender. Any other identity is refused before the driver runs.
 
 import (
 	"bytes"
@@ -49,11 +54,23 @@ type CommitResult struct {
 	Welcomes   map[string][]byte
 }
 
+// ErrRoomLeafIdentity reports a leaf whose identity is not the 128-byte
+// compact binding a relay room leaf carries.
+var ErrRoomLeafIdentity = errors.New("relay room leaf identity is not the 128-byte compact binding")
+
 // CreateRoom provisions the founder's group and installs its first state.
-func (c *RoomMLSController) CreateRoom(binding group.State, proof RoomAuthorityProof, identityState, ownKeyPackage, groupID []byte, keyPackageRef string) (RoomMLSRecord, error) {
+// own is the founder's leaf as its leaf credential expects it; the founder's
+// KeyPackage must carry exactly that identity and signature key.
+func (c *RoomMLSController) CreateRoom(binding group.State, proof RoomAuthorityProof, identityState, ownKeyPackage, groupID []byte, keyPackageRef string, own group.LeafBinding) (RoomMLSRecord, error) {
 	provisioner, ok := c.driver.(group.ProvisioningDriver)
 	if !ok {
 		return RoomMLSRecord{}, errors.New("MLS driver cannot provision groups")
+	}
+	if err := own.Validate(); err != nil {
+		return RoomMLSRecord{}, ErrRoomLeafIdentity
+	}
+	if err := c.driver.ValidateKeyPackage(ownKeyPackage, own.Identity(), own.SignatureKey()); err != nil {
+		return RoomMLSRecord{}, err
 	}
 	state, err := provisioner.CreateGroup(identityState, ownKeyPackage, groupID)
 	if err != nil {
@@ -95,6 +112,9 @@ func (c *RoomMLSController) Commit(template group.Transition, proof *RoomAuthori
 	if build == nil {
 		return CommitResult{}, RoomMLSRecord{}, errors.New("a Commit needs its output builder")
 	}
+	if err := checkRelayLeafOperations(operations); err != nil {
+		return CommitResult{}, RoomMLSRecord{}, err
+	}
 	record, state, err := c.current(template.Prior.RoomID)
 	if err != nil {
 		return CommitResult{}, RoomMLSRecord{}, err
@@ -132,16 +152,17 @@ func (c *RoomMLSController) Commit(template group.Transition, proof *RoomAuthori
 	return result, written, nil
 }
 
-// Apply applies the authority's Commit. expectedCommitter is the
-// BasicCredential identity of the authority's leaf; a Commit made by any
-// other leaf is refused without a write. An exact repeat of the accepted
-// Commit is a no-op reported as not fresh, without calling the driver.
-func (c *RoomMLSController) Apply(transition group.Transition, proof *RoomAuthorityProof, commit, expectedCommitter []byte) (bool, RoomMLSRecord, error) {
+// Apply applies the authority's Commit. expectedCommitter is the authority's
+// leaf as its verified leaf credential expects it (identity and signature
+// key); a Commit made by any other leaf is refused without a write. An exact
+// repeat of the accepted Commit is a no-op reported as not fresh, without
+// calling the driver.
+func (c *RoomMLSController) Apply(transition group.Transition, proof *RoomAuthorityProof, commit []byte, expectedCommitter group.LeafBinding) (bool, RoomMLSRecord, error) {
 	if len(commit) == 0 || len(commit) > group.MaxOpenMLSMessageBytes || canon.Digest(commit) != transition.CommitRef {
 		return false, RoomMLSRecord{}, errors.New("MLS commit reference mismatch")
 	}
-	if len(expectedCommitter) == 0 || len(expectedCommitter) > group.MaxOpenMLSIdentityBytes {
-		return false, RoomMLSRecord{}, errors.New("invalid expected MLS committer")
+	if err := expectedCommitter.Validate(); err != nil {
+		return false, RoomMLSRecord{}, ErrRoomLeafIdentity
 	}
 	record, state, err := c.current(transition.Prior.RoomID)
 	if err != nil {
@@ -164,8 +185,15 @@ func (c *RoomMLSController) Apply(transition group.Transition, proof *RoomAuthor
 	if err != nil {
 		return false, RoomMLSRecord{}, err
 	}
-	if !bytes.Equal(committer, expectedCommitter) {
+	if !expectedCommitter.Matches(committer) {
 		return false, RoomMLSRecord{}, ErrMLSSenderMismatch
+	}
+	// The authority's Commit may add or replace leaves; a tree holding any
+	// identity but the compact binding is not a relay room's, and would
+	// refuse every later members listing, so it is refused before it is
+	// written.
+	if _, err := c.relayMembers(next); err != nil {
+		return false, RoomMLSRecord{}, err
 	}
 	info, err := c.checkState(next, priorInfo.GroupID, transition.Next.Clock.MLSEpoch)
 	if err != nil {
@@ -203,12 +231,13 @@ func (c *RoomMLSController) Seal(roomID string, aad, plaintext []byte) ([]byte, 
 }
 
 // Open decrypts one application message of the current or a retained past
-// epoch. expectedSender is the BasicCredential identity of the member the
-// transport authenticated; a message sealed by any other leaf is refused
-// without a write.
-func (c *RoomMLSController) Open(roomID string, aad, message, expectedSender []byte) ([]byte, RoomMLSRecord, error) {
-	if len(expectedSender) == 0 || len(expectedSender) > group.MaxOpenMLSIdentityBytes {
-		return nil, RoomMLSRecord{}, errors.New("invalid expected MLS sender")
+// epoch. expectedSender is the leaf of the member the transport
+// authenticated, as its verified leaf credential expects it; a message sealed
+// by any other leaf, or by that identity under another signature key, is
+// refused without a write.
+func (c *RoomMLSController) Open(roomID string, aad, message []byte, expectedSender group.LeafBinding) ([]byte, RoomMLSRecord, error) {
+	if err := expectedSender.Validate(); err != nil {
+		return nil, RoomMLSRecord{}, ErrRoomLeafIdentity
 	}
 	record, state, err := c.current(roomID)
 	if err != nil {
@@ -222,7 +251,7 @@ func (c *RoomMLSController) Open(roomID string, aad, message, expectedSender []b
 	if err != nil {
 		return nil, RoomMLSRecord{}, err
 	}
-	if !bytes.Equal(sender, expectedSender) {
+	if !expectedSender.Matches(sender) {
 		return nil, RoomMLSRecord{}, ErrMLSSenderMismatch
 	}
 	if _, err := c.checkState(next, priorInfo.GroupID, record.MLSEpoch); err != nil {
@@ -236,6 +265,57 @@ func (c *RoomMLSController) Open(roomID string, aad, message, expectedSender []b
 		return nil, RoomMLSRecord{}, errors.New("MLS receive did not advance private state")
 	}
 	return plaintext, written, nil
+}
+
+// Members lists the leaves of a room's current MLS tree (leaf index, identity
+// and signature key) without changing anything. A receiver learning roster
+// entries and building per-member pins reads them here (section 11.8). Every
+// leaf of a relay room carries the compact identity; a tree holding any other
+// is refused.
+func (c *RoomMLSController) Members(roomID string) ([]group.MLSMember, error) {
+	_, state, err := c.current(roomID)
+	if err != nil {
+		return nil, err
+	}
+	return c.relayMembers(state)
+}
+
+// relayMembers lists a state's leaves and refuses a tree outside the relay
+// room bound or holding an identity that is not the compact binding.
+func (c *RoomMLSController) relayMembers(state []byte) ([]group.MLSMember, error) {
+	members, err := c.driver.Members(state)
+	if err != nil {
+		return nil, err
+	}
+	if len(members) == 0 || len(members) > MaxRoomLeaves {
+		return nil, errors.New("relay room tree is outside its leaf bound")
+	}
+	for _, member := range members {
+		if _, err := group.DecodeLeafIdentity(member.Identity); err != nil {
+			return nil, ErrRoomLeafIdentity
+		}
+	}
+	return members, nil
+}
+
+// MaxRoomLeaves is the leaf bound of a relay room: 32 Agents, one device
+// each (D3).
+const MaxRoomLeaves = group.MaxPrivateRoomAgents
+
+// checkRelayLeafOperations refuses a leaf operation whose leaf carries any
+// identity but the compact binding, before the driver runs.
+func checkRelayLeafOperations(operations []group.LeafOperation) error {
+	for _, operation := range operations {
+		for _, leaf := range []*group.Leaf{operation.Prior, operation.Next} {
+			if leaf == nil {
+				continue
+			}
+			if _, err := group.DecodeLeafIdentity(leaf.CredentialIdentity); err != nil {
+				return ErrRoomLeafIdentity
+			}
+		}
+	}
+	return nil
 }
 
 func (c *RoomMLSController) checkState(state, expectedGroupID []byte, expectedEpoch uint64) (group.MLSStateInfo, error) {

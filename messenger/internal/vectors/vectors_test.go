@@ -357,11 +357,31 @@ func build(t *testing.T) []Vector {
 		t.Fatalf("MLS KeyPackage ref: %v", err)
 	}
 	add("mls-device-credential-candidate", mlsWire, mlsCanonical, mlsRef)
-	mlsBasicIdentity, err := group.BasicCredentialIdentity(mlsCredential)
+	// The relay room leaf credential of the same leaf, and the 128-byte
+	// compact identity its KeyPackage carries (section 11.2).
+	mlsLeafCredential, err := group.SignLeafCredential(group.LeafCredential{
+		Network: del.Network, AgentID: del.AgentID, EndpointID: del.EndpointID,
+		DeviceID: deviceOne, DeviceSetDigest: setDigest,
+		LeafSignaturePublicKey: mlsLeafKey.Public().(ed25519.PublicKey),
+		IssuedAtUnix:           baseUnix, ExpiresAtUnix: baseUnix + 3600,
+	}, key)
 	if err != nil {
-		t.Fatalf("MLS BasicCredential identity: %v", err)
+		t.Fatalf("sign MLS leaf credential: %v", err)
 	}
-	add("mls-basic-credential-identity-candidate", mlsBasicIdentity, mlsBasicIdentity, "")
+	mlsLeafWire, err := group.EncodeLeafCredential(mlsLeafCredential)
+	if err != nil {
+		t.Fatalf("MLS leaf credential wire: %v", err)
+	}
+	mlsLeafSigning, err := group.LeafCredentialSigningBytes(mlsLeafCredential)
+	if err != nil {
+		t.Fatalf("MLS leaf credential signing bytes: %v", err)
+	}
+	add("mls-leaf-credential", mlsLeafWire, mlsLeafSigning, "")
+	mlsLeafIdentity, err := group.EncodeLeafIdentity(mlsLeafCredential)
+	if err != nil {
+		t.Fatalf("MLS leaf identity: %v", err)
+	}
+	add("mls-leaf-identity", mlsLeafIdentity, mlsLeafIdentity, "")
 	mlsRoomID := "room_" + strings.Repeat("8", 64)
 	mlsGroupID, err := group.MLSGroupID(del.Network, mlsRoomID)
 	if err != nil {

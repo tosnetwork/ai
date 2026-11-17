@@ -152,7 +152,7 @@ func FuzzDecodeRoomObject(f *testing.F) {
 
 func FuzzDecodeRoster(f *testing.F) {
 	if seed, err := EncodeRoster([]RosterEntry{{AgentID: "agent_" + string(bytes.Repeat([]byte{'a'}, 64)),
-		Card: []byte("card"), Evidence: fuzzEvidence()}}); err == nil {
+		Card: []byte("card"), Evidence: fuzzEvidence(), Credential: []byte("leaf credential")}}); err == nil {
 		f.Add(seed)
 	}
 	f.Add([]byte{})
@@ -208,7 +208,8 @@ func fuzzHeader() *RoomHeader {
 	if err != nil {
 		return nil
 	}
-	return &RoomHeader{Membership: room.Membership{RoomID: roomID, Epoch: 2, Members: members, Digest: digest}, Authorization: authorization}
+	return &RoomHeader{Membership: room.Membership{RoomID: roomID, Epoch: 2, Members: members, Digest: digest}, Authorization: authorization,
+		EndsAtUnix: 3}
 }
 
 // FuzzReassembler builds real objects split at the smallest test part size

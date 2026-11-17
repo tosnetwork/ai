@@ -48,7 +48,7 @@ type RoomFrameVector struct {
 
 const (
 	vectorRoom      = "room_" + "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
-	maximalRecipe   = "Welcome, room epoch 7, MLS epoch 9; header: members agent_<64-hex of 1..32>, network ID 128 x 'n', genesis hashes 64 x 'a' and 64 x 'b', authority the first member with mep_<64 x 'e'>, issued 1,800,000,000, expires +3,600, signed by the vector Endpoint key; body 1,048,576 bytes, byte i = i mod 251; part 0 carries the vector evidence and no card"
+	maximalRecipe   = "Welcome, room epoch 7, MLS epoch 9; header: members agent_<64-hex of 1..32>, network ID 128 x 'n', genesis hashes 64 x 'a' and 64 x 'b', authority the first member with mep_<64 x 'e'>, issued 1,800,000,000, expires +3,600, signed by the vector Endpoint key, room end +2,592,000; body 1,048,576 bytes, byte i = i mod 251; part 0 carries the vector evidence and no card"
 	vectorPartBytes = relayframe.MinTestPartBytes
 )
 
@@ -76,7 +76,7 @@ func roomHeaderVector(t *testing.T, epoch uint64, members int, networkID string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &relayframe.RoomHeader{Membership: membership, Authorization: authorization}
+	return &relayframe.RoomHeader{Membership: membership, Authorization: authorization, EndsAtUnix: baseUnix + 30*24*3600}
 }
 
 func relayEvidenceVector(t *testing.T) []byte {
@@ -244,8 +244,8 @@ func buildRoom(t *testing.T) []RoomVector {
 	add("room-object-welcome", welcome, nil)
 	add("room-object-application", object(relayframe.RoomObject{Type: relayframe.RoomApplication, RoomID: vectorRoom, RoomEpoch: 2, MLSEpoch: 4, Body: []byte("private message")}), nil)
 	roster, err := relayframe.EncodeRoster([]relayframe.RosterEntry{
-		{AgentID: vectorAgent(1), Card: []byte(`{"card":"member two"}`), Evidence: evidence},
-		{AgentID: vectorAgent(2), Card: []byte(`{"card":"member three"}`), Evidence: evidence},
+		{AgentID: vectorAgent(1), Card: []byte(`{"card":"member two"}`), Evidence: evidence, Credential: []byte("leaf credential of member two")},
+		{AgentID: vectorAgent(2), Card: []byte(`{"card":"member three"}`), Evidence: evidence, Credential: []byte("leaf credential of member three")},
 	})
 	if err != nil {
 		t.Fatal(err)

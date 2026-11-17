@@ -2,15 +2,74 @@ package eventlog
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/room"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
+
+// keySwapDriver reports every committer and sender leaf with another
+// signature key: the controller must refuse a leaf whose identity is right
+// but whose key is not the verified credential's.
+type keySwapDriver struct {
+	*group.OpenMLSSidecar
+	key ed25519.PublicKey
+}
+
+func (d keySwapDriver) ApplyAttributed(state, commit []byte) ([]byte, group.MLSMember, error) {
+	next, committer, err := d.OpenMLSSidecar.ApplyAttributed(state, commit)
+	committer.SignatureKey = d.key
+	return next, committer, err
+}
+
+func (d keySwapDriver) OpenAttributed(state, aad, message []byte) ([]byte, []byte, group.MLSMember, error) {
+	next, plaintext, sender, err := d.OpenMLSSidecar.OpenAttributed(state, aad, message)
+	sender.SignatureKey = d.key
+	return next, plaintext, sender, err
+}
+
+// relayLeaf makes member index's relay room leaf the way a joiner does: a
+// fresh leaf signature key, the Endpoint-signed leaf credential naming it,
+// then the KeyPackage under the compact identity naming that credential.
+func relayLeaf(t *testing.T, driver *group.OpenMLSSidecar, index int) (group.OpenMLSIdentity, group.LeafBinding) {
+	t.Helper()
+	signer, err := driver.NewLeafSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpointKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{byte(0x70 + index)}, ed25519.SeedSize))
+	network := &nativev1.NetworkDomain{NetworkId: "tos-local", GenesisRootHash: strings.Repeat("a", 64), GenesisFileHash: strings.Repeat("b", 64)}
+	endpointID, deviceID := fmt.Sprintf("mep_%064x", index+1), fmt.Sprintf("dev_%064x", index+1)
+	credential, err := group.SignLeafCredential(group.LeafCredential{
+		Network: network, AgentID: fusedAgent(index), EndpointID: endpointID, DeviceID: deviceID,
+		DeviceSetDigest: canon.Digest([]byte("set")), LeafSignaturePublicKey: signer.LeafSignaturePublicKey,
+		IssuedAtUnix: 1_000, ExpiresAtUnix: 2_000_000}, endpointKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegation := identity.Delegation{Network: network, AgentID: fusedAgent(index), EndpointID: endpointID,
+		IdentityPublicKey: endpointKey.Public().(ed25519.PublicKey), NotBeforeUnix: 1, ExpiresAtUnix: 3_000_000}
+	set := e2ee.SetSummary{EndpointID: endpointID, Digest: credential.DeviceSetDigest, DeviceIDs: []string{deviceID}}
+	binding, err := group.VerifyRoomLeafCredential(delegation, credential, set, credential.ExpiresAtUnix, time.Unix(10_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	made, err := driver.NewIdentityForSigner(signer, binding.Identity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return made, binding
+}
 
 func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T) {
 	binary := os.Getenv("TOS_OPENMLS_DRIVER")
@@ -18,14 +77,10 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 		t.Skip("TOS_OPENMLS_DRIVER is set by make messenger-test-openmls")
 	}
 	driver := &group.OpenMLSSidecar{Command: []string{binary}, Timeout: 10 * time.Second}
-	names := []string{"alice-leaf", "bob-leaf", "carol-leaf"}
-	identities := make([]group.OpenMLSIdentity, len(names))
-	for index, name := range names {
-		value, err := driver.NewIdentity([]byte(name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		identities[index] = value
+	identities := make([]group.OpenMLSIdentity, 3)
+	leaves := make([]group.LeafBinding, 3)
+	for index := range identities {
+		identities[index], leaves[index] = relayLeaf(t, driver, index)
 	}
 	fixture := newFusedFixture(t)
 	now := func() time.Time { return fixture.now }
@@ -59,13 +114,21 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 
 	groupID := bytes.Repeat([]byte{0x5a}, group.MLSGroupIDBytes)
 	founding := fixture.founding()
-	alice, err := controllers[0].CreateRoom(group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founding.Digest}, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage))
+	// The founder's KeyPackage must carry the founder's own leaf binding.
+	foundingBinding := group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founding.Digest}
+	if _, err := controllers[0].CreateRoom(foundingBinding, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage), leaves[1]); err == nil {
+		t.Fatal("a founder KeyPackage was installed under another leaf")
+	}
+	if _, err := controllers[0].CreateRoom(foundingBinding, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage), group.LeafBinding{}); !errors.Is(err, ErrRoomLeafIdentity) {
+		t.Fatalf("a founder without a verified binding: %v", err)
+	}
+	alice, err := controllers[0].CreateRoom(foundingBinding, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage), leaves[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	leaf := func(index int) group.LeafOperation {
-		return group.LeafOperation{Kind: group.LeafAdd, Next: &group.Leaf{CredentialIdentity: []byte(names[index]), LeafSignaturePublicKey: identities[index].LeafSignaturePublicKey, KeyPackageRef: canon.Digest(identities[index].KeyPackage), KeyPackage: identities[index].KeyPackage}}
+		return group.LeafOperation{Kind: group.LeafAdd, Next: &group.Leaf{CredentialIdentity: leaves[index].Identity(), LeafSignaturePublicKey: identities[index].LeafSignaturePublicKey, KeyPackageRef: canon.Digest(identities[index].KeyPackage), KeyPackage: identities[index].KeyPackage}}
 	}
 	add := func(current RoomMLSRecord, index int, existing []RoomRecipient) (CommitResult, RoomMLSRecord, room.Membership) {
 		t.Helper()
@@ -98,7 +161,7 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 		return record
 	}
 	// apply builds the member's own transition: its own binding as prior.
-	apply := func(index int, result CommitResult, membership *room.Membership, committer string) (bool, RoomMLSRecord, error) {
+	apply := func(index int, result CommitResult, membership *room.Membership, committer group.LeafBinding) (bool, RoomMLSRecord, error) {
 		current, _, err := ledgers[index].Current(fusedRoom)
 		if err != nil {
 			t.Fatal(err)
@@ -111,7 +174,7 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 			value := fixture.proof(*membership)
 			proof = &value
 		}
-		return controllers[index].Apply(transition, proof, result.Commit, []byte(committer))
+		return controllers[index].Apply(transition, proof, result.Commit, committer)
 	}
 
 	addBob, alice, withBob := add(alice, 1, nil)
@@ -123,25 +186,92 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 		t.Fatal("a Welcome was installed twice")
 	}
 
+	// An Add whose leaf carries any identity but the compact binding is
+	// refused before the driver runs.
+	short := leaf(2)
+	short.Next.CredentialIdentity = []byte("carol-leaf")
+	if _, _, err := controllers[0].Commit(group.Transition{Prior: alice.Binding()}, nil, []group.LeafOperation{short}, func(CommitResult) ([]StagedRoomObject, error) { return nil, nil }, fixture.now); !errors.Is(err, ErrRoomLeafIdentity) {
+		t.Fatalf("a short Add identity: %v", err)
+	}
 	addCarol, alice, withCarol := add(alice, 2, []RoomRecipient{{AgentID: fusedAgent(1)}})
 	// A Commit attributed to anyone but the authority's leaf is refused, and
-	// nothing is written.
-	if _, _, err := apply(1, addCarol, &withCarol, "carol-leaf"); !errors.Is(err, ErrMLSSenderMismatch) {
+	// nothing is written: another leaf, the authority's identity under
+	// another key, and no verified binding at all.
+	if _, _, err := apply(1, addCarol, &withCarol, leaves[2]); !errors.Is(err, ErrMLSSenderMismatch) {
 		t.Fatalf("wrong committer: %v", err)
+	}
+	swapped, err := NewRoomMLSController(ledgers[1], keySwapDriver{OpenMLSSidecar: driver, key: leaves[2].SignatureKey()}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	{
+		current, _, err := ledgers[1].Current(fusedRoom)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := group.State{RoomID: fusedRoom, Clock: addCarol.Transition.Next.Clock, MembershipDigest: addCarol.Transition.Next.MembershipDigest, AcceptedCommitRef: addCarol.Transition.CommitRef}
+		proof := fixture.proof(withCarol)
+		if _, _, err := swapped.Apply(group.Transition{Prior: current.Binding(), Next: next, Membership: withCarol, CommitRef: addCarol.Transition.CommitRef}, &proof, addCarol.Commit, leaves[0]); !errors.Is(err, ErrMLSSenderMismatch) {
+			t.Fatalf("the authority's identity under another key: %v", err)
+		}
+	}
+	if _, _, err := apply(1, addCarol, &withCarol, group.LeafBinding{}); !errors.Is(err, ErrRoomLeafIdentity) {
+		t.Fatalf("a committer without a verified binding: %v", err)
 	}
 	if unchanged, _, _ := ledgers[1].Current(fusedRoom); unchanged.StateDigest != bob.StateDigest {
 		t.Fatal("a refused Commit changed Bob's state")
 	}
-	fresh, bob, err := apply(1, addCarol, &withCarol, "alice-leaf")
+	fresh, bob, err := apply(1, addCarol, &withCarol, leaves[0])
 	if err != nil || !fresh || bob.MLSEpoch != 2 || bob.RoomEpoch != 3 {
 		t.Fatalf("Bob applies the Add: %v %v", fresh, err)
 	}
-	if fresh, _, err := apply(1, addCarol, &withCarol, "alice-leaf"); err != nil || fresh {
+	if fresh, _, err := apply(1, addCarol, &withCarol, leaves[0]); err != nil || fresh {
 		t.Fatalf("exact repeat: %v %v", fresh, err)
+	}
+	// members reports the three leaves with the keys their credentials name.
+	members, err := controllers[1].Members(fusedRoom)
+	if err != nil || len(members) != 3 {
+		t.Fatalf("members: %+v %v", members, err)
+	}
+	for index, member := range members {
+		if !leaves[index].Matches(member) || member.Index != uint32(index) {
+			t.Fatalf("member %d: %+v", index, member)
+		}
 	}
 	carol := join(2, addCarol, withCarol)
 	if !bytes.Equal(mustAuthenticator(t, alice, 2), mustAuthenticator(t, bob, 2)) || !bytes.Equal(mustAuthenticator(t, bob, 2), mustAuthenticator(t, carol, 2)) {
 		t.Fatal("members of epoch 2 disagree on its authenticator")
+	}
+
+	// The authority's Commit that adds a leaf whose identity is not the
+	// compact binding (made with the driver directly, past the authority's
+	// own check) is refused by a member before anything is written: such a
+	// tree would refuse every later members listing.
+	{
+		aliceState, err := ledgers[0].State(alice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mallory, err := driver.NewIdentity([]byte("mallory-leaf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, foreign, _, err := driver.Commit(aliceState, []group.LeafOperation{{Kind: group.LeafAdd, Next: &group.Leaf{CredentialIdentity: []byte("mallory-leaf"),
+			LeafSignaturePublicKey: mallory.LeafSignaturePublicKey, KeyPackageRef: canon.Digest(mallory.KeyPackage), KeyPackage: mallory.KeyPackage}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := canon.Digest(foreign)
+		next := group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: bob.RoomEpoch, MLSEpoch: bob.MLSEpoch + 1}, MembershipDigest: bob.MembershipDigest, AcceptedCommitRef: ref}
+		if _, _, err := controllers[1].Apply(group.Transition{Prior: bob.Binding(), Next: next, CommitRef: ref}, nil, foreign, leaves[0]); !errors.Is(err, ErrRoomLeafIdentity) {
+			t.Fatalf("a Commit adding a foreign identity: %v", err)
+		}
+		if unchanged, _, _ := ledgers[1].Current(fusedRoom); unchanged.StateDigest != bob.StateDigest {
+			t.Fatal("a refused Commit changed Bob's state")
+		}
+		if _, err := controllers[1].Members(fusedRoom); err != nil {
+			t.Fatalf("Bob's tree after the refusal: %v", err)
+		}
 	}
 
 	// Bob seals before the next Commit; the message is opened after it.
@@ -158,7 +288,7 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 		t.Fatal(err)
 	}
 	for _, index := range []int{1, 2} {
-		if _, _, err := apply(index, refresh, nil, "alice-leaf"); err != nil {
+		if _, _, err := apply(index, refresh, nil, leaves[0]); err != nil {
 			t.Fatalf("member %d applies the refresh: %v", index, err)
 		}
 	}
@@ -166,17 +296,24 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	open()
 
 	carolBefore, _, _ := ledgers[2].Current(fusedRoom)
-	if _, _, err := controllers[2].Open(fusedRoom, aad, early, []byte("alice-leaf")); !errors.Is(err, ErrMLSSenderMismatch) {
+	if _, _, err := controllers[2].Open(fusedRoom, aad, early, leaves[0]); !errors.Is(err, ErrMLSSenderMismatch) {
 		t.Fatalf("wrong sender: %v", err)
+	}
+	swappedCarol, err := NewRoomMLSController(ledgers[2], keySwapDriver{OpenMLSSidecar: driver, key: leaves[0].SignatureKey()}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := swappedCarol.Open(fusedRoom, aad, early, leaves[1]); !errors.Is(err, ErrMLSSenderMismatch) {
+		t.Fatalf("the sender's identity under another key: %v", err)
 	}
 	if after, _, _ := ledgers[2].Current(fusedRoom); after.StateDigest != carolBefore.StateDigest {
 		t.Fatal("a refused message spent Carol's ratchet step")
 	}
-	plaintext, _, err := controllers[2].Open(fusedRoom, aad, early, []byte("bob-leaf"))
+	plaintext, _, err := controllers[2].Open(fusedRoom, aad, early, leaves[1])
 	if err != nil || string(plaintext) != "sealed in epoch 2" {
 		t.Fatalf("past-epoch message after restart: %q %v", plaintext, err)
 	}
-	plaintext, _, err = controllers[0].Open(fusedRoom, aad, early, []byte("bob-leaf"))
+	plaintext, _, err = controllers[0].Open(fusedRoom, aad, early, leaves[1])
 	if err != nil || string(plaintext) != "sealed in epoch 2" {
 		t.Fatalf("authority opens the past-epoch message: %q %v", plaintext, err)
 	}
@@ -193,4 +330,46 @@ func mustAuthenticator(t *testing.T, record RoomMLSRecord, mlsEpoch uint64) []by
 		t.Fatalf("no authenticator for epoch %d", mlsEpoch)
 	}
 	return value
+}
+
+// members refuses a tree holding a leaf identity that is not the compact
+// binding: a relay room never holds one, so such a state is not a relay
+// room's.
+func TestOpenMLSRoomControllerMembersRefusesAnotherIdentity(t *testing.T) {
+	binary := os.Getenv("TOS_OPENMLS_DRIVER")
+	if binary == "" {
+		t.Skip("TOS_OPENMLS_DRIVER is set by make messenger-test-openmls")
+	}
+	driver := &group.OpenMLSSidecar{Command: []string{binary}, Timeout: 10 * time.Second}
+	short, err := driver.NewIdentity([]byte("short-leaf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupID := bytes.Repeat([]byte{0x5b}, group.MLSGroupIDBytes)
+	state, err := driver.CreateGroup(short.State, short.KeyPackage, groupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := driver.Inspect(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	founding := fixture.founding()
+	if _, err := ledger.InstallFounder(RoomMLSInstall{
+		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founding.Digest},
+		Proof:   fixture.proof(founding), State: state, EpochAuthenticator: info.EpochAuthenticator,
+		KeyPackageRef: canon.Digest(short.KeyPackage),
+	}, fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	controller, err := NewRoomMLSController(ledger, driver, func() time.Time { return fixture.now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Members(fusedRoom); !errors.Is(err, ErrRoomLeafIdentity) {
+		t.Fatalf("a tree with a short identity: %v", err)
+	}
 }

@@ -84,15 +84,26 @@ type MLSStateInfo struct {
 // (its hash length).
 const MLSEpochAuthenticatorBytes = 32
 
+// MLSMember is one leaf of a group as the driver reports it: its leaf index,
+// its BasicCredential identity and its leaf signature key.
+type MLSMember struct {
+	Index        uint32
+	Identity     []byte
+	SignatureKey ed25519.PublicKey
+}
+
 // AttributedDriver is a Driver that also reports who produced a processed
-// handshake or application message: the BasicCredential identity of the
-// committing or sending member's leaf. A room receiver compares it with the
+// handshake or application message: the leaf of the committing or sending
+// member, with its identity and signature key in the epoch it produced the
+// message in. A room receiver compares both with the leaf credential of the
 // authenticated packet sender, so content sealed by one member cannot be
-// presented as another's.
+// presented as another's. Members lists the current tree without changing
+// the state.
 type AttributedDriver interface {
 	Driver
-	ApplyAttributed(opaqueState, commit []byte) (nextState, committerIdentity []byte, err error)
-	OpenAttributed(opaqueState, authenticatedData, privateMessage []byte) (nextState, plaintext, senderIdentity []byte, err error)
+	ApplyAttributed(opaqueState, commit []byte) (nextState []byte, committer MLSMember, err error)
+	OpenAttributed(opaqueState, authenticatedData, privateMessage []byte) (nextState, plaintext []byte, sender MLSMember, err error)
+	Members(opaqueState []byte) ([]MLSMember, error)
 }
 
 // StateInspector exposes only the public binding needed to keep an opaque
@@ -421,10 +432,18 @@ func ValidatePrivateRoomCapacity(membership room.Membership, leaves []Leaf) erro
 	return nil
 }
 
+// DeviceLeafCredentials are the two credentials of one device's leaf: the
+// DeviceCredential authorising its KeyPackage and the leaf credential its
+// compact identity names.
+type DeviceLeafCredentials struct {
+	Device DeviceCredential
+	Leaf   LeafCredential
+}
+
 // PlanDeviceSuccession converts one accepted endpoint device succession into
 // deterministic leaf work. Retained devices update because their credential
 // must bind the newly current set digest; a revoked device is only removed.
-func PlanDeviceSuccession(agentID, endpointID string, current []Leaf, succession e2ee.Succession, credentials map[string]DeviceCredential) ([]LeafOperation, error) {
+func PlanDeviceSuccession(agentID, endpointID string, current []Leaf, succession e2ee.Succession, credentials map[string]DeviceLeafCredentials) ([]LeafOperation, error) {
 	if !ids.Agent.MatchString(agentID) || !ids.Endpoint.MatchString(endpointID) || succession.Accepted.EndpointID != endpointID || !canon.ValidDigest(succession.Accepted.Digest) {
 		return nil, errors.New("invalid device succession authority")
 	}
@@ -455,18 +474,13 @@ func PlanDeviceSuccession(agentID, endpointID string, current []Leaf, succession
 	ops := make([]LeafOperation, 0, len(current)+len(accepted))
 	for _, deviceID := range accepted {
 		credential, ok := credentials[deviceID]
-		if !ok || credential.AgentID != agentID || credential.EndpointID != endpointID || credential.DeviceID != deviceID || credential.DeviceSetDigest != succession.Accepted.Digest {
+		if !ok || credential.Device.AgentID != agentID || credential.Device.EndpointID != endpointID || credential.Device.DeviceID != deviceID || credential.Device.DeviceSetDigest != succession.Accepted.Digest {
 			return nil, errors.New("missing current MLS credential for accepted device")
 		}
-		ref, err := KeyPackageRef(credential)
+		next, err := LeafFromCredentials(credential.Device, credential.Leaf)
 		if err != nil {
 			return nil, err
 		}
-		credentialIdentity, err := BasicCredentialIdentity(credential)
-		if err != nil {
-			return nil, err
-		}
-		next := Leaf{AgentID: agentID, EndpointID: endpointID, DeviceID: deviceID, DeviceSetDigest: succession.Accepted.Digest, KeyPackageRef: ref, CredentialIdentity: credentialIdentity, LeafSignaturePublicKey: append(ed25519.PublicKey(nil), credential.LeafSignaturePublicKey...), KeyPackage: append([]byte(nil), credential.KeyPackage...)}
 		if prior, exists := byDevice[deviceID]; exists {
 			p := prior
 			n := next

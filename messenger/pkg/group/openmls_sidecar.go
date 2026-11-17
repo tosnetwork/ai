@@ -36,6 +36,13 @@ type OpenMLSIdentity struct {
 	KeyPackage             []byte
 }
 
+// OpenMLSSigner is a leaf signature key made before its identity: the state
+// holds the private key and no KeyPackage yet.
+type OpenMLSSigner struct {
+	State                  []byte
+	LeafSignaturePublicKey ed25519.PublicKey
+}
+
 type OpenMLSSidecar struct {
 	// Command contains the executable and optional fixed arguments. Fixed
 	// arguments make the boundary testable without a shell.
@@ -77,9 +84,22 @@ type openMLSResponse struct {
 	Secret     string  `json:"secret,omitempty"`
 	Epoch      *uint64 `json:"epoch,omitempty"`
 
-	SenderIdentity     string `json:"sender_identity,omitempty"`
-	EpochAuthenticator string `json:"epoch_authenticator,omitempty"`
+	SenderIdentity     string          `json:"sender_identity,omitempty"`
+	SenderSignatureKey string          `json:"sender_signature_key,omitempty"`
+	SenderLeafIndex    *uint32         `json:"sender_leaf_index,omitempty"`
+	EpochAuthenticator string          `json:"epoch_authenticator,omitempty"`
+	Members            []openMLSMember `json:"members,omitempty"`
 }
+
+type openMLSMember struct {
+	Index        uint32 `json:"index"`
+	Identity     string `json:"identity"`
+	SignatureKey string `json:"signature_key"`
+}
+
+// MaxOpenMLSMembers bounds the leaves a members listing may report: the
+// profile's leaf bound.
+const MaxOpenMLSMembers = MaxPrivateRoomLeaves
 
 func (d *OpenMLSSidecar) CipherSuite() uint16 { return MLSCipherSuite }
 
@@ -123,6 +143,52 @@ func (d *OpenMLSSidecar) NewIdentity(identity []byte) (OpenMLSIdentity, error) {
 	if err != nil {
 		return OpenMLSIdentity{}, err
 	}
+	return decodeIdentityResponse(response)
+}
+
+// NewLeafSigner makes a fresh leaf signature key with no identity yet. A
+// relay room leaf's identity names its leaf credential, which names this
+// key, so the key comes first and the KeyPackage after (section 11.8).
+func (d *OpenMLSSidecar) NewLeafSigner() (OpenMLSSigner, error) {
+	response, err := d.call(openMLSRequest{Operation: "signer"})
+	if err != nil {
+		return OpenMLSSigner{}, err
+	}
+	state, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
+	if err != nil {
+		return OpenMLSSigner{}, err
+	}
+	publicKey, err := decodeOpenMLS("public key", response.PublicKey, ed25519.PublicKeySize)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize || response.KeyPackage != "" {
+		return OpenMLSSigner{}, errors.New("invalid OpenMLS leaf signer")
+	}
+	return OpenMLSSigner{State: state, LeafSignaturePublicKey: ed25519.PublicKey(publicKey)}, nil
+}
+
+// NewIdentityForSigner makes the KeyPackage of a signer from NewLeafSigner
+// under the given identity. The result carries exactly the signer's key.
+func (d *OpenMLSSidecar) NewIdentityForSigner(signer OpenMLSSigner, identity []byte) (OpenMLSIdentity, error) {
+	if len(signer.State) == 0 || len(signer.State) > MaxOpenMLSStateBytes || len(signer.LeafSignaturePublicKey) != ed25519.PublicKeySize {
+		return OpenMLSIdentity{}, errors.New("invalid OpenMLS leaf signer")
+	}
+	if len(identity) == 0 || len(identity) > MaxOpenMLSIdentityBytes {
+		return OpenMLSIdentity{}, errors.New("invalid MLS BasicCredential identity")
+	}
+	response, err := d.call(openMLSRequest{Operation: "identity", State: b64(signer.State), Identity: b64(identity)})
+	if err != nil {
+		return OpenMLSIdentity{}, err
+	}
+	made, err := decodeIdentityResponse(response)
+	if err != nil {
+		return OpenMLSIdentity{}, err
+	}
+	if !bytes.Equal(made.LeafSignaturePublicKey, signer.LeafSignaturePublicKey) {
+		return OpenMLSIdentity{}, errors.New("OpenMLS identity changed the leaf signature key")
+	}
+	return made, nil
+}
+
+func decodeIdentityResponse(response openMLSResponse) (OpenMLSIdentity, error) {
 	state, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
 	if err != nil {
 		return OpenMLSIdentity{}, err
@@ -249,22 +315,67 @@ func (d *OpenMLSSidecar) Apply(state, commit []byte) ([]byte, error) {
 	return next, err
 }
 
-// ApplyAttributed applies a Commit and returns the committer's credential
-// identity. The driver refuses a Commit from anyone but a current member.
-func (d *OpenMLSSidecar) ApplyAttributed(state, commit []byte) ([]byte, []byte, error) {
+// ApplyAttributed applies a Commit and returns the committer's leaf: its
+// index, credential identity and signature key. The driver refuses a Commit
+// from anyone but a current member.
+func (d *OpenMLSSidecar) ApplyAttributed(state, commit []byte) ([]byte, MLSMember, error) {
 	response, err := d.call(openMLSRequest{Operation: "apply", State: b64(state), Message: b64(commit)})
 	if err != nil {
-		return nil, nil, err
+		return nil, MLSMember{}, err
 	}
 	next, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
 	if err != nil {
-		return nil, nil, err
+		return nil, MLSMember{}, err
 	}
-	committer, err := decodeOpenMLS("committer identity", response.SenderIdentity, MaxOpenMLSIdentityBytes)
+	committer, err := decodeSenderLeaf("committer", response)
 	if err != nil {
-		return nil, nil, err
+		return nil, MLSMember{}, err
 	}
 	return next, committer, nil
+}
+
+// Members lists every leaf of the current tree, in leaf order, without
+// changing the state.
+func (d *OpenMLSSidecar) Members(state []byte) ([]MLSMember, error) {
+	response, err := d.call(openMLSRequest{Operation: "members", State: b64(state)})
+	if err != nil {
+		return nil, err
+	}
+	if response.State != "" || len(response.Members) == 0 || len(response.Members) > MaxOpenMLSMembers {
+		return nil, errors.New("invalid OpenMLS members listing")
+	}
+	members := make([]MLSMember, 0, len(response.Members))
+	for position, listed := range response.Members {
+		if position > 0 && listed.Index <= response.Members[position-1].Index {
+			return nil, errors.New("OpenMLS members are out of leaf order")
+		}
+		identity, err := decodeOpenMLS("member identity", listed.Identity, MaxOpenMLSIdentityBytes)
+		if err != nil {
+			return nil, err
+		}
+		key, err := decodeOpenMLS("member signature key", listed.SignatureKey, ed25519.PublicKeySize)
+		if err != nil || len(key) != ed25519.PublicKeySize {
+			return nil, errors.New("invalid OpenMLS member signature key")
+		}
+		members = append(members, MLSMember{Index: listed.Index, Identity: identity, SignatureKey: ed25519.PublicKey(key)})
+	}
+	return members, nil
+}
+
+// decodeSenderLeaf reads the committer or sender leaf a response reports.
+func decodeSenderLeaf(label string, response openMLSResponse) (MLSMember, error) {
+	identity, err := decodeOpenMLS(label+" identity", response.SenderIdentity, MaxOpenMLSIdentityBytes)
+	if err != nil {
+		return MLSMember{}, err
+	}
+	key, err := decodeOpenMLS(label+" signature key", response.SenderSignatureKey, ed25519.PublicKeySize)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return MLSMember{}, fmt.Errorf("invalid OpenMLS %s signature key", label)
+	}
+	if response.SenderLeafIndex == nil {
+		return MLSMember{}, fmt.Errorf("OpenMLS reported no %s leaf index", label)
+	}
+	return MLSMember{Index: *response.SenderLeafIndex, Identity: identity, SignatureKey: ed25519.PublicKey(key)}, nil
 }
 
 func (d *OpenMLSSidecar) Seal(state, aad, plaintext []byte) ([]byte, []byte, error) {
@@ -286,23 +397,24 @@ func (d *OpenMLSSidecar) Open(state, aad, message []byte) ([]byte, []byte, error
 }
 
 // OpenAttributed opens a PrivateMessage of the current or a retained past
-// epoch and returns the sending member's credential identity.
-func (d *OpenMLSSidecar) OpenAttributed(state, aad, message []byte) ([]byte, []byte, []byte, error) {
+// epoch and returns the sending member's leaf as it was in the epoch the
+// message was sealed in.
+func (d *OpenMLSSidecar) OpenAttributed(state, aad, message []byte) ([]byte, []byte, MLSMember, error) {
 	response, err := d.call(openMLSRequest{Operation: "open", State: b64(state), AAD: optionalB64(aad), Message: b64(message)})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, MLSMember{}, err
 	}
 	next, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, MLSMember{}, err
 	}
 	plaintext, err := decodeOpenMLS("plaintext", response.Plaintext, MaxOpenMLSMessageBytes)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, MLSMember{}, err
 	}
-	sender, err := decodeOpenMLS("sender identity", response.SenderIdentity, MaxOpenMLSIdentityBytes)
+	sender, err := decodeSenderLeaf("sender", response)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, MLSMember{}, err
 	}
 	return next, plaintext, sender, nil
 }

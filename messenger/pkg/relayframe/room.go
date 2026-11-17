@@ -69,6 +69,15 @@ const (
 	MaxRosterEntries = 31
 	// MaxRoomMembers bounds a relay room's membership.
 	MaxRoomMembers = 32
+	// MaxRosterCredentialBytes is the roster codec's bound on an entry's leaf
+	// credential; the largest valid credential is 473 bytes (section 11.2).
+	MaxRosterCredentialBytes = 512
+	// MaxRoomHeaderValidBytes is the largest header a valid membership
+	// reaches: 32 members and a 128-byte network ID (section 11.1).
+	MaxRoomHeaderValidBytes = 1 + MaxRoomMembers*agentIDBytes + 2 + 128 + 2*sha256.Size + agentIDBytes +
+		endpointIDBytes + 8 + 8 + ed25519.SignatureSize + 8
+	// MaxRoomObjectValidBytes is the largest valid room object.
+	MaxRoomObjectValidBytes = RoomObjectFixedBytes + MaxRoomHeaderValidBytes + MaxRoomBodyBytes
 
 	agentIDBytes    = len("agent_") + 64
 	endpointIDBytes = len("mep_") + 64
@@ -76,10 +85,16 @@ const (
 
 // The fixed cut must fit the 8-part limit for the largest object, and an
 // application object must fit part 0; a change of a bound that broke either
-// cannot build.
+// cannot build. The valid header and object sizes are those section 11.1
+// states, inside the codec bounds.
 var (
 	_ [FirstPartBytes + (MaxParts-1)*LaterPartBytes - MaxRoomObjectBytes]struct{}
 	_ [FirstPartBytes - RoomObjectFixedBytes - MaxRoomApplicationBodyBytes]struct{}
+	_ [MaxRoomHeaderValidBytes - 2_661]struct{}
+	_ [2_661 - MaxRoomHeaderValidBytes]struct{}
+	_ [MaxRoomObjectValidBytes - 1_051_327]struct{}
+	_ [1_051_327 - MaxRoomObjectValidBytes]struct{}
+	_ [MaxRoomHeaderBytes - MaxRoomHeaderValidBytes]struct{}
 )
 
 // Room codec errors.
@@ -94,10 +109,16 @@ var (
 )
 
 // RoomHeader is the membership a handshake object makes or describes, with
-// the authority's authorization of exactly it.
+// the authority's authorization of exactly it, and the room's end time.
 type RoomHeader struct {
 	Membership    room.Membership
 	Authorization room.MembershipAuthorization
+	// EndsAtUnix is the room's end time (D18): the expires_at of the
+	// authority's leaf credential, the same in every header of the room. It
+	// is outside the authorization's signed preimage; the authority's
+	// Endpoint signs it in that credential, and a receiver requires the two
+	// to be equal.
+	EndsAtUnix uint64
 }
 
 // RoomObject is one decoded room object.
@@ -254,6 +275,7 @@ func roomIDBytes(roomID string) ([]byte, error) {
 //	issued_at     u64
 //	expires_at    u64
 //	signature     64
+//	room_ends_at  u64  the room's end time (D18), never zero
 //
 // Room and epoch come from the object; the membership digest is recomputed.
 func encodeRoomHeader(roomID string, roomEpoch uint64, header RoomHeader) ([]byte, error) {
@@ -268,7 +290,7 @@ func encodeRoomHeader(roomID string, roomEpoch uint64, header RoomHeader) ([]byt
 	if _, err := room.MembershipAuthorizationSigningBytes(authorization); err != nil {
 		return nil, ErrRoomObjectMalformed
 	}
-	if len(authorization.EndpointSignature) != ed25519.SignatureSize {
+	if len(authorization.EndpointSignature) != ed25519.SignatureSize || header.EndsAtUnix == 0 {
 		return nil, ErrRoomObjectMalformed
 	}
 	root, rootErr := hex.DecodeString(authorization.Network.GenesisRootHash)
@@ -297,6 +319,8 @@ func encodeRoomHeader(roomID string, roomEpoch uint64, header RoomHeader) ([]byt
 	binary.BigEndian.PutUint64(number[:], authorization.ExpiresAtUnix)
 	out.Write(number[:])
 	out.Write(authorization.EndpointSignature)
+	binary.BigEndian.PutUint64(number[:], header.EndsAtUnix)
+	out.Write(number[:])
 	if out.Len() > MaxRoomHeaderBytes {
 		return nil, ErrRoomHeaderTooLarge
 	}
@@ -328,6 +352,7 @@ func decodeRoomHeader(roomID string, roomEpoch uint64, raw []byte) (RoomHeader, 
 	issued := reader.u64()
 	expires := reader.u64()
 	signature := append([]byte(nil), reader.take(ed25519.SignatureSize)...)
+	endsAt := reader.u64()
 	if err := reader.done(); err != nil {
 		return RoomHeader{}, ErrRoomObjectMalformed
 	}
@@ -340,6 +365,7 @@ func decodeRoomHeader(roomID string, roomEpoch uint64, raw []byte) (RoomHeader, 
 		Authorization: room.MembershipAuthorization{Network: network, RoomID: roomID, Epoch: roomEpoch,
 			MembershipDigest: digest, Authority: authority, IssuedAtUnix: issued, ExpiresAtUnix: expires,
 			EndpointSignature: signature},
+		EndsAtUnix: endsAt,
 	}
 	// The header is canonical: re-encoding it gives the same bytes.
 	again, err := encodeRoomHeader(roomID, roomEpoch, header)
@@ -349,17 +375,22 @@ func decodeRoomHeader(roomID string, roomEpoch uint64, raw []byte) (RoomHeader, 
 	return header, nil
 }
 
-// RosterEntry is one member's chat card and relay identity evidence. A
-// roster is rendezvous, not authority: the receiver verifies each card and
-// evidence itself and learns only entries that are members.
+// RosterEntry is one member's chat card, relay identity evidence and leaf
+// credential. A roster is rendezvous, not authority: the receiver verifies
+// each card, evidence and credential itself and learns only entries that are
+// members. The credential is carried opaque here, bounded by the codec; it is
+// verified against the finalized delegation and the member's MLS leaf,
+// independently of the card and evidence (sections 11.2, 11.8).
 type RosterEntry struct {
-	AgentID  string
-	Card     []byte
-	Evidence []byte
+	AgentID    string
+	Card       []byte
+	Evidence   []byte
+	Credential []byte
 }
 
 // EncodeRoster encodes 1 .. 31 entries in ascending Agent order. Each entry is
-// the 70-byte Agent ID, the u16-prefixed card and the u16-prefixed evidence.
+// the 70-byte Agent ID, the u16-prefixed card, the u16-prefixed evidence and
+// the u16-prefixed leaf credential.
 func EncodeRoster(entries []RosterEntry) ([]byte, error) {
 	if len(entries) == 0 || len(entries) > MaxRosterEntries {
 		return nil, ErrRosterMalformed
@@ -376,6 +407,9 @@ func EncodeRoster(entries []RosterEntry) ([]byte, error) {
 		if _, err := DecodeEvidence(entry.Evidence); err != nil {
 			return nil, ErrRosterMalformed
 		}
+		if len(entry.Credential) == 0 || len(entry.Credential) > MaxRosterCredentialBytes {
+			return nil, ErrRosterMalformed
+		}
 		out.WriteString(entry.AgentID)
 		binary.BigEndian.PutUint16(length[:], uint16(len(entry.Card)))
 		out.Write(length[:])
@@ -383,6 +417,9 @@ func EncodeRoster(entries []RosterEntry) ([]byte, error) {
 		binary.BigEndian.PutUint16(length[:], uint16(len(entry.Evidence)))
 		out.Write(length[:])
 		out.Write(entry.Evidence)
+		binary.BigEndian.PutUint16(length[:], uint16(len(entry.Credential)))
+		out.Write(length[:])
+		out.Write(entry.Credential)
 	}
 	return out.Bytes(), nil
 }
@@ -409,6 +446,11 @@ func DecodeRoster(raw []byte) ([]RosterEntry, error) {
 			return nil, ErrRosterMalformed
 		}
 		evidence := append([]byte(nil), reader.take(evidenceLength)...)
+		credentialLength := int(reader.u16())
+		if reader.err != nil || credentialLength == 0 || credentialLength > MaxRosterCredentialBytes {
+			return nil, ErrRosterMalformed
+		}
+		credential := append([]byte(nil), reader.take(credentialLength)...)
 		if reader.err != nil {
 			return nil, ErrRosterMalformed
 		}
@@ -418,7 +460,7 @@ func DecodeRoster(raw []byte) ([]RosterEntry, error) {
 		if _, err := DecodeEvidence(evidence); err != nil {
 			return nil, ErrRosterMalformed
 		}
-		entries = append(entries, RosterEntry{AgentID: agentID, Card: card, Evidence: evidence})
+		entries = append(entries, RosterEntry{AgentID: agentID, Card: card, Evidence: evidence, Credential: credential})
 	}
 	if len(entries) == 0 {
 		return nil, ErrRosterMalformed

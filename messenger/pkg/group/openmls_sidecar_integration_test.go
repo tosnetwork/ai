@@ -279,10 +279,10 @@ func TestOpenMLSSidecarIntegrationAttributionAndPastEpochs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var committer []byte
+		var committer MLSMember
 		bobState, committer, err = driver.ApplyAttributed(bobState, commit)
-		if err != nil || string(committer) != "alice-authority" {
-			t.Fatalf("committer %q: %v", committer, err)
+		if err != nil || string(committer.Identity) != "alice-authority" || !bytes.Equal(committer.SignatureKey, alice.LeafSignaturePublicKey) || committer.Index != 0 {
+			t.Fatalf("committer %+v: %v", committer, err)
 		}
 	}
 	refresh()
@@ -293,8 +293,14 @@ func TestOpenMLSSidecarIntegrationAttributionAndPastEpochs(t *testing.T) {
 	refresh()
 	beforeThird := append([]byte(nil), aliceState...)
 	_, plaintext, sender, err := driver.OpenAttributed(aliceState, aad, sealed)
-	if err != nil || string(plaintext) != "sealed before two commits" || string(sender) != "bob-member" {
-		t.Fatalf("two-epoch-old message: %q from %q: %v", plaintext, sender, err)
+	if err != nil || string(plaintext) != "sealed before two commits" || string(sender.Identity) != "bob-member" ||
+		!bytes.Equal(sender.SignatureKey, bob.LeafSignaturePublicKey) || sender.Index != 1 {
+		t.Fatalf("two-epoch-old message: %q from %+v: %v", plaintext, sender, err)
+	}
+	members, err := driver.Members(aliceState)
+	if err != nil || len(members) != 2 || string(members[1].Identity) != "bob-member" || !bytes.Equal(members[1].SignatureKey, bob.LeafSignaturePublicKey) ||
+		!bytes.Equal(members[0].SignatureKey, alice.LeafSignaturePublicKey) {
+		t.Fatalf("members: %+v %v", members, err)
 	}
 	refresh()
 	if _, _, _, err := driver.OpenAttributed(aliceState, aad, sealed); err == nil {

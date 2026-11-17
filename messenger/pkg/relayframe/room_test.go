@@ -49,7 +49,7 @@ func roomHeader(t testing.TB, epoch uint64, members int, networkID string) *rela
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &relayframe.RoomHeader{Membership: membership, Authorization: authorization}
+	return &relayframe.RoomHeader{Membership: membership, Authorization: authorization, EndsAtUnix: 2_000_000}
 }
 
 func roomObject(t testing.TB, object relayframe.RoomObject) []byte {
@@ -74,6 +74,28 @@ func TestRoomObjectRoundTripsAndRefusesMalformation(t *testing.T) {
 	}
 	if decoded.Header.Membership.Digest != header.Membership.Digest || !bytes.Equal(decoded.Header.Authorization.EndpointSignature, header.Authorization.EndpointSignature) {
 		t.Fatal("the header lost its membership or authorization")
+	}
+	if decoded.Header.EndsAtUnix != header.EndsAtUnix {
+		t.Fatalf("the header lost the room's end time: %d", decoded.Header.EndsAtUnix)
+	}
+	// The end time is the header's last field: changing it changes the
+	// object, and a zero end time is refused (D18).
+	endless := *header
+	endless.EndsAtUnix = 0
+	if _, err := relayframe.EncodeRoomObject(relayframe.RoomObject{Type: relayframe.RoomCommit, RoomID: testRoom, RoomEpoch: 2, MLSEpoch: 5, Header: &endless, Body: []byte("commit")}); err == nil {
+		t.Fatal("a header without an end time encoded")
+	}
+	// The header ends just before the body length and the body.
+	endAt := len(raw) - len(commit.Body) - 4 - 8
+	zeroed := append([]byte(nil), raw...)
+	copy(zeroed[endAt:endAt+8], make([]byte, 8))
+	if _, err := relayframe.DecodeRoomObject(zeroed); err == nil {
+		t.Fatal("a header with a zero end time decoded")
+	}
+	later := append([]byte(nil), raw...)
+	later[endAt+7]++
+	if moved, err := relayframe.DecodeRoomObject(later); err != nil || moved.Header.EndsAtUnix != header.EndsAtUnix+1 {
+		t.Fatalf("the end time is not the header's last field: %v", err)
 	}
 	// An MLS-only refresh Commit and an application object have no header.
 	for _, object := range []relayframe.RoomObject{
@@ -135,29 +157,33 @@ func TestRoomObjectRoundTripsAndRefusesMalformation(t *testing.T) {
 
 func TestRosterCodec(t *testing.T) {
 	entries := []relayframe.RosterEntry{
-		{AgentID: roomAgent(1), Card: []byte("card one"), Evidence: evidence(t)},
-		{AgentID: roomAgent(2), Card: make([]byte, relayframe.MaxCardBytes), Evidence: evidence(t)},
+		{AgentID: roomAgent(1), Card: []byte("card one"), Evidence: evidence(t), Credential: []byte("credential one")},
+		{AgentID: roomAgent(2), Card: make([]byte, relayframe.MaxCardBytes), Evidence: evidence(t),
+			Credential: bytes.Repeat([]byte{0xc3}, relayframe.MaxRosterCredentialBytes)},
 	}
 	raw, err := relayframe.EncodeRoster(entries)
 	if err != nil {
 		t.Fatal(err)
 	}
 	decoded, err := relayframe.DecodeRoster(raw)
-	if err != nil || len(decoded) != 2 || decoded[1].AgentID != roomAgent(2) {
+	if err != nil || len(decoded) != 2 || decoded[1].AgentID != roomAgent(2) ||
+		!bytes.Equal(decoded[1].Credential, entries[1].Credential) || !bytes.Equal(decoded[0].Credential, entries[0].Credential) {
 		t.Fatalf("roster: %v", err)
 	}
 	full := make([]relayframe.RosterEntry, relayframe.MaxRosterEntries+1)
 	for index := range full {
-		full[index] = relayframe.RosterEntry{AgentID: roomAgent(index), Card: []byte("c"), Evidence: evidence(t)}
+		full[index] = relayframe.RosterEntry{AgentID: roomAgent(index), Card: []byte("c"), Evidence: evidence(t), Credential: []byte("l")}
 	}
 	for name, bad := range map[string][]relayframe.RosterEntry{
-		"empty":           nil,
-		"32 entries":      full,
-		"out of order":    {entries[1], entries[0]},
-		"duplicate":       {entries[0], entries[0]},
-		"no card":         {{AgentID: roomAgent(1), Evidence: evidence(t)}},
-		"card over bound": {{AgentID: roomAgent(1), Card: make([]byte, relayframe.MaxCardBytes+1), Evidence: evidence(t)}},
-		"bad evidence":    {{AgentID: roomAgent(1), Card: []byte("c"), Evidence: []byte("not evidence")}},
+		"empty":                 nil,
+		"32 entries":            full,
+		"out of order":          {entries[1], entries[0]},
+		"duplicate":             {entries[0], entries[0]},
+		"no card":               {{AgentID: roomAgent(1), Evidence: evidence(t), Credential: []byte("l")}},
+		"card over bound":       {{AgentID: roomAgent(1), Card: make([]byte, relayframe.MaxCardBytes+1), Evidence: evidence(t), Credential: []byte("l")}},
+		"bad evidence":          {{AgentID: roomAgent(1), Card: []byte("c"), Evidence: []byte("not evidence"), Credential: []byte("l")}},
+		"no credential":         {{AgentID: roomAgent(1), Card: []byte("c"), Evidence: evidence(t)}},
+		"credential over bound": {{AgentID: roomAgent(1), Card: []byte("c"), Evidence: evidence(t), Credential: make([]byte, relayframe.MaxRosterCredentialBytes+1)}},
 	} {
 		if _, err := relayframe.EncodeRoster(bad); err == nil {
 			t.Fatalf("%s: encoded", name)
@@ -169,9 +195,25 @@ func TestRosterCodec(t *testing.T) {
 	if _, err := relayframe.DecodeRoster(raw[:len(raw)-1]); err == nil {
 		t.Fatal("truncated roster accepted")
 	}
-	// The largest roster the arithmetic of section 11.1 allows fits a body.
-	if worst := relayframe.MaxRosterEntries * (70 + 4 + relayframe.MaxCardBytes + relayframe.MaxEvidenceBytes); worst != 859_382 || worst > relayframe.MaxRoomBodyBytes {
+	// A last entry whose credential is empty, or one byte past the codec
+	// bound, is refused on decode as well.
+	credentialAt := len(raw) - len(entries[1].Credential) - 2
+	for name, length := range map[string]int{"zero": 0, "over the bound": relayframe.MaxRosterCredentialBytes + 1} {
+		bad := append([]byte(nil), raw[:credentialAt]...)
+		bad = append(bad, byte(length>>8), byte(length))
+		bad = append(bad, bytes.Repeat([]byte{0xc3}, length)...)
+		if _, err := relayframe.DecodeRoster(bad); err == nil {
+			t.Fatalf("a %s credential length decoded", name)
+		}
+	}
+	// The largest roster the arithmetic of section 11.1 allows: 31 entries of
+	// maximal card, evidence and a 473-byte leaf credential, 874,107 bytes, and
+	// at the codec's 512-byte credential bound 1,209 more; both fit a body.
+	if worst := relayframe.MaxRosterEntries * (70 + 6 + relayframe.MaxCardBytes + relayframe.MaxEvidenceBytes + 473); worst != 874_107 || worst > relayframe.MaxRoomBodyBytes {
 		t.Fatalf("maximal roster %d", worst)
+	}
+	if bound := relayframe.MaxRosterEntries * (70 + 6 + relayframe.MaxCardBytes + relayframe.MaxEvidenceBytes + relayframe.MaxRosterCredentialBytes); bound != 874_107+1_209 || bound > relayframe.MaxRoomBodyBytes {
+		t.Fatalf("roster codec bound %d", bound)
 	}
 }
 
@@ -248,6 +290,13 @@ func TestSplitRoomObjectProductionCut(t *testing.T) {
 		t.Fatalf("largest object took %d parts", len(withCard))
 	}
 	t.Logf("largest valid object %d bytes; frames %v", len(object), frameSizes(withCard))
+	// Section 11.1: a 2,661-byte header, 1,051,327 bytes in all.
+	if len(object) != 1_051_327 || relayframe.MaxRoomObjectValidBytes != 1_051_327 {
+		t.Fatalf("largest valid object %d bytes", len(object))
+	}
+	if last := len(withCard[5]); last >= relayframe.MaxFrameBytes {
+		t.Fatalf("the last part is %d bytes", last)
+	}
 	digest := relayframe.ObjectDigest(object)
 	var joined []byte
 	for index := range withCard {

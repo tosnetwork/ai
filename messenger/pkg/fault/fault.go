@@ -139,6 +139,12 @@ const (
 	// MLS state, so it is not a fork, but the authority sent two answers to one
 	// question; the authority is told and its owner is shown the cause.
 	CodeRoomRosterConflict Code = "room-roster-conflict"
+	// CodeRoomEnded reports a Commit, Welcome, roster or application object
+	// for a room that has ended: its end time, the expiry of its authority's
+	// leaf credential (D18), plus the clock-skew bound has passed. It is
+	// peer-visible and permanent: the sender learns the room is over, and
+	// continuing means a new room.
+	CodeRoomEnded Code = "room-ended"
 	// CodeContentTooLarge reports content beyond the accepted bound.
 	CodeContentTooLarge Code = "content-too-large"
 	// CodePayloadMalformed reports a body that is not what its own kind says
@@ -220,6 +226,7 @@ var registry = map[Code]spec{
 	CodeRoomFork:           {Permanent, true, false},
 	CodeRoomForkSuspected:  {Permanent, false, false},
 	CodeRoomRosterConflict: {Permanent, true, false},
+	CodeRoomEnded:          {Permanent, true, false},
 	CodeContentTooLarge:    {Permanent, true, false},
 	CodePayloadMalformed:   {Permanent, true, false},
 	CodeEventOutsideWindow: {Permanent, true, false},
