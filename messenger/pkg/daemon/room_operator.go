@@ -658,10 +658,13 @@ func (r *roomRuntime) commitAdd(add eventlog.RoomAdd, now time.Time) error {
 		if err != nil {
 			return err
 		}
-		if err := r.stageAdd(record, add.AgentID, leaf, credential, now); err != nil {
+		if err := r.stageAdd(record, add.AgentID, leaf, binding, now); err != nil {
 			return err
 		}
 	}
+	// The Add's fused write learned the credential with the membership; a
+	// member left without it by an earlier write learns it here, as an
+	// exact repeat otherwise.
 	if _, _, err := r.ledger.LearnRoomCredentials(add.RoomID, []group.LeafBinding{binding}, now); err != nil {
 		return err
 	}
@@ -669,12 +672,13 @@ func (r *roomRuntime) commitAdd(add eventlog.RoomAdd, now time.Time) error {
 }
 
 // stageAdd commits the Add of one joiner: the next membership and its
-// authorization, the MLS Add, and the objects staged under the CommitRef in
-// the fused write: the Commit to every earlier member but the authority, the
+// authorization, the MLS Add, the joiner's leaf credential, and the objects
+// staged under the CommitRef, all named by one fused write: the Commit to every earlier member but the authority, the
 // Welcome to the joiner, the joiner's full roster, and the roster of the
 // added member to the earlier members (section 11.2).
 func (r *roomRuntime) stageAdd(record eventlog.RoomMLSRecord, joiner string, leaf group.Leaf,
-	credential group.LeafCredential, now time.Time) error {
+	binding group.LeafBinding, now time.Time) error {
+	credential := binding.Credential()
 	earlier := r.othersOf(record.Members)
 	membership, err := record.Membership().Add([]string{joiner})
 	if err != nil {
@@ -734,7 +738,10 @@ func (r *roomRuntime) stageAdd(record eventlog.RoomMLSRecord, joiner string, lea
 		}
 		return objects, nil
 	}
-	_, _, err = r.controller.Commit(template, &proof, operations, build, now.Add(r.retention))
+	// The joiner's credential is learned in the same fused write as the
+	// membership that adds it (section 11.8).
+	_, _, err = r.controller.CommitLearning(template, &proof, operations, build, now.Add(r.retention),
+		[]group.LeafBinding{binding})
 	return err
 }
 

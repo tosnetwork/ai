@@ -271,14 +271,37 @@ func (j *Journal) liveRoomAdds(roomID string, now time.Time) ([]RoomAdd, error) 
 			continue
 		}
 		if uint64(now.Unix()) >= add.ExpiresAtUnix {
-			if err := j.deleteRoomAdd(roomID, agentID); err != nil {
+			// An add whose Agent is a member without a stored credential
+			// is kept past its expiry, so its credential is still learned.
+			orphan, err := j.memberWithoutCredential(roomID, agentID)
+			if err != nil {
 				return nil, err
 			}
-			continue
+			if !orphan {
+				if err := j.deleteRoomAdd(roomID, agentID); err != nil {
+					return nil, err
+				}
+				continue
+			}
 		}
 		adds = append(adds, add)
 	}
 	return adds, nil
+}
+
+// memberWithoutCredential reports whether an Agent is a member of a room
+// held here whose leaf credential the room's list does not hold. The
+// journal mutex is held.
+func (j *Journal) memberWithoutCredential(roomID, agentID string) (bool, error) {
+	record, found, err := j.readRoomMLS(roomID)
+	if err != nil || !found || !containsString(record.Members, agentID) {
+		return false, err
+	}
+	_, known, err := j.roomCredential(roomID, agentID)
+	if err != nil {
+		return false, err
+	}
+	return !known, nil
 }
 
 func (j *Journal) roomAddPath(roomID, agentID string) string {

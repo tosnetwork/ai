@@ -131,6 +131,13 @@ func (c *RoomMLSController) Join(binding group.State, proof RoomAuthorityProof, 
 // output into the objects to publish (the Commit, Welcome and rosters); they
 // are staged and published with the advance, and retained until retainUntil.
 func (c *RoomMLSController) Commit(template group.Transition, proof *RoomAuthorityProof, operations []group.LeafOperation, build func(CommitResult) ([]StagedRoomObject, error), retainUntil time.Time) (CommitResult, RoomMLSRecord, error) {
+	return c.CommitLearning(template, proof, operations, build, retainUntil, nil)
+}
+
+// CommitLearning is Commit for an Add: learned are the joiners' verified
+// leaf credentials, written in the same fused write as the membership that
+// adds them.
+func (c *RoomMLSController) CommitLearning(template group.Transition, proof *RoomAuthorityProof, operations []group.LeafOperation, build func(CommitResult) ([]StagedRoomObject, error), retainUntil time.Time, learned []group.LeafBinding) (CommitResult, RoomMLSRecord, error) {
 	if template.CommitRef != "" || template.Next.AcceptedCommitRef != "" {
 		return CommitResult{}, RoomMLSRecord{}, errors.New("MLS commit template already has a reference")
 	}
@@ -169,7 +176,8 @@ func (c *RoomMLSController) Commit(template group.Transition, proof *RoomAuthori
 	_, written, err := c.ledger.Advance(RoomMLSAdvance{
 		Transition: template, Proof: proof, ExpectedStateDigest: record.StateDigest,
 		State: nextState, EpochAuthenticator: info.EpochAuthenticator,
-		Output: &RoomCommitOutput{Objects: objects, RetainUntil: retainUntil},
+		Output:  &RoomCommitOutput{Objects: objects, RetainUntil: retainUntil},
+		Learned: learned,
 	}, c.now())
 	if err != nil {
 		return CommitResult{}, RoomMLSRecord{}, err
