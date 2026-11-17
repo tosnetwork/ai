@@ -38,6 +38,9 @@ const OUT_OF_ORDER_TOLERANCE: u32 = 8;
 // OUT_OF_ORDER_TOLERANCE of them, so it does not change the state bound; it
 // bounds the work one message can cost a receiver (1,000 ratchet steps).
 const MAXIMUM_FORWARD_DISTANCE: u32 = 1000;
+// The most leaves a group may hold: the profile's bound (several devices per
+// Agent). The relay room bound is 32.
+const MAX_LEAVES: usize = 64;
 
 fn sender_ratchet() -> SenderRatchetConfiguration {
     SenderRatchetConfiguration::new(OUT_OF_ORDER_TOLERANCE, MAXIMUM_FORWARD_DISTANCE)
@@ -130,6 +133,20 @@ struct Response {
     epoch_authenticator: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     epoch: Option<u64>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    sender_signature_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sender_leaf_index: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    members: Vec<MemberOut>,
+}
+
+// MemberOut is one leaf of the current ratchet tree as `members` reports it.
+#[derive(Serialize)]
+struct MemberOut {
+    index: u32,
+    identity: String,
+    signature_key: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -140,6 +157,26 @@ struct Snapshot {
     #[serde(default)]
     group_id: String,
     entries: Vec<Entry>,
+    // The leaf signature keys of the retained past epochs, newest last. The
+    // library keeps those epochs' trees but does not expose their keys, and a
+    // message opened in a past epoch must report the key of the leaf that
+    // sealed it in that epoch.
+    #[serde(default)]
+    past_leaves: Vec<EpochLeaves>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+struct EpochLeaves {
+    epoch: u64,
+    leaves: Vec<LeafKey>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+struct LeafKey {
+    index: u32,
+    key: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -183,6 +220,25 @@ fn load_snapshot(encoded: &str) -> Result<(Provider, Snapshot), String> {
     if snapshot.schema != SCHEMA || snapshot.entries.len() > MAX_ENTRIES {
         return Err("unsupported state snapshot".into());
     }
+    if snapshot.past_leaves.len() > MAX_PAST_EPOCHS {
+        return Err("invalid past epoch leaves".into());
+    }
+    for (position, epoch) in snapshot.past_leaves.iter().enumerate() {
+        if epoch.leaves.is_empty() || epoch.leaves.len() > MAX_LEAVES {
+            return Err("invalid past epoch leaves".into());
+        }
+        if position > 0 && epoch.epoch <= snapshot.past_leaves[position - 1].epoch {
+            return Err("past epoch leaves out of order".into());
+        }
+        for (index, leaf) in epoch.leaves.iter().enumerate() {
+            if index > 0 && leaf.index <= epoch.leaves[index - 1].index {
+                return Err("past epoch leaves out of order".into());
+            }
+            if decode("past leaf key", &leaf.key, 64)?.len() != 32 {
+                return Err("invalid past leaf key".into());
+            }
+        }
+    }
     let signer = decode("signer public key", &snapshot.signer_public, 64)?;
     if signer.len() != 32 {
         return Err("invalid signer public key".into());
@@ -214,6 +270,7 @@ fn save_snapshot(
     provider: &Provider,
     signer_public: &[u8],
     group_id: Option<&GroupId>,
+    past_leaves: Vec<EpochLeaves>,
 ) -> Result<String, String> {
     let values = provider
         .storage
@@ -239,6 +296,7 @@ fn save_snapshot(
             .map(|g| B64.encode(g.as_slice()))
             .unwrap_or_default(),
         entries,
+        past_leaves,
     };
     let raw = serde_json::to_vec(&snapshot).map_err(|_| "state serialization failed")?;
     if raw.len() > MAX_STATE {
@@ -276,6 +334,70 @@ fn member_identity(sender: &Sender, credential: &Credential) -> Result<Vec<u8>, 
         return Err("invalid sender identity".into());
     }
     Ok(identity.to_vec())
+}
+
+// epoch_leaves records the signature key of every leaf of the group's
+// current epoch, in leaf order.
+fn epoch_leaves(group: &MlsGroup) -> Result<EpochLeaves, String> {
+    let mut leaves: Vec<LeafKey> = group
+        .members()
+        .map(|member| LeafKey {
+            index: member.index.u32(),
+            key: B64.encode(&member.signature_key),
+        })
+        .collect();
+    if leaves.is_empty() || leaves.len() > MAX_LEAVES {
+        return Err("group leaf count is outside its bound".into());
+    }
+    leaves.sort_by_key(|leaf| leaf.index);
+    Ok(EpochLeaves {
+        epoch: group.epoch().as_u64(),
+        leaves,
+    })
+}
+
+// retire_epoch appends the epoch a group is about to leave to the retained
+// past epochs, keeping only as many as the group retains.
+fn retire_epoch(mut past: Vec<EpochLeaves>, leaving: EpochLeaves) -> Vec<EpochLeaves> {
+    past.retain(|epoch| epoch.epoch < leaving.epoch);
+    past.push(leaving);
+    let excess = past.len().saturating_sub(MAX_PAST_EPOCHS);
+    past.drain(..excess);
+    past
+}
+
+// current_leaf_key returns the signature key of `index` in the current tree.
+fn current_leaf_key(group: &MlsGroup, index: LeafNodeIndex) -> Result<Vec<u8>, String> {
+    group
+        .member_at(index)
+        .map(|member| member.signature_key)
+        .ok_or_else(|| "sender leaf is not in the tree".to_string())
+}
+
+// past_leaf_key returns the signature key `index` had in a retained past
+// epoch.
+fn past_leaf_key(
+    past: &[EpochLeaves],
+    epoch: u64,
+    index: LeafNodeIndex,
+) -> Result<Vec<u8>, String> {
+    let leaves = past
+        .iter()
+        .find(|retained| retained.epoch == epoch)
+        .ok_or("the message epoch is not retained")?;
+    let leaf = leaves
+        .leaves
+        .iter()
+        .find(|leaf| leaf.index == index.u32())
+        .ok_or("sender leaf is not in the past epoch tree")?;
+    decode("past leaf key", &leaf.key, 64)
+}
+
+fn member_index(sender: &Sender) -> Result<LeafNodeIndex, String> {
+    match sender {
+        Sender::Member(index) => Ok(*index),
+        _ => Err("message sender is not a group member".into()),
+    }
 }
 
 fn handle(req: Request) -> Result<Response, String> {
@@ -334,14 +456,38 @@ fn handle(req: Request) -> Result<Response, String> {
                 return Err("KeyPackage authority mismatch".into());
             }
         }
-        "identity" => {
-            let identity = decode("identity", &req.identity, MAX_IDENTITY)?;
+        "signer" => {
+            // A fresh leaf signature key, before its identity exists: a relay
+            // room leaf's identity names a credential that names this key.
             let provider = Provider::default();
             let signer = SignatureKeyPair::new(SUITE.signature_algorithm())
                 .map_err(|_| "signer generation failed")?;
             signer
                 .store(provider.storage())
                 .map_err(|_| "signer storage failed")?;
+            out.public_key = B64.encode(signer.public());
+            out.state = save_snapshot(&provider, signer.public(), None, Vec::new())?;
+        }
+        "identity" => {
+            let identity = decode("identity", &req.identity, MAX_IDENTITY)?;
+            // With a state, the KeyPackage is made for the signer it holds
+            // (from `signer`); without one, for a fresh signer.
+            let (provider, signer) = if req.state.is_empty() {
+                let provider = Provider::default();
+                let signer = SignatureKeyPair::new(SUITE.signature_algorithm())
+                    .map_err(|_| "signer generation failed")?;
+                signer
+                    .store(provider.storage())
+                    .map_err(|_| "signer storage failed")?;
+                (provider, signer)
+            } else {
+                let (provider, snapshot) = load_snapshot(&req.state)?;
+                if !snapshot.group_id.is_empty() {
+                    return Err("identity already belongs to a group".into());
+                }
+                let signer = signer(&provider, &snapshot)?;
+                (provider, signer)
+            };
             let credential = CredentialWithKey {
                 credential: BasicCredential::new(identity).into(),
                 signature_key: signer.to_public_vec().into(),
@@ -351,7 +497,7 @@ fn handle(req: Request) -> Result<Response, String> {
                 .map_err(|_| "KeyPackage generation failed")?;
             out.public_key = B64.encode(signer.public());
             out.key_package = encode(bundle.key_package())?;
-            out.state = save_snapshot(&provider, signer.public(), None)?;
+            out.state = save_snapshot(&provider, signer.public(), None, Vec::new())?;
         }
         "create" => {
             let (provider, snapshot) = load_snapshot(&req.state)?;
@@ -388,7 +534,12 @@ fn handle(req: Request) -> Result<Response, String> {
             )
             .map_err(|_| "group creation failed")?;
             out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(&provider, signer.public(), Some(group.group_id()))?;
+            out.state = save_snapshot(
+                &provider,
+                signer.public(),
+                Some(group.group_id()),
+                Vec::new(),
+            )?;
         }
         "commit" => {
             if req.key_packages.len() + req.remove_identities.len() == 0
@@ -427,6 +578,7 @@ fn handle(req: Request) -> Result<Response, String> {
                 }
                 removals.push(matches[0]);
             }
+            let leaving = epoch_leaves(&group)?;
             let bundle = group
                 .commit_builder()
                 .propose_removals(removals)
@@ -446,12 +598,14 @@ fn handle(req: Request) -> Result<Response, String> {
                 out.welcome = encode(&welcome)?;
             }
             out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(&provider, signer.public(), Some(group.group_id()))?;
+            let past = retire_epoch(snapshot.past_leaves, leaving);
+            out.state = save_snapshot(&provider, signer.public(), Some(group.group_id()), past)?;
         }
         "refresh" => {
             let (provider, snapshot) = load_snapshot(&req.state)?;
             let signer = signer(&provider, &snapshot)?;
             let mut group = group(&provider, &snapshot)?;
+            let leaving = epoch_leaves(&group)?;
             let bundle = group
                 .self_update(&provider, &signer, LeafNodeParameters::default())
                 .map_err(|_| "self update failed")?;
@@ -460,7 +614,8 @@ fn handle(req: Request) -> Result<Response, String> {
                 .map_err(|_| "self update merge failed")?;
             out.commit = encode(&bundle.into_commit())?;
             out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(&provider, signer.public(), Some(group.group_id()))?;
+            let past = retire_epoch(snapshot.past_leaves, leaving);
+            out.state = save_snapshot(&provider, signer.public(), Some(group.group_id()), past)?;
         }
         "join" => {
             let (provider, snapshot) = load_snapshot(&req.state)?;
@@ -483,12 +638,13 @@ fn handle(req: Request) -> Result<Response, String> {
                 .map_err(|_| "Welcome merge failed")?;
             let public = decode("signer public key", &snapshot.signer_public, 64)?;
             out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(&provider, &public, Some(group.group_id()))?;
+            out.state = save_snapshot(&provider, &public, Some(group.group_id()), Vec::new())?;
         }
         "apply" => {
             let (provider, snapshot) = load_snapshot(&req.state)?;
             let mut group = group(&provider, &snapshot)?;
             let message: MlsMessageIn = decode_tls("commit", &req.message, MAX_MESSAGE)?;
+            let leaving = epoch_leaves(&group)?;
             let processed = group
                 .process_message(
                     &provider,
@@ -498,6 +654,8 @@ fn handle(req: Request) -> Result<Response, String> {
                 )
                 .map_err(|_| "commit processing failed")?;
             let committer = member_identity(processed.sender(), processed.credential())?;
+            let committer_index = member_index(processed.sender())?;
+            let committer_key = current_leaf_key(&group, committer_index)?;
             let staged = match processed.into_content() {
                 ProcessedMessageContent::StagedCommitMessage(v) => v,
                 _ => return Err("message is not a commit".into()),
@@ -507,8 +665,11 @@ fn handle(req: Request) -> Result<Response, String> {
                 .map_err(|_| "commit merge failed")?;
             let public = decode("signer public key", &snapshot.signer_public, 64)?;
             out.sender_identity = B64.encode(committer);
+            out.sender_signature_key = B64.encode(committer_key);
+            out.sender_leaf_index = Some(committer_index.u32());
             out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(&provider, &public, Some(group.group_id()))?;
+            let past = retire_epoch(snapshot.past_leaves, leaving);
+            out.state = save_snapshot(&provider, &public, Some(group.group_id()), past)?;
         }
         "seal" => {
             let (provider, snapshot) = load_snapshot(&req.state)?;
@@ -526,7 +687,12 @@ fn handle(req: Request) -> Result<Response, String> {
                 .map_err(|_| "message encryption failed")?;
             out.message = encode(&message)?;
             out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(&provider, signer.public(), Some(group.group_id()))?;
+            out.state = save_snapshot(
+                &provider,
+                signer.public(),
+                Some(group.group_id()),
+                snapshot.past_leaves,
+            )?;
         }
         "open" => {
             let (provider, snapshot) = load_snapshot(&req.state)?;
@@ -551,6 +717,13 @@ fn handle(req: Request) -> Result<Response, String> {
                 .process_message(&provider, protocol)
                 .map_err(|_| "message decryption failed")?;
             let sender = member_identity(processed.sender(), processed.credential())?;
+            let sender_index = member_index(processed.sender())?;
+            let message_epoch = processed.epoch().as_u64();
+            let sender_key = if message_epoch == group.epoch().as_u64() {
+                current_leaf_key(&group, sender_index)?
+            } else {
+                past_leaf_key(&snapshot.past_leaves, message_epoch, sender_index)?
+            };
             let plaintext = match processed.into_content() {
                 ProcessedMessageContent::ApplicationMessage(v) => v.into_bytes(),
                 _ => return Err("message is not application data".into()),
@@ -558,8 +731,41 @@ fn handle(req: Request) -> Result<Response, String> {
             let public = decode("signer public key", &snapshot.signer_public, 64)?;
             out.plaintext = B64.encode(plaintext);
             out.sender_identity = B64.encode(sender);
+            out.sender_signature_key = B64.encode(sender_key);
+            out.sender_leaf_index = Some(sender_index.u32());
             out.epoch = Some(group.epoch().as_u64());
-            out.state = save_snapshot(&provider, &public, Some(group.group_id()))?;
+            out.state = save_snapshot(
+                &provider,
+                &public,
+                Some(group.group_id()),
+                snapshot.past_leaves,
+            )?;
+        }
+        "members" => {
+            let (provider, snapshot) = load_snapshot(&req.state)?;
+            let group = group(&provider, &snapshot)?;
+            let mut members = Vec::new();
+            for member in group.members() {
+                if member.credential.credential_type() != CredentialType::Basic {
+                    return Err("unsupported member credential".into());
+                }
+                let identity = member.credential.serialized_content();
+                if identity.is_empty() || identity.len() > MAX_IDENTITY {
+                    return Err("invalid member identity".into());
+                }
+                members.push(MemberOut {
+                    index: member.index.u32(),
+                    identity: B64.encode(identity),
+                    signature_key: B64.encode(&member.signature_key),
+                });
+            }
+            if members.is_empty() || members.len() > MAX_LEAVES {
+                return Err("group leaf count is outside its bound".into());
+            }
+            members.sort_by_key(|member| member.index);
+            out.members = members;
+            out.group_id = B64.encode(group.group_id().as_slice());
+            out.epoch = Some(group.epoch().as_u64());
         }
         _ => return Err("unsupported operation".into()),
     }
@@ -881,6 +1087,8 @@ mod tests {
     fn past_epochs_open_and_report_the_sender() {
         let alice = identity(b"alice-authority");
         let bob = identity(b"bob-member");
+        let alice_key = alice.public_key.clone();
+        let bob_key = bob.public_key.clone();
         let mut create = request("create");
         create.state = alice.state;
         create.key_package = alice.key_package;
@@ -920,6 +1128,9 @@ mod tests {
             B64.decode(&applied.sender_identity).unwrap(),
             b"alice-authority"
         );
+        // The committer's leaf signature key is the authority's own.
+        assert_eq!(applied.sender_signature_key, alice_key);
+        assert_eq!(applied.sender_leaf_index, Some(0));
         states = vec![refreshed.state, applied.state];
         let second = authenticators(&states);
         assert_eq!(second[0], second[1]);
@@ -933,6 +1144,12 @@ mod tests {
             b"before the commits"
         );
         assert_eq!(B64.decode(&opened.sender_identity).unwrap(), b"bob-member");
+        // Opened two epochs late, it still names the key that sealed it.
+        assert_eq!(opened.sender_signature_key, bob_key);
+        assert_eq!(opened.sender_leaf_index, Some(1));
+        let current = seal_as(&states[1], aad, b"in the current epoch");
+        let opened_now = open_as(&states[0], aad, &current.message).unwrap();
+        assert_eq!(opened_now.sender_signature_key, bob_key);
 
         // A third epoch is beyond max_past_epochs and fails.
         let late = seal_as(&states[1], aad, b"sealed at the older epoch");
@@ -942,6 +1159,151 @@ mod tests {
         refresh_all(&mut states);
         assert!(open_as(&states[0], aad, &late.message).is_err());
         assert!(open_as(&state_before, aad, &late.message).is_ok());
+    }
+
+    // A leaf signature key made first gets its KeyPackage later, under an
+    // identity that may name it; the KeyPackage carries exactly that key.
+    #[test]
+    fn signer_then_identity_keeps_the_key() {
+        let signer = handle(request("signer")).unwrap();
+        assert!(signer.key_package.is_empty());
+        let mut made = request("identity");
+        made.state = signer.state.clone();
+        made.identity = B64.encode(leaf_identity(3));
+        let made = handle(made).unwrap();
+        assert_eq!(made.public_key, signer.public_key);
+        let mut validate = request("validate");
+        validate.identity = B64.encode(leaf_identity(3));
+        validate.public_key = signer.public_key.clone();
+        validate.key_package = made.key_package.clone();
+        handle(validate).unwrap();
+        // The identity's KeyPackage joins a group like any other.
+        let founder = identity(&leaf_identity(0));
+        let mut create = request("create");
+        create.state = founder.state;
+        create.key_package = founder.key_package;
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let mut add = request("commit");
+        add.state = handle(create).unwrap().state;
+        add.key_packages = vec![made.key_package];
+        let added = handle(add).unwrap();
+        let mut join = request("join");
+        join.state = made.state.clone();
+        join.welcome = added.welcome;
+        let joined = handle(join).unwrap();
+        // A state that already holds a group makes no new identity.
+        let mut again = request("identity");
+        again.state = joined.state;
+        again.identity = B64.encode(leaf_identity(4));
+        assert!(handle(again).is_err());
+    }
+
+    // `members` reports every leaf of the current tree, in leaf order, with
+    // its identity and signature key, and changes nothing.
+    #[test]
+    fn members_reports_every_leaf() {
+        let states = full_group(3);
+        let mut members = request("members");
+        members.state = states[1].clone();
+        let listed = handle(members).unwrap();
+        assert!(listed.state.is_empty());
+        assert_eq!(listed.members.len(), 3);
+        for (position, member) in listed.members.iter().enumerate() {
+            assert_eq!(member.index as usize, position);
+            assert_eq!(
+                B64.decode(&member.identity).unwrap(),
+                leaf_identity(position)
+            );
+            assert_eq!(B64.decode(&member.signature_key).unwrap().len(), 32);
+        }
+        // The key `members` reports is the one `open` reports for that leaf.
+        let aad = b"room binding";
+        let sealed = seal_as(&states[2], aad, b"m");
+        let opened = open_as(&states[1], aad, &sealed.message).unwrap();
+        assert_eq!(opened.sender_signature_key, listed.members[2].signature_key);
+        let mut without_group = request("members");
+        without_group.state = identity(b"no group").state;
+        assert!(handle(without_group).is_err());
+    }
+
+    // A message opened in a past epoch reports the key its sender's leaf had
+    // in that epoch, even after the sender was removed and another member
+    // took its leaf index.
+    #[test]
+    fn past_epoch_sender_key_survives_index_reuse() {
+        let alice = identity(b"alice-authority");
+        let bob = identity(b"bob-member");
+        let carol = identity(b"carol-member");
+        let bob_key = bob.public_key.clone();
+        let mut create = request("create");
+        create.state = alice.state;
+        create.key_package = alice.key_package;
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let mut add = request("commit");
+        add.state = handle(create).unwrap().state;
+        add.key_packages = vec![bob.key_package];
+        let added = handle(add).unwrap();
+        let mut join = request("join");
+        join.state = bob.state;
+        join.welcome = added.welcome;
+        let bob_state = handle(join).unwrap().state;
+        let aad = b"room binding";
+        let sealed = seal_as(&bob_state, aad, b"sealed by bob");
+        // Remove Bob and add Carol in one Commit: Carol takes leaf index 1.
+        let mut replace = request("commit");
+        replace.state = added.state;
+        replace.remove_identities = vec![B64.encode(b"bob-member")];
+        replace.key_packages = vec![carol.key_package.clone()];
+        let replaced = handle(replace).unwrap();
+        let mut members = request("members");
+        members.state = replaced.state.clone();
+        let listed = handle(members).unwrap();
+        assert_eq!(listed.members[1].index, 1);
+        assert_eq!(listed.members[1].signature_key, carol.public_key);
+        let opened = open_as(&replaced.state, aad, &sealed.message).unwrap();
+        assert_eq!(B64.decode(&opened.sender_identity).unwrap(), b"bob-member");
+        assert_eq!(opened.sender_leaf_index, Some(1));
+        assert_eq!(opened.sender_signature_key, bob_key);
+    }
+
+    // A state whose retained past-epoch keys break their bounds is refused.
+    #[test]
+    fn past_epoch_keys_are_bounded_on_load() {
+        let mut states = full_group(2);
+        refresh_all(&mut states);
+        refresh_all(&mut states);
+        refresh_all(&mut states);
+        let raw = B64.decode(&states[1]).unwrap();
+        let mut snapshot: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(
+            snapshot["past_leaves"].as_array().unwrap().len(),
+            MAX_PAST_EPOCHS
+        );
+        let mut inspect = request("inspect");
+        inspect.state = states[1].clone();
+        assert!(handle(inspect).is_ok());
+        let corruptions: Vec<Box<dyn Fn(&mut serde_json::Value)>> = vec![
+            Box::new(|value| {
+                let first = value["past_leaves"][0].clone();
+                value["past_leaves"].as_array_mut().unwrap().push(first);
+            }),
+            Box::new(|value| value["past_leaves"].as_array_mut().unwrap().reverse()),
+            Box::new(|value| value["past_leaves"][0]["leaves"] = serde_json::json!([])),
+            Box::new(|value| {
+                value["past_leaves"][0]["leaves"][0]["key"] = serde_json::json!("AA==")
+            }),
+        ];
+        for corrupt in corruptions {
+            let mut changed = snapshot.clone();
+            corrupt(&mut changed);
+            let mut inspect = request("inspect");
+            inspect.state = B64.encode(serde_json::to_vec(&changed).unwrap());
+            assert!(handle(inspect).is_err());
+        }
+        snapshot["past_leaves"] = serde_json::json!([]);
+        let mut inspect = request("inspect");
+        inspect.state = B64.encode(serde_json::to_vec(&snapshot).unwrap());
+        assert!(handle(inspect).is_ok());
     }
 
     #[test]
