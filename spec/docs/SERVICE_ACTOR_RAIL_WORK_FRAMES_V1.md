@@ -341,7 +341,9 @@ purchase's frame binding, and only after its respond is finalized:
    `report_digest`.
 
 A buyer MAY store a result that arrives before the respond is finalized and
-validate it later; OpenFox does.
+validate it later; OpenFox does. OpenFox keeps the first result message it
+stores for a purchase and ends the purchase as `receipt-mismatch` when that
+message fails these checks (section 15, Q9).
 
 ## 8. Integrity summary
 
@@ -560,3 +562,9 @@ Receipt codec covers.
 - **Q8. Actor workchain.** The frame binds the actor by its
   32-byte account ID only; workchain 0 is implied by the rail
   (`SOFTWARE_WORK_MANIFEST_V1.md` key 21), not carried.
+- **Q9. First stored result wins.** OpenFox stores the first result message
+  from the purchase's provider and never replaces it; if that message fails
+  7.2 the purchase ends as `receipt-mismatch`, although the respond is final
+  and the price is paid, and a later valid redelivery is not considered. Only
+  the authenticated provider can cause this. Whether a buyer must keep
+  accepting redeliveries until one passes 7.2 is open.
