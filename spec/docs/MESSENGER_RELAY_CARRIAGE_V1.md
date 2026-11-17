@@ -1224,7 +1224,10 @@ seal already carry any frame; nothing new is resolved on chain).
    `Driver` gains those results. A `signer` operation makes a leaf signature
    key before any identity exists and `identity` then makes the KeyPackage
    for that signer, because the identity names a credential that names the
-   key (11.8). A read-only `members` operation returns
+   key (11.8). `join` returns the leaf that authored the Welcome (index,
+   identity and signature key), which the joiner requires to be the leaf
+   its invite's authority credential binds before anything is installed
+   (11.3). A read-only `members` operation returns
    (leaf index, identity, signature key) for every leaf, used when learning
    roster entries and when building per-member pins (11.8). The driver keeps
    its generic
@@ -1839,8 +1842,9 @@ checked by `keyPackageConsumed` `:336-358` and the replay refusal `:98`), and
 the epoch authenticators of the current and 2 previous epochs, and the
 digest of the room's leaf-credential list (11.8) and the room's end time
 (D18). Worst case about
-**5.2 KB**: measured 5,056 bytes before the credential-list digest and the
-end time, which add about 130 bytes with their field names (the bound test re-measures it) (2,336 bytes for 32 member IDs, about 900 for an
+**5.2 KB**: measured 5,196 bytes with the credential-list digest and the
+end time, which added 140 bytes with their field names to the earlier 5,056
+(`TestFusedRecordMaximalEncodingFitsItsCap`) (2,336 bytes for 32 member IDs, about 900 for an
 authorization with a maximal network ID, about 150 for the two refs, the rest
 digests and IDs, plus field names); the codec caps it at **8,192 bytes**,
 leaving 778,240 bytes (99 %) of the 768 KiB record bound
