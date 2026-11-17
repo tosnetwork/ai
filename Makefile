@@ -1,4 +1,5 @@
-.PHONY: verify fmt-check proto-check vet test-race build conformance boundary-lint spec-check fuzz test-privileged \
+.PHONY: verify fmt-check proto-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants \
+	test-privileged \
 	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors messenger-cross-build \
 	messenger-fuzz
 
@@ -46,6 +47,12 @@ spec-check:
 	python3 spec/scripts/verify-prediction-market-compatibility.py
 	python3 -I spec/scripts/reproduce-software-work-manifest-v1-service-actor.py
 	python3 -I spec/scripts/reproduce-service-actor-rail-work-frames-v1.py
+
+# Red controls for the rail work frame checks: every mutant must be caught by
+# its named test, and a mutant that does not apply or build is a script error.
+# Opt-in; not part of verify (it builds the package once per mutant).
+railwork-mutants:
+	GOWORK=off python3 -I protocol/scripts/railwork-mutants.py
 
 # Bounded native fuzzing of the strict PredictionMarket decoders; the regular
 # suite runs the fixed seeds. The budget is an execution count, not a
