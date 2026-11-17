@@ -452,6 +452,120 @@ func (r *roomRuntime) evidenceFailed(member string, err error, now time.Time) {
 	}
 }
 
+// waitsOnEvidence reports whether a room object to a member waits on the
+// member's stored evidence, which keeps the member's kind-4 request
+// outstanding (section 2.5): an application object pending for it, the head
+// of its handshake queue that is pending or due for its re-deposit, or its
+// pending single Commit after a removal, in a room this installation is the
+// authority of, while that evidence fails CheckPeer pinned as the deposit
+// pins it. A finalized-state or journal read failure is returned, and the
+// caller then leaves the request as it is. The caller holds neither the
+// handling lock nor a fan-out mutex.
+func (r *roomRuntime) waitsOnEvidence(member string, now time.Time) (bool, error) {
+	if r == nil {
+		return false, errors.New("the room runtime is not configured")
+	}
+	sends, err := r.daemon.journal.PendingRoomApplicationSends()
+	if err != nil {
+		return false, err
+	}
+	for _, send := range sends {
+		for _, delivery := range send.Members {
+			if delivery.AgentID != member || delivery.State != eventlog.RoomDeliveryPending {
+				continue
+			}
+			if waits, err := r.memberEvidenceFails(send.RoomID, member, now); err != nil || waits {
+				return waits, err
+			}
+		}
+	}
+	records, err := r.ledger.List()
+	if err != nil {
+		return false, err
+	}
+	for _, record := range records {
+		if record.AuthorityAgentID != r.daemon.config.AgentID || r.sendingStopped(record.RoomEndsAtUnix, now) {
+			continue
+		}
+		waits, err := r.handshakeWaitsOnEvidence(record, member, now)
+		if err != nil || waits {
+			return waits, err
+		}
+	}
+	return false, nil
+}
+
+// handshakeWaitsOnEvidence is waitsOnEvidence for one room this
+// installation is the authority of: the member's single Commit after its
+// removal, checked against its own Endpoint and device, or the head of its
+// queue, checked against its leaf credential, each only when fanOut would
+// deposit it now.
+func (r *roomRuntime) handshakeWaitsOnEvidence(record eventlog.RoomMLSRecord, member string, now time.Time) (bool, error) {
+	heads, err := r.daemon.journal.RoomOutboxHeads(record.RoomID)
+	if err != nil {
+		return false, err
+	}
+	seconds := uint64(now.Unix())
+	for _, head := range heads {
+		delivery, found := head.Member(member)
+		if !found || !delivery.Once || delivery.State != eventlog.RoomDeliveryPending {
+			continue
+		}
+		// Past its retention the Commit is never deposited again: its
+		// envelopes would carry an expiry already passed.
+		if seconds >= head.RetainUntilUnix {
+			continue
+		}
+		if _, err := r.relay.verifier.CheckStoredContact(member, now); err != nil {
+			if fault.CodeOf(err) == fault.CodeInternal {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	if !containsAgent(record.Members, member) {
+		return false, nil
+	}
+	if stopped, err := r.queueStopped(record.RoomID, member); err != nil || stopped {
+		return false, err
+	}
+	queue, err := r.daemon.journal.RoomMemberQueue(record.RoomID, member)
+	if err != nil || len(queue) == 0 {
+		return false, err
+	}
+	head := queue[0]
+	delivery, _ := head.Member(member)
+	due := delivery.State == eventlog.RoomDeliveryPending ||
+		delivery.State == eventlog.RoomDeliveryCarried && delivery.NextRedepositAtUnix != 0 && seconds >= delivery.NextRedepositAtUnix
+	if !due || seconds >= head.RetainUntilUnix {
+		return false, nil
+	}
+	return r.memberEvidenceFails(record.RoomID, member, now)
+}
+
+// memberEvidenceFails runs a deposit's CheckPeer on a member's stored
+// evidence, pinned to the member's verified leaf credential in a room. A
+// member whose credential is not known yet waits on its roster, and one
+// whose credential no longer pins is abandoned by the deposit: neither waits
+// on its evidence.
+func (r *roomRuntime) memberEvidenceFails(roomID, member string, now time.Time) (bool, error) {
+	credential, known, err := r.ledger.RoomCredential(roomID, member)
+	if err != nil || !known {
+		return false, err
+	}
+	pin, err := directory.LeafPin(member, credential, now)
+	if err != nil {
+		return false, nil
+	}
+	if _, err := r.relay.verifier.CheckStored(member, pin, now); err != nil {
+		if fault.CodeOf(err) == fault.CodeInternal {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // roomAckReceived applies a member's room ack (section 11.7): the ack's
 // Endpoint and device must be the member's own, as its leaf credential and
 // the frame's evidence pinned to it show, and its signature must verify
