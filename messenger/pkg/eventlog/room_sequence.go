@@ -164,8 +164,18 @@ func (j *Journal) ObserveRoomSequence(roomID, sender string, sequence uint64, no
 		if sequence-record.Highest > 1 {
 			skipped := missingRange{First: record.Highest + 1, Last: sequence - 1, NoticedAtN: now.UnixNano()}
 			if record.OpenDrop != "" {
-				if err := j.fixRoomGap(roomID, record.OpenDrop, skipped.First, skipped.Last); err != nil {
+				fixed, err := j.fixRoomGap(roomID, record.OpenDrop, skipped.First, skipped.Last)
+				if err != nil {
 					return err
+				}
+				if !fixed {
+					// The open drop's record was pruned under the gap
+					// bounds. The skipped range is still lost, so it is
+					// declared afresh rather than vanishing with the drop.
+					if _, err := j.writeRoomGap(RoomGap{RoomID: roomID, SenderAgentID: sender, FirstSequence: skipped.First,
+						LastSequence: skipped.Last, Reason: RoomGapNotArrived}, now); err != nil {
+						return err
+					}
 				}
 				// Only a jump reveals the dropped object's range; a
 				// contiguous sequence leaves the drop open.
@@ -542,14 +552,21 @@ func (j *Journal) storeRoomGap(gap RoomGap) error {
 }
 
 // fixRoomGap gives an open sender-only gap the range the sender's next
-// sequence revealed. A gap already pruned is no error.
-func (j *Journal) fixRoomGap(roomID, id string, first, last uint64) error {
+// sequence revealed. It reports false, with no error, when the gap record
+// was already pruned, so the caller declares the range another way.
+func (j *Journal) fixRoomGap(roomID, id string, first, last uint64) (bool, error) {
 	gap, found, err := j.readRoomGap(roomID, id)
-	if err != nil || !found {
-		return err
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
 	}
 	gap.FirstSequence, gap.LastSequence = first, last
-	return j.storeRoomGap(gap)
+	if err := j.storeRoomGap(gap); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (j *Journal) readRoomGap(roomID, id string) (RoomGap, bool, error) {

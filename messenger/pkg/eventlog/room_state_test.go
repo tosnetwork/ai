@@ -592,6 +592,58 @@ func TestRoomDropStaysOpenUntilAJump(t *testing.T) {
 	}
 }
 
+// A drop whose open record was pruned under the gap bounds still has its
+// range declared at the sender's next jump: sequence 1, a drop, the drop
+// pruned through other senders' gaps, then sequence 100 declares 2-99.
+func TestRoomPrunedDropRangeIsStillDeclared(t *testing.T) {
+	journal, err := Open(t.TempDir() + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	now := time.Unix(1_900_000_000, 0)
+	saved := roomGapCap
+	roomGapCap = 3
+	defer func() { roomGapCap = saved }()
+	sender := fusedAgent(1)
+	if err := journal.ObserveRoomSequence(fusedRoom, sender, 1, now); err != nil {
+		t.Fatal(err)
+	}
+	drop, err := journal.RecordRoomDrop(fusedRoom, sender, RoomGapBufferFull, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 3; index++ {
+		if _, err := journal.RecordRoomDrop(fusedRoom, fusedAgent(2+index), RoomGapBufferFull,
+			now.Add(time.Duration(index+1)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, found, err := journal.readRoomGap(fusedRoom, drop.ID); err != nil || found {
+		t.Fatalf("the open drop was not pruned: %v %v", found, err)
+	}
+	if err := journal.ObserveRoomSequence(fusedRoom, sender, 100, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	gaps, err := journal.RoomGaps(fusedRoom, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := false
+	for _, gap := range gaps {
+		if gap.SenderAgentID == sender && gap.FirstSequence == 2 && gap.LastSequence == 99 {
+			declared = true
+		}
+	}
+	if !declared {
+		t.Fatalf("the range 2-99 of a pruned drop was lost: %+v", gaps)
+	}
+	record, err := journal.readRoomSequence(fusedRoom, sender)
+	if err != nil || record.OpenDrop != "" || len(record.Missing) != 0 || record.Highest != 100 {
+		t.Fatalf("sequence record: %+v %v", record, err)
+	}
+}
+
 // One sender's share of a room's gap records, and the bound across rooms.
 func TestRoomGapSharesAndTotal(t *testing.T) {
 	journal, err := Open(t.TempDir() + "/state")
