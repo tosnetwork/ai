@@ -410,8 +410,11 @@ func TestRoomAADDecodesStrictly(t *testing.T) {
 		"empty":     {},
 		"truncated": raw[:len(raw)-1],
 		"trailing":  append(bytes.Clone(raw), 0),
-		"domain":    append([]byte("tos.messaging.room-aad.v2\x00"), raw[len(aadDomain):]...),
 	}
+	// Another version of the domain.
+	domain := bytes.Clone(raw)
+	domain[len(aadDomain)-2]++
+	refused["domain"] = domain
 	// A length prefix naming one byte more than the room ID takes.
 	longer := bytes.Clone(raw)
 	longer[len(aadDomain)+3]++
