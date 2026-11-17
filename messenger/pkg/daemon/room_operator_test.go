@@ -32,6 +32,12 @@ type operatorScene struct {
 
 func newOperatorScene(t *testing.T, count int) *operatorScene {
 	t.Helper()
+	return newOperatorSceneWith(t, count, roomRetention)
+}
+
+// newOperatorSceneWith is newOperatorScene under a handshake retention.
+func newOperatorSceneWith(t *testing.T, count int, retention time.Duration) *operatorScene {
+	t.Helper()
 	driver := openMLSDriver(t)
 	start := time.Unix(1_900_000_000, 0)
 	digits := [][2]string{{"a", "1"}, {"b", "2"}, {"c", "3"}, {"d", "4"}}[:count]
@@ -45,7 +51,7 @@ func newOperatorScene(t *testing.T, count int) *operatorScene {
 		cards := &roomCardsCarrier{}
 		scene.cards = append(scene.cards, cards)
 		if err := node.d.installRoomRuntime(roomRuntimeSettings{driver: driver, cards: cards, skew: 5 * time.Minute,
-			retention: roomRetention, gapDelay: testRoomGapDelay}); err != nil {
+			retention: retention, gapDelay: testRoomGapDelay}); err != nil {
 			t.Fatalf("install the room runtime: %v", err)
 		}
 	}
@@ -68,7 +74,50 @@ func relayOne(t *testing.T, from, to *relayNode) carrierapi.Response {
 	if _, err := from.d.dispatch.Sweep(context.Background(), 0); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	return deliver(t, from, to, onlyFrame(t, from).frame)
+	copies := takeFrames(t, from, func(frame relayframe.Frame, _ string) bool { return frame.Kind == relayframe.KindCopy })
+	if len(copies) != 1 {
+		t.Fatalf("the carrier holds %d copy frames, want 1", len(copies))
+	}
+	return deliver(t, from, to, copies[0].frame)
+}
+
+// takeFrames removes from a node's carrier the frames match selects and
+// leaves the others, as a carrier holding several kinds of deposit would.
+func takeFrames(t *testing.T, node *relayNode, match func(relayframe.Frame, string) bool) []carried {
+	t.Helper()
+	node.carrier.mutex.Lock()
+	defer node.carrier.mutex.Unlock()
+	var taken, kept []carried
+	for _, frame := range node.carrier.frames {
+		decoded, err := relayframe.Decode(frame.frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if match(decoded, frame.recipient) {
+			taken = append(taken, frame)
+		} else {
+			kept = append(kept, frame)
+		}
+	}
+	node.carrier.frames = kept
+	return taken
+}
+
+// roomObjectFrames takes the kind-3 frames of one object type a node
+// deposited to a recipient (part 0 names the type; later parts follow it).
+func roomObjectFrames(t *testing.T, node *relayNode, recipient string, kind uint8) []carried {
+	t.Helper()
+	digests := map[[32]byte]bool{}
+	return takeFrames(t, node, func(frame relayframe.Frame, to string) bool {
+		if frame.Kind != relayframe.KindRoom || to != recipient {
+			return false
+		}
+		if frame.PartIndex == 0 {
+			_, objectType, err := relayframe.RoomObjectPrefix(frame.Part)
+			digests[frame.ObjectDigest] = err == nil && objectType == kind
+		}
+		return digests[frame.ObjectDigest]
+	})
 }
 
 // founded creates the test room at node 0.
@@ -159,17 +208,7 @@ func (s *operatorScene) compose(t *testing.T, index int, body, idem string) (str
 // roomFrames takes the kind-3 frames a node's carrier got for a recipient.
 func roomFrames(t *testing.T, node *relayNode, recipient string) []carried {
 	t.Helper()
-	var frames []carried
-	for _, frame := range node.carrier.take() {
-		decoded, err := relayframe.Decode(frame.frame)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if decoded.Kind == relayframe.KindRoom && frame.recipient == recipient {
-			frames = append(frames, frame)
-		}
-	}
-	return frames
+	return roomObjectFrames(t, node, recipient, relayframe.RoomApplication)
 }
 
 // sequenceOf decodes the room.message a journaled Event carries.
@@ -318,19 +357,32 @@ func TestRoomOperatorRemoveStagesTheCommitOnceToTheRemovedMember(t *testing.T) {
 	if after.Membership().Contains(b.d.config.AgentID) || after.RoomEpoch != before.RoomEpoch+1 || after.MLSEpoch != before.MLSEpoch+1 {
 		t.Fatalf("after the Remove: %+v", after)
 	}
+	// The removing Commit went to B in its single deposit, and its head,
+	// settled by that deposit, is retired: no queue, no re-deposit.
+	commits := roomObjectFrames(t, a, b.d.config.AgentID, relayframe.RoomCommit)
+	if len(commits) != 1 {
+		t.Fatalf("B got %d removing-Commit frames", len(commits))
+	}
+	decoded, err := relayframe.Decode(commits[0].frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if object, err := relayframe.DecodeRoomObject(decoded.Part); err != nil || object.MLSEpoch != after.MLSEpoch {
+		t.Fatalf("the removing Commit: %+v %v", object, err)
+	}
 	heads, err := a.d.journal.RoomOutboxHeads(testRoomID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var removing *eventlog.RoomOutboxHead
-	for index := range heads {
-		if heads[index].MLSEpoch == after.MLSEpoch {
-			removing = &heads[index]
+	for _, head := range heads {
+		if head.MLSEpoch == after.MLSEpoch {
+			t.Fatalf("the removing Commit is still queued: %+v", head)
 		}
 	}
-	if removing == nil || removing.Type != eventlog.RoomObjectCommit || len(removing.Members) != 1 ||
-		removing.Members[0].AgentID != b.d.config.AgentID || !removing.Members[0].Once {
-		t.Fatalf("the removing Commit: %+v", removing)
+	scene.clock.set(scene.clock.now().Add(time.Hour / 2))
+	scene.rooms(0).maintain()
+	if again := roomObjectFrames(t, a, b.d.config.AgentID, relayframe.RoomCommit); len(again) != 0 {
+		t.Fatal("the removing Commit was deposited again")
 	}
 	if _, known, err := scene.rooms(0).ledger.RoomCredential(testRoomID, b.d.config.AgentID); err != nil || known {
 		t.Fatalf("the removed member's credential is still listed: %v", err)
@@ -377,8 +429,8 @@ func TestRoomOperatorRefusesWhatOnlyTheAuthorityMayDo(t *testing.T) {
 	if _, err := a.d.dispatch.Sweep(context.Background(), 0); err != nil {
 		t.Fatal(err)
 	}
-	if frames := a.carrier.take(); len(frames) != 0 {
-		t.Fatalf("adding a member again sent %d frames", len(frames))
+	if frames := takeFrames(t, a, func(frame relayframe.Frame, _ string) bool { return frame.Kind == relayframe.KindCopy }); len(frames) != 0 {
+		t.Fatalf("adding a member again sent %d copies", len(frames))
 	}
 
 	// C was never added: its KeyPackage is refused and records nothing.

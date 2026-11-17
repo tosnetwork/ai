@@ -50,6 +50,8 @@ type recordingCarrier struct {
 	// the smallest of its card's relays; a recipient not listed reports the
 	// protocol maximum.
 	ttl map[string]uint64
+	// withdrawn records carrier.withdraw calls.
+	withdrawn []carried
 }
 
 func (c *recordingCarrier) Carry(_ context.Context, recipient, key, withdraw string, _ uint64,
@@ -72,6 +74,20 @@ func (c *recordingCarrier) Carry(_ context.Context, recipient, key, withdraw str
 		ttl = carrierapi.MaxRelayTTLSeconds
 	}
 	return carrierapi.Carried(ttl), nil
+}
+
+// Withdraw records a withdrawal of a deposited envelope.
+func (c *recordingCarrier) Withdraw(_ context.Context, recipient, key string) (carrierapi.Response, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.withdrawn = append(c.withdrawn, carried{recipient: recipient, key: key})
+	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultApplied}, nil
+}
+
+func (c *recordingCarrier) withdrawals() []carried {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return append([]carried(nil), c.withdrawn...)
 }
 
 func (c *recordingCarrier) take() []carried {

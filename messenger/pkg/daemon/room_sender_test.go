@@ -260,20 +260,8 @@ func TestRoomSenderRemovedMemberSealsNothing(t *testing.T) {
 	if err := scene.rooms(0).RemoveRoomMember(context.Background(), testRoomID, b.d.config.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := fused(t, a)
-	heads, err := a.d.journal.RoomOutboxHeads(testRoomID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, head := range heads {
-		if head.MLSEpoch != after.MLSEpoch {
-			continue
-		}
-		object, err := a.d.journal.RoomOutboxObject(head.ObjectDigest)
-		if err != nil {
-			t.Fatal(err)
-		}
-		deliverObject(t, a, b, object)
+	for _, frame := range roomObjectFrames(t, a, b.d.config.AgentID, relayframe.RoomCommit) {
+		deliver(t, a, b, frame.frame)
 	}
 	if _, removed, err := b.d.journal.RoomRemovalOf(testRoomID); err != nil || !removed {
 		t.Fatalf("the removing Commit was not taken as a removal notice: %v", err)

@@ -309,6 +309,10 @@ func (r *roomRuntime) depositApplication(ctx context.Context, send eventlog.Room
 		if member.State != eventlog.RoomDeliveryPending || member.NextAttemptAtUnix > uint64(now.Unix()) {
 			continue
 		}
+		// Handshake objects go before application objects to a member.
+		if r.pendingHandshakeTo(send.RoomID, member.AgentID) {
+			continue
+		}
 		if err := r.depositApplicationTo(ctx, send, object, member.AgentID, now); err != nil {
 			r.daemon.report("room message "+send.RoomID, err)
 		}

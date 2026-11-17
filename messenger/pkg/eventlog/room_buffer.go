@@ -346,17 +346,51 @@ func (j *Journal) ReleaseRoomObject(roomID, digest string) error {
 // or whose room is no longer held here. Every drop is returned for the
 // caller's gap records.
 func (j *Journal) SweepRoomBuffer(now time.Time) ([]BufferedRoomDrop, error) {
+	return j.SweepRoomBufferRecording(now, nil)
+}
+
+// SweepRoomBufferRecording is SweepRoomBuffer that hands every drop to
+// record before its buffered record is deleted, outside the journal mutex,
+// so the drop's gap is durable first: a crash or a failed record leaves
+// the buffered object, which the next sweep drops again. A drop whose
+// record failed is not deleted and not returned.
+func (j *Journal) SweepRoomBufferRecording(now time.Time, record func(BufferedRoomDrop) error) ([]BufferedRoomDrop, error) {
 	if err := j.usable(); err != nil {
 		return nil, err
 	}
 	if now.IsZero() {
 		return nil, errors.New("invalid room buffer sweep time")
 	}
+	drops, names, err := j.roomBufferDrops(now)
+	if err != nil {
+		return nil, err
+	}
+	var done []BufferedRoomDrop
+	for index, drop := range drops {
+		if record != nil {
+			if err := record(drop); err != nil {
+				continue
+			}
+		}
+		j.mutex.Lock()
+		err := j.removeRoomBufferNames([]string{names[index]})
+		j.mutex.Unlock()
+		if err != nil {
+			return done, err
+		}
+		done = append(done, drop)
+	}
+	return done, nil
+}
+
+// roomBufferDrops lists the buffered objects a sweep at now drops, with
+// their record names.
+func (j *Journal) roomBufferDrops(now time.Time) ([]BufferedRoomDrop, []string, error) {
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 	entries, err := j.roomBufferEntries()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	epochs := map[string]uint64{}
 	held := map[string]bool{}
@@ -366,7 +400,7 @@ func (j *Journal) SweepRoomBuffer(now time.Time) ([]BufferedRoomDrop, error) {
 		if _, read := held[entry.roomID]; !read {
 			record, found, err := j.readRoomMLS(entry.roomID)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			held[entry.roomID] = found
 			epochs[entry.roomID] = record.MLSEpoch
@@ -385,10 +419,7 @@ func (j *Journal) SweepRoomBuffer(now time.Time) ([]BufferedRoomDrop, error) {
 		names = append(names, entry.name)
 		drops = append(drops, BufferedRoomDrop{RoomID: entry.roomID, SenderAgentID: entry.sender, MLSEpoch: entry.mlsEpoch, Reason: reason})
 	}
-	if err := j.removeRoomBufferNames(names); err != nil {
-		return nil, err
-	}
-	return drops, nil
+	return drops, names, nil
 }
 
 // roomBufferEntries lists the buffer in arrival order. A name that is not a

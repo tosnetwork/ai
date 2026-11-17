@@ -60,6 +60,8 @@ var evidenceCodes = map[fault.Code]struct{}{
 type relayCarrier interface {
 	Carry(ctx context.Context, recipientAgentID, idempotencyKey, withdrawKey string,
 		expiresAtUnix uint64, frame []byte) (carrierapi.Response, error)
+	// Withdraw removes a deposited envelope from the recipient's relays.
+	Withdraw(ctx context.Context, recipientAgentID, idempotencyKey string) (carrierapi.Response, error)
 }
 
 // relayRuntime is the daemon half of relay carriage.
@@ -888,6 +890,12 @@ func (r *relayRuntime) DeliveryAck(ctx context.Context, sender string, raw []byt
 	}
 	if frame.Kind != relayframe.KindDeliveryAck {
 		return carrierapi.Refusal(carrierapi.CodeKindNotCarried)
+	}
+	if relayframe.IsRoomAck(frame.Part) {
+		if r.rooms == nil {
+			return carrierapi.Refusal(carrierapi.CodeKindNotCarried)
+		}
+		return r.rooms.roomAckReceived(ctx, sender, frame)
 	}
 	ack, err := relayframe.DecodeAck(frame.Part)
 	if err != nil {

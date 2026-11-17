@@ -605,6 +605,9 @@ func (r *roomRuntime) commitReadyAdds(roomID string) {
 			return
 		}
 	}
+	if record, found, err := r.ledger.Current(roomID); err == nil && found {
+		r.fanOut(context.Background(), record)
+	}
 }
 
 // commitAddsEverywhere is the maintenance pass over every room this
@@ -757,7 +760,7 @@ func (r *roomRuntime) stageAdd(record eventlog.RoomMLSRecord, joiner string, lea
 // authorization, the MLS Remove of its leaf, and the Commit staged to every
 // remaining member but the authority and once to the removed member
 // (section 11.4). A member no longer in the room is a no-op.
-func (r *roomRuntime) RemoveRoomMember(_ context.Context, roomID, agentID string) error {
+func (r *roomRuntime) RemoveRoomMember(ctx context.Context, roomID, agentID string) error {
 	if !ids.Agent.MatchString(agentID) {
 		return fault.New(fault.CodePayloadMalformed, "invalid member identifier")
 	}
@@ -817,7 +820,18 @@ func (r *roomRuntime) RemoveRoomMember(_ context.Context, roomID, agentID string
 		return err
 	}
 	// The removed member's card goes with its credential.
-	return r.daemon.journal.ForgetRoomMemberCard(roomID, agentID)
+	if err := r.daemon.journal.ForgetRoomMemberCard(roomID, agentID); err != nil {
+		return err
+	}
+	// Its in-flight generations are withdrawn, and the removing Commit goes
+	// out at once.
+	if err := r.withdrawFromRemoved(ctx, roomID, agentID, now); err != nil {
+		return err
+	}
+	if current, found, err := r.ledger.Current(roomID); err == nil && found {
+		r.fanOut(ctx, current)
+	}
+	return nil
 }
 
 // othersOf returns the members other than this installation, ascending.
