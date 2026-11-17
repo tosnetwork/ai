@@ -403,3 +403,37 @@ func TestRoomPartZeroEvidenceIsCheckedBeforeStoring(t *testing.T) {
 		t.Fatalf("%d parts stored under failing evidence", n)
 	}
 }
+
+// Only the authority commits or sends rosters, whatever the rest of the
+// object says: a Commit C's own leaf made, under C's evidence, and a roster
+// whose header C itself authorized are refused and change nothing.
+func TestRoomHandshakeObjectsOfAnotherMemberAreRefusedWhole(t *testing.T) {
+	scene := newAddedScene(t, roomRetention)
+	b := scene.nodes[1]
+	before, _ := fused(t, b)
+	state, err := scene.driver.Join(scene.c.identity.State, scene.addC.Welcomes[scene.c.leaf.KeyPackageRef])
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, commit, _, err := scene.driver.Commit(state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := scene.authority.object(relayframe.RoomCommit, before.RoomEpoch, before.MLSEpoch+1, nil, commit)
+	requireRejected(t, b, send(t, b, scene.c.agent(), framesOf(t, scene.c, own, 0)), fault.CodeNotAuthentic)
+	requireUnmoved(t, b, before)
+
+	impostor := &testAuthority{t: t, member: scene.c, clock: scene.clock}
+	membership := scene.authority.record.Membership()
+	body, err := relayframe.EncodeRoster([]relayframe.RosterEntry{rosterEntry(t, scene.c)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := &relayframe.RoomHeader{Membership: membership, Authorization: impostor.authorization(membership, scene.clock.now()),
+		EndsAtUnix: before.RoomEndsAtUnix}
+	roster := scene.authority.object(relayframe.RoomRoster, membership.Epoch, before.MLSEpoch, header, body)
+	requireRejected(t, b, send(t, b, scene.c.agent(), framesOf(t, scene.c, roster, 0)), fault.CodeNotAuthentic)
+	if _, found := credentialOf(t, b, scene.c.agent()); found {
+		t.Fatal("a roster from a member taught a credential")
+	}
+}
