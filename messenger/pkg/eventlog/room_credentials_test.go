@@ -233,6 +233,18 @@ func TestRoomInstallFixesTheEndToTheAuthorityCredential(t *testing.T) {
 			t.Fatalf("%s: the room was installed", name)
 		}
 	}
+	// A member's credential without the authority's fixes no end.
+	pair, err := room.Found(fusedRoom, []string{fusedAgent(0), fusedAgent(3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutAuthority := base
+	withoutAuthority.Binding.MembershipDigest = pair.Digest
+	withoutAuthority.Proof = fixture.proof(pair)
+	withoutAuthority.Credentials, withoutAuthority.EndsAtUnix = []group.LeafBinding{memberBinding(t, fusedAgent(3))}, testRoomEnd
+	if _, err := ledger.InstallFounder(withoutAuthority, fixture.now); !errors.Is(err, ErrRoomAuthorityCredential) {
+		t.Fatalf("no authority credential: %v", err)
+	}
 	install := base
 	install.Credentials, install.EndsAtUnix = fixture.credentials(), testRoomEnd
 	if _, err := ledger.InstallFounder(install, fixture.now); err != nil {
