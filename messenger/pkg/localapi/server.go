@@ -27,6 +27,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
+	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
 )
@@ -76,6 +77,28 @@ type Config struct {
 	// EconomicActionAdmitter is a daemon-owned durable writer-generation and
 	// exact-action boundary. When absent, autonomous economic sends fail closed.
 	EconomicActionAdmitter EconomicActionAdmitter
+	// RoomOperator is the daemon's private-room runtime: membership changes,
+	// joining and room-wide composition over the relay. When absent, those
+	// operations are refused as not configured; rooms.list and rooms.gaps
+	// read the journal and work without it.
+	RoomOperator RoomOperator
+}
+
+// RoomComposition is a room-wide message: the runtime's meaning, which the
+// daemon seals to the room in its current epoch and fans out to its members.
+type RoomComposition struct {
+	RoomID, ConversationID, ReplyToEventID, MediaType, Body, IdempotencyKey string
+	MembershipEpoch, ExpiresAtUnix                                          uint64
+}
+
+// RoomOperator owns private-room membership and room-wide carriage. Every
+// membership method is reached only by a verified owner decision.
+type RoomOperator interface {
+	CreateRoom(ctx context.Context, roomID string) error
+	AddRoomMember(ctx context.Context, roomID, agentID string) error
+	RemoveRoomMember(ctx context.Context, roomID, agentID string) error
+	JoinRoom(ctx context.Context, roomID, authorityAgentID string) error
+	ComposeRoomMessage(ctx context.Context, composition RoomComposition) (eventID string, fresh bool, err error)
 }
 
 type EconomicActionAdmitter interface {
@@ -354,6 +377,12 @@ func (s *Server) handle(ctx context.Context, principal Principal, raw []byte) Re
 		return s.exportDeviceHistory(request)
 	case OpListDeviceHistory:
 		return s.listDeviceHistory(request)
+	case OpCreateRoom, OpAddRoomMember, OpRemoveRoomMember, OpJoinRoom:
+		return s.changeRoom(ctx, request)
+	case OpListRooms:
+		return s.listRooms(now)
+	case OpRoomGaps:
+		return s.roomGaps(request)
 	}
 	return refuse(fault.CodeInternal, errors.New("unknown local operation"))
 }
@@ -954,6 +983,23 @@ func (s *Server) queue(request Request) Response {
 }
 
 func (s *Server) compose(ctx context.Context, request Request) Response {
+	if request.RoomID != "" {
+		private, err := s.privateRoom(request.RoomID)
+		if err != nil {
+			return refuse(fault.CodeInternal, err)
+		}
+		if RoomWideComposition(request) {
+			if !private {
+				return refuse(fault.CodePayloadMalformed, errors.New("a room-wide composition needs a private room held here"))
+			}
+			return s.composeRoom(ctx, request)
+		}
+		// A private room's content is sealed to the room, so its members'
+		// removal takes effect; it is never a pairwise device copy.
+		if private {
+			return refuse(fault.CodePayloadMalformed, errors.New("a private room's messages are composed to the room, not to a device"))
+		}
+	}
 	if request.RecipientAgentID != "" {
 		if s.config.ContactResolver == nil {
 			return refuse(fault.CodeClassNotDelegated, errors.New("recipient route verification is not configured"))
@@ -980,6 +1026,130 @@ func (s *Server) compose(ctx context.Context, request Request) Response {
 		return refuse(fault.CodeInternal, err)
 	}
 	return Response{OK: true, Fresh: fresh, EventID: event.EventID}
+}
+
+// privateRoom reports whether a room is a private room held here.
+func (s *Server) privateRoom(roomID string) (bool, error) {
+	ledger, err := s.config.Journal.OpenRoomMLS()
+	if err != nil {
+		return false, err
+	}
+	_, found, err := ledger.Current(roomID)
+	return found, err
+}
+
+// composeRoom takes the kind-3 path: the composition is checked against the
+// room's current epoch and this installation's membership, and handed to the
+// room runtime, which seals it to the room.
+func (s *Server) composeRoom(ctx context.Context, request Request) Response {
+	ledger, err := s.config.Journal.OpenRoomMLS()
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	record, found, err := ledger.Current(request.RoomID)
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	if !found {
+		return refuse(fault.CodePayloadMalformed, errors.New("a room-wide composition needs a private room held here"))
+	}
+	if !record.Membership().Contains(s.config.Dispatcher.LocalIdentity().AgentID) {
+		return refuse(fault.CodeNotARoomMember, errors.New("this installation is not a member of the room"))
+	}
+	if request.MembershipEpoch != record.RoomEpoch {
+		return refuse(fault.CodeRoomEpochGap, errors.New("the composition names another room epoch than the current one"))
+	}
+	// The sealed Event is bounded before the MLS seal; the body alone already
+	// exceeding it is refused here.
+	if len(request.Body) > relayframe.MaxRoomApplicationPlaintextBytes {
+		return refuse(fault.CodeContentTooLarge, errors.New("a room message exceeds the room plaintext bound"))
+	}
+	if s.config.RoomOperator == nil {
+		return refuse(fault.CodeClassNotDelegated, errors.New("private rooms over the relay are not configured"))
+	}
+	eventID, fresh, err := s.config.RoomOperator.ComposeRoomMessage(ctx, RoomComposition{
+		RoomID: request.RoomID, ConversationID: request.ConversationID, ReplyToEventID: request.ReplyToEventID,
+		MediaType: request.MediaType, Body: request.Body, IdempotencyKey: request.IdempotencyKey,
+		MembershipEpoch: request.MembershipEpoch, ExpiresAtUnix: request.ExpiresAtUnix,
+	})
+	if err != nil {
+		return refuse(faultCodeOr(err, fault.CodeInternal), err)
+	}
+	return Response{OK: true, Fresh: fresh, EventID: eventID, RoomID: request.RoomID}
+}
+
+// changeRoom carries one owner membership decision to the room runtime.
+func (s *Server) changeRoom(ctx context.Context, request Request) Response {
+	if s.config.RoomOperator == nil {
+		return refuse(fault.CodeClassNotDelegated, errors.New("private rooms over the relay are not configured"))
+	}
+	var err error
+	switch request.Op {
+	case OpCreateRoom:
+		err = s.config.RoomOperator.CreateRoom(ctx, request.RoomID)
+	case OpAddRoomMember:
+		err = s.config.RoomOperator.AddRoomMember(ctx, request.RoomID, request.RoomMemberAgentID)
+	case OpRemoveRoomMember:
+		err = s.config.RoomOperator.RemoveRoomMember(ctx, request.RoomID, request.RoomMemberAgentID)
+	case OpJoinRoom:
+		err = s.config.RoomOperator.JoinRoom(ctx, request.RoomID, request.RoomAuthorityAgentID)
+	default:
+		return refuse(fault.CodeInternal, errors.New("unknown room operation"))
+	}
+	if err != nil {
+		return refuse(faultCodeOr(err, fault.CodeInternal), err)
+	}
+	return Response{OK: true, RoomID: request.RoomID}
+}
+
+// listRooms reads the private rooms held here and the live pending joins.
+func (s *Server) listRooms(now time.Time) Response {
+	ledger, err := s.config.Journal.OpenRoomMLS()
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	records, err := ledger.List()
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	joins, err := s.config.Journal.ListPendingRoomJoins(now)
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	local := s.config.Dispatcher.LocalIdentity().AgentID
+	rooms := make([]RoomSummary, 0, len(records)+len(joins))
+	for _, record := range records {
+		rooms = append(rooms, RoomSummary{RoomID: record.RoomID, State: "joined", AuthorityAgentID: record.AuthorityAgentID,
+			IsAuthority: record.AuthorityAgentID == local, RoomEpoch: record.RoomEpoch, MLSEpoch: record.MLSEpoch,
+			Members: append([]string(nil), record.Members...)})
+	}
+	for _, join := range joins {
+		rooms = append(rooms, RoomSummary{RoomID: join.RoomID, State: string(join.State), AuthorityAgentID: join.AuthorityAgentID,
+			InviteExpiresAtUnix: join.InviteExpiresAtUnix})
+	}
+	return Response{OK: true, Rooms: rooms}
+}
+
+// roomGaps reads one room's gap records, newest first.
+func (s *Server) roomGaps(request Request) Response {
+	gaps, err := s.config.Journal.RoomGaps(request.RoomID, request.Limit)
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	listed := make([]RoomGap, 0, len(gaps))
+	for _, gap := range gaps {
+		listed = append(listed, RoomGap{GapID: gap.ID, SenderAgentID: gap.SenderAgentID, FirstSequence: gap.FirstSequence,
+			LastSequence: gap.LastSequence, Reason: string(gap.Reason), Dropped: gap.Dropped, DeclaredAtUnix: gap.DeclaredAtUnix})
+	}
+	return Response{OK: true, RoomID: request.RoomID, RoomGaps: listed}
+}
+
+// faultCodeOr returns the fault code an error carries, or fallback.
+func faultCodeOr(err error, fallback fault.Code) fault.Code {
+	if value, ok := fault.Of(err); ok {
+		return value.Code
+	}
+	return fallback
 }
 
 func (s *Server) composeProtocolResult(request Request) Response {

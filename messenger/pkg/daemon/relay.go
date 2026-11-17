@@ -608,6 +608,18 @@ func (r *relayRuntime) Carry(context.Context, carrierapi.Request, []byte) carrie
 	return carrierapi.NotServed()
 }
 
+// RoomCards is the carrier's operation (its chat peer store); the daemon
+// does not serve it.
+func (r *relayRuntime) RoomCards(context.Context, carrierapi.Request) carrierapi.Response {
+	return carrierapi.NotServed()
+}
+
+// Withdraw is the carrier's operation (its relay outbox); the daemon does
+// not serve it.
+func (r *relayRuntime) Withdraw(context.Context, carrierapi.Request) carrierapi.Response {
+	return carrierapi.NotServed()
+}
+
 // Deliver handles a verified packet's frame of kind 1 or 4.
 //
 // The carrier handler's per-connection deadline does not bound CheckPeer's

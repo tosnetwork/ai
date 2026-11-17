@@ -2,7 +2,8 @@ package eventlog
 
 // Restart recovery and garbage collection of private-room records.
 //
-// The roots are every fused room record and every room-outbox head: an older
+// The roots are every fused room record, every room-outbox head and every
+// pending join (which names the identity state staged for its Welcome): an older
 // Commit stays re-depositable after the authority has moved on, and a roster
 // or Commit whose fused record has been superseded is named only by its head.
 // A staged state, delegation, membership or object chunk that no root names
@@ -36,8 +37,14 @@ type RoomGarbageReport struct {
 // recoverRooms runs at Open, before any room operation: it publishes or
 // discards every staged Commit output, then collects unnamed records.
 func (j *Journal) recoverRooms() error {
-	_, err := j.collectRoomGarbage()
-	return err
+	if _, err := j.collectRoomGarbage(); err != nil {
+		return err
+	}
+	// The receive state of a room neither held nor pending is what a crash
+	// between the room's end and ForgetRoomState left behind.
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	return j.sweepOrphanedRoomState()
 }
 
 // CollectRoomGarbage resolves staged Commit outputs and deletes every staged
@@ -143,6 +150,24 @@ func (j *Journal) namedRoomRecords() (namedRoomSet, bool, error) {
 		named.delegations[record.DelegationDigest] = struct{}{}
 		for _, digest := range record.PriorMemberships {
 			named.memberships[digest] = struct{}{}
+		}
+	}
+	// A pending join names the identity state it staged for its Welcome.
+	joinKeys, err := j.roomJoinKeys()
+	if err != nil {
+		return named, false, nil
+	}
+	for _, key := range joinKeys {
+		join, found, err := j.readRoomJoin(key.room, key.authority)
+		if err != nil || !found {
+			return named, false, nil
+		}
+		for _, chunk := range join.IdentityStateChunks {
+			path, err := j.roomStatePath(key.room, chunk)
+			if err != nil {
+				return named, false, nil
+			}
+			named.state[filepath.Base(path)] = struct{}{}
 		}
 	}
 	entries, err := os.ReadDir(filepath.Join(j.root, roomOutboxDir))

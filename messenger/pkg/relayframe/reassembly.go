@@ -393,6 +393,17 @@ type Usage struct {
 	ObjectKeys []string
 }
 
+// Holds reports whether an incomplete object of a sender is held.
+func (r *Reassembler) Holds(sender string, digest [sha256.Size]byte) bool {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	_, held := r.objects[reassemblyKey{sender: sender, digest: digest}]
+	return held
+}
+
+// Lifetime is how long an incomplete object is held after its first part.
+func (r *Reassembler) Lifetime() time.Duration { return r.limits.Lifetime }
+
 // Usage returns a snapshot of the held parts.
 func (r *Reassembler) Usage() Usage {
 	r.mutex.Lock()
