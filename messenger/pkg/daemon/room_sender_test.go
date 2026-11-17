@@ -470,3 +470,38 @@ func TestRoomAddRecordedBeforeACrashIsCommittedOnTheNextPass(t *testing.T) {
 		t.Fatalf("the add was not finished: %+v %v", adds, err)
 	}
 }
+
+// The Add Commit judges the joiner's credential against its stored evidence
+// pinned to that credential: evidence naming another device commits
+// nothing, and the add waits for the next pass.
+func TestRoomAddWaitsWhileTheJoinersEvidenceFails(t *testing.T) {
+	scene := newOperatorScene(t, 2)
+	a, b := scene.nodes[0], scene.nodes[1]
+	record := scene.founded(t)
+	now := scene.clock.now()
+	if _, _, err := a.d.journal.RecordRoomAdd(testRoomID, b.d.config.AgentID, now.Add(time.Hour/2), now); err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := scene.rooms(1).issueLeaf(record.RoomEndsAtUnix, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.d.journal.RecordRoomAddKeyPackage(testRoomID, b.d.config.AgentID, leaf.deviceJSON, leaf.encoded, now); err != nil {
+		t.Fatal(err)
+	}
+	good, _, err := a.d.journal.LoadRelayEvidence(b.d.config.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := evidenceFor(t, b, "dev_"+strings.Repeat("9", 64), uint64(now.Unix()), uint64(now.Add(30*time.Minute).Unix()))
+	if err := a.d.journal.StoreRelayEvidence(b.d.config.AgentID, other, canon.Digest(good), now); err != nil {
+		t.Fatal(err)
+	}
+	scene.rooms(0).maintain()
+	if after, _ := fused(t, a); after.Membership().Contains(b.d.config.AgentID) {
+		t.Fatal("an Add was committed while the joiner's evidence fails")
+	}
+	if adds, err := a.d.journal.RoomAdds(testRoomID, now); err != nil || len(adds) != 1 || !adds[0].Ready() {
+		t.Fatalf("the add was not kept: %+v %v", adds, err)
+	}
+}
