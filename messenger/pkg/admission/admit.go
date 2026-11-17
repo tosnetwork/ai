@@ -693,6 +693,15 @@ func (g *Gate) judgeRoomCarriage(inbound Inbound, delegation identity.Delegation
 	if !joined {
 		return false, fault.CodeNotARoomMember, nil
 	}
+	// D18: at end + skew the room has ended for every member.
+	if roomEnded(record.RoomEndsAtUnix, g.config.MaxClockSkewSeconds, inbound.ReceivedAtUnix) {
+		return false, fault.CodeRoomEnded, nil
+	}
+	// A room whose credential list cannot be read (for example one a crash
+	// left half retired) admits nothing.
+	if _, _, err := g.config.RoomMLS.RoomCredential(carriage.RoomID, carriage.PacketSenderAgentID); err != nil {
+		return false, "", err
+	}
 	if carriage.PacketSenderAgentID != inbound.Event.SenderAgentID {
 		return false, fault.CodeSenderMismatch, nil
 	}
@@ -717,6 +726,15 @@ func (g *Gate) judgeRoomCarriage(inbound Inbound, delegation identity.Delegation
 		return false, "", nil
 	}
 	return true, "", nil
+}
+
+// roomEnded reports whether a receive time is at or past a room's end plus
+// the clock-skew bound, with checked arithmetic.
+func roomEnded(endsAtUnix, skewSeconds, receivedAtUnix uint64) bool {
+	if endsAtUnix == 0 || skewSeconds > ^uint64(0)-endsAtUnix {
+		return true
+	}
+	return receivedAtUnix >= endsAtUnix+skewSeconds
 }
 
 // leafCredentialHolds reports whether a leaf credential is the Event

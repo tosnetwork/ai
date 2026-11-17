@@ -135,19 +135,22 @@ type harness struct {
 	sender     *stubSender
 	dispatcher *dispatch.Dispatcher
 	clock      time.Time
+	// root is the journal's directory, for tests that damage a record.
+	root string
 }
 
 func newHarness(t *testing.T) *harness { return newHarnessWithPolicy(t, firewall.Default()) }
 
 func newHarnessWithPolicy(t *testing.T, policy firewall.Policy) *harness {
 	t.Helper()
-	journal, err := eventlog.Open(filepath.Join(t.TempDir(), "state"))
+	root := filepath.Join(t.TempDir(), "state")
+	journal, err := eventlog.Open(root)
 	if err != nil {
 		t.Fatalf("journal: %v", err)
 	}
 	t.Cleanup(func() { _ = journal.Close() })
 
-	instance := &harness{journal: journal, sender: &stubSender{}, clock: time.Unix(int64(baseUnix), 0)}
+	instance := &harness{journal: journal, sender: &stubSender{}, clock: time.Unix(int64(baseUnix), 0), root: root}
 	dispatcher, err := dispatch.New(dispatch.Config{
 		Journal: journal, Suite: stubSuite{}, Sender: instance.sender,
 		Bindings: stubBindings{}, Now: func() time.Time { return instance.clock },

@@ -4,14 +4,19 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	"github.com/tosnetwork/ai/messenger/pkg/room"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -26,7 +31,22 @@ var otherMember = "agent_" + strings.Repeat("3", 64)
 // removes the sender.
 func roomGate(t *testing.T, policy ContactPolicy) (*Gate, *eventlog.Journal, *eventlog.RoomMLSLedger) {
 	t.Helper()
+	return roomGateAt(t, policy, "")
+}
+
+// roomGateAt is roomGate with the room ledger in its own journal at root,
+// when root is set, so a test can damage its records.
+func roomGateAt(t *testing.T, policy ContactPolicy, root string) (*Gate, *eventlog.Journal, *eventlog.RoomMLSLedger) {
+	t.Helper()
 	gate, journal, _, _ := testGate(t, policy)
+	if root != "" {
+		var err error
+		journal, err = eventlog.Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = journal.Close() })
+	}
 	ledger, err := journal.OpenRoomMLS()
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +72,7 @@ func roomGate(t *testing.T, policy ContactPolicy) (*Gate, *eventlog.Journal, *ev
 		Binding: group.State{RoomID: privateRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founded.Digest},
 		Proof:   at(founded), State: []byte("founder state"), EpochAuthenticator: bytes.Repeat([]byte{1}, group.MLSEpochAuthenticatorBytes),
 		KeyPackageRef: canon.Digest([]byte("founder key package")),
+		Credentials:   []group.LeafBinding{roomLeafBinding(t, local, key, baseUnix, baseUnix+43_200)}, EndsAtUnix: baseUnix + 43_200,
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -340,5 +361,55 @@ func TestRoomInviteCarriesTheAuthorityLeafCredential(t *testing.T) {
 		if _, found, err := journal.Lookup(event.EventID); err != nil || found {
 			t.Fatalf("%s: a refused invite was journaled: %v %v", test.name, found, err)
 		}
+	}
+}
+
+// roomLeafBinding signs a leaf credential for a delegation and verifies it
+// on the room path, which is the only way to obtain a binding.
+func roomLeafBinding(t *testing.T, delegation identity.Delegation, key ed25519.PrivateKey, issued, expires uint64) group.LeafBinding {
+	t.Helper()
+	leaf := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x29}, ed25519.SeedSize))
+	device := "dev_" + delegation.AgentID[len("agent_"):]
+	credential, err := group.SignLeafCredential(group.LeafCredential{Network: delegation.Network, AgentID: delegation.AgentID,
+		EndpointID: delegation.EndpointID, DeviceID: device, DeviceSetDigest: canon.Digest([]byte("set")),
+		LeafSignaturePublicKey: leaf.Public().(ed25519.PublicKey), IssuedAtUnix: issued, ExpiresAtUnix: expires}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := e2ee.SetSummary{EndpointID: delegation.EndpointID, Digest: credential.DeviceSetDigest, DeviceIDs: []string{device}}
+	binding, err := group.VerifyRoomLeafCredential(delegation, credential, set, expires, time.Unix(int64(issued), 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return binding
+}
+
+// D18 on the receive side: at the room's end plus the clock-skew bound D11
+// refuses room-ended, and a room whose credential list is gone (a crash left
+// it half retired) admits nothing.
+func TestRoomScopedAdmissionStopsAtTheRoomEndAndInAHalfRetiredRoom(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "rooms")
+	gate, _, ledger := roomGateAt(t, allowList(t, TellThem), root)
+	record, found, err := ledger.Current(privateRoom)
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	ended := record.RoomEndsAtUnix + gate.config.MaxClockSkewSeconds
+	before := roomInbound(t, 1, "just before the end")
+	before.ReceivedAtUnix = ended - 1
+	if decision, err := gate.Admit(before); err != nil || decision.Code == fault.CodeRoomEnded {
+		t.Fatalf("a second before the end: %+v %v", decision, err)
+	}
+	after := roomInbound(t, 1, "at the end")
+	after.ReceivedAtUnix = ended
+	if decision, err := gate.Admit(after); err != nil || decision.Outcome != Rejected || decision.Code != fault.CodeRoomEnded {
+		t.Fatalf("at the end plus skew: %+v %v", decision, err)
+	}
+	listPath := filepath.Join(root, "room-blobs", "l-"+record.CredentialListDigest[len("sha256:"):]+".json")
+	if err := os.Remove(listPath); err != nil {
+		t.Fatal(err)
+	}
+	if decision, err := gate.Admit(roomInbound(t, 1, "half retired")); err == nil && decision.Outcome == Accepted {
+		t.Fatalf("a half-retired room admitted: %+v", decision)
 	}
 }

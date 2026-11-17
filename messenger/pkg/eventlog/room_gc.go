@@ -2,8 +2,10 @@ package eventlog
 
 // Restart recovery and garbage collection of private-room records.
 //
-// The roots are every fused room record, every room-outbox head and every
-// pending join (which names the identity state staged for its Welcome): an older
+// The roots are every fused room record (and through it the room's
+// leaf-credential list, which names the credentials), every room-outbox head
+// and every pending join (which names the identity state staged for its
+// Welcome): an older
 // Commit stays re-depositable after the authority has moved on, and a roster
 // or Commit whose fused record has been superseded is named only by its head.
 // A staged state, delegation, membership or object chunk that no root names
@@ -118,10 +120,12 @@ func (j *Journal) collectRoomGarbage() (RoomGarbageReport, error) {
 }
 
 type namedRoomSet struct {
-	state        map[string]struct{}
-	delegations  map[string]struct{}
-	memberships  map[string]struct{}
-	objectChunks map[string]struct{}
+	state           map[string]struct{}
+	delegations     map[string]struct{}
+	memberships     map[string]struct{}
+	objectChunks    map[string]struct{}
+	credentials     map[string]struct{}
+	credentialLists map[string]struct{}
 }
 
 // namedRoomRecords reads every root and returns what they name. ok is false
@@ -130,6 +134,7 @@ func (j *Journal) namedRoomRecords() (namedRoomSet, bool, error) {
 	named := namedRoomSet{
 		state: map[string]struct{}{}, delegations: map[string]struct{}{},
 		memberships: map[string]struct{}{}, objectChunks: map[string]struct{}{},
+		credentials: map[string]struct{}{}, credentialLists: map[string]struct{}{},
 	}
 	roomIDs, err := j.fusedRoomIDs()
 	if err != nil {
@@ -150,6 +155,16 @@ func (j *Journal) namedRoomRecords() (namedRoomSet, bool, error) {
 		named.delegations[record.DelegationDigest] = struct{}{}
 		for _, digest := range record.PriorMemberships {
 			named.memberships[digest] = struct{}{}
+		}
+		// The list is a root through the record: an unreadable list stops
+		// the collection, since it may be the only name of a credential.
+		named.credentialLists[record.CredentialListDigest] = struct{}{}
+		list, err := j.loadCredentialList(roomID, record.CredentialListDigest)
+		if err != nil {
+			return named, false, nil
+		}
+		for _, entry := range list.Entries {
+			named.credentials[entry.Digest] = struct{}{}
 		}
 	}
 	// A pending join names the identity state it staged for its Welcome.
@@ -215,7 +230,7 @@ func (n namedRoomSet) keepBlob(name string) (bool, bool) {
 		_, keep := n.memberships["sha256:"+value]
 		return true, keep
 	}
-	return false, false
+	return n.keepCredentialBlob(stem)
 }
 
 func (n namedRoomSet) keepObjectChunk(name string) (bool, bool) {

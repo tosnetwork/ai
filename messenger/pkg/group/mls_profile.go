@@ -103,6 +103,9 @@ type AttributedDriver interface {
 	Driver
 	ApplyAttributed(opaqueState, commit []byte) (nextState []byte, committer MLSMember, err error)
 	OpenAttributed(opaqueState, authenticatedData, privateMessage []byte) (nextState, plaintext []byte, sender MLSMember, err error)
+	// JoinAttributed processes a Welcome and reports the leaf that authored
+	// it, which a joiner authenticates as the authority's.
+	JoinAttributed(keyPackagePrivateState, welcome []byte) (opaqueState []byte, sender MLSMember, err error)
 	Members(opaqueState []byte) ([]MLSMember, error)
 }
 

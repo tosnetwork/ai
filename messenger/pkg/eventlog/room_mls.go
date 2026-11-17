@@ -123,7 +123,13 @@ type RoomMLSRecord struct {
 	// EpochAuthenticators are those of the current and earlier retained MLS
 	// epochs, newest first.
 	EpochAuthenticators []EpochAuthenticator `json:"epoch_authenticators"`
-	UpdatedAtUnix       uint64               `json:"updated_at_unix"`
+	// CredentialListDigest names the room's leaf-credential list (section
+	// 11.8), a garbage-collection root through this record.
+	CredentialListDigest string `json:"credential_list_digest"`
+	// RoomEndsAtUnix is the room's end (D18): the expiry of the authority's
+	// leaf credential, fixed at creation.
+	RoomEndsAtUnix uint64 `json:"room_ends_at_unix"`
+	UpdatedAtUnix  uint64 `json:"updated_at_unix"`
 }
 
 // Binding returns the public application binding of the record's MLS state.
@@ -229,6 +235,12 @@ type RoomMLSInstall struct {
 	KeyPackageRef      string
 	// WelcomeRef is the digest of the processed Welcome; empty for a founder.
 	WelcomeRef string
+	// Credentials are the verified leaf credentials the installer holds: the
+	// founder's own, or a joiner's copy of the authority's (from its
+	// room.invite). They must include the authority's, whose expiry is
+	// EndsAtUnix, the room's end (D18).
+	Credentials []group.LeafBinding
+	EndsAtUnix  uint64
 }
 
 // RoomMLSAdvance moves a room by exactly one MLS epoch. Proof is required
@@ -341,6 +353,20 @@ func (l *RoomMLSLedger) install(install RoomMLSInstall, now time.Time) (RoomMLSR
 	} else if held >= MaxRoomsHeld {
 		return RoomMLSRecord{}, ErrRoomsFull
 	}
+	authority := roomAuthorityRef{agentID: install.Proof.Authorization.Authority.AgentID, endpointID: install.Proof.Authorization.Authority.EndpointID}
+	// A joiner's Welcome is checked against the authority credential its
+	// accepted join holds: the one the room.invite carried.
+	if install.WelcomeRef != "" {
+		if err := l.journal.requireJoinAuthorityCredential(binding.RoomID, install.KeyPackageRef, authority, install.Credentials); err != nil {
+			return RoomMLSRecord{}, err
+		}
+	}
+	// The credentials and their list are staged before the fused write that
+	// names the list, so the install roots them.
+	listDigest, err := l.journal.stageInstallCredentials(binding.RoomID, authority, membership.Members, install.Credentials, install.EndsAtUnix)
+	if err != nil {
+		return RoomMLSRecord{}, err
+	}
 	record := RoomMLSRecord{
 		Schema: RoomMLSRecordSchema, RoomID: binding.RoomID,
 		RoomEpoch: binding.Clock.RoomEpoch, MLSEpoch: binding.Clock.MLSEpoch,
@@ -350,8 +376,10 @@ func (l *RoomMLSLedger) install(install RoomMLSInstall, now time.Time) (RoomMLSR
 		Authorization:       encodeAuthorization(install.Proof.Authorization),
 		AcceptedCommitRef:   binding.AcceptedCommitRef,
 		KeyPackageRef:       install.KeyPackageRef, WelcomeRef: install.WelcomeRef,
-		EpochAuthenticators: []EpochAuthenticator{{MLSEpoch: binding.Clock.MLSEpoch, AuthenticatorHex: hex.EncodeToString(authenticator)}},
-		UpdatedAtUnix:       uint64(now.Unix()),
+		EpochAuthenticators:  []EpochAuthenticator{{MLSEpoch: binding.Clock.MLSEpoch, AuthenticatorHex: hex.EncodeToString(authenticator)}},
+		CredentialListDigest: listDigest,
+		RoomEndsAtUnix:       install.EndsAtUnix,
+		UpdatedAtUnix:        uint64(now.Unix()),
 	}
 	return l.commit(record, nil, install.State, delegationJSON)
 }
@@ -459,6 +487,13 @@ func (l *RoomMLSLedger) Advance(advance RoomMLSAdvance, now time.Time) (bool, Ro
 		next.Members = append([]string(nil), proof.Membership.Members...)
 		next.Authorization = encodeAuthorization(proof.Authorization)
 		next.PriorMemberships = retainMemberships(current.MembershipDigest, current.PriorMemberships)
+		// A removed member's credential leaves the list in the same write
+		// (section 11.4); its record is then collected.
+		listDigest, err := l.journal.retainMemberCredentials(current, next.Members)
+		if err != nil {
+			return false, RoomMLSRecord{}, err
+		}
+		next.CredentialListDigest = listDigest
 	}
 	var staged []RoomOutboxHead
 	if advance.Output != nil {
@@ -806,6 +841,9 @@ func validateRoomMLSRecord(record RoomMLSRecord) error {
 		if index > 0 && entry.MLSEpoch >= record.EpochAuthenticators[index-1].MLSEpoch {
 			return errors.New("fused room record epoch authenticators are out of order")
 		}
+	}
+	if !canon.ValidDigest(record.CredentialListDigest) || record.RoomEndsAtUnix == 0 {
+		return errors.New("invalid fused room record credential list or end")
 	}
 	if record.UpdatedAtUnix == 0 {
 		return errors.New("invalid fused room record time")

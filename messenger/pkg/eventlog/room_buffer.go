@@ -10,6 +10,13 @@ package eventlog
 // (32 MiB); an object outside the window, beyond a bound, or held longer than
 // 24 h 5 min is dropped and counted as a gap by the caller.
 //
+// An object at the member's current epoch (e = r) from a member whose leaf
+// credential is not yet known (its roster has not arrived) is held here too,
+// under the same bounds (section 11.8). An object is offered for opening
+// only once its sender's credential is known; the ones still unknown are
+// listed apart, for the caller to refuse once a roster arrived without a
+// verifying entry for the sender.
+//
 // Every bound is judged from the directory listing alone: a record's name
 // carries its room, arrival time, sender, MLS epoch, object length and
 // digest, and reading a record checks that its contents match its name. The
@@ -68,6 +75,9 @@ var (
 	// ErrRoomNotJoined reports a room this installation holds no fused
 	// record of.
 	ErrRoomNotJoined = errors.New("this installation has not joined the room")
+	// ErrRoomBufferCredentialKnown reports an object at the current epoch
+	// whose sender's credential is known: it is opened now, not held.
+	ErrRoomBufferCredentialKnown = errors.New("room object at the current epoch from a member whose credential is known")
 )
 
 // BufferedRoomObject is one object waiting for its epoch.
@@ -154,9 +164,11 @@ func parseRoomBufferName(name string) (roomBufferEntry, bool) {
 		length: length, digest: fields[5], arrivedAt: time.Unix(0, nanos)}, true
 }
 
-// BufferRoomObject keeps an application object sealed in a future MLS epoch.
+// BufferRoomObject keeps an application object sealed in a future MLS epoch,
+// or at the current one from a member whose leaf credential is not yet known.
 // It reports false for an object already buffered. The window is judged
-// against this installation's current MLS epoch r: r < e <= r + 4.
+// against this installation's current MLS epoch r: r < e <= r + 4, or e = r
+// for an unknown credential.
 func (j *Journal) BufferRoomObject(sender string, object []byte, now time.Time) (bool, error) {
 	if err := j.usable(); err != nil {
 		return false, err
@@ -181,7 +193,17 @@ func (j *Journal) BufferRoomObject(sender string, object []byte, now time.Time) 
 		return false, ErrRoomNotJoined
 	}
 	r := record.MLSEpoch
-	if decoded.MLSEpoch <= r || decoded.MLSEpoch-r > RoomBufferLookahead {
+	switch {
+	case decoded.MLSEpoch > r && decoded.MLSEpoch-r <= RoomBufferLookahead:
+	case decoded.MLSEpoch == r:
+		known, err := j.credentialAgents(record)
+		if err != nil {
+			return false, err
+		}
+		if known[sender] {
+			return false, ErrRoomBufferCredentialKnown
+		}
+	default:
 		return false, ErrRoomBufferEpoch
 	}
 	entries, err := j.roomBufferEntries()
@@ -226,11 +248,24 @@ func (j *Journal) BufferRoomObject(sender string, object []byte, now time.Time) 
 }
 
 // OpenableRoomObjects returns, in arrival order, the buffered objects of a
-// room whose epoch the member has reached (e <= r) and can still open
-// (e >= r - 2). Each is verified against its name; the caller opens it and
-// then releases it. A record that does not verify is deleted and returned
-// as a drop, so one damaged record cannot block the room.
+// room whose epoch the member has reached (e <= r), can still open
+// (e >= r - 2), and whose sender's leaf credential is known. Each is verified
+// against its name; the caller opens it and then releases it. A record that
+// does not verify is deleted and returned as a drop, so one damaged record
+// cannot block the room.
 func (j *Journal) OpenableRoomObjects(roomID string) ([]BufferedRoomObject, []BufferedRoomDrop, error) {
+	return j.reachedRoomObjects(roomID, true)
+}
+
+// RoomObjectsAwaitingCredential returns the buffered objects of a room the
+// member could open but whose sender's leaf credential is not known. Once a
+// roster arrived without a verifying entry for the sender, the caller
+// refuses them not-authentic and releases them (section 11.8).
+func (j *Journal) RoomObjectsAwaitingCredential(roomID string) ([]BufferedRoomObject, []BufferedRoomDrop, error) {
+	return j.reachedRoomObjects(roomID, false)
+}
+
+func (j *Journal) reachedRoomObjects(roomID string, credentialKnown bool) ([]BufferedRoomObject, []BufferedRoomDrop, error) {
 	if err := j.usable(); err != nil {
 		return nil, nil, err
 	}
@@ -250,11 +285,16 @@ func (j *Journal) OpenableRoomObjects(roomID string) ([]BufferedRoomObject, []Bu
 	if err != nil {
 		return nil, nil, err
 	}
+	known, err := j.credentialAgents(record)
+	if err != nil {
+		return nil, nil, err
+	}
 	var openable []BufferedRoomObject
 	var drops []BufferedRoomDrop
 	var damaged []string
 	for _, entry := range entries {
-		if entry.roomID != roomID || entry.mlsEpoch > record.MLSEpoch || !withinPastEpochs(entry.mlsEpoch, record.MLSEpoch) {
+		if entry.roomID != roomID || entry.mlsEpoch > record.MLSEpoch || !withinPastEpochs(entry.mlsEpoch, record.MLSEpoch) ||
+			known[entry.sender] != credentialKnown {
 			continue
 		}
 		object, err := j.readRoomBufferRecord(entry)

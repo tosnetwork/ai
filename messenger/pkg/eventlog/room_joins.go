@@ -17,6 +17,12 @@ package eventlog
 // and only while the join is pending. Installing the Welcome consumes the
 // KeyPackage in the fused record; the join then ends.
 //
+// The join also holds the authority's leaf credential, which the room.invite
+// carried and the receiver verified on the room path before recording it
+// (section 11.6): the joiner authenticates the Welcome's sender with it
+// before any roster, and installing the Welcome roots it in the room's
+// credential list (section 11.8).
+//
 // The record names staged identity chunks, so every pending join is a
 // garbage-collection root (room_gc.go). A join whose KeyPackage a fused
 // record already consumed (a crash between the install and FinishRoomJoin)
@@ -79,19 +85,36 @@ var (
 
 // PendingRoomJoin is one room this installation was invited to.
 type PendingRoomJoin struct {
-	Schema              string           `json:"schema"`
-	RoomID              string           `json:"room_id"`
-	AuthorityAgentID    string           `json:"authority_agent_id"`
-	InviteEventID       string           `json:"invite_event_id"`
-	InviteExpiresAtUnix uint64           `json:"invite_expires_at_unix"`
-	InvitedAtUnix       uint64           `json:"invited_at_unix"`
-	State               PendingJoinState `json:"state"`
-	KeyPackageRef       string           `json:"key_package_ref,omitempty"`
-	IdentityStateDigest string           `json:"identity_state_digest,omitempty"`
-	IdentityStateChunks []string         `json:"identity_state_chunk_digests,omitempty"`
-	CredentialBase64    string           `json:"device_credential_base64,omitempty"`
-	CredentialExpiresAt uint64           `json:"credential_expires_at_unix,omitempty"`
-	JoinedAtUnix        uint64           `json:"joined_at_unix,omitempty"`
+	Schema              string `json:"schema"`
+	RoomID              string `json:"room_id"`
+	AuthorityAgentID    string `json:"authority_agent_id"`
+	InviteEventID       string `json:"invite_event_id"`
+	InviteExpiresAtUnix uint64 `json:"invite_expires_at_unix"`
+	InvitedAtUnix       uint64 `json:"invited_at_unix"`
+	// AuthorityCredentialBase64 is the authority's leaf credential.
+	AuthorityCredentialBase64 string           `json:"authority_leaf_credential_base64"`
+	State                     PendingJoinState `json:"state"`
+	KeyPackageRef             string           `json:"key_package_ref,omitempty"`
+	IdentityStateDigest       string           `json:"identity_state_digest,omitempty"`
+	IdentityStateChunks       []string         `json:"identity_state_chunk_digests,omitempty"`
+	CredentialBase64          string           `json:"device_credential_base64,omitempty"`
+	CredentialExpiresAt       uint64           `json:"credential_expires_at_unix,omitempty"`
+	JoinedAtUnix              uint64           `json:"joined_at_unix,omitempty"`
+}
+
+// AuthorityCredential returns the authority's leaf credential the
+// room.invite carried. The caller re-verifies it against finalized state
+// before it authenticates a Welcome with it.
+func (p PendingRoomJoin) AuthorityCredential() (group.LeafCredential, error) {
+	raw, err := base64.StdEncoding.Strict().DecodeString(p.AuthorityCredentialBase64)
+	if err != nil || len(raw) == 0 || len(raw) > group.MaxLeafCredentialBytes {
+		return group.LeafCredential{}, errRoomJoinRecordValue
+	}
+	credential, err := group.DecodeLeafCredential(raw)
+	if err != nil || credential.AgentID != p.AuthorityAgentID {
+		return group.LeafCredential{}, errRoomJoinRecordValue
+	}
+	return credential, nil
 }
 
 // Credential returns the DeviceCredential a joined pending join sent.
@@ -114,16 +137,28 @@ func (p PendingRoomJoin) expiresAt() uint64 {
 }
 
 // RecordRoomInvite records a room.invite from an Agent naming itself the
-// room's authority. A later invite from the same Agent for the same room
-// refreshes an unjoined one. Once the owner accepted one authority's invite,
-// invites from others for that room are refused.
-func (j *Journal) RecordRoomInvite(roomID, authorityAgentID, inviteEventID string, expires, now time.Time) (PendingRoomJoin, error) {
+// room's authority, with the authority's leaf credential the invite carried,
+// verified on the room path (group.VerifyRoomLeafCredential). A later invite
+// from the same Agent for the same room refreshes an unjoined one. Once the
+// owner accepted one authority's invite, invites from others for that room
+// are refused.
+func (j *Journal) RecordRoomInvite(roomID, authorityAgentID, inviteEventID string, authority group.LeafBinding, expires, now time.Time) (PendingRoomJoin, error) {
 	if err := j.usable(); err != nil {
 		return PendingRoomJoin{}, err
 	}
 	if !ids.Room.MatchString(roomID) || !ids.Agent.MatchString(authorityAgentID) || !ids.Event.MatchString(inviteEventID) ||
 		now.IsZero() || now.Unix() <= 0 || !expires.After(now) || expires.Sub(now) > MaxRoomInviteLifetime {
 		return PendingRoomJoin{}, errors.New("invalid room invite")
+	}
+	if err := authority.Validate(); err != nil {
+		return PendingRoomJoin{}, ErrRoomCredentialUnverified
+	}
+	if authority.Credential().AgentID != authorityAgentID {
+		return PendingRoomJoin{}, errors.New("the invite's leaf credential is not the inviting Agent's")
+	}
+	authorityCredential, err := group.EncodeLeafCredential(authority.Credential())
+	if err != nil {
+		return PendingRoomJoin{}, ErrRoomCredentialUnverified
 	}
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
@@ -167,7 +202,7 @@ func (j *Journal) RecordRoomInvite(roomID, authorityAgentID, inviteEventID strin
 	}
 	join := PendingRoomJoin{Schema: roomJoinSchema, RoomID: roomID, AuthorityAgentID: authorityAgentID,
 		InviteEventID: inviteEventID, InviteExpiresAtUnix: uint64(expires.Unix()), InvitedAtUnix: uint64(now.Unix()),
-		State: JoinInvited}
+		AuthorityCredentialBase64: base64.StdEncoding.EncodeToString(authorityCredential), State: JoinInvited}
 	return join, j.writeRoomJoin(join)
 }
 
@@ -553,6 +588,9 @@ func validateRoomJoin(join PendingRoomJoin) error {
 	if join.Schema != roomJoinSchema || !ids.Room.MatchString(join.RoomID) || !ids.Agent.MatchString(join.AuthorityAgentID) ||
 		!ids.Event.MatchString(join.InviteEventID) || join.InvitedAtUnix == 0 || join.InviteExpiresAtUnix <= join.InvitedAtUnix ||
 		join.InviteExpiresAtUnix-join.InvitedAtUnix > payload.MaxRoomInviteLifetimeSeconds {
+		return errRoomJoinRecordValue
+	}
+	if _, err := join.AuthorityCredential(); err != nil {
 		return errRoomJoinRecordValue
 	}
 	switch join.State {

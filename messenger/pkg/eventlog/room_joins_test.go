@@ -52,12 +52,12 @@ func TestPendingRoomJoinLifecycle(t *testing.T) {
 	if _, err := journal.BeginRoomJoin(fusedRoom, authority, []byte("identity"), []byte("{}"), now); err == nil {
 		t.Fatal("joined without an invite")
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, now.Add(time.Hour), now); err != nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, inviteBinding(t, authority), now.Add(time.Hour), now); err != nil {
 		t.Fatal(err)
 	}
 	// Another Agent's invite for the same room coexists until the owner
 	// accepts one.
-	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, now.Add(time.Hour), now); err != nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, inviteBinding(t, fusedAgent(5)), now.Add(time.Hour), now); err != nil {
 		t.Fatalf("invite from another Agent: %v", err)
 	}
 	credential, ref := joinCredential(t, fusedAgent(1), 0x71, uint64(now.Unix())-10, uint64(now.Add(24*time.Hour).Unix()))
@@ -69,7 +69,7 @@ func TestPendingRoomJoinLifecycle(t *testing.T) {
 	if _, found, _ := journal.PendingRoomJoinFor(fusedRoom, fusedAgent(5), now); found {
 		t.Fatal("accepting one authority kept the other's invite")
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinConflict) {
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, inviteBinding(t, fusedAgent(5)), now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinConflict) {
 		t.Fatalf("an invite from another Agent after acceptance: %v", err)
 	}
 	if again, err := journal.BeginRoomJoin(fusedRoom, authority, identity, credential, now); err != nil || again.KeyPackageRef != ref {
@@ -101,6 +101,7 @@ func TestPendingRoomJoinLifecycle(t *testing.T) {
 		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 1}, MembershipDigest: membership.Digest},
 		Proof:   fixture.proof(membership), State: []byte("joined state"), EpochAuthenticator: fusedAuthenticator(2),
 		KeyPackageRef: ref, WelcomeRef: canon.Digest([]byte("welcome")),
+		Credentials: fixture.credentials(), EndsAtUnix: testRoomEnd,
 	}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestPendingRoomJoinLifecycle(t *testing.T) {
 			t.Fatal("the ended join's identity chunk was kept")
 		}
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, now.Add(time.Hour), now); !errors.Is(err, ErrRoomAlreadyJoined) {
+	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, inviteBinding(t, authority), now.Add(time.Hour), now); !errors.Is(err, ErrRoomAlreadyJoined) {
 		t.Fatalf("invite to a joined room: %v", err)
 	}
 }
@@ -131,15 +132,15 @@ func TestPendingRoomJoinEndsAndIsBounded(t *testing.T) {
 	for index := 0; index < MaxPendingRoomJoins; index++ {
 		roomID := "room_" + strings.Repeat("0", 62) + string("0123456789abcdef"[index/16]) + string("0123456789abcdef"[index%16])
 		inviter := fusedAgent(10 + index/MaxPendingRoomJoinsPerAuthority)
-		if _, err := journal.RecordRoomInvite(roomID, inviter, inviteEvent, now.Add(time.Minute), now); err != nil {
+		if _, err := journal.RecordRoomInvite(roomID, inviter, inviteEvent, inviteBinding(t, inviter), now.Add(time.Minute), now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(1), inviteEvent, now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinsFull) {
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(1), inviteEvent, inviteBinding(t, fusedAgent(1)), now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinsFull) {
 		t.Fatalf("beyond the bound: %v", err)
 	}
 	later := now.Add(2 * time.Minute)
-	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(1), inviteEvent, later.Add(time.Hour), later); err != nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(1), inviteEvent, inviteBinding(t, fusedAgent(1)), later.Add(time.Hour), later); err != nil {
 		t.Fatalf("expired invites still filled the bound: %v", err)
 	}
 	joins, err := journal.ListPendingRoomJoins(later)
@@ -164,26 +165,26 @@ func TestRoomInvitesCannotBePreempted(t *testing.T) {
 	defer journal.Close()
 	now := fixture.now
 	stranger := fusedAgent(5)
-	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, now.Add(100*365*24*time.Hour), now); err == nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, inviteBinding(t, stranger), now.Add(100*365*24*time.Hour), now); err == nil {
 		t.Fatal("a far-future invite was recorded")
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, now.Add(MaxRoomInviteLifetime+time.Second), now); err == nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, inviteBinding(t, stranger), now.Add(MaxRoomInviteLifetime+time.Second), now); err == nil {
 		t.Fatal("an invite beyond 7 days was recorded")
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, now.Add(MaxRoomInviteLifetime), now); err != nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, inviteBinding(t, stranger), now.Add(MaxRoomInviteLifetime), now); err != nil {
 		t.Fatal(err)
 	}
 	authority := fixture.delegation.AgentID
-	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, now.Add(time.Hour), now); err != nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, inviteBinding(t, authority), now.Add(time.Hour), now); err != nil {
 		t.Fatalf("the real authority was pre-empted: %v", err)
 	}
 	for index := 1; index < MaxPendingRoomJoinsPerAuthority; index++ {
 		roomID := "room_" + strings.Repeat("e", 63) + string("0123456789abcdef"[index])
-		if _, err := journal.RecordRoomInvite(roomID, stranger, inviteEvent, now.Add(time.Hour), now); err != nil {
+		if _, err := journal.RecordRoomInvite(roomID, stranger, inviteEvent, inviteBinding(t, stranger), now.Add(time.Hour), now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := journal.RecordRoomInvite("room_"+strings.Repeat("f", 64), stranger, inviteEvent, now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinsShareFull) {
+	if _, err := journal.RecordRoomInvite("room_"+strings.Repeat("f", 64), stranger, inviteEvent, inviteBinding(t, stranger), now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinsShareFull) {
 		t.Fatalf("a ninth pending join of one Agent: %v", err)
 	}
 	// The stranger's 7-day invite ends; a year later nothing of it is left.
@@ -205,7 +206,7 @@ func TestAcceptingAJoinDiscardsTheOthersAtOnce(t *testing.T) {
 	now := fixture.now
 	authority := fixture.delegation.AgentID
 	for _, inviter := range []string{authority, fusedAgent(5), fusedAgent(6)} {
-		if _, err := journal.RecordRoomInvite(fusedRoom, inviter, inviteEvent, now.Add(time.Hour), now); err != nil {
+		if _, err := journal.RecordRoomInvite(fusedRoom, inviter, inviteEvent, inviteBinding(t, inviter), now.Add(time.Hour), now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -239,6 +240,7 @@ func TestRoomsHeldAreBounded(t *testing.T) {
 			Binding: group.State{RoomID: roomID, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: membership.Digest},
 			Proof:   fixture.proof(membership), State: []byte("founder state"), EpochAuthenticator: fusedAuthenticator(1),
 			KeyPackageRef: canon.Digest([]byte(fmt.Sprint("key package ", index))),
+			Credentials:   fixture.credentials(), EndsAtUnix: testRoomEnd,
 		}, fixture.now)
 		return err
 	}
@@ -250,7 +252,7 @@ func TestRoomsHeldAreBounded(t *testing.T) {
 	if err := install(MaxRoomsHeld); !errors.Is(err, ErrRoomsFull) {
 		t.Fatalf("a room beyond the bound: %v", err)
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, fixture.now.Add(time.Hour), fixture.now); err != nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, inviteBinding(t, fusedAgent(5)), fixture.now.Add(time.Hour), fixture.now); err != nil {
 		t.Fatal(err)
 	}
 	credential, _ := joinCredential(t, fusedAgent(1), 0x74, uint64(fixture.now.Unix())-10, uint64(fixture.now.Add(24*time.Hour).Unix()))

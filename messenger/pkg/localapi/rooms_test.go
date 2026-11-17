@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
@@ -80,11 +83,14 @@ func installPrivateRoom(t *testing.T, h *harness, members ...string) eventlog.Ro
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := ledger.InstallWelcome(eventlog.RoomMLSInstall{
-		Binding: group.State{RoomID: privateRoomID, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 1}, MembershipDigest: membership.Digest},
+	// The room is installed as its own first state: a Welcome install needs
+	// the pending join of the room.invite this harness never received.
+	record, err := ledger.InstallFounder(eventlog.RoomMLSInstall{
+		Binding: group.State{RoomID: privateRoomID, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: membership.Digest},
 		Proof:   eventlog.RoomAuthorityProof{Membership: membership, Authorization: authorization, Delegation: delegation},
 		State:   []byte("joined"), EpochAuthenticator: bytes.Repeat([]byte{7}, group.MLSEpochAuthenticatorBytes),
-		KeyPackageRef: canon.Digest([]byte("key package")), WelcomeRef: canon.Digest([]byte("welcome")),
+		KeyPackageRef: canon.Digest([]byte("key package")),
+		Credentials:   []group.LeafBinding{roomLeafBinding(t, delegation, key, baseUnix-10, testRoomEnd)}, EndsAtUnix: testRoomEnd,
 	}, h.clock)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +207,7 @@ func TestRoomOperationsWithoutARuntimeAndTheirShapes(t *testing.T) {
 func TestRuntimeListsRoomsAndGaps(t *testing.T) {
 	h := newHarness(t)
 	installPrivateRoom(t, h, senderID, memberID)
-	if _, err := h.journal.RecordRoomInvite(otherRoomID, authorityID, "evt_"+strings.Repeat("a", 64), h.clock.Add(time.Hour), h.clock); err != nil {
+	if _, err := h.journal.RecordRoomInvite(otherRoomID, authorityID, "evt_"+strings.Repeat("a", 64), inviteAuthorityBinding(t), h.clock.Add(time.Hour), h.clock); err != nil {
 		t.Fatal(err)
 	}
 	listed := h.call(t, Request{Op: OpListRooms})
@@ -278,5 +284,73 @@ func TestComposeToAPrivateRoomNeedsMembership(t *testing.T) {
 	h.server.config.RoomOperator = &recordingRooms{}
 	if response := h.call(t, roomComposition(1)); response.OK || response.Code != fault.CodeNotARoomMember {
 		t.Fatalf("not a member: %+v", response)
+	}
+}
+
+// roomLeafBinding signs a leaf credential for a delegation and verifies it
+// on the room path, which is the only way to obtain a binding.
+func roomLeafBinding(t *testing.T, delegation identity.Delegation, key ed25519.PrivateKey, issued, expires uint64) group.LeafBinding {
+	t.Helper()
+	leaf := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x29}, ed25519.SeedSize))
+	device := "dev_" + delegation.AgentID[len("agent_"):]
+	credential, err := group.SignLeafCredential(group.LeafCredential{Network: delegation.Network, AgentID: delegation.AgentID,
+		EndpointID: delegation.EndpointID, DeviceID: device, DeviceSetDigest: canon.Digest([]byte("set")),
+		LeafSignaturePublicKey: leaf.Public().(ed25519.PublicKey), IssuedAtUnix: issued, ExpiresAtUnix: expires}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := e2ee.SetSummary{EndpointID: delegation.EndpointID, Digest: credential.DeviceSetDigest, DeviceIDs: []string{device}}
+	binding, err := group.VerifyRoomLeafCredential(delegation, credential, set, expires, time.Unix(int64(issued), 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return binding
+}
+
+// inviteAuthorityBinding is the authority's verified leaf credential a test
+// room.invite carries.
+func inviteAuthorityBinding(t *testing.T) group.LeafBinding {
+	t.Helper()
+	network := testNetwork()
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
+	endpointID, err := identity.DeriveEndpointID(network, authorityID, key.Public().(ed25519.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegation := identity.Delegation{Network: network, AgentID: authorityID, EndpointID: endpointID,
+		IdentityPublicKey: key.Public().(ed25519.PublicKey), NotBeforeUnix: 1, ExpiresAtUnix: 2_000_000_000}
+	return roomLeafBinding(t, delegation, key, baseUnix-10, testRoomEnd)
+}
+
+// testRoomEnd is the end of the test room: ten days after the harness clock.
+const testRoomEnd = baseUnix + 10*24*3600
+
+// D18 on the send side: a member stops sealing at the room's end minus the
+// clock-skew bound, and a room whose credential list is gone (a crash left
+// it half retired) sends nothing.
+func TestComposeStopsAtTheRoomEndAndInAHalfRetiredRoom(t *testing.T) {
+	h := newHarness(t)
+	record := installPrivateRoom(t, h, senderID, memberID)
+	h.server.config.RoomOperator = &recordingRooms{}
+	stop := time.Unix(int64(record.RoomEndsAtUnix), 0).Add(-DefaultRoomClockSkew)
+	h.clock = stop.Add(-time.Second)
+	if response := h.call(t, roomComposition(1)); !response.OK {
+		t.Fatalf("a second before the stop: %+v", response)
+	}
+	h.clock = stop
+	second := roomComposition(1)
+	second.IdempotencyKey = "idem_" + strings.Repeat("f", 64)
+	if response := h.call(t, second); response.OK || response.Code != fault.CodeRoomEnded {
+		t.Fatalf("at the stop: %+v", response)
+	}
+	h.clock = stop.Add(-time.Hour)
+	listPath := filepath.Join(h.root, "room-blobs", "l-"+record.CredentialListDigest[len("sha256:"):]+".json")
+	if err := os.Remove(listPath); err != nil {
+		t.Fatal(err)
+	}
+	third := roomComposition(1)
+	third.IdempotencyKey = "idem_" + strings.Repeat("d", 64)
+	if response := h.call(t, third); response.OK {
+		t.Fatalf("a half-retired room sent: %+v", response)
 	}
 }

@@ -45,12 +45,17 @@ func TestRoomBufferWindowDuplicatesAndOpening(t *testing.T) {
 	fixture := newFusedFixture(t)
 	journal, ledger := openFused(t, t.TempDir()+"/state")
 	defer journal.Close()
-	sender := fusedAgent(1)
+	// The sender is the authority, whose leaf credential the room knows, so
+	// only future epochs are held for it.
+	sender := fusedAgent(0)
 	if _, err := journal.BufferRoomObject(sender, applicationObject(t, 1, 1, 64), fixture.now); !errors.Is(err, ErrRoomNotJoined) {
 		t.Fatalf("buffer before joining: %v", err)
 	}
 	record := fixture.installFounder(ledger, []byte("epoch zero"))
-	for _, epoch := range []uint64{0, 5, 6} {
+	if _, err := journal.BufferRoomObject(sender, applicationObject(t, 0, 2, 64), fixture.now); !errors.Is(err, ErrRoomBufferCredentialKnown) {
+		t.Fatalf("current epoch, known credential: %v", err)
+	}
+	for _, epoch := range []uint64{5, 6} {
 		if _, err := journal.BufferRoomObject(sender, applicationObject(t, epoch, 2, 64), fixture.now); !errors.Is(err, ErrRoomBufferEpoch) {
 			t.Fatalf("epoch %d: %v", epoch, err)
 		}
@@ -196,7 +201,7 @@ func TestRoomBufferExpiryAndDamage(t *testing.T) {
 	defer journal.Close()
 	record := fixture.installFounder(ledger, []byte("epoch zero"))
 	for epoch := uint64(1); epoch <= 2; epoch++ {
-		if _, err := journal.BufferRoomObject(fusedAgent(1), applicationObject(t, epoch, 1, 64), fixture.now); err != nil {
+		if _, err := journal.BufferRoomObject(fusedAgent(0), applicationObject(t, epoch, 1, 64), fixture.now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -783,10 +788,12 @@ func TestJoinerWelcomeRedepositIsADuplicate(t *testing.T) {
 		if err := journal.BeginRoomHandshake(fusedRoom, 4, digest, welcomeRef); err != nil {
 			t.Fatal(err)
 		}
+		keyPackageRef := prepareJoin(t, journal, fixture)
 		if _, err := ledger.InstallWelcome(RoomMLSInstall{
 			Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 4}, MembershipDigest: membership.Digest},
 			Proof:   fixture.proof(membership), State: []byte("joined"), EpochAuthenticator: fusedAuthenticator(4),
-			KeyPackageRef: canon.Digest([]byte("joiner key package")), WelcomeRef: welcomeRef,
+			KeyPackageRef: keyPackageRef, WelcomeRef: welcomeRef,
+			Credentials: fixture.credentials(), EndsAtUnix: testRoomEnd,
 		}, fixture.now); err != nil {
 			t.Fatal(err)
 		}

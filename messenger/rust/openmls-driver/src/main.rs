@@ -632,11 +632,29 @@ fn handle(req: Request) -> Result<Response, String> {
                 .max_past_epochs(MAX_PAST_EPOCHS)
                 .sender_ratchet_configuration(sender_ratchet())
                 .build();
-            let group = StagedWelcome::new_from_welcome(&provider, &config, welcome, None)
-                .map_err(|_| "Welcome processing failed")?
+            let staged = StagedWelcome::new_from_welcome(&provider, &config, welcome, None)
+                .map_err(|_| "Welcome processing failed")?;
+            // The leaf that authored the Welcome: the joiner authenticates
+            // it as the authority before anything is installed.
+            let sender_index = staged.welcome_sender_index();
+            let sender = staged
+                .welcome_sender()
+                .map_err(|_| "Welcome sender is not in the tree")?;
+            if sender.credential().credential_type() != CredentialType::Basic {
+                return Err("unsupported Welcome sender credential".into());
+            }
+            let sender_identity = sender.credential().serialized_content().to_vec();
+            if sender_identity.is_empty() || sender_identity.len() > MAX_IDENTITY {
+                return Err("invalid Welcome sender identity".into());
+            }
+            let sender_key = sender.signature_key().as_slice().to_vec();
+            let group = staged
                 .into_group(&provider)
                 .map_err(|_| "Welcome merge failed")?;
             let public = decode("signer public key", &snapshot.signer_public, 64)?;
+            out.sender_identity = B64.encode(sender_identity);
+            out.sender_signature_key = B64.encode(sender_key);
+            out.sender_leaf_index = Some(sender_index.u32());
             out.epoch = Some(group.epoch().as_u64());
             out.state = save_snapshot(&provider, &public, Some(group.group_id()), Vec::new())?;
         }
@@ -1038,6 +1056,14 @@ mod tests {
     // A sender far ahead (one message just inside the forward distance) costs
     // the receiver no more stored keys than the tolerance allows; one beyond
     // it is refused.
+    //
+    // The library stores byte strings as JSON number arrays, so a key of
+    // random bytes costs 1 to 3 characters per byte: two states holding the
+    // same number of keys differ by tens of bytes (over 200 runs the jump and
+    // the tolerance growth differed by -52 to +60 bytes, mean +4.5, the wider
+    // generation numbers of a jump adding only a few). So the jump is held to
+    // "at most the tolerance's keys", one key's cost being the margin, and to
+    // far below what keeping every skipped key would cost.
     #[test]
     fn forward_jump_keeps_only_the_tolerance() {
         let aad = b"room binding";
@@ -1052,14 +1078,25 @@ mod tests {
             }
             (state_len(&states[1]), open_as(&states[1], aad, &last))
         };
-        let (before, jumped) = growth(MAXIMUM_FORWARD_DISTANCE as usize);
-        let jump_growth = state_len(&jumped.unwrap().state) - before;
-        let (before, skipped) = growth(OUT_OF_ORDER_TOLERANCE as usize);
-        let tolerance_growth = state_len(&skipped.unwrap().state) - before;
-        eprintln!("forward jump of {MAXIMUM_FORWARD_DISTANCE}: +{jump_growth} bytes; skip of {OUT_OF_ORDER_TOLERANCE}: +{tolerance_growth} bytes");
+        let measured = |skipped: usize| -> usize {
+            let (before, opened) = growth(skipped);
+            state_len(&opened.unwrap().state) - before
+        };
+        let tolerance = OUT_OF_ORDER_TOLERANCE as usize;
+        let jump_growth = measured(MAXIMUM_FORWARD_DISTANCE as usize);
+        let tolerance_growth = measured(tolerance);
+        let in_order_growth = measured(0);
+        // The cost of one kept key: the tolerance's keys over in-order traffic.
+        let per_key = tolerance_growth.saturating_sub(in_order_growth) / tolerance;
+        eprintln!("forward jump of {MAXIMUM_FORWARD_DISTANCE}: +{jump_growth} bytes; skip of {tolerance}: +{tolerance_growth} bytes; in order: +{in_order_growth} bytes; one key: {per_key} bytes");
+        assert!(per_key > 0, "skipping keys stored nothing");
         assert!(
-            jump_growth <= tolerance_growth + 64,
-            "{jump_growth} > {tolerance_growth}"
+            jump_growth < tolerance_growth + per_key,
+            "a jump of {MAXIMUM_FORWARD_DISTANCE} kept more than {tolerance} keys: +{jump_growth} vs +{tolerance_growth}, one key {per_key}"
+        );
+        assert!(
+            jump_growth * 4 < MAXIMUM_FORWARD_DISTANCE as usize * per_key,
+            "a jump of {MAXIMUM_FORWARD_DISTANCE} costs near every skipped key: +{jump_growth}"
         );
         let (_, beyond) = growth(MAXIMUM_FORWARD_DISTANCE as usize + 1);
         assert!(beyond.is_err());
@@ -1314,6 +1351,31 @@ mod tests {
         );
         assert_eq!(opened.sender_leaf_index, Some(2));
         assert_eq!(opened.sender_signature_key, carol_key);
+    }
+
+    // `join` reports the leaf that authored the Welcome: the authority's.
+    #[test]
+    fn join_reports_the_welcome_sender() {
+        let alice = identity(b"alice-authority");
+        let bob = identity(b"bob-member");
+        let mut create = request("create");
+        create.state = alice.state;
+        create.key_package = alice.key_package;
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let mut add = request("commit");
+        add.state = handle(create).unwrap().state;
+        add.key_packages = vec![bob.key_package];
+        let added = handle(add).unwrap();
+        let mut join = request("join");
+        join.state = bob.state;
+        join.welcome = added.welcome;
+        let joined = handle(join).unwrap();
+        assert_eq!(
+            B64.decode(&joined.sender_identity).unwrap(),
+            b"alice-authority"
+        );
+        assert_eq!(joined.sender_signature_key, alice.public_key);
+        assert_eq!(joined.sender_leaf_index, Some(0));
     }
 
     // A state whose retained past-epoch keys break their bounds is refused.

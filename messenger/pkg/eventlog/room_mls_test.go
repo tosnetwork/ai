@@ -76,6 +76,7 @@ func (f *fusedFixture) installFounder(ledger *RoomMLSLedger, state []byte) RoomM
 		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: membership.Digest},
 		Proof:   f.proof(membership), State: state, EpochAuthenticator: fusedAuthenticator(1),
 		KeyPackageRef: canon.Digest([]byte("founder key package")),
+		Credentials:   f.credentials(), EndsAtUnix: testRoomEnd,
 	}, f.now)
 	if err != nil {
 		f.t.Fatal(err)
@@ -131,6 +132,7 @@ func TestFusedRecordMaximalEncodingFitsItsCap(t *testing.T) {
 			{MLSEpoch: ^uint64(0) - 1, AuthenticatorHex: hex.EncodeToString(fusedAuthenticator(2))},
 			{MLSEpoch: ^uint64(0) - 2, AuthenticatorHex: hex.EncodeToString(fusedAuthenticator(1))},
 		},
+		CredentialListDigest: ref("credential list"), RoomEndsAtUnix: ^uint64(0),
 		UpdatedAtUnix: ^uint64(0),
 	}
 	encoded, err := encodeRoomMLSRecord(record)
@@ -317,12 +319,13 @@ func TestFusedLedgerKeyPackageIsOneTimeAndWelcomeReplayIsRefused(t *testing.T) {
 	journal, ledger := openFused(t, t.TempDir()+"/state")
 	defer journal.Close()
 	membership := fixture.founding()
-	kp := canon.Digest([]byte("one-time key package"))
+	kp := prepareJoin(t, journal, fixture)
 	welcome := canon.Digest([]byte("welcome"))
 	install := RoomMLSInstall{
 		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 3}, MembershipDigest: membership.Digest},
 		Proof:   fixture.proof(membership), State: []byte("joined"), EpochAuthenticator: fusedAuthenticator(1),
 		KeyPackageRef: kp, WelcomeRef: welcome,
+		Credentials: fixture.credentials(), EndsAtUnix: testRoomEnd,
 	}
 	if _, err := ledger.InstallWelcome(install, fixture.now); err != nil {
 		t.Fatal(err)
@@ -345,6 +348,7 @@ func TestFusedLedgerKeyPackageIsOneTimeAndWelcomeReplayIsRefused(t *testing.T) {
 		Binding: group.State{RoomID: secondRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 1}, MembershipDigest: second.Digest},
 		Proof:   fixture.proof(second), State: []byte("second room"), EpochAuthenticator: fusedAuthenticator(1),
 		KeyPackageRef: kp, WelcomeRef: canon.Digest([]byte("second welcome")),
+		Credentials: fixture.credentials(), EndsAtUnix: testRoomEnd,
 	}
 	if _, err := ledger.InstallWelcome(cross, fixture.now); !errors.Is(err, ErrKeyPackageConsumed) {
 		t.Fatalf("KeyPackage reuse across rooms: %v", err)
@@ -521,6 +525,7 @@ func TestRoomLedgerAnswersForFusedRoomAndRefusesToAdvanceIt(t *testing.T) {
 		Binding: group.State{RoomID: logical, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founded.Digest},
 		Proof:   fixture.proof(founded), State: []byte("s"), EpochAuthenticator: fusedAuthenticator(1),
 		KeyPackageRef: canon.Digest([]byte("another key package")),
+		Credentials:   fixture.credentials(), EndsAtUnix: testRoomEnd,
 	}, fixture.now); !errors.Is(err, ErrRoomKind) {
 		t.Fatalf("private install over a logical room: %v", err)
 	}
@@ -539,6 +544,7 @@ func FuzzRoomMLSRecordDecode(f *testing.F) {
 			Authority: room.Authority{AgentID: fusedAgent(0), EndpointID: endpoint}, IssuedAtUnix: 1, ExpiresAtUnix: 2, EndpointSignature: bytes.Repeat([]byte{1}, ed25519.SignatureSize)}),
 		StateDigest: canon.Digest([]byte("s")), StateChunks: []string{canon.Digest([]byte("c"))}, DelegationDigest: canon.Digest([]byte("d")),
 		KeyPackageRef: canon.Digest([]byte("k")), EpochAuthenticators: []EpochAuthenticator{{AuthenticatorHex: hex.EncodeToString(fusedAuthenticator(1))}}, UpdatedAtUnix: 1,
+		CredentialListDigest: canon.Digest([]byte("l")), RoomEndsAtUnix: 2,
 	}
 	seed, err := json.Marshal(record)
 	if err != nil {
