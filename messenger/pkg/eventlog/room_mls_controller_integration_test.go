@@ -11,10 +11,32 @@ import (
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/room"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
+
+// keySwapDriver reports every committer and sender leaf with another
+// signature key: the controller must refuse a leaf whose identity is right
+// but whose key is not the verified credential's.
+type keySwapDriver struct {
+	*group.OpenMLSSidecar
+	key ed25519.PublicKey
+}
+
+func (d keySwapDriver) ApplyAttributed(state, commit []byte) ([]byte, group.MLSMember, error) {
+	next, committer, err := d.OpenMLSSidecar.ApplyAttributed(state, commit)
+	committer.SignatureKey = d.key
+	return next, committer, err
+}
+
+func (d keySwapDriver) OpenAttributed(state, aad, message []byte) ([]byte, []byte, group.MLSMember, error) {
+	next, plaintext, sender, err := d.OpenMLSSidecar.OpenAttributed(state, aad, message)
+	sender.SignatureKey = d.key
+	return next, plaintext, sender, err
+}
 
 // relayLeaf makes member index's relay room leaf the way a joiner does: a
 // fresh leaf signature key, the Endpoint-signed leaf credential naming it,
@@ -26,19 +48,23 @@ func relayLeaf(t *testing.T, driver *group.OpenMLSSidecar, index int) (group.Ope
 		t.Fatal(err)
 	}
 	endpointKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{byte(0x70 + index)}, ed25519.SeedSize))
+	network := &nativev1.NetworkDomain{NetworkId: "tos-local", GenesisRootHash: strings.Repeat("a", 64), GenesisFileHash: strings.Repeat("b", 64)}
+	endpointID, deviceID := fmt.Sprintf("mep_%064x", index+1), fmt.Sprintf("dev_%064x", index+1)
 	credential, err := group.SignLeafCredential(group.LeafCredential{
-		Network: &nativev1.NetworkDomain{NetworkId: "tos-local", GenesisRootHash: strings.Repeat("a", 64), GenesisFileHash: strings.Repeat("b", 64)},
-		AgentID: fusedAgent(index), EndpointID: fmt.Sprintf("mep_%064x", index+1), DeviceID: fmt.Sprintf("dev_%064x", index+1),
+		Network: network, AgentID: fusedAgent(index), EndpointID: endpointID, DeviceID: deviceID,
 		DeviceSetDigest: canon.Digest([]byte("set")), LeafSignaturePublicKey: signer.LeafSignaturePublicKey,
 		IssuedAtUnix: 1_000, ExpiresAtUnix: 2_000_000}, endpointKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, err := group.LeafBindingOf(credential)
+	delegation := identity.Delegation{Network: network, AgentID: fusedAgent(index), EndpointID: endpointID,
+		IdentityPublicKey: endpointKey.Public().(ed25519.PublicKey), NotBeforeUnix: 1, ExpiresAtUnix: 3_000_000}
+	set := e2ee.SetSummary{EndpointID: endpointID, Digest: credential.DeviceSetDigest, DeviceIDs: []string{deviceID}}
+	binding, err := group.VerifyRoomLeafCredential(delegation, credential, set, credential.ExpiresAtUnix, time.Unix(10_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	made, err := driver.NewIdentityForSigner(signer, binding.Identity)
+	made, err := driver.NewIdentityForSigner(signer, binding.Identity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +119,8 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	if _, err := controllers[0].CreateRoom(foundingBinding, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage), leaves[1]); err == nil {
 		t.Fatal("a founder KeyPackage was installed under another leaf")
 	}
-	if _, err := controllers[0].CreateRoom(foundingBinding, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage), group.LeafBinding{Identity: []byte("alice-leaf"), SignatureKey: leaves[0].SignatureKey}); !errors.Is(err, ErrRoomLeafIdentity) {
-		t.Fatalf("a short founder identity: %v", err)
+	if _, err := controllers[0].CreateRoom(foundingBinding, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage), group.LeafBinding{}); !errors.Is(err, ErrRoomLeafIdentity) {
+		t.Fatalf("a founder without a verified binding: %v", err)
 	}
 	alice, err := controllers[0].CreateRoom(foundingBinding, fixture.proof(founding), identities[0].State, identities[0].KeyPackage, groupID, canon.Digest(identities[0].KeyPackage), leaves[0])
 	if err != nil {
@@ -102,7 +128,7 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	}
 
 	leaf := func(index int) group.LeafOperation {
-		return group.LeafOperation{Kind: group.LeafAdd, Next: &group.Leaf{CredentialIdentity: leaves[index].Identity, LeafSignaturePublicKey: identities[index].LeafSignaturePublicKey, KeyPackageRef: canon.Digest(identities[index].KeyPackage), KeyPackage: identities[index].KeyPackage}}
+		return group.LeafOperation{Kind: group.LeafAdd, Next: &group.Leaf{CredentialIdentity: leaves[index].Identity(), LeafSignaturePublicKey: identities[index].LeafSignaturePublicKey, KeyPackageRef: canon.Digest(identities[index].KeyPackage), KeyPackage: identities[index].KeyPackage}}
 	}
 	add := func(current RoomMLSRecord, index int, existing []RoomRecipient) (CommitResult, RoomMLSRecord, room.Membership) {
 		t.Helper()
@@ -170,15 +196,27 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	addCarol, alice, withCarol := add(alice, 2, []RoomRecipient{{AgentID: fusedAgent(1)}})
 	// A Commit attributed to anyone but the authority's leaf is refused, and
 	// nothing is written: another leaf, the authority's identity under
-	// another key, and an identity that is not the compact binding.
-	impostor := group.LeafBinding{Identity: leaves[0].Identity, SignatureKey: leaves[2].SignatureKey}
-	for name, committer := range map[string]group.LeafBinding{"another leaf": leaves[2], "another key": impostor} {
-		if _, _, err := apply(1, addCarol, &withCarol, committer); !errors.Is(err, ErrMLSSenderMismatch) {
-			t.Fatalf("wrong committer (%s): %v", name, err)
+	// another key, and no verified binding at all.
+	if _, _, err := apply(1, addCarol, &withCarol, leaves[2]); !errors.Is(err, ErrMLSSenderMismatch) {
+		t.Fatalf("wrong committer: %v", err)
+	}
+	swapped, err := NewRoomMLSController(ledgers[1], keySwapDriver{OpenMLSSidecar: driver, key: leaves[2].SignatureKey()}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	{
+		current, _, err := ledgers[1].Current(fusedRoom)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := group.State{RoomID: fusedRoom, Clock: addCarol.Transition.Next.Clock, MembershipDigest: addCarol.Transition.Next.MembershipDigest, AcceptedCommitRef: addCarol.Transition.CommitRef}
+		proof := fixture.proof(withCarol)
+		if _, _, err := swapped.Apply(group.Transition{Prior: current.Binding(), Next: next, Membership: withCarol, CommitRef: addCarol.Transition.CommitRef}, &proof, addCarol.Commit, leaves[0]); !errors.Is(err, ErrMLSSenderMismatch) {
+			t.Fatalf("the authority's identity under another key: %v", err)
 		}
 	}
-	if _, _, err := apply(1, addCarol, &withCarol, group.LeafBinding{Identity: []byte("alice-leaf"), SignatureKey: leaves[0].SignatureKey}); !errors.Is(err, ErrRoomLeafIdentity) {
-		t.Fatalf("a short committer identity: %v", err)
+	if _, _, err := apply(1, addCarol, &withCarol, group.LeafBinding{}); !errors.Is(err, ErrRoomLeafIdentity) {
+		t.Fatalf("a committer without a verified binding: %v", err)
 	}
 	if unchanged, _, _ := ledgers[1].Current(fusedRoom); unchanged.StateDigest != bob.StateDigest {
 		t.Fatal("a refused Commit changed Bob's state")
@@ -205,6 +243,37 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 		t.Fatal("members of epoch 2 disagree on its authenticator")
 	}
 
+	// The authority's Commit that adds a leaf whose identity is not the
+	// compact binding (made with the driver directly, past the authority's
+	// own check) is refused by a member before anything is written: such a
+	// tree would refuse every later members listing.
+	{
+		aliceState, err := ledgers[0].State(alice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mallory, err := driver.NewIdentity([]byte("mallory-leaf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, foreign, _, err := driver.Commit(aliceState, []group.LeafOperation{{Kind: group.LeafAdd, Next: &group.Leaf{CredentialIdentity: []byte("mallory-leaf"),
+			LeafSignaturePublicKey: mallory.LeafSignaturePublicKey, KeyPackageRef: canon.Digest(mallory.KeyPackage), KeyPackage: mallory.KeyPackage}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := canon.Digest(foreign)
+		next := group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: bob.RoomEpoch, MLSEpoch: bob.MLSEpoch + 1}, MembershipDigest: bob.MembershipDigest, AcceptedCommitRef: ref}
+		if _, _, err := controllers[1].Apply(group.Transition{Prior: bob.Binding(), Next: next, CommitRef: ref}, nil, foreign, leaves[0]); !errors.Is(err, ErrRoomLeafIdentity) {
+			t.Fatalf("a Commit adding a foreign identity: %v", err)
+		}
+		if unchanged, _, _ := ledgers[1].Current(fusedRoom); unchanged.StateDigest != bob.StateDigest {
+			t.Fatal("a refused Commit changed Bob's state")
+		}
+		if _, err := controllers[1].Members(fusedRoom); err != nil {
+			t.Fatalf("Bob's tree after the refusal: %v", err)
+		}
+	}
+
 	// Bob seals before the next Commit; the message is opened after it.
 	aad := []byte("room binding")
 	early, _, err := controllers[1].Seal(fusedRoom, aad, []byte("sealed in epoch 2"))
@@ -227,11 +296,15 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	open()
 
 	carolBefore, _, _ := ledgers[2].Current(fusedRoom)
-	for name, sender := range map[string]group.LeafBinding{"another leaf": leaves[0],
-		"another key": {Identity: leaves[1].Identity, SignatureKey: leaves[0].SignatureKey}} {
-		if _, _, err := controllers[2].Open(fusedRoom, aad, early, sender); !errors.Is(err, ErrMLSSenderMismatch) {
-			t.Fatalf("wrong sender (%s): %v", name, err)
-		}
+	if _, _, err := controllers[2].Open(fusedRoom, aad, early, leaves[0]); !errors.Is(err, ErrMLSSenderMismatch) {
+		t.Fatalf("wrong sender: %v", err)
+	}
+	swappedCarol, err := NewRoomMLSController(ledgers[2], keySwapDriver{OpenMLSSidecar: driver, key: leaves[0].SignatureKey()}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := swappedCarol.Open(fusedRoom, aad, early, leaves[1]); !errors.Is(err, ErrMLSSenderMismatch) {
+		t.Fatalf("the sender's identity under another key: %v", err)
 	}
 	if after, _, _ := ledgers[2].Current(fusedRoom); after.StateDigest != carolBefore.StateDigest {
 		t.Fatal("a refused message spent Carol's ratchet step")

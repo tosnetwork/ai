@@ -69,7 +69,7 @@ func (c *RoomMLSController) CreateRoom(binding group.State, proof RoomAuthorityP
 	if err := own.Validate(); err != nil {
 		return RoomMLSRecord{}, ErrRoomLeafIdentity
 	}
-	if err := c.driver.ValidateKeyPackage(ownKeyPackage, own.Identity, own.SignatureKey); err != nil {
+	if err := c.driver.ValidateKeyPackage(ownKeyPackage, own.Identity(), own.SignatureKey()); err != nil {
 		return RoomMLSRecord{}, err
 	}
 	state, err := provisioner.CreateGroup(identityState, ownKeyPackage, groupID)
@@ -188,6 +188,13 @@ func (c *RoomMLSController) Apply(transition group.Transition, proof *RoomAuthor
 	if !expectedCommitter.Matches(committer) {
 		return false, RoomMLSRecord{}, ErrMLSSenderMismatch
 	}
+	// The authority's Commit may add or replace leaves; a tree holding any
+	// identity but the compact binding is not a relay room's, and would
+	// refuse every later members listing, so it is refused before it is
+	// written.
+	if _, err := c.relayMembers(next); err != nil {
+		return false, RoomMLSRecord{}, err
+	}
 	info, err := c.checkState(next, priorInfo.GroupID, transition.Next.Clock.MLSEpoch)
 	if err != nil {
 		return false, RoomMLSRecord{}, err
@@ -270,6 +277,12 @@ func (c *RoomMLSController) Members(roomID string) ([]group.MLSMember, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.relayMembers(state)
+}
+
+// relayMembers lists a state's leaves and refuses a tree outside the relay
+// room bound or holding an identity that is not the compact binding.
+func (c *RoomMLSController) relayMembers(state []byte) ([]group.MLSMember, error) {
 	members, err := c.driver.Members(state)
 	if err != nil {
 		return nil, err

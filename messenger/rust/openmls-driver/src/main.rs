@@ -1266,6 +1266,56 @@ mod tests {
         assert_eq!(opened.sender_signature_key, bob_key);
     }
 
+    // A member that applied the authority's remove-and-add Commit opens a
+    // message sealed in the earlier epoch and reports the key the sender had
+    // then, not the key of the member that took its leaf index: `apply`
+    // retires the tree the member held before the Commit.
+    #[test]
+    fn member_applying_a_commit_keeps_the_past_epoch_key() {
+        let alice = identity(b"alice-authority");
+        let bob = identity(b"bob-member");
+        let carol = identity(b"carol-member");
+        let dave = identity(b"dave-member");
+        let carol_key = carol.public_key.clone();
+        let mut create = request("create");
+        create.state = alice.state;
+        create.key_package = alice.key_package;
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let mut add = request("commit");
+        add.state = handle(create).unwrap().state;
+        add.key_packages = vec![bob.key_package, carol.key_package];
+        let added = handle(add).unwrap();
+        let joined = |state: String| -> String {
+            let mut join = request("join");
+            join.state = state;
+            join.welcome = added.welcome.clone();
+            handle(join).unwrap().state
+        };
+        let bob_state = joined(bob.state);
+        let carol_state = joined(carol.state);
+        let aad = b"room binding";
+        let sealed = seal_as(&carol_state, aad, b"sealed by carol");
+        // The authority removes Carol and adds Dave, who takes her index.
+        let mut replace = request("commit");
+        replace.state = added.state;
+        replace.remove_identities = vec![B64.encode(b"carol-member")];
+        replace.key_packages = vec![dave.key_package.clone()];
+        let replaced = handle(replace).unwrap();
+        let bob_after = apply_as(&bob_state, &replaced.commit);
+        let mut members = request("members");
+        members.state = bob_after.state.clone();
+        let listed = handle(members).unwrap();
+        assert_eq!(listed.members[2].index, 2);
+        assert_eq!(listed.members[2].signature_key, dave.public_key);
+        let opened = open_as(&bob_after.state, aad, &sealed.message).unwrap();
+        assert_eq!(
+            B64.decode(&opened.sender_identity).unwrap(),
+            b"carol-member"
+        );
+        assert_eq!(opened.sender_leaf_index, Some(2));
+        assert_eq!(opened.sender_signature_key, carol_key);
+    }
+
     // A state whose retained past-epoch keys break their bounds is refused.
     #[test]
     fn past_epoch_keys_are_bounded_on_load() {

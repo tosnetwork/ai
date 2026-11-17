@@ -279,6 +279,12 @@ func DecodeLeafIdentity(raw []byte) (LeafIdentity, error) {
 // finalized now: the delegation's Agent, Endpoint and network, a leaf key
 // distinct from the Endpoint key, a window no longer than 30 days that does
 // not outlast the delegation and holds now, and the Endpoint's signature.
+//
+// It is the check for a credential judged before any room state exists (a
+// room.invite's authority credential, D11 at admission). Room code that
+// learns a member's credential, adds a member or expects a committer or
+// sender uses VerifyRoomLeafCredential, which also checks the device set and
+// the room's end and is the only source of a LeafBinding.
 func VerifyLeafCredential(delegation identity.Delegation, c LeafCredential, now time.Time) error {
 	if err := validateLeafCredential(c, true); err != nil {
 		return err
@@ -305,13 +311,39 @@ func VerifyLeafCredential(delegation identity.Delegation, c LeafCredential, now 
 	if !ed25519.Verify(delegation.IdentityPublicKey, preimage, c.EndpointSignature) {
 		return ErrLeafCredentialNotAuthentic
 	}
-	return CheckLeafCredentialWindow(c, now, 0)
+	return checkLeafCredentialWindow(c, now, 0)
 }
 
-// CheckLeafCredentialWindow requires now to be inside the credential's
+// VerifyRoomLeafCredential is the room path's verification of a member's
+// leaf credential (section 11.8): VerifyLeafCredential, the credential's
+// device current in the Endpoint's finalized device set, and a window that
+// lasts at least until the room's end (D18; never zero). It returns the leaf
+// the credential binds, which is the only way to obtain a LeafBinding, so the
+// room controller can be handed nothing but a verified credential's leaf.
+func VerifyRoomLeafCredential(delegation identity.Delegation, c LeafCredential, currentSet e2ee.SetSummary, roomEndsAtUnix uint64, now time.Time) (LeafBinding, error) {
+	if roomEndsAtUnix == 0 {
+		return LeafBinding{}, errors.New("a room leaf credential is judged against the room's end")
+	}
+	if err := VerifyLeafCredential(delegation, c, now); err != nil {
+		return LeafBinding{}, err
+	}
+	if err := checkLeafCredentialDevice(c, currentSet); err != nil {
+		return LeafBinding{}, err
+	}
+	if err := checkLeafCredentialWindow(c, now, roomEndsAtUnix); err != nil {
+		return LeafBinding{}, err
+	}
+	identity, err := EncodeLeafIdentity(c)
+	if err != nil {
+		return LeafBinding{}, err
+	}
+	return LeafBinding{identity: identity, signatureKey: append(ed25519.PublicKey(nil), c.LeafSignaturePublicKey...), credential: c}, nil
+}
+
+// checkLeafCredentialWindow requires now to be inside the credential's
 // window and, when lastsUntilUnix is not zero, the window to last at least
 // until then (a room's end, D18).
-func CheckLeafCredentialWindow(c LeafCredential, now time.Time, lastsUntilUnix uint64) error {
+func checkLeafCredentialWindow(c LeafCredential, now time.Time, lastsUntilUnix uint64) error {
 	if now.IsZero() || now.Unix() < 0 {
 		return errors.New("invalid leaf credential verification time")
 	}
@@ -325,9 +357,9 @@ func CheckLeafCredentialWindow(c LeafCredential, now time.Time, lastsUntilUnix u
 	return nil
 }
 
-// CheckLeafCredentialDevice requires the credential's device to be current in
+// checkLeafCredentialDevice requires the credential's device to be current in
 // the Endpoint's device set, the set the credential names.
-func CheckLeafCredentialDevice(c LeafCredential, currentSet e2ee.SetSummary) error {
+func checkLeafCredentialDevice(c LeafCredential, currentSet e2ee.SetSummary) error {
 	if currentSet.EndpointID != c.EndpointID || currentSet.Digest != c.DeviceSetDigest || !contains(currentSet.DeviceIDs, c.DeviceID) {
 		return ErrLeafCredentialNotAuthentic
 	}
@@ -395,30 +427,35 @@ func LeafFromCredentials(device DeviceCredential, leaf LeafCredential) (Leaf, er
 }
 
 // LeafBinding is the MLS leaf a verified leaf credential expects: its
-// compact identity and its leaf signature key. A receiver passes it to the
+// compact identity and its leaf signature key. Its fields are unexported and
+// VerifyRoomLeafCredential is its only constructor, so a binding always comes
+// from a credential verified on the room path. A receiver passes it to the
 // room controller, which refuses a Commit or message whose MLS sender is any
-// other leaf.
+// other leaf. The zero value binds nothing and is refused.
 type LeafBinding struct {
-	Identity     []byte
-	SignatureKey ed25519.PublicKey
+	identity     []byte
+	signatureKey ed25519.PublicKey
+	credential   LeafCredential
 }
 
-// LeafBindingOf returns the leaf a credential expects.
-func LeafBindingOf(c LeafCredential) (LeafBinding, error) {
-	identity, err := EncodeLeafIdentity(c)
-	if err != nil {
-		return LeafBinding{}, err
-	}
-	return LeafBinding{Identity: identity, SignatureKey: append(ed25519.PublicKey(nil), c.LeafSignaturePublicKey...)}, nil
+// Identity returns a copy of the bound leaf's 128-byte compact identity.
+func (b LeafBinding) Identity() []byte { return append([]byte(nil), b.identity...) }
+
+// SignatureKey returns a copy of the bound leaf's signature key.
+func (b LeafBinding) SignatureKey() ed25519.PublicKey {
+	return append(ed25519.PublicKey(nil), b.signatureKey...)
 }
 
-// Validate checks a binding's shape: a 128-byte compact identity and an
-// Ed25519 key.
+// Credential returns the verified credential the binding was made from.
+func (b LeafBinding) Credential() LeafCredential { return b.credential }
+
+// Validate refuses the zero value and anything but a 128-byte compact
+// identity with an Ed25519 key.
 func (b LeafBinding) Validate() error {
-	if _, err := DecodeLeafIdentity(b.Identity); err != nil {
+	if _, err := DecodeLeafIdentity(b.identity); err != nil {
 		return err
 	}
-	if len(b.SignatureKey) != ed25519.PublicKeySize || canon.IsZero(b.SignatureKey) {
+	if len(b.signatureKey) != ed25519.PublicKeySize || canon.IsZero(b.signatureKey) {
 		return ErrLeafMismatch
 	}
 	return nil
@@ -426,7 +463,7 @@ func (b LeafBinding) Validate() error {
 
 // Matches reports whether a driver-reported leaf is exactly this binding.
 func (b LeafBinding) Matches(member MLSMember) bool {
-	return bytes.Equal(b.Identity, member.Identity) && bytes.Equal(b.SignatureKey, member.SignatureKey)
+	return bytes.Equal(b.identity, member.Identity) && bytes.Equal(b.signatureKey, member.SignatureKey)
 }
 
 func validateLeafCredential(c LeafCredential, signed bool) error {

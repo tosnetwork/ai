@@ -186,16 +186,16 @@ func TestVerifyLeafCredentialAgainstTheDelegation(t *testing.T) {
 // credential issued later than now is outside its own window.
 func TestLeafCredentialWindowAndRoomEnd(t *testing.T) {
 	_, _, c := testLeafCredential(t)
-	if err := CheckLeafCredentialWindow(c, time.Unix(int64(c.IssuedAtUnix), 0), c.ExpiresAtUnix); err != nil {
+	if err := checkLeafCredentialWindow(c, time.Unix(int64(c.IssuedAtUnix), 0), c.ExpiresAtUnix); err != nil {
 		t.Fatalf("a credential lasting exactly until the end: %v", err)
 	}
-	if err := CheckLeafCredentialWindow(c, time.Unix(int64(c.IssuedAtUnix), 0), c.ExpiresAtUnix+1); !errors.Is(err, ErrLeafCredentialOutsideWindow) {
+	if err := checkLeafCredentialWindow(c, time.Unix(int64(c.IssuedAtUnix), 0), c.ExpiresAtUnix+1); !errors.Is(err, ErrLeafCredentialOutsideWindow) {
 		t.Fatalf("a credential ending before the room: %v", err)
 	}
-	if err := CheckLeafCredentialWindow(c, time.Unix(int64(c.IssuedAtUnix)-1, 0), 0); !errors.Is(err, ErrLeafCredentialOutsideWindow) {
+	if err := checkLeafCredentialWindow(c, time.Unix(int64(c.IssuedAtUnix)-1, 0), 0); !errors.Is(err, ErrLeafCredentialOutsideWindow) {
 		t.Fatalf("before its window: %v", err)
 	}
-	if err := CheckLeafCredentialWindow(c, time.Unix(int64(c.ExpiresAtUnix)-1, 0), 0); err != nil {
+	if err := checkLeafCredentialWindow(c, time.Unix(int64(c.ExpiresAtUnix)-1, 0), 0); err != nil {
 		t.Fatalf("last second: %v", err)
 	}
 }
@@ -203,7 +203,7 @@ func TestLeafCredentialWindowAndRoomEnd(t *testing.T) {
 func TestLeafCredentialDeviceIsCurrent(t *testing.T) {
 	_, _, c := testLeafCredential(t)
 	set := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: c.DeviceSetDigest, DeviceIDs: []string{c.DeviceID}}
-	if err := CheckLeafCredentialDevice(c, set); err != nil {
+	if err := checkLeafCredentialDevice(c, set); err != nil {
 		t.Fatal(err)
 	}
 	for name, stale := range map[string]e2ee.SetSummary{
@@ -211,7 +211,7 @@ func TestLeafCredentialDeviceIsCurrent(t *testing.T) {
 		"device removed":   {EndpointID: c.EndpointID, Digest: c.DeviceSetDigest, DeviceIDs: []string{mlsDevice("2")}},
 		"another Endpoint": {EndpointID: "mep_" + strings.Repeat("d", 64), Digest: c.DeviceSetDigest, DeviceIDs: []string{c.DeviceID}},
 	} {
-		if err := CheckLeafCredentialDevice(c, stale); !errors.Is(err, ErrLeafCredentialNotAuthentic) {
+		if err := checkLeafCredentialDevice(c, stale); !errors.Is(err, ErrLeafCredentialNotAuthentic) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
@@ -257,15 +257,19 @@ func TestLeafCredentialMustMatchTheDeviceCredential(t *testing.T) {
 // that credential and its key is the credential's.
 func TestCheckLeafBindsIdentityAndKey(t *testing.T) {
 	delegation, key, c := testLeafCredential(t)
-	binding, err := LeafBindingOf(c)
+	set := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: c.DeviceSetDigest, DeviceIDs: []string{c.DeviceID}}
+	binding, err := VerifyRoomLeafCredential(delegation, c, set, c.ExpiresAtUnix, time.Unix(500, 0))
 	if err != nil || binding.Validate() != nil {
 		t.Fatalf("binding: %v", err)
 	}
-	if err := CheckLeaf(c, binding.Identity, binding.SignatureKey); err != nil {
+	if err := CheckLeaf(c, binding.Identity(), binding.SignatureKey()); err != nil {
 		t.Fatal(err)
 	}
-	if !binding.Matches(MLSMember{Identity: binding.Identity, SignatureKey: binding.SignatureKey}) {
+	if !binding.Matches(MLSMember{Identity: binding.Identity(), SignatureKey: binding.SignatureKey()}) {
 		t.Fatal("a binding does not match its own leaf")
+	}
+	if binding.Credential().AgentID != c.AgentID {
+		t.Fatal("the binding lost its credential")
 	}
 	other := mlsLeafCredentials(t, delegation, key, mlsDevice("2"), canon.Digest([]byte("set"))).Leaf
 	otherIdentity, err := EncodeLeafIdentity(other)
@@ -286,8 +290,8 @@ func TestCheckLeafBindsIdentityAndKey(t *testing.T) {
 	}{
 		"another device's identity":   {otherIdentity, c.LeafSignaturePublicKey, ErrLeafMismatch},
 		"another credential's digest": {renewedIdentity, c.LeafSignaturePublicKey, ErrLeafMismatch},
-		"another leaf key":            {binding.Identity, other.LeafSignaturePublicKey, ErrLeafMismatch},
-		"a short identity":            {binding.Identity[:127], c.LeafSignaturePublicKey, ErrLeafIdentityMalformed},
+		"another leaf key":            {binding.Identity(), other.LeafSignaturePublicKey, ErrLeafMismatch},
+		"a short identity":            {binding.Identity()[:127], c.LeafSignaturePublicKey, ErrLeafIdentityMalformed},
 	}
 	for name, test := range cases {
 		if err := CheckLeaf(c, test.identity, test.key); !errors.Is(err, test.want) {
@@ -297,10 +301,52 @@ func TestCheckLeafBindsIdentityAndKey(t *testing.T) {
 			t.Fatalf("%s: the binding matched", name)
 		}
 	}
-	if (LeafBinding{Identity: make([]byte, 9), SignatureKey: c.LeafSignaturePublicKey}).Validate() == nil {
+	if (LeafBinding{}).Validate() == nil {
+		t.Fatal("the zero binding validated")
+	}
+	if (LeafBinding{identity: make([]byte, 9), signatureKey: c.LeafSignaturePublicKey}).Validate() == nil {
 		t.Fatal("a 9-byte identity validated")
 	}
-	if (LeafBinding{Identity: binding.Identity, SignatureKey: make(ed25519.PublicKey, ed25519.PublicKeySize)}).Validate() == nil {
+	if (LeafBinding{identity: binding.Identity(), signatureKey: make(ed25519.PublicKey, ed25519.PublicKeySize)}).Validate() == nil {
 		t.Fatal("a zero key validated")
+	}
+	// The accessors hand out copies: changing one does not change the binding.
+	identityCopy := binding.Identity()
+	identityCopy[0] ^= 1
+	if !binding.Matches(MLSMember{Identity: binding.Identity(), SignatureKey: binding.SignatureKey()}) {
+		t.Fatal("an accessor exposed the binding's bytes")
+	}
+}
+
+// VerifyRoomLeafCredential is the room path's one verification: everything
+// VerifyLeafCredential checks, the current device set and the room's end.
+func TestVerifyRoomLeafCredential(t *testing.T) {
+	delegation, _, c := testLeafCredential(t)
+	now := time.Unix(500, 0)
+	set := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: c.DeviceSetDigest, DeviceIDs: []string{c.DeviceID}}
+	if _, err := VerifyRoomLeafCredential(delegation, c, set, c.ExpiresAtUnix, now); err != nil {
+		t.Fatalf("a credential lasting until the end: %v", err)
+	}
+	forged := resignLeaf(t, c, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x44}, ed25519.SeedSize)))
+	stale := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: canon.Digest([]byte("newer")), DeviceIDs: []string{c.DeviceID}}
+	cases := []struct {
+		name       string
+		credential LeafCredential
+		set        e2ee.SetSummary
+		end        uint64
+		want       error
+	}{
+		{"not signed by the Endpoint", forged, set, c.ExpiresAtUnix, ErrLeafCredentialNotAuthentic},
+		{"device no longer current", c, stale, c.ExpiresAtUnix, ErrLeafCredentialNotAuthentic},
+		{"ends before the room", c, set, c.ExpiresAtUnix + 1, ErrLeafCredentialOutsideWindow},
+	}
+	for _, test := range cases {
+		binding, err := VerifyRoomLeafCredential(delegation, test.credential, test.set, test.end, now)
+		if !errors.Is(err, test.want) || binding.Validate() == nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+	if _, err := VerifyRoomLeafCredential(delegation, c, set, 0, now); err == nil {
+		t.Fatal("a room leaf was verified without the room's end")
 	}
 }
