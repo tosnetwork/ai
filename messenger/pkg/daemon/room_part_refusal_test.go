@@ -147,3 +147,46 @@ func TestRoomRetriedPartZeroKeepsTheLaterParts(t *testing.T) {
 		t.Fatalf("%d parts stored after a retried part 0, want %d", n, len(frames)-1)
 	}
 }
+
+// Part 0 of a handshake object of a room this installation was removed
+// from, after its later parts: ignored, and nothing of the object stays.
+func TestRoomRefusedPartZeroAfterTheRemovalDropsTheLaterParts(t *testing.T) {
+	scene := newJoinedSceneCut(t, roomRetention, refusalPartBytes)
+	b := scene.nodes[1]
+	removal := removeCommit(t, scene, scene.b)
+	if response := send(t, b, scene.a.agent(), framesOf(t, scene.a, removal, refusalPartBytes)); response.Result != carrierapi.ResultIgnored {
+		t.Fatalf("B's removal: %s/%s", response.Result, response.Code)
+	}
+	if n := storedParts(t, b); n != 0 {
+		t.Fatalf("%d parts stored after the removal", n)
+	}
+	frames := splitInto(t, scene, scene.a, relayframe.RoomCommit, 6)
+	deliverLaterParts(t, b, scene.a.agent(), frames)
+	if answer := b.d.relay.Deliver(context.Background(), scene.a.agent(), frames[0]); answer.Result != carrierapi.ResultIgnored {
+		t.Fatalf("part 0 after the removal: %s/%s", answer.Result, answer.Code)
+	}
+	requireNothingHeld(t, b)
+}
+
+// A malformed part 0 under the digest of stored later parts: refused
+// frame-malformed, and nothing of the object stays.
+func TestRoomRefusedMalformedPartZeroDropsTheLaterParts(t *testing.T) {
+	scene := newJoinedSceneCut(t, roomRetention, refusalPartBytes)
+	b := scene.nodes[1]
+	frames := splitInto(t, scene, scene.c, relayframe.RoomCommit, 6)
+	deliverLaterParts(t, b, scene.c.agent(), frames)
+	later, err := relayframe.Decode(frames[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformed, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 0, PartCount: later.PartCount,
+		ObjectDigest: later.ObjectDigest, Card: scene.c.card, Evidence: scene.c.evidence, Part: []byte{0x01, 0x02}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := b.d.relay.Deliver(context.Background(), scene.c.agent(), malformed)
+	if answer.Result != carrierapi.ResultRefused || answer.Code != carrierapi.CodeFrameMalformed {
+		t.Fatalf("a malformed part 0: %s/%s", answer.Result, answer.Code)
+	}
+	requireNothingHeld(t, b)
+}
