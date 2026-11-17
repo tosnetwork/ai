@@ -632,11 +632,29 @@ fn handle(req: Request) -> Result<Response, String> {
                 .max_past_epochs(MAX_PAST_EPOCHS)
                 .sender_ratchet_configuration(sender_ratchet())
                 .build();
-            let group = StagedWelcome::new_from_welcome(&provider, &config, welcome, None)
-                .map_err(|_| "Welcome processing failed")?
+            let staged = StagedWelcome::new_from_welcome(&provider, &config, welcome, None)
+                .map_err(|_| "Welcome processing failed")?;
+            // The leaf that authored the Welcome: the joiner authenticates
+            // it as the authority before anything is installed.
+            let sender_index = staged.welcome_sender_index();
+            let sender = staged
+                .welcome_sender()
+                .map_err(|_| "Welcome sender is not in the tree")?;
+            if sender.credential().credential_type() != CredentialType::Basic {
+                return Err("unsupported Welcome sender credential".into());
+            }
+            let sender_identity = sender.credential().serialized_content().to_vec();
+            if sender_identity.is_empty() || sender_identity.len() > MAX_IDENTITY {
+                return Err("invalid Welcome sender identity".into());
+            }
+            let sender_key = sender.signature_key().as_slice().to_vec();
+            let group = staged
                 .into_group(&provider)
                 .map_err(|_| "Welcome merge failed")?;
             let public = decode("signer public key", &snapshot.signer_public, 64)?;
+            out.sender_identity = B64.encode(sender_identity);
+            out.sender_signature_key = B64.encode(sender_key);
+            out.sender_leaf_index = Some(sender_index.u32());
             out.epoch = Some(group.epoch().as_u64());
             out.state = save_snapshot(&provider, &public, Some(group.group_id()), Vec::new())?;
         }
@@ -1314,6 +1332,31 @@ mod tests {
         );
         assert_eq!(opened.sender_leaf_index, Some(2));
         assert_eq!(opened.sender_signature_key, carol_key);
+    }
+
+    // `join` reports the leaf that authored the Welcome: the authority's.
+    #[test]
+    fn join_reports_the_welcome_sender() {
+        let alice = identity(b"alice-authority");
+        let bob = identity(b"bob-member");
+        let mut create = request("create");
+        create.state = alice.state;
+        create.key_package = alice.key_package;
+        create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
+        let mut add = request("commit");
+        add.state = handle(create).unwrap().state;
+        add.key_packages = vec![bob.key_package];
+        let added = handle(add).unwrap();
+        let mut join = request("join");
+        join.state = bob.state;
+        join.welcome = added.welcome;
+        let joined = handle(join).unwrap();
+        assert_eq!(
+            B64.decode(&joined.sender_identity).unwrap(),
+            b"alice-authority"
+        );
+        assert_eq!(joined.sender_signature_key, alice.public_key);
+        assert_eq!(joined.sender_leaf_index, Some(0));
     }
 
     // A state whose retained past-epoch keys break their bounds is refused.

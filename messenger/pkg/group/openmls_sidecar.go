@@ -221,11 +221,26 @@ func (d *OpenMLSSidecar) ValidateKeyPackage(keyPackage, expectedIdentity []byte,
 }
 
 func (d *OpenMLSSidecar) Join(identityState, welcome []byte) ([]byte, error) {
+	state, _, err := d.JoinAttributed(identityState, welcome)
+	return state, err
+}
+
+// JoinAttributed processes a Welcome and returns the joined state and the
+// leaf that authored the Welcome (index, identity and signature key).
+func (d *OpenMLSSidecar) JoinAttributed(identityState, welcome []byte) ([]byte, MLSMember, error) {
 	response, err := d.call(openMLSRequest{Operation: "join", State: b64(identityState), Welcome: b64(welcome)})
 	if err != nil {
-		return nil, err
+		return nil, MLSMember{}, err
 	}
-	return decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
+	state, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
+	if err != nil {
+		return nil, MLSMember{}, err
+	}
+	sender, err := decodeSenderLeaf("Welcome sender", response)
+	if err != nil {
+		return nil, MLSMember{}, err
+	}
+	return state, sender, nil
 }
 
 func (d *OpenMLSSidecar) Commit(state []byte, operations []LeafOperation) ([]byte, []byte, map[string][]byte, error) {
