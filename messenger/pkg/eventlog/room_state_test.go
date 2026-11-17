@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 )
 
@@ -356,42 +358,76 @@ func TestRoomAppliedKeepsTheLast64(t *testing.T) {
 }
 
 // A received application digest is a duplicate for 24 h 5 min, then
-// forgotten; the markers are bounded.
+// forgotten; the markers are bounded in total, per room and per sender.
 func TestRoomReceivedDigests(t *testing.T) {
-	journal, err := Open(t.TempDir() + "/state")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer journal.Close()
+	root := t.TempDir() + "/state"
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, root)
+	// Only a held room keeps its receive state across a restart.
+	fixture.installFounder(ledger, []byte("epoch zero"))
 	now := time.Unix(1_900_000_000, 0)
+	sender := fusedAgent(1)
 	digest := objectDigest("message")
-	if seen, err := journal.RoomApplicationSeen(fusedRoom, digest, now); err != nil || seen {
+	if seen, err := journal.RoomApplicationSeen(fusedRoom, sender, digest, now); err != nil || seen {
 		t.Fatalf("unseen: %v %v", seen, err)
 	}
-	if fresh, err := journal.MarkRoomApplicationSeen(fusedRoom, digest, now); err != nil || !fresh {
+	if fresh, err := journal.MarkRoomApplicationSeen(fusedRoom, sender, digest, now); err != nil || !fresh {
 		t.Fatal(err)
 	}
-	if fresh, err := journal.MarkRoomApplicationSeen(fusedRoom, digest, now.Add(time.Hour)); err != nil || fresh {
+	if fresh, err := journal.MarkRoomApplicationSeen(fusedRoom, sender, digest, now.Add(time.Hour)); err != nil || fresh {
 		t.Fatal("a repeat was fresh")
 	}
-	if seen, _ := journal.RoomApplicationSeen(fusedRoom, digest, now.Add(RoomReceivedWindow-time.Second)); !seen {
+	if seen, _ := journal.RoomApplicationSeen(fusedRoom, sender, digest, now.Add(RoomReceivedWindow-time.Second)); !seen {
 		t.Fatal("forgotten inside the window")
 	}
-	if seen, _ := journal.RoomApplicationSeen(fusedRoom, digest, now.Add(RoomReceivedWindow)); seen {
+	if seen, _ := journal.RoomApplicationSeen(fusedRoom, sender, digest, now.Add(RoomReceivedWindow)); seen {
 		t.Fatal("kept beyond the window")
 	}
-	saved := roomReceivedCap
-	roomReceivedCap = 2
-	defer func() { roomReceivedCap = saved }()
+	saved := [3]int{roomReceivedCap, roomReceivedRoomCap, roomReceivedSenderCap}
+	defer func() { roomReceivedCap, roomReceivedRoomCap, roomReceivedSenderCap = saved[0], saved[1], saved[2] }()
+	roomReceivedCap, roomReceivedRoomCap, roomReceivedSenderCap = 6, 4, 2
+	mark := func(room, from, label string, at time.Time) error {
+		_, err := journal.MarkRoomApplicationSeen(room, from, objectDigest(label), at)
+		return err
+	}
+	// One sender's share.
 	for index := 0; index < 2; index++ {
-		if _, err := journal.MarkRoomApplicationSeen(fusedRoom, objectDigest(fmt.Sprint(index)), now); err != nil {
+		if err := mark(fusedRoom, sender, fmt.Sprint("a", index), now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := journal.MarkRoomApplicationSeen(fusedRoom, objectDigest("third"), now); !errors.Is(err, ErrRoomReceivedFull) {
-		t.Fatalf("beyond the bound: %v", err)
+	if err := mark(fusedRoom, sender, "a2", now); !errors.Is(err, ErrRoomReceivedFull) {
+		t.Fatalf("beyond a sender's share: %v", err)
 	}
-	if fresh, err := journal.MarkRoomApplicationSeen(fusedRoom, objectDigest("third"), now.Add(RoomReceivedWindow)); err != nil || !fresh {
+	// A room's share.
+	for index := 0; index < 2; index++ {
+		if err := mark(fusedRoom, fusedAgent(2), fmt.Sprint("b", index), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mark(fusedRoom, fusedAgent(3), "c0", now); !errors.Is(err, ErrRoomReceivedFull) {
+		t.Fatalf("beyond a room's share: %v", err)
+	}
+	// The total, across rooms.
+	other := "room_" + strings.Repeat("6", 64)
+	for index := 0; index < 2; index++ {
+		if err := mark(other, fusedAgent(2), fmt.Sprint("d", index), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mark("room_"+strings.Repeat("7", 64), fusedAgent(2), "e0", now); !errors.Is(err, ErrRoomReceivedFull) {
+		t.Fatalf("beyond the total: %v", err)
+	}
+	// Expired markers are swept at a bound; the counts survive a restart.
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	journal, _ = openFused(t, root)
+	defer journal.Close()
+	if err := mark(fusedRoom, sender, "a2", now); !errors.Is(err, ErrRoomReceivedFull) {
+		t.Fatalf("the counts were lost by a restart: %v", err)
+	}
+	if err := mark(fusedRoom, sender, "a2", now.Add(RoomReceivedWindow)); err != nil {
 		t.Fatalf("expired markers were not swept at the bound: %v", err)
 	}
 }
@@ -524,5 +560,196 @@ func TestRoomSequenceBounds(t *testing.T) {
 	}
 	if _, err := journal.RoomGaps(fusedRoom, MaxRoomGapsPerResponse+1); err == nil {
 		t.Fatal("an oversized listing was accepted")
+	}
+}
+
+// A drop stays open until a jump reveals its range: with reordered
+// deliveries the next sequence need not be past the dropped one.
+func TestRoomDropStaysOpenUntilAJump(t *testing.T) {
+	journal, err := Open(t.TempDir() + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	now := time.Unix(1_900_000_000, 0)
+	sender := fusedAgent(1)
+	if err := journal.ObserveRoomSequence(fusedRoom, sender, 1, now); err != nil {
+		t.Fatal(err)
+	}
+	// The object carrying 3 is dropped unopened; 2 arrives after it.
+	if _, err := journal.RecordRoomDrop(fusedRoom, sender, RoomGapEpochTooOld, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.ObserveRoomSequence(fusedRoom, sender, 2, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.ObserveRoomSequence(fusedRoom, sender, 4, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	gaps, err := journal.RoomGaps(fusedRoom, 0)
+	if err != nil || len(gaps) != 1 || gaps[0].FirstSequence != 3 || gaps[0].LastSequence != 3 {
+		t.Fatalf("the drop's range: %+v %v", gaps, err)
+	}
+}
+
+// One sender's share of a room's gap records, and the bound across rooms.
+func TestRoomGapSharesAndTotal(t *testing.T) {
+	journal, err := Open(t.TempDir() + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	now := time.Unix(1_900_000_000, 0)
+	saved := [3]int{roomGapCap, roomGapSenderCap, roomGapTotalCap}
+	defer func() { roomGapCap, roomGapSenderCap, roomGapTotalCap = saved[0], saved[1], saved[2] }()
+	roomGapCap, roomGapSenderCap, roomGapTotalCap = 6, 3, 8
+	drop := func(room string, sender string, at time.Duration) {
+		t.Helper()
+		// A drop and a jump make one declared gap each time.
+		if _, err := journal.RecordRoomDrop(room, sender, RoomGapBufferFull, now.Add(at)); err != nil {
+			t.Fatal(err)
+		}
+		record, err := journal.readRoomSequence(room, sender)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := journal.ObserveRoomSequence(room, sender, record.Highest+2, now.Add(at)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	noisy, quiet := fusedAgent(1), fusedAgent(2)
+	drop(fusedRoom, quiet, 0)
+	for index := 1; index <= 5; index++ {
+		drop(fusedRoom, noisy, time.Duration(index)*time.Second)
+	}
+	gaps, err := journal.RoomGaps(fusedRoom, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, gap := range gaps {
+		counts[gap.SenderAgentID]++
+	}
+	if counts[noisy] != 3 || counts[quiet] != 1 {
+		t.Fatalf("shares: %v", counts)
+	}
+	other := "room_" + strings.Repeat("6", 64)
+	for index := 0; index < 6; index++ {
+		drop(other, fusedAgent(3+index), time.Duration(10+index)*time.Second)
+	}
+	all, err := journal.allRoomGapNames()
+	if err != nil || len(all) != 8 {
+		t.Fatalf("%d gap records across rooms, bound 8: %v", len(all), err)
+	}
+}
+
+// The per (room, sender) sequence records are bounded across rooms.
+func TestRoomSequenceRecordsAreBounded(t *testing.T) {
+	journal, err := Open(t.TempDir() + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	saved := roomSequenceCap
+	roomSequenceCap = 2
+	defer func() { roomSequenceCap = saved }()
+	now := time.Unix(1_900_000_000, 0)
+	for index := 0; index < 2; index++ {
+		if err := journal.ObserveRoomSequence(fusedRoom, fusedAgent(index), 1, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := journal.ObserveRoomSequence(fusedRoom, fusedAgent(5), 1, now); !errors.Is(err, ErrRoomSequencesFull) {
+		t.Fatalf("beyond the bound: %v", err)
+	}
+	if err := journal.ObserveRoomSequence(fusedRoom, fusedAgent(0), 2, now); err != nil {
+		t.Fatalf("an existing record at the bound: %v", err)
+	}
+	if removed, err := journal.ForgetRoomSender(fusedRoom, fusedAgent(1)); err != nil || !removed {
+		t.Fatalf("forget sender: %v %v", removed, err)
+	}
+	if err := journal.ObserveRoomSequence(fusedRoom, fusedAgent(5), 1, now); err != nil {
+		t.Fatalf("a removed member's record still counted: %v", err)
+	}
+}
+
+// A room's receive state is deleted once the room is neither held nor
+// pending: on request, and at restart for what a crash left.
+func TestRoomStateIsForgottenWithTheRoom(t *testing.T) {
+	fixture := newFusedFixture(t)
+	root := t.TempDir() + "/state"
+	journal, ledger := openFused(t, root)
+	fixture.installFounder(ledger, []byte("epoch zero"))
+	now := time.Unix(1_900_000_000, 0)
+	other := "room_" + strings.Repeat("6", 64)
+	for _, roomID := range []string{fusedRoom, other} {
+		if err := journal.ObserveRoomSequence(roomID, fusedAgent(1), 3, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := journal.RecordRoomDrop(roomID, fusedAgent(1), RoomGapBufferFull, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := journal.MarkRoomApplicationSeen(roomID, fusedAgent(1), objectDigest(roomID), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := journal.BeginRoomHandshake(fusedRoom, 1, objectDigest("c1"), canon.Digest([]byte("ref"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.ForgetRoomState(fusedRoom); !errors.Is(err, ErrRoomStillHeld) {
+		t.Fatalf("a held room's state was forgotten: %v", err)
+	}
+	if deleted, err := journal.ForgetRoomState(other); err != nil || deleted != 3 {
+		t.Fatalf("forget: %d %v", deleted, err)
+	}
+	// What a crash leaves for a room no longer held is deleted at restart.
+	if err := journal.ObserveRoomSequence(other, fusedAgent(2), 1, now); err != nil {
+		t.Fatal(err)
+	}
+	journal, _ = reopenFused(t, journal, root)
+	defer journal.Close()
+	if gaps, err := journal.RoomGaps(fusedRoom, 0); err != nil || len(gaps) != 1 {
+		t.Fatalf("the held room lost its state: %d %v", len(gaps), err)
+	}
+	record, err := journal.readRoomSequence(other, fusedAgent(2))
+	if err != nil || record.Highest != 0 {
+		t.Fatalf("an orphaned sequence record survived restart: %+v %v", record, err)
+	}
+}
+
+// A joiner's Welcome, recorded around its install, makes every later copy of
+// it a duplicate: after CompleteRoomHandshake, and after a crash before it.
+func TestJoinerWelcomeRedepositIsADuplicate(t *testing.T) {
+	for _, crash := range []bool{false, true} {
+		fixture := newFusedFixture(t)
+		root := t.TempDir() + "/state"
+		journal, ledger := openFused(t, root)
+		membership := fixture.founding()
+		welcome := []byte("the joiner's welcome")
+		welcomeRef := canon.Digest(welcome)
+		digest := RoomObjectDigest(welcome)
+		if err := journal.BeginRoomHandshake(fusedRoom, 4, digest, welcomeRef); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ledger.InstallWelcome(RoomMLSInstall{
+			Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 4}, MembershipDigest: membership.Digest},
+			Proof:   fixture.proof(membership), State: []byte("joined"), EpochAuthenticator: fusedAuthenticator(4),
+			KeyPackageRef: canon.Digest([]byte("joiner key package")), WelcomeRef: welcomeRef,
+		}, fixture.now); err != nil {
+			t.Fatal(err)
+		}
+		if crash {
+			journal, _ = reopenFused(t, journal, root)
+		} else if err := journal.CompleteRoomHandshake(fusedRoom, 4, digest); err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := journal.JudgeRoomHandshake(fusedRoom, 4, digest)
+		if err != nil || verdict != HandshakeDuplicate {
+			t.Fatalf("crash=%v: re-deposited Welcome %v %v", crash, verdict, err)
+		}
+		if verdict, _ := journal.JudgeRoomHandshake(fusedRoom, 4, objectDigest("another welcome")); verdict != HandshakeFork {
+			t.Fatalf("crash=%v: another object for the Welcome's epoch: %v", crash, verdict)
+		}
+		journal.Close()
 	}
 }

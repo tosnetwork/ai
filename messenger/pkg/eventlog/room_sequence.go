@@ -43,12 +43,31 @@ const (
 	MaxRoomMissingRanges = 64
 	// MaxRoomGaps bounds the gap records kept per room; the oldest go first.
 	MaxRoomGaps = 1024
+	// MaxRoomGapsPerSender is one sender's share of a room's gap records.
+	MaxRoomGapsPerSender = 128
+	// MaxRoomGapsTotal bounds the gap records of every room together.
+	MaxRoomGapsTotal = 16384
+	// MaxRoomSequenceRecords bounds the per (room, sender) sequence records
+	// of every room together: 128 rooms of 32 members.
+	MaxRoomSequenceRecords = 4096
 	// MaxRoomGapsPerResponse bounds one rooms.gaps listing.
 	MaxRoomGapsPerResponse = 64
 )
 
-// roomGapCap is MaxRoomGaps; a test lowers it to reach the bound cheaply.
-var roomGapCap = MaxRoomGaps
+// roomGapCap, roomGapSenderCap and roomGapTotalCap are MaxRoomGaps,
+// MaxRoomGapsPerSender and MaxRoomGapsTotal; tests lower them to reach the
+// bounds cheaply.
+var (
+	roomGapCap       = MaxRoomGaps
+	roomGapSenderCap = MaxRoomGapsPerSender
+	roomGapTotalCap  = MaxRoomGapsTotal
+	// roomSequenceCap is MaxRoomSequenceRecords.
+	roomSequenceCap = MaxRoomSequenceRecords
+)
+
+// ErrRoomSequencesFull reports that the per-sender sequence records of
+// every room reached their bound.
+var ErrRoomSequencesFull = errors.New("room sequence records reached their bound")
 
 // RoomGapReason says why a sequence range was declared lost.
 type RoomGapReason string
@@ -148,11 +167,13 @@ func (j *Journal) ObserveRoomSequence(roomID, sender string, sequence uint64, no
 				if err := j.fixRoomGap(roomID, record.OpenDrop, skipped.First, skipped.Last); err != nil {
 					return err
 				}
+				// Only a jump reveals the dropped object's range; a
+				// contiguous sequence leaves the drop open.
+				record.OpenDrop = ""
 			} else {
 				record.Missing = append(record.Missing, skipped)
 			}
 		}
-		record.OpenDrop = ""
 		record.Highest = sequence
 	default:
 		record.Missing = fillMissing(record.Missing, sequence)
@@ -358,6 +379,18 @@ func (j *Journal) writeRoomSequence(record roomSequenceRecord) error {
 	if err := validateRoomSequence(record, record.RoomID, record.SenderAgentID); err != nil {
 		return err
 	}
+	path := filepath.Join(j.root, roomSequenceDir, roomSequenceName(record.RoomID, record.SenderAgentID))
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		count, err := countEntries(filepath.Join(j.root, roomSequenceDir))
+		if err != nil {
+			return err
+		}
+		if count >= roomSequenceCap {
+			return ErrRoomSequencesFull
+		}
+	} else if err != nil {
+		return errors.New("read room sequence")
+	}
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		return err
@@ -408,21 +441,93 @@ func (j *Journal) writeRoomGap(gap RoomGap, now time.Time) (RoomGap, error) {
 	if err := j.storeRoomGap(gap); err != nil {
 		return RoomGap{}, err
 	}
-	names, err := j.roomGapNames(gap.RoomID)
-	if err != nil {
+	if err := j.pruneRoomGaps(gap.RoomID, gap.SenderAgentID); err != nil {
 		return RoomGap{}, err
 	}
-	if excess := len(names) - roomGapCap; excess > 0 {
-		for _, name := range names[:excess] {
-			if err := os.Remove(filepath.Join(j.root, roomGapDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return RoomGap{}, errors.New("prune room gaps")
-			}
+	return gap, nil
+}
+
+// pruneRoomGaps keeps the gap records bounded, oldest first: one sender's
+// share of a room (so a noisy sender cannot evict the others' records), the
+// room's bound, and the bound across rooms. The journal mutex is held.
+func (j *Journal) pruneRoomGaps(roomID, sender string) error {
+	all, err := j.allRoomGapNames()
+	if err != nil {
+		return err
+	}
+	var room, own []string
+	for _, entry := range all {
+		if entry.room != roomID {
+			continue
 		}
-		if err := syncDirectory(filepath.Join(j.root, roomGapDir)); err != nil {
-			return RoomGap{}, err
+		room = append(room, entry.name)
+		if strings.HasSuffix(entry.id, sender[len("agent_"):]) {
+			own = append(own, entry.name)
 		}
 	}
-	return gap, nil
+	doomed := map[string]struct{}{}
+	for index := 0; index < len(own)-roomGapSenderCap; index++ {
+		doomed[own[index]] = struct{}{}
+	}
+	kept := 0
+	for _, name := range room {
+		if _, gone := doomed[name]; !gone {
+			kept++
+		}
+	}
+	for _, name := range room {
+		if kept <= roomGapCap {
+			break
+		}
+		if _, gone := doomed[name]; !gone {
+			doomed[name] = struct{}{}
+			kept--
+		}
+	}
+	total := len(all) - len(doomed)
+	for _, entry := range all {
+		if total <= roomGapTotalCap {
+			break
+		}
+		if _, gone := doomed[entry.name]; !gone {
+			doomed[entry.name] = struct{}{}
+			total--
+		}
+	}
+	if len(doomed) == 0 {
+		return nil
+	}
+	for name := range doomed {
+		if err := os.Remove(filepath.Join(j.root, roomGapDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.New("prune room gaps")
+		}
+	}
+	return syncDirectory(filepath.Join(j.root, roomGapDir))
+}
+
+type roomGapEntry struct{ name, room, id string }
+
+// allRoomGapNames lists every room's gap records, oldest declaration first
+// (the ID leads with the declaration time). The journal mutex is held.
+func (j *Journal) allRoomGapNames() ([]roomGapEntry, error) {
+	entries, err := os.ReadDir(filepath.Join(j.root, roomGapDir))
+	if err != nil {
+		return nil, errors.New("read room gaps")
+	}
+	var listed []roomGapEntry
+	for _, entry := range entries {
+		name := entry.Name()
+		if isTransitionTemp(name) {
+			continue
+		}
+		roomHex, rest, cut := strings.Cut(strings.TrimSuffix(name, ".json"), "-")
+		if !cut || entry.IsDir() || !strings.HasSuffix(name, ".json") || !canon.HashPattern.MatchString(roomHex) || !validGapID(rest) {
+			return nil, errors.New("unexpected entry in the room gaps")
+		}
+		listed = append(listed, roomGapEntry{name: name, room: "room_" + roomHex, id: rest})
+	}
+	sort.Slice(listed, func(a, b int) bool { return listed[a].id < listed[b].id })
+	return listed, nil
 }
 
 func (j *Journal) storeRoomGap(gap RoomGap) error {

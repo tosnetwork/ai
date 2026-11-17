@@ -288,6 +288,9 @@ type Journal struct {
 	lock  *dirlock.Lock
 	quota Quota
 	mutex sync.Mutex
+	// received counts the received room application digests on disk; nil
+	// until first use. Guarded by mutex.
+	received *roomReceivedIndex
 }
 
 // Open takes ownership of a private state directory. A second Open on the same
