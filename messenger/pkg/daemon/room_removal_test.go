@@ -3,8 +3,11 @@ package daemon
 import (
 	"context"
 	"errors"
+	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,6 +139,9 @@ func TestRoomEndedRoomsAreRetiredByTheRuntime(t *testing.T) {
 		if n := storedParts(t, b); n != 0 {
 			t.Fatalf("%d parts of the retired room are left (at start %v)", n, start)
 		}
+		if usage := b.d.relay.rooms.parts.Usage(); usage.Objects != 0 {
+			t.Fatalf("%d objects of the retired room are left in memory (at start %v)", usage.Objects, start)
+		}
 	}
 }
 
@@ -159,5 +165,140 @@ func TestRoomRosterRetriesWhenTheDeviceLedgerCannotBeRead(t *testing.T) {
 	}
 	if ack := roomAckOf(t, b, send(t, b, scene.a.agent(), framesOf(t, scene.a, scene.added, 0))); ack.Outcome != relayframe.OutcomeAccepted {
 		t.Fatalf("the redelivered roster: %+v", ack)
+	}
+}
+
+// applyWithoutForgetting applies the authority's Commit through the
+// controller alone: the fused write happens, the forgetting after it does
+// not, as a crash between them leaves it.
+func applyWithoutForgetting(t *testing.T, scene *joinedScene, raw []byte) {
+	t.Helper()
+	b := scene.nodes[1]
+	r := b.d.relay.rooms
+	object, err := relayframe.DecodeRoomObject(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := scene.clock.now()
+	peer, err := r.checkSenderEvidence(testRoomID, scene.a.agent(), scene.a.evidence, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := roomInbound{ctx: context.Background(), sender: scene.a.agent(), peer: peer, object: object, raw: raw,
+		digest: relayframe.ObjectDigest(raw), now: now}
+	record, _, err := r.ledger.Current(testRoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committer, err := r.authorityBinding(record, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, membership, code := r.commitHeader(record, in)
+	if code != "" {
+		t.Fatal(code)
+	}
+	commitRef := canon.Digest(object.Body)
+	transition := group.Transition{Prior: record.Binding(),
+		Next: group.State{RoomID: testRoomID, Clock: group.Clock{RoomEpoch: object.RoomEpoch, MLSEpoch: object.MLSEpoch},
+			MembershipDigest: membership.Digest, AcceptedCommitRef: commitRef},
+		Membership: membership, CommitRef: commitRef}
+	if err := b.d.journal.BeginRoomHandshake(testRoomID, object.MLSEpoch, in.objectDigest(), commitRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.controller.Apply(transition, proof, object.Body, committer); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A removed member is forgotten even when the step after the fused write
+// did not run: a crash between them is repaired at start, and a carrier
+// that failed the forget is repaired by the timer's reconciliation.
+func TestRoomRemovedMemberIsForgottenAfterACrashOrACarrierFailure(t *testing.T) {
+	scene := newJoinedScene(t, roomRetention)
+	b := scene.nodes[1]
+	applyWithoutForgetting(t, scene, removeCommit(t, scene, scene.c))
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 0 {
+		t.Fatalf("forgotten before the restart: %v", forgotten)
+	}
+	if err := b.d.installRoomRuntime(roomRuntimeSettings{driver: scene.driver, cards: scene.cards[1], skew: 5 * time.Minute,
+		retention: roomRetention}); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); !containsAgent(forgotten, scene.c.agent()) {
+		t.Fatalf("C was not forgotten at start: %v", forgotten)
+	}
+
+	other := newJoinedScene(t, roomRetention)
+	receiver := other.nodes[1]
+	other.cards[1].failForgets = 1
+	if ack := roomAckOf(t, receiver, send(t, receiver, other.a.agent(), framesOf(t, other.a, removeCommit(t, other, other.c), 0))); ack.Outcome != relayframe.OutcomeAccepted {
+		t.Fatalf("the removal of C: %+v", ack)
+	}
+	if forgotten := other.cards[1].forgottenIn(testRoomID); len(forgotten) != 0 {
+		t.Fatalf("a failed forget was recorded: %v", forgotten)
+	}
+	receiver.d.relay.rooms.maintain()
+	if forgotten := other.cards[1].forgottenIn(testRoomID); !containsAgent(forgotten, other.c.agent()) {
+		t.Fatalf("the timer did not repair the failed forget: %v", forgotten)
+	}
+}
+
+// The removal marker is judged under the handling lock: an object whose
+// part 0 was taken before the room was marked removed, completed after, is
+// not applied.
+func TestRoomRemovalIsJudgedUnderTheHandlingLock(t *testing.T) {
+	scene := newJoinedScene(t, roomRetention)
+	b := scene.nodes[1]
+	r := b.d.relay.rooms
+	refresh, membership := scene.authority.commit()
+	refreshRaw := scene.authority.commitObject(refresh, membership)
+	if response := send(t, b, scene.a.agent(), framesOf(t, scene.a, removeCommit(t, scene, scene.b), 0)); response.Result != carrierapi.ResultIgnored {
+		t.Fatalf("the removal: %s/%s", response.Result, response.Code)
+	}
+	before, _ := fused(t, b)
+	digest := relayframe.ObjectDigest(refreshRaw)
+	response, settle := r.handleComplete(context.Background(), scene.a.agent(), digest,
+		relayframe.PartResult{Status: relayframe.PartComplete, RoomID: testRoomID, ObjectType: relayframe.RoomCommit,
+			Evidence: scene.a.evidence, Object: refreshRaw}, scene.clock.now())
+	if response.Result != carrierapi.ResultIgnored || !settle {
+		t.Fatalf("a Commit completed after the removal: %s/%s", response.Result, response.Code)
+	}
+	requireUnmoved(t, b, before)
+}
+
+// A removed member who is still a sender of another room held or joined
+// here keeps its parts; only this room's admission of its card is dropped.
+func TestRoomRemovalKeepsAMemberSharedWithAnotherRoom(t *testing.T) {
+	partBytes := 4 * relayframe.MinTestPartBytes
+	scene := newJoinedSceneCut(t, roomRetention, partBytes)
+	b := scene.nodes[1]
+	now := scene.clock.now()
+	otherRoom := "room_" + strings.Repeat("6", 64)
+	joiner := newRoomMember(t, scene.driver, b, scene.start, scene.start.Add(50*time.Minute))
+	if _, err := b.d.journal.RecordRoomInvite(otherRoom, scene.c.agent(), "evt_"+strings.Repeat("8", 64), scene.c.binding,
+		now.Add(time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.d.journal.BeginRoomJoin(otherRoom, scene.c.agent(), joiner.identity.State, joiner.deviceJSON, now); err != nil {
+		t.Fatal(err)
+	}
+	record := scene.authority.record
+	pending := scene.authority.object(relayframe.RoomCommit, record.RoomEpoch, record.MLSEpoch+1, nil, make([]byte, 3*partBytes))
+	if response := b.d.relay.Deliver(context.Background(), scene.c.agent(), framesOf(t, scene.c, pending, partBytes)[1]); response.Result != carrierapi.ResultAdmitted {
+		t.Fatalf("C's stored part: %s/%s", response.Result, response.Code)
+	}
+	removal := removeCommit(t, scene, scene.c)
+	if ack := roomAckOf(t, b, send(t, b, scene.a.agent(), framesOf(t, scene.a, removal, partBytes))); ack.Outcome != relayframe.OutcomeAccepted {
+		t.Fatalf("the removal of C: %+v", ack)
+	}
+	if storedParts(t, b) != 1 {
+		t.Fatal("the parts of a member shared with another room were dropped")
+	}
+	if forgotten := scene.cards[1].forgottenIn(otherRoom); len(forgotten) != 0 {
+		t.Fatalf("the other room's card admission was forgotten: %v", forgotten)
+	}
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); !containsAgent(forgotten, scene.c.agent()) {
+		t.Fatalf("this room's card admission was kept: %v", forgotten)
 	}
 }

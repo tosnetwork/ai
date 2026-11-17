@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,9 @@ type roomCardsCarrier struct {
 	mutex     sync.Mutex
 	admitted  map[string][]string
 	forgotten map[string][]string
+	// failForgets makes that many forget calls fail, as an unreachable
+	// carrier would.
+	failForgets int
 }
 
 func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, cards []carrierapi.RoomCard) (carrierapi.Response, error) {
@@ -77,6 +81,10 @@ func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, cards []c
 func (c *roomCardsCarrier) ForgetRoomCards(_ context.Context, roomID string, agentIDs []string) (carrierapi.Response, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+	if c.failForgets > 0 {
+		c.failForgets--
+		return carrierapi.Response{}, errors.New("the carrier is unreachable")
+	}
 	if c.forgotten == nil {
 		c.forgotten = map[string][]string{}
 	}

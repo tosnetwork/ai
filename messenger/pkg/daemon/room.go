@@ -128,6 +128,9 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 		return err
 	}
 	runtime.parts = parts
+	// A crash or a failed carrier call may have left a removed member
+	// remembered; it is forgotten before the runtime serves.
+	runtime.reconcileRemoved()
 	d.relay.rooms = runtime
 	for _, completed := range replay.Completed {
 		runtime.handleReplayed(completed)
@@ -401,9 +404,6 @@ func (r *roomRuntime) handleComplete(ctx context.Context, sender string, digest 
 	if response, refused := r.endedRoom(roomInbound{ctx: ctx, sender: sender, object: object, digest: digest, now: now}); refused {
 		return response, response.Result != carrierapi.ResultRetry
 	}
-	if response, refused := r.removedRoom(roomInbound{ctx: ctx, sender: sender, object: object, digest: digest, now: now}); refused {
-		return response, response.Result != carrierapi.ResultRetry
-	}
 	// Part 0's held evidence is checked again at completion: the newest
 	// generation's, against the credential as the room stands now.
 	peer, err := r.checkSenderEvidence(object.RoomID, sender, result.Evidence, now)
@@ -414,6 +414,11 @@ func (r *roomRuntime) handleComplete(ctx context.Context, sender string, digest 
 	r.handling.Lock()
 	defer r.handling.Unlock()
 	in := roomInbound{ctx: ctx, sender: sender, peer: peer, object: object, raw: result.Object, digest: digest, now: now}
+	// The removal marker is judged under the handling lock: a removal
+	// handled while this object waited for the lock stops it here.
+	if response, refused := r.removedRoom(in); refused {
+		return response, response.Result != carrierapi.ResultRetry
+	}
 	var response carrierapi.Response
 	switch object.Type {
 	case relayframe.RoomCommit:
@@ -515,10 +520,51 @@ func (r *roomRuntime) nonAuthority(in roomInbound) (carrierapi.Response, bool) {
 }
 
 // maintain is the room runtime's share of the relay maintenance timer:
-// expired parts go, and ended rooms are retired.
+// expired parts go, removed members are forgotten, and ended rooms are
+// retired.
 func (r *roomRuntime) maintain() {
 	r.sweepParts()
+	r.reconcileRemoved()
 	r.retireEnded()
+}
+
+// reconcileRemoved brings what the receiver derived from a room's members
+// back to its durable membership: every Agent of a retained earlier
+// membership (the two room epochs before the current one) that is not a
+// member now is forgotten again, as forgetMembers does after the Commit
+// that removed it. That step runs once, after the fused write, so a crash
+// before it, or a carrier that failed it, would leave a removed member's
+// card admitted for the room; this repeats it from the journal alone. Every
+// step is idempotent. It runs at start and on the relay timer.
+func (r *roomRuntime) reconcileRemoved() {
+	r.handling.Lock()
+	defer r.handling.Unlock()
+	records, err := r.ledger.List()
+	if err != nil {
+		r.daemon.report("room removed members", err)
+		return
+	}
+	for _, record := range records {
+		var removed []string
+		for back := uint64(1); back < eventlog.RetainedRoomEpochs && back < record.RoomEpoch; back++ {
+			earlier, held, err := r.ledger.MembershipAt(record.RoomID, record.RoomEpoch-back)
+			if err != nil {
+				r.daemon.report("room removed members", err)
+				return
+			}
+			if !held {
+				continue
+			}
+			for _, agentID := range earlier.Members {
+				if !containsAgent(record.Members, agentID) && !containsAgent(removed, agentID) && agentID != r.daemon.config.AgentID {
+					removed = append(removed, agentID)
+				}
+			}
+		}
+		if len(removed) > 0 {
+			r.forgetMembers(context.Background(), record.RoomID, removed)
+		}
+	}
 }
 
 // sweepParts drops incomplete room objects past their lifetime, with their

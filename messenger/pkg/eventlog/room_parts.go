@@ -329,6 +329,17 @@ func (p *RoomParts) DropSender(sender string) (int, error) {
 	return p.deleteUnheld()
 }
 
+// Usage reports what the part store holds in memory: the Reassembler's
+// incomplete objects and part bytes.
+func (p *RoomParts) Usage() relayframe.Usage {
+	if p == nil {
+		return relayframe.Usage{}
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.reassembler.Usage()
+}
+
 // DropRoom drops the incomplete objects of a retired room from memory, and
 // forgets its complete objects left unsettled; their stored parts are
 // deleted. Retirement deletes the room's stored parts itself

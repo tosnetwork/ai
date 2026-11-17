@@ -10,6 +10,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"errors"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -128,12 +129,8 @@ func (r *roomRuntime) removalNotice(in roomInbound, digest string) carrierapi.Re
 	return ignored()
 }
 
-// forgetRemoved forgets the members an applied Commit removed: the room's
-// admission of their cards (carrier.room-cards forget; a card another
-// admission holds stays), their sequence records, and, when no room held
-// here still takes parts from them, their incomplete parts. Each is
-// receive-side bookkeeping, not authority, so a failure is reported and the
-// Commit stands.
+// forgetRemoved forgets the members an applied Commit removed. A crash
+// before it, or a failure inside it, is repaired by reconcileRemoved.
 func (r *roomRuntime) forgetRemoved(in roomInbound, before, after []string) {
 	var removed []string
 	for _, agentID := range before {
@@ -144,8 +141,18 @@ func (r *roomRuntime) forgetRemoved(in roomInbound, before, after []string) {
 	if len(removed) == 0 {
 		return
 	}
+	r.forgetMembers(in.ctx, in.object.RoomID, removed)
+}
+
+// forgetMembers forgets members removed from a room: the room's admission
+// of their cards (carrier.room-cards forget; a card another admission holds
+// stays), their sequence records, and, when no room held here still takes
+// parts from them, their incomplete parts. Each step is idempotent
+// receive-side bookkeeping, not authority, so a failure is reported and
+// repeated by the next reconciliation.
+func (r *roomRuntime) forgetMembers(ctx context.Context, roomID string, removed []string) {
 	for _, agentID := range removed {
-		if _, err := r.daemon.journal.ForgetRoomSender(in.object.RoomID, agentID); err != nil {
+		if _, err := r.daemon.journal.ForgetRoomSender(roomID, agentID); err != nil {
 			r.daemon.report("room removed member", err)
 		}
 		if !(roomSenders{runtime: r}).MayHold(agentID) {
@@ -154,7 +161,7 @@ func (r *roomRuntime) forgetRemoved(in roomInbound, before, after []string) {
 			}
 		}
 	}
-	response, err := r.cards.ForgetRoomCards(in.ctx, in.object.RoomID, removed)
+	response, err := r.cards.ForgetRoomCards(ctx, roomID, removed)
 	if err != nil {
 		r.daemon.report("room cards", err)
 		return
