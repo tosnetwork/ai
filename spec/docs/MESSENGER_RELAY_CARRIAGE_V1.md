@@ -1752,7 +1752,9 @@ of it; OpenFox then learns part 0's card under the D11 rule (as it does for
 kind 4, openfox `relay_chat.go:716-722`), and the daemon runs `CommitPeer` on
 part 0's evidence (newer only). A sender includes its card in part 0 until a
 room ack confirms it (application objects are never acked, so a room-only
-peer gets the card in every part 0).
+peer gets the card in every part 0). The authority's handshake objects carry its card
+in every part 0 as well, acknowledged or not: a superset of the rule above,
+and the cut does not depend on the card (11.1).
 
 **Room-scoped admission (D11).** Once the owner has joined a room, an Event
 is admitted without the allow-list only if it names that room, it is room
@@ -2059,7 +2061,11 @@ in V1, D3), journaled with its outbox entry as 11.7 requires.
   relay evidence is not deleted: it is public, signed routing data, every room
   path requires membership, so it is never used for the room, and the
   evidence store's expiry (2.5) retires it like any peer's. M gets the
-  Commit once (no re-deposit, no ack, outside its in-order queue). M treats a Commit whose verified header removes M, at any
+  Commit once (no re-deposit, no ack, outside its in-order queue). That one
+  deposit checks M's stored evidence against the evidence's own Endpoint and
+  device (`CheckStoredContact`), not pinned to M's leaf credential, because
+  the removing fused write already dropped that credential; the Commit
+  carries no content M could open. M treats a Commit whose verified header removes M, at any
   epoch above its own, as a removal notice: it marks the room removed without
   applying it to MLS. If that one deposit is lost, M is not told: its later
   room messages are refused at members and relay-acknowledged without an
