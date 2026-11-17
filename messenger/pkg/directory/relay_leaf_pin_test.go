@@ -10,12 +10,12 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/group"
 )
 
-func (f *relayFixture) leafCredential(deviceID string, issued, expires uint64) group.DeviceCredential {
+func (f *relayFixture) leafCredential(deviceID string, issued, expires uint64) group.LeafCredential {
 	f.t.Helper()
 	leaf := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x29}, ed25519.SeedSize))
-	return group.DeviceCredential{Network: f.delegation.Network, AgentID: f.delegation.AgentID, EndpointID: f.delegation.EndpointID,
+	return group.LeafCredential{Network: f.delegation.Network, AgentID: f.delegation.AgentID, EndpointID: f.delegation.EndpointID,
 		DeviceID: deviceID, DeviceSetDigest: canon.Digest([]byte("set")), LeafSignaturePublicKey: leaf.Public().(ed25519.PublicKey),
-		KeyPackage: []byte("key package"), IssuedAtUnix: issued, ExpiresAtUnix: expires}
+		IssuedAtUnix: issued, ExpiresAtUnix: expires}
 }
 
 // A member's pin is its leaf's Endpoint and device: CheckPeer passes on

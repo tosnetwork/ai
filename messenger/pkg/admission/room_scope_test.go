@@ -74,21 +74,31 @@ func roomGate(t *testing.T, policy ContactPolicy) (*Gate, *eventlog.Journal, *ev
 	return gate, journal, ledger
 }
 
-// senderCredential is the sender's leaf DeviceCredential, signed by the
-// sender's Endpoint key.
-func senderCredential(t *testing.T, issued, expires uint64) group.DeviceCredential {
+// senderCredential is the sender's leaf credential, signed by the sender's
+// Endpoint key.
+func senderCredential(t *testing.T, issued, expires uint64) group.LeafCredential {
 	t.Helper()
 	delegation, _ := testDelegation(t)
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize))
 	leaf := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x12}, ed25519.SeedSize))
-	credential, err := group.SignDeviceCredential(group.DeviceCredential{Network: delegation.Network, AgentID: senderID,
+	credential, err := group.SignLeafCredential(group.LeafCredential{Network: delegation.Network, AgentID: senderID,
 		EndpointID: delegation.EndpointID, DeviceID: deviceID, DeviceSetDigest: canon.Digest([]byte("set")),
-		LeafSignaturePublicKey: leaf.Public().(ed25519.PublicKey), KeyPackage: []byte("key package"),
-		IssuedAtUnix: issued, ExpiresAtUnix: expires}, key)
+		LeafSignaturePublicKey: leaf.Public().(ed25519.PublicKey),
+		IssuedAtUnix:           issued, ExpiresAtUnix: expires}, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return credential
+}
+
+// encodedSenderCredential is senderCredential in its canonical bytes.
+func encodedSenderCredential(t *testing.T, issued, expires uint64) []byte {
+	t.Helper()
+	encoded, err := group.EncodeLeafCredential(senderCredential(t, issued, expires))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }
 
 func roomInbound(t *testing.T, epoch uint64, label string) Inbound {
@@ -158,6 +168,17 @@ func TestRoomScopedAdmissionRefusals(t *testing.T) {
 		{"credential not yet valid", func(in *Inbound) { in.Room.SenderCredential = senderCredential(t, baseUnix+61, baseUnix+86_400) }, fault.CodeNotAuthentic},
 		{"forged credential", func(in *Inbound) { in.Room.SenderCredential.EndpointSignature[0] ^= 1 }, fault.CodeNotAuthentic},
 		{"another device", func(in *Inbound) { in.Room.SenderCredential.DeviceID = "dev_" + strings.Repeat("9", 64) }, fault.CodeNotAuthentic},
+		{"outlives its delegation", func(in *Inbound) { in.Room.SenderCredential = senderCredential(t, baseUnix, baseUnix+86_401) }, fault.CodeNotAuthentic},
+		{"leaf key is the Endpoint key", func(in *Inbound) {
+			credential := in.Room.SenderCredential
+			delegation, _ := testDelegation(t)
+			credential.LeafSignaturePublicKey = delegation.IdentityPublicKey
+			signed, err := group.SignLeafCredential(credential, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			in.Room.SenderCredential = signed
+		}, fault.CodeNotAuthentic},
 	}
 	for index, test := range cases {
 		request := roomInbound(t, 1, fmt.Sprintf("refusal %d", index))
@@ -208,7 +229,7 @@ func TestRoomScopedAdmissionGrantsOnlyRoomContent(t *testing.T) {
 	credential.Network = &nativev1.NetworkDomain{NetworkId: "other-net",
 		GenesisRootHash: strings.Repeat("c", 64), GenesisFileHash: strings.Repeat("d", 64)}
 	// Signed by the sender's Endpoint, so only the network differs.
-	signed, err := group.SignDeviceCredential(credential, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize)))
+	signed, err := group.SignLeafCredential(credential, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +247,7 @@ func TestRoomInviteLifetimeIsBounded(t *testing.T) {
 		accepted bool
 	}{{6 * 24 * 3600, true}, {payload.MaxRoomInviteLifetimeSeconds, true}, {payload.MaxRoomInviteLifetimeSeconds + 1, false}, {0, false}} {
 		body, err := payload.Encode(payload.RoomInvite{RoomID: privateRoom, InviteeAgentID: localID, Purpose: "join us",
-			ExpiresAtUnix: baseUnix + 10 + test.lifetime})
+			ExpiresAtUnix: baseUnix + 10 + test.lifetime, AuthorityLeafCredential: encodedSenderCredential(t, baseUnix, baseUnix+86_400)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,6 +256,80 @@ func TestRoomInviteLifetimeIsBounded(t *testing.T) {
 		if err != nil || (decision.Outcome == Accepted) != test.accepted ||
 			(!test.accepted && decision.Code != fault.CodePayloadMalformed) {
 			t.Fatalf("lifetime %d: %+v %v", test.lifetime, decision, err)
+		}
+	}
+}
+
+// A room.invite carries the inviting authority's own leaf credential; one
+// that is not the sender's, current, is refused not-authentic and nothing is
+// stored (section 11.6).
+func TestRoomInviteCarriesTheAuthorityLeafCredential(t *testing.T) {
+	gate, journal, delegation, encoded := testGate(t, OpenInbox())
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize))
+	resign := func(change func(*group.LeafCredential)) []byte {
+		credential := senderCredential(t, baseUnix, baseUnix+86_400)
+		change(&credential)
+		signed, err := group.SignLeafCredential(credential, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := group.EncodeLeafCredential(signed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	forged := encodedSenderCredential(t, baseUnix, baseUnix+86_400)
+	forged[len(forged)-1] ^= 1
+	other := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x55}, ed25519.SeedSize))
+	byStranger, err := group.SignLeafCredential(senderCredential(t, baseUnix, baseUnix+86_400), other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strangerRaw, err := group.EncodeLeafCredential(byStranger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		credential []byte
+		code       fault.Code
+	}{
+		{"the sender's current credential", encodedSenderCredential(t, baseUnix, baseUnix+86_400), ""},
+		{"forged signature", forged, fault.CodeNotAuthentic},
+		{"signed by another key", strangerRaw, fault.CodeNotAuthentic},
+		{"not yet valid", encodedSenderCredential(t, baseUnix+61, baseUnix+86_400), fault.CodeNotAuthentic},
+		{"expired", encodedSenderCredential(t, baseUnix-100, baseUnix+60), fault.CodeNotAuthentic},
+		{"another Agent", resign(func(c *group.LeafCredential) { c.AgentID = otherMember }), fault.CodeNotAuthentic},
+		{"another device", resign(func(c *group.LeafCredential) { c.DeviceID = "dev_" + strings.Repeat("9", 64) }), fault.CodeNotAuthentic},
+		{"another network", resign(func(c *group.LeafCredential) {
+			c.Network = &nativev1.NetworkDomain{NetworkId: "other-net", GenesisRootHash: strings.Repeat("c", 64), GenesisFileHash: strings.Repeat("d", 64)}
+		}), fault.CodeNotAuthentic},
+		{"not a credential", []byte("not a leaf credential"), fault.CodeNotAuthentic},
+		{"trailing byte", append(encodedSenderCredential(t, baseUnix, baseUnix+86_400), 0), fault.CodeNotAuthentic},
+	}
+	for index, test := range cases {
+		body, err := payload.Encode(payload.RoomInvite{RoomID: privateRoom, InviteeAgentID: localID, Purpose: fmt.Sprintf("join %d", index),
+			ExpiresAtUnix: baseUnix + 3600, AuthorityLeafCredential: test.credential})
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := testEvent(t, delegation, func(e *envelope.Event) { e.Kind, e.Content = "room.invite", body })
+		decision, err := gate.Admit(inbound(event, encoded))
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if test.code == "" {
+			if decision.Outcome != Accepted {
+				t.Fatalf("%s: %+v", test.name, decision)
+			}
+			continue
+		}
+		if decision.Outcome != Rejected || decision.Code != test.code {
+			t.Fatalf("%s: %+v", test.name, decision)
+		}
+		if _, found, err := journal.Lookup(event.EventID); err != nil || found {
+			t.Fatalf("%s: a refused invite was journaled: %v %v", test.name, found, err)
 		}
 	}
 }

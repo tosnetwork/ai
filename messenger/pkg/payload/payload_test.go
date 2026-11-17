@@ -246,7 +246,7 @@ func sample(kind string) Payload {
 	case "room.invite":
 		return RoomInvite{RoomID: "room_" + strings.Repeat("9", 64),
 			InviteeAgentID: "agent_" + strings.Repeat("a", 64),
-			Purpose:        "planning", ExpiresAtUnix: 1_800_000_000}
+			Purpose:        "planning", ExpiresAtUnix: 1_800_000_000, AuthorityLeafCredential: []byte("authority leaf credential")}
 	case "room.membership.commit":
 		return RoomMembershipCommit{RoomID: "room_" + strings.Repeat("9", 64), Epoch: 3,
 			MembershipDigest: "sha256:" + strings.Repeat("b", 64), MemberCount: 4}
@@ -254,7 +254,8 @@ func sample(kind string) Payload {
 		return RoomMessage{RoomID: "room_" + strings.Repeat("9", 64), Epoch: 3,
 			MediaType: "text/markdown", Body: "agenda", Sequence: 7}
 	case "room.key-package":
-		return RoomKeyPackage{RoomID: "room_" + strings.Repeat("9", 64), DeviceCredentialJSON: []byte(`{"schema":"credential"}`)}
+		return RoomKeyPackage{RoomID: "room_" + strings.Repeat("9", 64), DeviceCredentialJSON: []byte(`{"schema":"credential"}`),
+			LeafCredential: []byte("joiner leaf credential")}
 	case "room.moderation":
 		return RoomModeration{RoomID: "room_" + strings.Repeat("9", 64), MembershipEpoch: 3,
 			RolePolicyRevision: 2, TargetEventID: "evt_" + strings.Repeat("8", 64),

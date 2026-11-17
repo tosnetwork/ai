@@ -15,8 +15,9 @@ match its BasicCredential identity and LeafNode signing key;
   signing public key, exact KeyPackage bytes, and validity window;
 - strict JSON publication plus a domain-separated canonical signature preimage
   and committed positive/adversarial vectors;
-- exact BasicCredential identity bytes and a 32-byte network-bound MLS
-  `group_id`, both with candidate change-detection vectors;
+- the 128-byte compact relay room leaf identity, the leaf credential it names
+  by digest, and a 32-byte network-bound MLS `group_id`, all with candidate
+  change-detection vectors;
 - explicit `room_epoch` and `mls_epoch` clocks. Agent membership advances both;
   device churn and PCS refresh may advance only `mls_epoch`;
 - v1 capacity bounds of 32 logical Agents, 64 total active device leaves, the
@@ -35,9 +36,13 @@ match its BasicCredential identity and LeafNode signing key;
   founder/join, mixed Add/Remove replacement commits, encrypted application
   messages, two retained past epochs (`max_past_epochs(2)`) with an
   out-of-order tolerance of 8 and a forward distance of 1,000 (the worst-case
-  state at 32 leaves is 272,968 bytes, under the 512 KiB bound), the
-  committer and sender identity of every
-  processed message, and public group-id/epoch/epoch-authenticator inspection;
+  state at 32 leaves with maximal 128-byte identities is under 340,000 bytes,
+  inside the 512 KiB bound), a leaf signature key made before its identity
+  (`signer`, then `identity` for that signer), the committer and sender leaf
+  (index, identity and signature key, the latter as it was in the message's
+  own epoch, kept for the two retained past epochs) of every processed
+  message, a read-only `members` listing of every leaf, and public
+  group-id/epoch/epoch-authenticator inspection;
 - `group.OpenMLSSidecar` and `eventlog.RoomMLSController`, which bound process
   I/O, reject wrong AAD and state bindings, refuse a Commit or message whose MLS
   sender is not the expected member before anything is written, derive the
@@ -60,21 +65,25 @@ unsigned big-endian `uint32`/`uint64`; every text or byte string is prefixed by
 its `uint32` byte length. Genesis hashes are lowercase bare hex at the JSON
 boundary and are decoded to exactly 32 raw bytes before entering a preimage.
 
-The RFC 9420 BasicCredential `identity` is the complete canonical byte string:
+The RFC 9420 BasicCredential `identity` of a relay room leaf is the fixed
+128-byte compact binding of `MESSENGER_RELAY_CARRIAGE_V1.md` section 11.2,
+because the identity is copied into the ratchet tree and every retained epoch:
 
 ```text
-"tos.messaging.mls-basic-credential.v1\0"
-text("tos.messaging.mls-basic-credential.v1")
-text(network_id) || bytes(genesis_root) || bytes(genesis_file)
-text(agent_id) || text(endpoint_id) || text(device_id)
-text(device_set_digest) || bytes(leaf_signature_public_key)
-uint32(0x0001)
+raw(agent_id) || raw(endpoint_id) || raw(device_id)   32 bytes each
+SHA-256(leaf_credential)                              32 bytes
 ```
 
-It is identity data, not standalone authority. The application still verifies
-the surrounding endpoint-signed `mls-device-credential.v2`, finalized
-delegation, current device set, distinct leaf key, and exact KeyPackage before
-passing it to an MLS Driver.
+The leaf credential it names is the Endpoint-signed binding of the leaf
+signature key to the network, Agent, Endpoint, device, device set, suite and
+validity window (domain `tos.messaging.mls-leaf-credential.v1`, at most 473
+bytes; `pkg/group/leaf_credential.go`). It names no KeyPackage, which would be
+circular. The identity is identity data, not standalone authority: the
+application verifies the leaf credential against the finalized delegation,
+the endpoint-signed `mls-device-credential.v2` of the KeyPackage, that the two
+match, and the exact KeyPackage before passing it to an MLS Driver, and the
+relay room controller refuses any identity of another length. The driver
+itself keeps a generic 4,096-byte identity limit for other profiles.
 
 The MLS `group_id` is the raw 32-byte SHA-256 output over:
 

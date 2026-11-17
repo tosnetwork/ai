@@ -696,16 +696,26 @@ func decodeReadAck(reader *canon.Reader) Payload {
 	return ReadAck{EventID: reader.Text(MaxShortTextBytes), ReadAtUnix: reader.Uint64()}
 }
 
-// RoomInvite invites an Agent into a room.
+// MaxLeafCredentialBytes is the payload codec's bound on a leaf credential
+// (section 11.2): the largest valid one is 473 bytes.
+const MaxLeafCredentialBytes = 512
+
+// RoomInvite invites an Agent into a room. It carries the inviting
+// authority's own leaf credential, so the joiner holds a verified credential
+// of the authority before the Welcome arrives and can authenticate the
+// Welcome's sender with it (sections 11.3, 11.6). The credential is opaque
+// here; the receiver verifies it against the authority's finalized
+// delegation before it records the invite.
 type RoomInvite struct {
-	RoomID         string
-	InviteeAgentID string
-	Purpose        string
-	ExpiresAtUnix  uint64
+	RoomID                  string
+	InviteeAgentID          string
+	Purpose                 string
+	ExpiresAtUnix           uint64
+	AuthorityLeafCredential []byte
 }
 
 // Schema implements Payload.
-func (RoomInvite) Schema() string { return "tos.messaging.payload.room-invite.v1" }
+func (RoomInvite) Schema() string { return "tos.messaging.payload.room-invite.v2" }
 
 // Validate implements Payload.
 func (r RoomInvite) Validate() error {
@@ -717,6 +727,9 @@ func (r RoomInvite) Validate() error {
 	}
 	if err := requireText("purpose", r.Purpose, MaxShortTextBytes); err != nil {
 		return err
+	}
+	if len(r.AuthorityLeafCredential) == 0 || len(r.AuthorityLeafCredential) > MaxLeafCredentialBytes {
+		return errors.New("a room invite carries no bounded authority leaf credential")
 	}
 	return requireTime("invitation expiry", r.ExpiresAtUnix)
 }
@@ -741,14 +754,16 @@ func (r RoomInvite) encode(buffer *bytes.Buffer) {
 	canon.Text(buffer, r.InviteeAgentID)
 	canon.Text(buffer, r.Purpose)
 	canon.Uint64(buffer, r.ExpiresAtUnix)
+	canon.Bytes(buffer, r.AuthorityLeafCredential)
 }
 
 func decodeRoomInvite(reader *canon.Reader) Payload {
 	return RoomInvite{
-		RoomID:         reader.Text(MaxShortTextBytes),
-		InviteeAgentID: reader.Text(MaxShortTextBytes),
-		Purpose:        reader.Text(MaxShortTextBytes),
-		ExpiresAtUnix:  reader.Uint64(),
+		RoomID:                  reader.Text(MaxShortTextBytes),
+		InviteeAgentID:          reader.Text(MaxShortTextBytes),
+		Purpose:                 reader.Text(MaxShortTextBytes),
+		ExpiresAtUnix:           reader.Uint64(),
+		AuthorityLeafCredential: reader.Bytes(MaxLeafCredentialBytes),
 	}
 }
 
@@ -858,16 +873,19 @@ func decodeRoomMessage(reader *canon.Reader) Payload {
 const MaxRoomKeyPackageCredentialBytes = 96 << 10
 
 // RoomKeyPackage answers a room.invite: the joining member's Endpoint-signed
-// DeviceCredential, which binds its MLS leaf key and one-time KeyPackage. It
-// names the room only inside the payload. The authority verifies the
-// credential against finalized state before it adds the member.
+// DeviceCredential, which binds its MLS leaf key and one-time KeyPackage,
+// and its leaf credential, which the KeyPackage's 128-byte identity names by
+// digest. It names the room only inside the payload. The authority verifies
+// both against finalized state, and that they match, before it adds the
+// member.
 type RoomKeyPackage struct {
 	RoomID               string
 	DeviceCredentialJSON []byte
+	LeafCredential       []byte
 }
 
 // Schema implements Payload.
-func (RoomKeyPackage) Schema() string { return "tos.messaging.payload.room-key-package.v1" }
+func (RoomKeyPackage) Schema() string { return "tos.messaging.payload.room-key-package.v2" }
 
 // Validate implements Payload.
 func (r RoomKeyPackage) Validate() error {
@@ -877,18 +895,23 @@ func (r RoomKeyPackage) Validate() error {
 	if len(r.DeviceCredentialJSON) == 0 || len(r.DeviceCredentialJSON) > MaxRoomKeyPackageCredentialBytes {
 		return errors.New("a room KeyPackage carries no bounded device credential")
 	}
+	if len(r.LeafCredential) == 0 || len(r.LeafCredential) > MaxLeafCredentialBytes {
+		return errors.New("a room KeyPackage carries no bounded leaf credential")
+	}
 	return nil
 }
 
 func (r RoomKeyPackage) encode(buffer *bytes.Buffer) {
 	canon.Text(buffer, r.RoomID)
 	canon.Bytes(buffer, r.DeviceCredentialJSON)
+	canon.Bytes(buffer, r.LeafCredential)
 }
 
 func decodeRoomKeyPackage(reader *canon.Reader) Payload {
 	return RoomKeyPackage{
 		RoomID:               reader.Text(MaxShortTextBytes),
 		DeviceCredentialJSON: reader.Bytes(MaxRoomKeyPackageCredentialBytes),
+		LeafCredential:       reader.Bytes(MaxLeafCredentialBytes),
 	}
 }
 

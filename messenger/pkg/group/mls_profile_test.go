@@ -172,7 +172,7 @@ func TestDeviceSuccessionKeepsOtherAgentDevice(t *testing.T) {
 	d1, d2, d3 := mlsDevice("1"), mlsDevice("2"), mlsDevice("3")
 	current := []Leaf{{AgentID: mlsAgent(), EndpointID: delegation.EndpointID, DeviceID: d1, DeviceSetDigest: oldDigest, KeyPackageRef: canon.Digest([]byte("kp1"))}, {AgentID: mlsAgent(), EndpointID: delegation.EndpointID, DeviceID: d2, DeviceSetDigest: oldDigest, KeyPackageRef: canon.Digest([]byte("kp2"))}}
 	succession := e2ee.Succession{Accepted: e2ee.SetSummary{EndpointID: delegation.EndpointID, Digest: newDigest, DeviceIDs: []string{d1, d3}}, Removed: []string{d2}}
-	credentials := map[string]DeviceCredential{d1: mlsCredential(t, delegation, key, d1, newDigest), d3: mlsCredential(t, delegation, key, d3, newDigest)}
+	credentials := map[string]DeviceLeafCredentials{d1: mlsLeafCredentials(t, delegation, key, d1, newDigest), d3: mlsLeafCredentials(t, delegation, key, d3, newDigest)}
 	ops, err := PlanDeviceSuccession(mlsAgent(), delegation.EndpointID, current, succession, credentials)
 	if err != nil {
 		t.Fatal(err)
@@ -188,8 +188,13 @@ func TestDeviceSuccessionKeepsOtherAgentDevice(t *testing.T) {
 		if op.Kind == LeafRemove && op.Prior.DeviceID != d2 {
 			t.Fatalf("wrong device removed: %s", op.Prior.DeviceID)
 		}
-		if op.Next != nil && (len(op.Next.CredentialIdentity) == 0 || len(op.Next.LeafSignaturePublicKey) != ed25519.PublicKeySize || len(op.Next.KeyPackage) == 0) {
+		if op.Next != nil && (len(op.Next.CredentialIdentity) != LeafIdentityBytes || len(op.Next.LeafSignaturePublicKey) != ed25519.PublicKeySize || len(op.Next.KeyPackage) == 0) {
 			t.Fatal("planned MLS leaf omitted Driver authority material")
+		}
+		if op.Next != nil {
+			if err := CheckLeaf(credentials[op.Next.DeviceID].Leaf, op.Next.CredentialIdentity, op.Next.LeafSignaturePublicKey); err != nil {
+				t.Fatalf("planned leaf is not the compact binding of its credential: %v", err)
+			}
 		}
 	}
 }

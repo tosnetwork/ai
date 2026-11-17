@@ -148,9 +148,9 @@ const (
 	// one device's distinct MLS leaf key and exact KeyPackage. v2 encodes both
 	// genesis hashes as raw 32-byte values rather than display hex.
 	DomainMLSDeviceCredential = "tos.messaging.mls-device-credential.v2\x00"
-	// DomainMLSBasicCredential namespaces the opaque identity bytes carried by
-	// the standard MLS BasicCredential.
-	DomainMLSBasicCredential = "tos.messaging.mls-basic-credential.v1\x00"
+	// DomainMLSLeafCredential namespaces the Endpoint-signed leaf credential
+	// a relay room leaf's 128-byte compact identity names by digest.
+	DomainMLSLeafCredential = "tos.messaging.mls-leaf-credential.v1\x00"
 	// DomainMLSGroupID namespaces the network-bound MLS group identifier.
 	DomainMLSGroupID = "tos.messaging.mls-group-id.v1\x00"
 	// DomainAttachmentMetadata commits plaintext metadata kept inside E2EE.
@@ -283,7 +283,7 @@ var Domains = []string{
 	DomainStoredAck,
 	DomainConformanceReport,
 	DomainMLSDeviceCredential,
-	DomainMLSBasicCredential,
+	DomainMLSLeafCredential,
 	DomainMLSGroupID,
 	DomainAttachmentMetadata,
 	DomainAttachmentChunk,

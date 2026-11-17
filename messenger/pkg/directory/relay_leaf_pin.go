@@ -14,16 +14,19 @@ import (
 // only after CheckPeer passes on that member's stored evidence, and a
 // received object's part-0 evidence is checked the same way. Neither side
 // has a 1:1 session pin for a member that is no contact; the pin is the
-// Endpoint and device of the member's MLS leaf, as the leaf's
-// DeviceCredential bound them. CheckPeer then requires the evidence to be a
+// Endpoint and device of the member's MLS leaf, as the member's verified leaf
+// credential (the one its leaf identity names by digest, section 11.2) binds
+// them. CheckPeer then requires the evidence to be a
 // live finalized delegation of that Endpoint whose current set still holds
 // that device, so a member whose device a newer descriptor removed, or whose
 // Endpoint was withdrawn on chain, gets nothing.
 
-// LeafPin returns the pin of a member from its leaf's DeviceCredential. The
-// credential must be the member's own and inside its validity window: an
-// expired credential refuses the member's objects not-authentic (D15).
-func LeafPin(memberAgentID string, credential group.DeviceCredential, now time.Time) (Pin, error) {
+// LeafPin returns the pin of a member from its verified leaf credential. The
+// caller has verified the credential against the finalized delegation and the
+// member's leaf (section 11.8); LeafPin requires it to be the member's own
+// and inside its validity window: an expired credential refuses the member's
+// objects not-authentic (D15).
+func LeafPin(memberAgentID string, credential group.LeafCredential, now time.Time) (Pin, error) {
 	if !ids.Agent.MatchString(memberAgentID) {
 		return Pin{}, fault.New(fault.CodeSenderMismatch, "invalid room member Agent identifier")
 	}

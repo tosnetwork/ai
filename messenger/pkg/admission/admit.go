@@ -2,7 +2,6 @@ package admission
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -125,8 +124,9 @@ type RoomCarriage struct {
 	// PacketSenderAgentID is the Agent whose controller signed the packet
 	// that carried the object.
 	PacketSenderAgentID string
-	// SenderCredential is the DeviceCredential of the sending member's leaf.
-	SenderCredential group.DeviceCredential
+	// SenderCredential is the leaf credential of the sending member's leaf:
+	// the one its 128-byte leaf identity names by digest (section 11.2).
+	SenderCredential group.LeafCredential
 }
 
 // Config wires one gate.
@@ -444,6 +444,15 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 			decision.Delegation = delegation
 			return decision, nil
 		}
+		// The invite carries the authority's own leaf credential, which the
+		// joiner later authenticates the Welcome's sender with (section
+		// 11.6). One that is not the sender's, current, is refused before
+		// anything is stored.
+		if !g.authorityLeafCredentialHolds(inbound, delegation, invite.AuthorityLeafCredential) {
+			decision := g.refuse(inbound, fault.CodeNotAuthentic, class)
+			decision.Delegation = delegation
+			return decision, nil
+		}
 	}
 	// A moderation decision's authority is verified before an invite is
 	// claimed for it, so an inauthentic one never spends a bearer.
@@ -654,9 +663,10 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 //   - one for a private room this installation has not joined is refused
 //     not-a-room-member;
 //   - its packet sender must be the Event's sender Agent;
-//   - the sender's leaf DeviceCredential must be the sender's Endpoint and
-//     device, signed by that Endpoint and inside its validity window, or
-//     the object is refused not-authentic (D15);
+//   - the sender's leaf credential must be the sender's Endpoint and
+//     device, of this network, signed by that Endpoint, not outliving its
+//     delegation and inside its validity window, or the object is refused
+//     not-authentic (D15);
 //   - the packet sender must be in the committed membership of the room
 //     epoch the Event was sealed in, the current one or the two before it,
 //     or it is refused not-a-room-member;
@@ -686,17 +696,7 @@ func (g *Gate) judgeRoomCarriage(inbound Inbound, delegation identity.Delegation
 	if carriage.PacketSenderAgentID != inbound.Event.SenderAgentID {
 		return false, fault.CodeSenderMismatch, nil
 	}
-	credential := carriage.SenderCredential
-	if credential.AgentID != delegation.AgentID || credential.EndpointID != delegation.EndpointID ||
-		credential.DeviceID != inbound.Event.SenderDeviceID || !sameNetwork(credential.Network, g.config.Network) {
-		return false, fault.CodeNotAuthentic, nil
-	}
-	preimage, err := group.CredentialSigningBytes(credential)
-	if err != nil || len(delegation.IdentityPublicKey) != ed25519.PublicKeySize ||
-		!ed25519.Verify(delegation.IdentityPublicKey, preimage, credential.EndpointSignature) {
-		return false, fault.CodeNotAuthentic, nil
-	}
-	if inbound.ReceivedAtUnix < credential.IssuedAtUnix || inbound.ReceivedAtUnix >= credential.ExpiresAtUnix {
+	if !g.leafCredentialHolds(inbound, delegation, carriage.SenderCredential) {
 		return false, fault.CodeNotAuthentic, nil
 	}
 	// The membership is judged at the Event's own epoch: a message sealed
@@ -718,6 +718,32 @@ func (g *Gate) judgeRoomCarriage(inbound Inbound, delegation identity.Delegation
 	}
 	return true, "", nil
 }
+
+// leafCredentialHolds reports whether a leaf credential is the Event
+// sender's: its Agent, Endpoint and device, this installation's network, and
+// verified against the sender's finalized delegation at the receive time.
+func (g *Gate) leafCredentialHolds(inbound Inbound, delegation identity.Delegation, credential group.LeafCredential) bool {
+	if credential.DeviceID != inbound.Event.SenderDeviceID || !sameNetwork(credential.Network, g.config.Network) {
+		return false
+	}
+	if inbound.ReceivedAtUnix == 0 || inbound.ReceivedAtUnix > maxUnixSeconds {
+		return false
+	}
+	return group.VerifyLeafCredential(delegation, credential, time.Unix(int64(inbound.ReceivedAtUnix), 0)) == nil
+}
+
+// authorityLeafCredentialHolds decodes a room.invite's authority leaf
+// credential strictly and requires it to be the inviting sender's.
+func (g *Gate) authorityLeafCredentialHolds(inbound Inbound, delegation identity.Delegation, raw []byte) bool {
+	credential, err := group.DecodeLeafCredential(raw)
+	if err != nil {
+		return false
+	}
+	return g.leafCredentialHolds(inbound, delegation, credential)
+}
+
+// maxUnixSeconds is the largest receive time a time.Time conversion keeps.
+const maxUnixSeconds = uint64(1<<63 - 1)
 
 // roomContentKinds are the Event kinds a private room's application object
 // carries (section 11.1): a room message and an encrypted attachment
