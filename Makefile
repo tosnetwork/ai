@@ -40,11 +40,12 @@ boundary-lint:
 	GOWORK=off scripts/check-boundaries.sh
 
 # The closed PredictionMarket V1 release manifest must match its vectors, and
-# the independent reproducer must rebuild the Service Actor manifest vector
-# and refuse its negative corpus.
+# the independent reproducers must rebuild the Service Actor manifest vector
+# and the rail work frame vectors and refuse their negative cases.
 spec-check:
 	python3 spec/scripts/verify-prediction-market-compatibility.py
 	python3 -I spec/scripts/reproduce-software-work-manifest-v1-service-actor.py
+	python3 -I spec/scripts/reproduce-service-actor-rail-work-frames-v1.py
 
 # Bounded native fuzzing of the strict PredictionMarket decoders; the regular
 # suite runs the fixed seeds. The budget is an execution count, not a
