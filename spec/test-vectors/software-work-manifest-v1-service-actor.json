@@ -1,0 +1,1305 @@
+{
+  "schema": "tos.service.software-work-manifest.v1.service-actor.vector",
+  "media_type": "application/vnd.tos.service.software-work-manifest.v1+cbor",
+  "canonicalization": "RFC 8949 Core Deterministic Encoding; integer field keys of docs/SOFTWARE_WORK_MANIFEST_V1.md; byte strings project to JSON as standard Base64",
+  "sources": {
+    "execution_signer_authorization": "SHA-256 of the exact ASCII of settlement.attestor_key",
+    "input_schema_digest": "SHA-256 of schemas/software-work-job-v1.schema.json",
+    "output_schema_digest": "SHA-256 of schemas/software-work-outcome-v1.schema.json",
+    "settlement.actor_account_id": "illustrative: SHA-256 of the ASCII text 'software-work manifest vector actor account'",
+    "settlement.actor_code_hash": "contract_code_hash of test-vectors/service-actor-conformance-vectors.json (the tos-service-actor-v1 release)",
+    "settlement.attestor_key": "mldsa44: and init.attestor_key_id of test-vectors/service-actor-conformance-vectors.json"
+  },
+  "manifest": {
+    "protocol": "tos.service.software-work-manifest.v1",
+    "version": "2.0.0",
+    "name": "Deterministic Go test",
+    "description": "Run the committed Go test suite without network access.",
+    "operation": "test",
+    "accepted_source_kinds": [
+      "content-addressed-archive",
+      "immutable-repository-commit"
+    ],
+    "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+    "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+    "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+    "invocation": {
+      "executable": "/usr/local/go/bin/go",
+      "arguments": [
+        "test",
+        "-count=1",
+        "./..."
+      ],
+      "working_directory": "/workspace/source"
+    },
+    "network_policy": "none",
+    "limits": {
+      "cpu_millis": 120000,
+      "memory_bytes": 1073741824,
+      "scratch_bytes": 2147483648,
+      "output_bytes": 16777216,
+      "wall_clock_millis": 180000
+    },
+    "artifact_media_types": [
+      "application/vnd.tos.service.software-artifact.v1+tar"
+    ],
+    "report_media_types": [
+      "application/vnd.tos.service.test-report.v1+json"
+    ],
+    "success_condition": "exit-code-zero-and-valid-reports",
+    "refund_conditions": [
+      "no-attested-response-before-deadline"
+    ],
+    "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+    "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+    "retention_seconds": 86400,
+    "supported_assets": [
+      {
+        "kind": "native-tos"
+      }
+    ],
+    "settlement": {
+      "rail": "tos.service.service-actor.v1",
+      "actor_workchain": 0,
+      "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+      "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+      "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30"
+    }
+  },
+  "expected": {
+    "digest": "sha256:2b620be615ab2e4d7395a4f5717ca879c3e0281cce97b0fc78e5539d5bb2543b",
+    "canonical_cbor_base64": "tQF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaEAam5hdGl2ZS10b3MVpQF4HHRvcy5zZXJ2aWNlLnNlcnZpY2UtYWN0b3IudjECAANYIGhr2h2AVhnk/Yx4j6U5h9ah+qt8i+vJ2bMKlrZiylaLBFggBZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5CqgwFeEhtbGRzYTQ0OjRlYzRmYzdmNjRmMDJjOWM5NjY2YmJjMmY0OTM1Y2ZmNWE5OTIxMzU1MmNmZThlZDJjNmQzNzAyN2JhZmNlMzA="
+  },
+  "negative_json": [
+    {
+      "name": "key16_escrow_refund_value",
+      "rule": "key 16 is exactly [no-attested-response-before-deadline]",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "not-started-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key16_duplicate_refund_value",
+      "rule": "key 16 is exactly [no-attested-response-before-deadline]",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline",
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key18_unrelated_digest",
+      "rule": "key 18 is SHA-256 of the exact ASCII of key 21 field 5",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key18_raw_key_id",
+      "rule": "key 18 hashes the attestor text form, not the bare key ID",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key20_stablecoin_asset",
+      "rule": "key 20 is exactly [{0: native-tos}]",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "USDT"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key20_two_assets",
+      "rule": "key 20 is exactly [{0: native-tos}]",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          },
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key20_no_asset",
+      "rule": "key 20 is exactly [{0: native-tos}]",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_escrow_rail",
+      "rule": "key 21 field 1 is exactly tos.service.service-actor.v1",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.escrow.v2"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_masterchain_actor",
+      "rule": "key 21 field 2 is exactly 0",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": -1,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_short_actor_account",
+      "rule": "key 21 field 3 is 32 non-zero bytes",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVg==",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_zero_actor_account",
+      "rule": "key 21 field 3 is 32 non-zero bytes",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_long_code_hash",
+      "rule": "key 21 field 4 is 32 non-zero bytes",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5CqgwA",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_zero_code_hash",
+      "rule": "key 21 field 4 is 32 non-zero bytes",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_bare_attestor_key_id",
+      "rule": "key 21 field 5 is mldsa44:\u003c64 lowercase hex\u003e",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:f55b3e1233fdf9d6de1f8beafe741f64985dee486ad7eaec2a17ed4e450a83af",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_uppercase_attestor_key_id",
+      "rule": "key 21 field 5 is mldsa44:\u003c64 lowercase hex\u003e",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:40dcf7baa86d505a00c9bf68ce09062c789befd62ac568c3031ec076d84db191",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4EC4FC7F64F02C9C9666BBC2F4935CFF5A99213552CFE8ED2C6D37027BAFCE30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_zero_attestor_key_id",
+      "rule": "key 21 field 5 names a non-zero key ID",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:b2877353eb82be698835a69ea8163b1d35ae8391a6e93439882e2cc0672555eb",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:0000000000000000000000000000000000000000000000000000000000000000",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_attestor_without_key18",
+      "rule": "a changed key 21 attestor needs the matching key 18",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:9898989898989898989898989898989898989898989898989898989898989898",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_missing",
+      "rule": "key 21 is required",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_missing_attestor",
+      "rule": "key 21 has exactly fields 1-5",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "name": "key21_unknown_field",
+      "rule": "key 21 has exactly fields 1-5",
+      "manifest": {
+        "accepted_source_kinds": [
+          "content-addressed-archive",
+          "immutable-repository-commit"
+        ],
+        "artifact_media_types": [
+          "application/vnd.tos.service.software-artifact.v1+tar"
+        ],
+        "description": "Run the committed Go test suite without network access.",
+        "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+        "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+        "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+        "invocation": {
+          "arguments": [
+            "test",
+            "-count=1",
+            "./..."
+          ],
+          "executable": "/usr/local/go/bin/go",
+          "working_directory": "/workspace/source"
+        },
+        "limits": {
+          "cpu_millis": 120000,
+          "memory_bytes": 1073741824,
+          "output_bytes": 16777216,
+          "scratch_bytes": 2147483648,
+          "wall_clock_millis": 180000
+        },
+        "name": "Deterministic Go test",
+        "network_policy": "none",
+        "operation": "test",
+        "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+        "protocol": "tos.service.software-work-manifest.v1",
+        "refund_conditions": [
+          "no-attested-response-before-deadline"
+        ],
+        "report_media_types": [
+          "application/vnd.tos.service.test-report.v1+json"
+        ],
+        "retention_seconds": 86400,
+        "settlement": {
+          "actor_account_id": "aGvaHYBWGeT9jHiPpTmH1qH6q3yL68nZswqWtmLKVos=",
+          "actor_address": "0:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "actor_code_hash": "BZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw=",
+          "actor_workchain": 0,
+          "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+          "rail": "tos.service.service-actor.v1"
+        },
+        "success_condition": "exit-code-zero-and-valid-reports",
+        "supported_assets": [
+          {
+            "kind": "native-tos"
+          }
+        ],
+        "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+        "version": "2.0.0"
+      }
+    }
+  ],
+  "negative_cbor": [
+    {
+      "name": "indefinite_root_map",
+      "rule": "definite lengths only",
+      "cbor_base64": "vwF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaEAam5hdGl2ZS10b3MVpQF4HHRvcy5zZXJ2aWNlLnNlcnZpY2UtYWN0b3IudjECAANYIGhr2h2AVhnk/Yx4j6U5h9ah+qt8i+vJ2bMKlrZiylaLBFggBZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5CqgwFeEhtbGRzYTQ0OjRlYzRmYzdmNjRmMDJjOWM5NjY2YmJjMmY0OTM1Y2ZmNWE5OTIxMzU1MmNmZThlZDJjNmQzNzAyN2JhZmNlMzD/"
+    },
+    {
+      "name": "root_key_22",
+      "rule": "the root map has exactly keys 1-21",
+      "cbor_base64": "tgF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaEAam5hdGl2ZS10b3MVpQF4HHRvcy5zZXJ2aWNlLnNlcnZpY2UtYWN0b3IudjECAANYIGhr2h2AVhnk/Yx4j6U5h9ah+qt8i+vJ2bMKlrZiylaLBFggBZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5CqgwFeEhtbGRzYTQ0OjRlYzRmYzdmNjRmMDJjOWM5NjY2YmJjMmY0OTM1Y2ZmNWE5OTIxMzU1MmNmZThlZDJjNmQzNzAyN2JhZmNlMzAWZWV4dHJh"
+    },
+    {
+      "name": "key20_extra_entry_key",
+      "rule": "a key 20 entry is exactly {0: native-tos}",
+      "cbor_base64": "tQF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaIAam5hdGl2ZS10b3MBaGRlY2ltYWxzFaUBeBx0b3Muc2VydmljZS5zZXJ2aWNlLWFjdG9yLnYxAgADWCBoa9odgFYZ5P2MeI+lOYfWofqrfIvrydmzCpa2YspWiwRYIAWU+aV0NED5xfY5E6t5DA6m9P1cYn2ZYtY+CUKOQqoMBXhIbWxkc2E0NDo0ZWM0ZmM3ZjY0ZjAyYzljOTY2NmJiYzJmNDkzNWNmZjVhOTkyMTM1NTJjZmU4ZWQyYzZkMzcwMjdiYWZjZTMw"
+    },
+    {
+      "name": "key21_account_as_text",
+      "rule": "key 21 field 3 is a byte string",
+      "cbor_base64": "tQF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaEAam5hdGl2ZS10b3MVpQF4HHRvcy5zZXJ2aWNlLnNlcnZpY2UtYWN0b3IudjECAAN4QDY4NmJkYTFkODA1NjE5ZTRmZDhjNzg4ZmE1Mzk4N2Q2YTFmYWFiN2M4YmViYzlkOWIzMGE5NmI2NjJjYTU2OGIEWCAFlPmldDRA+cX2OROreQwOpvT9XGJ9mWLWPglCjkKqDAV4SG1sZHNhNDQ6NGVjNGZjN2Y2NGYwMmM5Yzk2NjZiYmMyZjQ5MzVjZmY1YTk5MjEzNTUyY2ZlOGVkMmM2ZDM3MDI3YmFmY2UzMA=="
+    },
+    {
+      "name": "key21_code_hash_as_text",
+      "rule": "key 21 field 4 is a byte string",
+      "cbor_base64": "tQF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaEAam5hdGl2ZS10b3MVpQF4HHRvcy5zZXJ2aWNlLnNlcnZpY2UtYWN0b3IudjECAANYIGhr2h2AVhnk/Yx4j6U5h9ah+qt8i+vJ2bMKlrZiylaLBHhAMDU5NGY5YTU3NDM0NDBmOWM1ZjYzOTEzYWI3OTBjMGVhNmY0ZmQ1YzYyN2Q5OTYyZDYzZTA5NDI4ZTQyYWEwYwV4SG1sZHNhNDQ6NGVjNGZjN2Y2NGYwMmM5Yzk2NjZiYmMyZjQ5MzVjZmY1YTk5MjEzNTUyY2ZlOGVkMmM2ZDM3MDI3YmFmY2UzMA=="
+    },
+    {
+      "name": "key21_field_6",
+      "rule": "key 21 has exactly fields 1-5",
+      "cbor_base64": "tQF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaEAam5hdGl2ZS10b3MVpgF4HHRvcy5zZXJ2aWNlLnNlcnZpY2UtYWN0b3IudjECAANYIGhr2h2AVhnk/Yx4j6U5h9ah+qt8i+vJ2bMKlrZiylaLBFggBZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5CqgwFeEhtbGRzYTQ0OjRlYzRmYzdmNjRmMDJjOWM5NjY2YmJjMmY0OTM1Y2ZmNWE5OTIxMzU1MmNmZThlZDJjNmQzNzAyN2JhZmNlMzAGZWV4dHJh"
+    },
+    {
+      "name": "key21_missing_field_5",
+      "rule": "key 21 has exactly fields 1-5",
+      "cbor_base64": "tQF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaEAam5hdGl2ZS10b3MVpAF4HHRvcy5zZXJ2aWNlLnNlcnZpY2UtYWN0b3IudjECAANYIGhr2h2AVhnk/Yx4j6U5h9ah+qt8i+vJ2bMKlrZiylaLBFggBZT5pXQ0QPnF9jkTq3kMDqb0/VxifZli1j4JQo5Cqgw="
+    }
+  ]
+}
