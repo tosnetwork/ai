@@ -399,6 +399,35 @@ func TestAReceiptBOCMustBeTheCanonicalSingleRootEncoding(t *testing.T) {
 	}
 }
 
+// A Receipt that binds the delivered artifact's digest but another output
+// or report digest is refused: each member is checked, not only the tar.
+func TestBuyerRefusesAReceiptWhoseMemberDigestsDifferFromTheArtifact(t *testing.T) {
+	document := loadVectors(t)
+	binding := vectorReceiptBinding(t, document)
+	receipt, _, err := DecodeReceipt(mustBase64(t, document.Receipt.ReceiptBOCBase64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := "sha256:" + strings.Repeat("09", 32)
+	for name, outcome := range map[string]Outcome{
+		"output.log": {ResultDigest: other, ArtifactDigest: receipt.ArtifactDigest, ReportDigest: receipt.ReportDigest,
+			CompletedAtUnix: receipt.CompletedAt},
+		"report.json": {ResultDigest: receipt.ResultDigest, ArtifactDigest: receipt.ArtifactDigest, ReportDigest: other,
+			CompletedAtUnix: receipt.CompletedAt},
+	} {
+		root, responseHash, err := BuildReceipt(binding, outcome)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := vectorResult(t, document)
+		result.Receipt = root.ToBOC()
+		result.Header.ResponseHash = hex.EncodeToString(responseHash[:])
+		if err = ValidateResult(result, binding, responseHash); !errors.Is(err, ErrResultNotAccepted) {
+			t.Errorf("%s digest differs: err=%v", name, err)
+		}
+	}
+}
+
 func TestArtifactMustHoldExactlyItsOutputAndReport(t *testing.T) {
 	output, report := [2]string{"output.log", "ok\n"}, [2]string{"report.json", "{}\n"}
 	if gotOutput, gotReport, err := ArtifactMembers(tarOf(t, report, output)); err != nil ||
