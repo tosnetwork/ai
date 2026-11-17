@@ -1,11 +1,27 @@
 # Gate D Pilot Readiness Packet
 
-**Rail change (2026-11-07).** Stablecoin escrow v2 is retired and the
-software-work profile settles in native TOS on the Service Actor
-([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
+**Escrow-rail packet; not current (rail change 2026-11-07).** Stablecoin
+escrow v2 is retired and the software-work profile settles in native TOS on the
+Service Actor ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
 [`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-The escrow, stablecoin, and settlement-intent inputs below describe the retired rail and cannot produce Gate D evidence. Where this document conflicts with those, they govern; its in-place
-rewrite follows the implementation change listed in the design's section 7.
+This packet still describes the escrow rail and cannot produce Gate D
+evidence:
+
+- **Void:** the §1 statement that Gate D's implementation is complete (the
+  open Service Actor items are listed in `ROADMAP.md` Gate D); the §3 rows for
+  the escrow encodings and the strict verifier; the §4 stablecoin, escrow,
+  stablecoin-wallet and query-ID rows; the §5 escrow, tUSDT and
+  settlement-intent checklist items; all of §6 (the verifier script was
+  removed from tos in `bc57ab010`); the §7 stablecoin, escrow and transaction
+  fields and the verdict string; and all of §9 (release/refund scope of the
+  escrow rail).
+- **Still binding:** the §2 independence rules and the rail-independent rows
+  and items of §3-§5 and §8 (Registry code hash, executor toolchain, Agent and
+  Capability registration, executor isolation, endpoint independence).
+- **Next:** a Service Actor rewrite of this packet follows in a separate
+  change, together with that of `GATE_D_EXTERNAL_PILOT.md`, which remains
+  authoritative. Where this packet conflicts with the Service Actor
+  documents, they govern.
 
 **Status:** operational readiness companion to `GATE_D_EXTERNAL_PILOT.md`, which
 is authoritative. This packet only assembles the fixed inputs, per-role

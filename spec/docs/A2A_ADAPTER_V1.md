@@ -1,11 +1,16 @@
 # A2A Software-Work Adapter V1
 
-**Rail change (2026-11-07).** Stablecoin escrow v2 is retired and the
-software-work profile settles in native TOS on the Service Actor
-([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
+**Retired (2026-11-08).** The A2A adapter this document describes no longer
+exists. It was built on the escrow execution Gate and was removed with the
+escrow rail in `execution/` commit `0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c`
+(`execution/pkg/a2aadapter`, its public HTTP boundary and the cross-transport
+acceptance test); the Gate itself was removed in `protocol/` commit
+`b9ad8e17`. The software-work profile now settles in native TOS on the Service
+Actor ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
 [`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-Escrow addresses and funded-escrow checks below are superseded by the `(actor, request_id)` of a pending Service Actor request; the settler submits `respond` with the attestor's SRP2 signature. Where this document conflicts with those, they govern; its in-place
-rewrite follows the implementation change listed in the design's section 7.
+The text below is kept as history only; it is not a current specification and
+no implementation conforms to it. No A2A adapter exists on the Service Actor
+rail.
 
 ## Scope
 

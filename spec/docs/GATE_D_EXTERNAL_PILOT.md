@@ -1,11 +1,29 @@
 # Gate D External Pilot
 
-**Rail change (2026-11-07).** Stablecoin escrow v2 is retired and the
-software-work profile settles in native TOS on the Service Actor
-([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
+**Escrow-rail runbook; not current (rail change 2026-11-07).** Stablecoin
+escrow v2 is retired and the software-work profile settles in native TOS on the
+Service Actor ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
 [`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-The escrow funding, stablecoin, and release/refund steps below describe the retired rail and cannot produce Gate D evidence; the pilot runs on the Service Actor once the items `ROADMAP.md` Gate D lists as open are met. Where this document conflicts with those, they govern; its in-place
-rewrite follows the implementation change listed in the design's section 7.
+This runbook still describes the escrow rail and cannot produce Gate D
+evidence:
+
+- **Void:** "Frozen profile" (stablecoin identity, release/refund, Receipt and
+  settlement-intent cells); "Execution sequence" steps 1 (stablecoin
+  identity), 3-4 (escrow StateInit and funding) and 6 (settlement-intent
+  signature and stablecoin transfer); "Custody-safe Receipt signing"
+  (`native-receipt-release` was removed in `protocol/` commit `b9ad8e17`);
+  "Independent verification" (`scripts/tos-service-software-work-paid-evidence.py`
+  was removed from tos in `bc57ab010`); and the escrow, stablecoin and
+  settlement fields and the `PASS_INDEPENDENT_PAID_SOFTWARE_WORK_SETTLEMENT`
+  verdict of "Acceptance record".
+- **Still binding:** the purpose, the three-role independence rules, the
+  custody rules for test identities, and execution steps 2, 5 and 7 apart
+  from their escrow wording.
+- **Next:** a Service Actor rewrite of this runbook (native-TOS `call`,
+  attestor-signed `respond`, `expire`/`claim_refund`, and a verifier for the
+  responded, refunded and swept outcomes) follows in a separate change, after
+  the open Gate D items in `ROADMAP.md`. Where this document conflicts with
+  the Service Actor documents, they govern.
 
 ## Purpose
 

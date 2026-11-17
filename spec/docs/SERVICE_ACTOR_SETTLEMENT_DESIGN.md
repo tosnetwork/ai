@@ -9,7 +9,9 @@ is merged (tos `fc5e7723e`, #429) and released by
 `SERVICE_ACTOR_TVM_V1.md`), with contract-execution vectors reproduced by the
 protocol implementation. The settlement path passed on the public testnet
 (global_id 2) on 2026-11-07, with the discovery catalog and quote transport as
-local stand-ins.
+local stand-ins; that run was a same-operator rehearsal (team memo STATUS
+13.353), not Gate D evidence, and the network has since been halted (STATUS
+13.559).
 
 **Owner decision it implements (2026-11-06):** the current-domain
 `tos_service_v1` end-to-end acceptance settles on the Service Actor contract
@@ -483,28 +485,31 @@ protects pending requests, but revenue and future-call policy do not.
 
 ## 7. Gaps in the implementation repositories
 
-Pointers for follow-up changes; no code is written here.
+Pointers for follow-up changes. The Status column was checked against tos main
+`ed8e0a80b`, ai main `64e69cf9` and OpenFox main `682c8bc3` on 2026-11-17;
+the line pointers in the File column are those of the original survey and may
+have moved.
 
-| Repository | File | Gap |
-|---|---|---|
-| tos | RS:18, RS:159-160 | closed: `crypto/smartcont/tos-service-actor-v1.release.json` (#430) publishes the code hash, and `scripts/check-service-actor-bytecode.py` rebuilds the source and requires the embedded SDK code (by root hash) and the release artifact (byte for byte) to match |
-| tos | CMD:1147-1152 | `call` defaults `expected_terms_hash` to live state |
-| tos | RS:218 | deploy is always `active = 1`; add an inactive deploy for 2.3 |
-| tos | service-actor-code.fc | ML-DSA-44 attestor (D1), sweep to the caller ahead of the operating reserve (D3), request snapshot carrying `request_id` and the exact terms preimage (D10, SAP:478-502) and the `call` attestor-encoding check: implemented on `feat/service-actor-pq` at `4c62edcae`, not merged, not deployed |
-| spec | see section 10 | Accepted Quote, escrow v2, settlement, Receipt, manifest, execution gate (slot key `(quote_commitment, escrow_address)` becomes `(quote_commitment, actor, request_id)`), strategy §9, roadmap Gate D |
-| spec | `native.proto` 315-349 | `MoneyV1.asset` is stablecoin-only; `QuoteProposalV1` has no actor or `terms_hash`; `AcceptedQuoteV1` |
-| spec | `test-vectors/` | `NSM1`, `NSR1`, Accepted Quote, `terms_hash`, SRP2, from contract execution |
-| protocol | `pkg/nativecore/quote.go`, `internal/referencecodec/quote.go` | rail cell instead of asset and escrow terms |
-| protocol | `pkg/nativecore/receipt.go`, `escrow.go`, `escrow_v2.go` | settlement intent and release/refund bodies give way to an SRP2 builder and `call`/`expire`/`claim_refund` bodies |
-| protocol | `pkg/toschain/escrow.go` | actor resolver: code hash, exact decode, request/refund lookup, transaction-derived outcomes |
-| protocol | `pkg/executiongate/gate.go` | `PaidDemandEscrowResolver` and the funded-escrow predicate become "request pending under the quoted `terms_hash` and `request_hash`" |
-| protocol | `pkg/buyersdk/buyer.go`, `tosctl_sender.go`, `journal.go` | native-TOS `call` with the quoted terms; journal `expire`/`claim_refund` duties and deadlines |
-| protocol | `pkg/quoteprovider/provider.go`, `pkg/quoteexchange/package.go` | proposals from finalized actor state; `terms_hash` instead of escrow terms |
-| protocol | `pkg/providersdk/provider.go` | manifest key 21; deploy, register, `update_policy` sequencing |
-| protocol | `pkg/economic`, `cmd/native-receipt-release` | inputs from actor transactions (`pkg/paiddemand` stays escrow-bound, out of scope) |
-| gateway | `internal/nativegateway/server.go`, `internal/quotesource` | Quote Proposal contents only; no authority |
-| execution | `pkg/a2aadapter/adapter.go`, `pkg/mcpadapter/adapter.go` | carry `(actor, request_id)` instead of `EscrowAddress`; settler submits `respond`; attestor signing keeps the Receipt document's two-stage custody (emit the 32-byte SRP2 hash, verify the signature before building `respond`); `pkg/softwarework` unchanged |
-| openfox | `pkg/servicebridge/interfaces.go`, `buyer.go`, `provider.go`, `nativeimpl/purchase_coordinator.go`, `nativeimpl/tosctl_runner.go` | `call` instead of fund (`ResolveEscrow`, `SignAndFundEscrow`); new buyer duty to `expire` and `claim_refund` before `refund_claim_deadline` (`pkg/earning/paid_demand_*` stays escrow-bound) |
+| Repository | File | Gap | Status |
+|---|---|---|---|
+| tos | RS:18, RS:159-160 | release manifest and code-hash check | closed: `crypto/smartcont/tos-service-actor-v1.release.json` (#430, `4f5307523`) publishes the code hash, and `scripts/check-service-actor-bytecode.py` rebuilds the source and requires the embedded SDK code (by root hash) and the release artifact (byte for byte) to match |
+| tos | CMD:1147-1152 | `call` defaults `expected_terms_hash` to live state | closed in #429 (`910e91155`): `call_terms_hash` in `service_actor_cmd.rs` refuses a `call` without `--expected-terms-hash` and refuses one that differs from the live terms |
+| tos | RS:218 | deploy is always `active = 1`; add an inactive deploy for 2.3 | open: `service_actor.rs` still writes `active = 1 at deploy` |
+| tos | service-actor-code.fc | ML-DSA-44 attestor (D1), sweep to the caller ahead of the operating reserve (D3), request snapshot carrying `request_id` and the exact terms preimage (D10, SAP:478-502) and the `call` attestor-encoding check | closed: merged on tos main (#429, merge `fc5e7723e`) and released (#430); the section 9 gates remain open |
+| spec | see section 10 | Accepted Quote, escrow v2, settlement, Receipt, manifest, execution gate (slot key `(quote_commitment, escrow_address)` becomes `(quote_commitment, actor, request_id)`), strategy §9, roadmap Gate D | partly closed: the section 10 documents carry Service Actor notes; their in-place rewrites are open |
+| spec | `native.proto` 315-349 | `MoneyV1.asset` is stablecoin-only; `QuoteProposalV1` has no actor or `terms_hash`; `AcceptedQuoteV1` | closed: `spec/proto/tos/service/v1/native.proto` `QuoteProposalV1` reserves the escrow fields and carries `actor`, `actor_code_hash`, `policy_version`, `terms_hash`, the nanoTOS price and storage fee and `attestor_key_id`; `AcceptedQuoteV1` carries the request ID |
+| spec | `test-vectors/` | `NSM1`, `NSR1`, Accepted Quote, `terms_hash`, SRP2, from contract execution | open: the vectors exist in `protocol/pkg/nativecore/testdata/service-actor-conformance-vectors.json`, byte-identical to the tos sandbox fixture; the copy under `spec/test-vectors/` is pending |
+| protocol | `pkg/nativecore/quote.go`, `internal/referencecodec/quote.go` | rail cell instead of asset and escrow terms | closed: `pkg/nativecore/quote.go` (rewritten in protocol `b9ad8e17`, `ParseServiceActorQuoteRail`) and `internal/referencecodec/rail.go` |
+| protocol | `pkg/nativecore/receipt.go`, `escrow.go`, `escrow_v2.go` | settlement intent and release/refund bodies give way to an SRP2 builder and `call`/`expire`/`claim_refund` bodies | closed: `escrow.go` and `escrow_v2.go` were removed in protocol `b9ad8e17`; `pkg/nativecore/service_actor.go` builds the `call` body and the SRP2 domain and decodes every inbound body; `expire` and `claim_refund` are sent through `tosctl` |
+| protocol | `pkg/toschain/escrow.go` | actor resolver: code hash, exact decode, request/refund lookup, transaction-derived outcomes | closed: `pkg/toschain/escrow.go` was removed in protocol `b9ad8e17`; `pkg/toschain/service_actor.go` and `service_actor_history.go` resolve the actor, and `pkg/serviceactor` implements both verification procedures of 2.4 |
+| protocol | `pkg/executiongate/gate.go` | `PaidDemandEscrowResolver` and the funded-escrow predicate become "request pending under the quoted `terms_hash` and `request_hash`" | closed: `pkg/executiongate` was removed in protocol `b9ad8e17`; execution is admitted by `execution/pkg/railgate` on the pending request and its `request_hash` |
+| protocol | `pkg/buyersdk/buyer.go`, `tosctl_sender.go`, `journal.go` | native-TOS `call` with the quoted terms; journal `expire`/`claim_refund` duties and deadlines | partly closed: `pkg/buyersdk` `ServiceActorBuyer` (Discover, Prepare, Call, Resolve) sends the native-TOS `call` under a crash-safe journal and budget, and `pkg/serviceactor/lifecycle.go` names the refund duty; sending `expire` and `claim_refund` is left to the buyer runtime (OpenFox does it), so a buyer without one has no shared path yet |
+| protocol | `pkg/quoteprovider/provider.go`, `pkg/quoteexchange/package.go` | proposals from finalized actor state; `terms_hash` instead of escrow terms | closed: `pkg/quoteprovider/provider.go` derives `terms_hash` from the finalized policy (protocol `b9ad8e17`) |
+| protocol | `pkg/providersdk/provider.go` | manifest key 21; deploy, register, `update_policy` sequencing | partly closed: `pkg/providersdk/publication.go` `CheckManifestActorPin` refuses a manifest whose key 21 names other code; the manifest key 21 spec vector and negative corpus are open (`ROADMAP.md` Gate D) |
+| protocol | `pkg/economic`, `cmd/native-receipt-release` | inputs from actor transactions (`pkg/paiddemand` stays escrow-bound, out of scope) | void: `cmd/native-receipt-release` was removed in protocol `b9ad8e17` and `pkg/economic` in `7db00113`; no Service Actor replacement exists |
+| gateway | `internal/nativegateway/server.go`, `internal/quotesource` | Quote Proposal contents only; no authority | closed: `internal/quotesource` builds Service Actor Quote Proposals over `pkg/quoteprovider` and pins the release code hash |
+| execution | `pkg/a2aadapter/adapter.go`, `pkg/mcpadapter/adapter.go` | carry `(actor, request_id)` instead of `EscrowAddress`; settler submits `respond`; attestor signing keeps the Receipt document's two-stage custody (emit the 32-byte SRP2 hash, verify the signature before building `respond`); `pkg/softwarework` unchanged | void: both adapters were removed with the escrow rail in execution `0d0dfc22`; a buyer-side MCP adapter on this rail is planned for Gate D |
+| openfox | `pkg/servicebridge/interfaces.go`, `buyer.go`, `provider.go`, `nativeimpl/purchase_coordinator.go`, `nativeimpl/tosctl_runner.go` | `call` instead of fund (`ResolveEscrow`, `SignAndFundEscrow`); new buyer duty to `expire` and `claim_refund` before `refund_claim_deadline` (`pkg/earning/paid_demand_*` stays escrow-bound) | closed: OpenFox main has no escrow funding path; `pkg/servicebridge/buyer.go` and `lifecycle.go` send `expire` and `claim_refund` through `tosctl` |
 
 ## 8. Owner decisions (taken 2026-11-07)
 
@@ -623,12 +628,15 @@ the options that were weighed and records the one taken.
   buyer, independent provider and independent resolver (`ROADMAP.md` Gate D).
 - **Review.** Independent security review of the changed contract and protocol.
 
-| Gate | Status (2026-11-07) |
+| Gate | Status (checked 2026-11-17) |
 |---|---|
-| Sandbox, current Ed25519 contract | Met for that contract (SBX, 3,275 lines); not for the changed one |
-| Changed contract | Implemented on `feat/service-actor-pq` at `4c62edcae` with its sandbox tests (SBX, 3,667 lines); not merged, not deployed, no gate accepted |
-| ML-DSA-44 cost | Probe only (`b39fdba8a`); not yet measured on the changed contract |
-| Everything else above | Open |
+| Sandbox, current Ed25519 contract | Met for that contract (SBX, 3,275 lines); superseded by the changed contract |
+| Changed contract | Merged on tos main with its sandbox tests (#429, merge `fc5e7723e`; SBX on main `ed8e0a80b` has 4,003 lines) and released (#430, `4f5307523`); the both-VM replay is not recorded and no gate is accepted |
+| ML-DSA-44 cost | Probe only (`b39fdba8a`); no measurement on the changed contract is recorded |
+| Vectors | Generated from contract execution (tos sandbox `conformance_vectors_come_from_contract_execution`) and reproduced by `nativecore` and `internal/referencecodec`; the `spec/test-vectors/` copy is pending |
+| Resolver | Both procedures implemented in `protocol/pkg/serviceactor`; not independently reviewed |
+| Live chain | One same-host lifecycle per terminal state recorded in `deployments/local-service-actor-settlement-lifecycle-20261114.json` (not public acceptance); a second resolver's reconstruction and the public external run are open |
+| Review | Open |
 
 ## 10. Contradictions found
 

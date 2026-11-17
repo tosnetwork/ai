@@ -1,11 +1,28 @@
 # Gate E Buyer Onboarding
 
-**Rail change (2026-11-07).** Stablecoin escrow v2 is retired and the
-software-work profile settles in native TOS on the Service Actor
-([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
+**Escrow-rail runbook; not current (rail change 2026-11-07).** Stablecoin
+escrow v2 is retired and the software-work profile settles in native TOS on the
+Service Actor ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
 [`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-The stablecoin sender, escrow funding, and escrow evidence below describe the retired rail; a buyer pays with one native-TOS `call` and owns the `expire` and `claim_refund` duties before `refund_claim_deadline`. Where this document conflicts with those, they govern; its in-place
-rewrite follows the implementation change listed in the design's section 7.
+A buyer pays with one native-TOS `call` and owns the `expire` and
+`claim_refund` duties before `refund_claim_deadline`. This runbook still
+describes the escrow rail and cannot produce Gate E evidence:
+
+- **Void:** the stablecoin, escrow and funding statements of "Status";
+  "Authority and custody boundary" items 3-5 and 8 (escrow acceptance,
+  stablecoin identity, escrow deployment, funded escrow as payment success);
+  "Buyer sequence" steps 3-7 (`FundPurchase` and the stablecoin sender no
+  longer exist; the current path is `protocol/pkg/buyersdk`
+  `ServiceActorBuyer`: Discover, Prepare, Call, Resolve); the escrow, asset
+  and wallet fields of "Crash and budget rules"; and the funding, stablecoin
+  and escrow entries of "Current implementation and remaining acceptance".
+- **Still binding:** Quote Proposals are never canonical; independent
+  manifest and finalized Capability verification; `tosctl` custody; transport
+  responses are observations only; the owner-private budget directory and the
+  never-pay-twice journal rules.
+- **Next:** a Service Actor rewrite of this runbook follows in a separate
+  change. Where this document conflicts with the Service Actor documents, they
+  govern.
 
 ## Status
 

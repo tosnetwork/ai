@@ -6,8 +6,10 @@ ML-DSA-44 attestor, D3 sweep returns the price to the caller, D10 request
 snapshot message). Implemented and merged on tos main (tosnetwork/tos#429,
 `fc5e7723e`). Released by the reproducible release manifest
 `crypto/smartcont/tos-service-actor-v1.release.json` (tosnetwork/tos#430).
-Deployed on the public testnet (global_id 2) by the public Gate D/E run; it is
-not deployed on any mainnet.
+Deployed on the public testnet (global_id 2) by a same-operator rehearsal on
+2026-11-07 (team memo STATUS 13.353), which is not Gate D evidence; that
+network has since been halted (STATUS 13.559). It is not deployed on any
+running public network or mainnet.
 
 **Code identity.** The release manifest is the authority; these values are
 copied from it:
@@ -568,6 +570,11 @@ SA:1001-1071. Convenience only; resolvers decode the account data exactly
 Listed in design §9: sandbox on both VMs, the adversarial cases, gas and size
 (including the `respond` and `rotate_attestor_key` owner-wallet external
 messages within 65,535 bytes), vectors generated from contract execution, the
-resolver, live-chain lifecycles and an independent security review. Sandbox
-tests exist on the implementing branch (SBX at `4c62edcae`); none of the gates
-has been accepted as of 2026-11-07.
+resolver, live-chain lifecycles and an independent security review. The
+sandbox tests were merged with the contract (tos #429, `fc5e7723e`). Vectors
+generated from contract execution are reproduced by `nativecore` and the
+independent reference codec, and both resolver procedures are implemented in
+`protocol/pkg/serviceactor`; the both-VM replay, gas and size measurements,
+the public-network lifecycles and the independent security review are not
+recorded, so none of the gates has been accepted (status checked 2026-11-17;
+`ROADMAP.md` Gate D is authoritative).
