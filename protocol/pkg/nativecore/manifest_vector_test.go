@@ -276,6 +276,51 @@ func negativeCBORCases(canonical []byte) ([]manifestVectorNegativeCBOR, error) {
 	indefinite := append(append([]byte{0xbf}, canonical[1:]...), 0xff)
 	cases := []manifestVectorNegativeCBOR{{Name: "indefinite_root_map", Rule: "definite lengths only",
 		CBORBase64: base64.StdEncoding.EncodeToString(indefinite)}}
+
+	// Two encodings that decode to the same valid manifest and differ from
+	// the canonical bytes only in form, so only a canonical re-encode check
+	// refuses them.
+	var root map[uint64]any
+	if err := cbor.Unmarshal(canonical, &root); err != nil {
+		return nil, err
+	}
+	entry := func(key uint64) ([]byte, error) {
+		encodedKey, err := mode.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		encodedValue, err := mode.Marshal(root[key])
+		if err != nil {
+			return nil, err
+		}
+		return append(encodedKey, encodedValue...), nil
+	}
+	first, err := entry(1)
+	if err != nil {
+		return nil, err
+	}
+	second, err := entry(2)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(canonical[1:1+len(first)+len(second)], append(append([]byte{}, first...), second...)) {
+		return nil, errors.New("the canonical manifest does not start with keys 1 and 2")
+	}
+	unsorted := append([]byte{canonical[0]}, second...)
+	unsorted = append(append(unsorted, first...), canonical[1+len(first)+len(second):]...)
+	cases = append(cases, manifestVectorNegativeCBOR{Name: "unsorted_root_keys",
+		Rule: "map keys in canonical order (keys 2 and 1 swapped)", CBORBase64: base64.StdEncoding.EncodeToString(unsorted)})
+
+	// Key 21 field 2 (the actor workchain, 0) as the two-byte 0x18 0x00
+	// instead of the one-byte 0x00.
+	workchain := []byte{0x02, 0x00, 0x03, 0x58, 0x20}
+	at := bytes.Index(canonical, workchain)
+	if at < 0 || bytes.Count(canonical, workchain) != 1 {
+		return nil, errors.New("the key 21 workchain entry is not found exactly once")
+	}
+	longer := append(append(append([]byte{}, canonical[:at+1]...), 0x18, 0x00), canonical[at+2:]...)
+	cases = append(cases, manifestVectorNegativeCBOR{Name: "key21_workchain_not_shortest",
+		Rule: "integers in their shortest form (key 21 field 2 as 0x18 0x00)", CBORBase64: base64.StdEncoding.EncodeToString(longer)})
 	for _, item := range []struct {
 		name, rule string
 		edit       func(map[uint64]any) error
