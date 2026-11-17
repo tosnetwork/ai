@@ -1044,7 +1044,11 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     crash at each step is finished at restart, and garbage collection then
     reclaims what nothing names.
 20. **Credential storage and holding (unit, 11.8).**
-    - A learned leaf credential is durable before the roster's room ack.
+    - A learned leaf credential, its list and a fused write naming the
+      list's digest are durable before the roster's room ack. A crash after
+      the ack leaves the credentials rooted across a restart; a crash
+      before the fused write leaves the roster unacknowledged and it is
+      learned again.
     - The fused record's credential-list digest is a garbage-collection
       root: an unreadable list deletes nothing.
     - Remove deletes the removed member's credential.
@@ -2033,7 +2037,8 @@ restart each member's queue is rebuilt from the membership as (that epoch's
 Commit or Welcome, then its roster), ahead of any later object; the
 authority never queues a roster for E after a Commit for E + 1.
 
-**Garbage collection.** The roots are every fused record and every
+**Garbage collection.** The roots are every fused record (and through it
+the room's leaf-credential list, 11.8), every pending join and every
 room-outbox head record: an older Commit stays re-depositable for up to
 7 days after the authority has moved on, and a roster or Commit whose fused
 record has been superseded is named only by its outbox head. A staged state, delegation, membership or object chunk that no root names is
@@ -2091,14 +2096,24 @@ A receiver takes the leaves from the driver's read-only `members` operation
 An entry that fails is skipped like a stale card, and the rest of the roster
 is learned.
 
-**Store.** A verified credential is written as a content-addressed record
-named by its digest (the one in the leaf identity) before the roster's room
-ack is signed, so an acknowledged roster is never forgotten by a crash. The
-room's credential list is a content-addressed record of the digests of the
-current members' credentials. The fused record names it by a 32-byte digest,
-so the next fused write commits it (11.3), and it is a garbage-collection
-root: collection keeps every credential it names, and an unreadable list
-deletes nothing (11.7). Remove (11.4) drops the removed member's digest from
+**Store.** The room's credential list is a content-addressed record of the
+digests of the current members' credentials, and the fused record names it
+by a 32-byte digest. That makes it a garbage-collection root: collection
+keeps every credential it names, and an unreadable list deletes nothing
+(11.7). Learning a roster takes three steps, all before the roster's room
+ack is signed:
+
+1. Write each verified credential as a content-addressed record named by its
+   digest (the one in the leaf identity).
+2. Write the new list that names those credentials.
+3. Make a fused write naming the new list's digest, under the same
+   atomic-replace and directory-fsync rules as every fused write (11.3). An
+   exact repeat (the same list digest) is a no-op.
+
+So a credential is rooted before it is acknowledged. A crash before step 3
+leaves unrooted records that restart collects; the roster is not yet
+acknowledged, so it is re-deposited and learned again. A crash after the ack
+finds the credentials rooted. Remove (11.4) drops the removed member's digest from
 the list, and its record is collected. Objects of a current MLS member
 whose credential is not yet known (its roster has not arrived) are held in
 the future-epoch buffer (11.3; same caps, 24 h 5 min) and opened once the
