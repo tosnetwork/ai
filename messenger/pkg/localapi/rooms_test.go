@@ -354,3 +354,22 @@ func TestComposeStopsAtTheRoomEndAndInAHalfRetiredRoom(t *testing.T) {
 		t.Fatalf("a half-retired room sent: %+v", response)
 	}
 }
+
+// A member removed from the room seals nothing more in it (section 11.4).
+func TestComposeIsRefusedInARoomThisInstallationWasRemovedFrom(t *testing.T) {
+	h := newHarness(t)
+	record := installPrivateRoom(t, h, senderID, memberID)
+	h.server.config.RoomOperator = &recordingRooms{}
+	if response := h.call(t, roomComposition(1)); !response.OK {
+		t.Fatalf("before the removal: %+v", response)
+	}
+	if fresh, _, err := h.journal.MarkRoomRemoved(record.RoomID, record.RoomEpoch+1, record.MLSEpoch+1,
+		strings.Repeat("ab", 32), h.clock); err != nil || !fresh {
+		t.Fatalf("mark removed: %v %v", fresh, err)
+	}
+	second := roomComposition(1)
+	second.IdempotencyKey = "idem_" + strings.Repeat("f", 64)
+	if response := h.call(t, second); response.OK || response.Code != fault.CodeNotARoomMember {
+		t.Fatalf("after the removal: %+v", response)
+	}
+}

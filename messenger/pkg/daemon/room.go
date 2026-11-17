@@ -33,6 +33,10 @@ import (
 // carrier.carry: the card admissions a roster teaches.
 type roomCarrier interface {
 	RoomCards(ctx context.Context, roomID string, cards []carrierapi.RoomCard) (carrierapi.Response, error)
+	// ForgetRoomCards drops the room's admission of removed members' cards;
+	// a card another admission (a contact, a session, another room) holds
+	// stays with the carrier.
+	ForgetRoomCards(ctx context.Context, roomID string, agentIDs []string) (carrierapi.Response, error)
 }
 
 // roomRuntime receives private room objects.
@@ -60,6 +64,10 @@ type roomRuntime struct {
 	noticedMutex sync.Mutex
 	noticed      map[string]struct{}
 }
+
+// ErrRoomRemoved is the owner notice of a room this installation was removed
+// from (section 11.4).
+var ErrRoomRemoved = errors.New("this installation was removed from the private room; it accepts and sends nothing more there")
 
 // roomRuntimeSettings are the values the room runtime is built with.
 type roomRuntimeSettings struct {
@@ -98,6 +106,17 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 	}
 	runtime := &roomRuntime{relay: d.relay, daemon: d, ledger: ledger, controller: controller, cards: settings.cards,
 		skew: settings.skew, retention: settings.retention, noticed: map[string]struct{}{}}
+	// Rooms past their retirement time are retired before anything else,
+	// a crash's half-retired room included, and only then is garbage
+	// collected, so the retired rooms' records are reclaimed (section 11.8).
+	if _, err := ledger.RetireEndedRooms(d.clock(), settings.retention, settings.skew); err != nil {
+		return err
+	}
+	if report, err := d.journal.CollectRoomGarbage(); err != nil {
+		return err
+	} else if report.FailedClosed {
+		d.report("room garbage collection", errors.New("a room root is unreadable; nothing was collected"))
+	}
 	limits := relayframe.DefaultReassemblyLimits()
 	limits.PartBytes = settings.partBytes
 	reassembler, err := relayframe.NewReassembler(limits, roomSenders{runtime: runtime})
@@ -268,6 +287,9 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 		if response, refused := r.endedRoom(ended); refused {
 			return response
 		}
+		if response, refused := r.removedRoom(ended); refused {
+			return response
+		}
 		// Only the room's authority sends handshake objects (section 11.5):
 		// another member's part 0 is refused before anything of it is held.
 		if response, refused := r.nonAuthority(ended); refused {
@@ -377,6 +399,9 @@ func (r *roomRuntime) handleComplete(ctx context.Context, sender string, digest 
 		return carrierapi.Refusal(carrierapi.CodeFrameMalformed), true
 	}
 	if response, refused := r.endedRoom(roomInbound{ctx: ctx, sender: sender, object: object, digest: digest, now: now}); refused {
+		return response, response.Result != carrierapi.ResultRetry
+	}
+	if response, refused := r.removedRoom(roomInbound{ctx: ctx, sender: sender, object: object, digest: digest, now: now}); refused {
 		return response, response.Result != carrierapi.ResultRetry
 	}
 	// Part 0's held evidence is checked again at completion: the newest
@@ -489,13 +514,77 @@ func (r *roomRuntime) nonAuthority(in roomInbound) (carrierapi.Response, bool) {
 	return r.roomAck(in, answerRejected(fault.CodeNotAuthentic)), true
 }
 
+// maintain is the room runtime's share of the relay maintenance timer:
+// expired parts go, and ended rooms are retired.
+func (r *roomRuntime) maintain() {
+	r.sweepParts()
+	r.retireEnded()
+}
+
 // sweepParts drops incomplete room objects past their lifetime, with their
-// stored parts, and forgets complete objects left unsettled that long. It
-// runs on the relay maintenance timer.
+// stored parts, and forgets complete objects left unsettled that long.
 func (r *roomRuntime) sweepParts() {
 	if _, err := r.parts.Sweep(r.now()); err != nil {
 		r.daemon.report("room part sweep", err)
 	}
+}
+
+// retireEnded retires every room past end + retention + skew (D18). The
+// room's objects are first dropped from the part store's memory, while
+// their part 0 still names the room; retirement then deletes the stored
+// parts, buffer, receive state, credential list and, last, the fused record,
+// and a collection reclaims what nothing names any more.
+func (r *roomRuntime) retireEnded() {
+	r.handling.Lock()
+	defer r.handling.Unlock()
+	now := r.now()
+	records, err := r.ledger.List()
+	if err != nil {
+		r.daemon.report("room retirement", err)
+		return
+	}
+	due := false
+	for _, record := range records {
+		at, err := eventlog.RoomRetireAt(record, r.retention, r.skew)
+		if err != nil || now.Before(at) {
+			continue
+		}
+		due = true
+		if _, err := r.parts.DropRoom(record.RoomID); err != nil {
+			r.daemon.report("room retirement", err)
+			return
+		}
+	}
+	if !due {
+		return
+	}
+	retired, err := r.ledger.RetireEndedRooms(now, r.retention, r.skew)
+	if err != nil {
+		r.daemon.report("room retirement", err)
+		return
+	}
+	if len(retired) == 0 {
+		return
+	}
+	if report, err := r.daemon.journal.CollectRoomGarbage(); err != nil {
+		r.daemon.report("room garbage collection", err)
+	} else if report.FailedClosed {
+		r.daemon.report("room garbage collection", errors.New("a room root is unreadable; nothing was collected"))
+	}
+}
+
+// removedRoom answers an object of a room this installation was removed
+// from: it accepts no handshake object there any more (section 11.4), and
+// nothing of it is held or answered.
+func (r *roomRuntime) removedRoom(in roomInbound) (carrierapi.Response, bool) {
+	_, removed, err := r.daemon.journal.RoomRemovalOf(in.object.RoomID)
+	if err != nil {
+		return carrierapi.Retry(), true
+	}
+	if !removed || in.object.Type == relayframe.RoomApplication {
+		return carrierapi.Response{}, false
+	}
+	return ignored(), true
 }
 
 // roomEnded reports now >= end + skew (D18), with checked arithmetic: an end

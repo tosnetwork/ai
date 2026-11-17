@@ -1113,7 +1113,7 @@ func refuseOpenFailure(err error) error {
 }
 
 // runRelay serves the inbound carrier socket, sweeps evidence pulls and,
-// with private rooms, drops expired room parts.
+// with private rooms, drops expired room parts and retires ended rooms.
 func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync.WaitGroup) {
 	group.Add(2)
 	go func() {
@@ -1133,7 +1133,7 @@ func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync
 			case <-ticker.C:
 				r.sweepPulls(ctx)
 				if r.rooms != nil {
-					r.rooms.sweepParts()
+					r.rooms.maintain()
 				}
 			}
 		}

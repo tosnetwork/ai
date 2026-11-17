@@ -383,6 +383,24 @@ func (r *Reassembler) DropSender(sender string) int {
 	return len(keys)
 }
 
+// DropRoom drops every incomplete object whose part 0 names a room, for
+// example a room retired here. An object whose part 0 has not arrived names
+// no room and expires with the lifetime.
+func (r *Reassembler) DropRoom(roomID string) int {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	var keys []reassemblyKey
+	for key, object := range r.objects {
+		if object.roomID == roomID {
+			keys = append(keys, key)
+		}
+	}
+	for _, key := range keys {
+		r.drop(key)
+	}
+	return len(keys)
+}
+
 // Usage reports what is held: incomplete objects and part bytes, per sender
 // and in total.
 type Usage struct {

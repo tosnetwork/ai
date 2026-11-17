@@ -70,10 +70,10 @@ func (r *roomRuntime) handleCommit(in roomInbound) carrierapi.Response {
 	}
 	// A Commit whose verified header removes this member, at any epoch above
 	// its own, is a removal notice and is not applied to MLS (sections 11.3,
-	// 11.4): the removed member gets it once, outside its queue, and answers
-	// nothing.
+	// 11.4): the removed member gets it once, outside its queue, marks the
+	// room removed and answers nothing.
 	if !membership.Contains(r.daemon.config.AgentID) {
-		return ignored()
+		return r.removalNotice(in, digest)
 	}
 	if verdict == eventlog.HandshakeGap {
 		return r.roomAck(in, answerRejected(fault.CodeRoomEpochGap))
@@ -95,6 +95,9 @@ func (r *roomRuntime) handleCommit(in roomInbound) carrierapi.Response {
 	if err != nil {
 		return r.applyRefusal(in, err)
 	}
+	// The members the Commit removed are forgotten here (section 11.4): the
+	// fused write already dropped their credentials.
+	r.forgetRemoved(in, record.Members, membership.Members)
 	if err := r.daemon.journal.CompleteRoomHandshake(roomID, in.object.MLSEpoch, digest); err != nil {
 		// The fused write stands; the next judgement resolves the intent.
 		r.daemon.report("room handshake record", err)
@@ -105,6 +108,60 @@ func (r *roomRuntime) handleCommit(in roomInbound) carrierapi.Response {
 		return r.roomAck(in, answerDuplicate)
 	}
 	return r.roomAck(in, answerAccepted)
+}
+
+// removalNotice marks the room removed for a verified Commit that removes
+// this member and raises the owner notice once. Nothing is answered: the
+// removed member's Commit is outside its queue and is never acked.
+func (r *roomRuntime) removalNotice(in roomInbound, digest string) carrierapi.Response {
+	fresh, _, err := r.daemon.journal.MarkRoomRemoved(in.object.RoomID, in.object.RoomEpoch, in.object.MLSEpoch, digest, in.now)
+	if err != nil {
+		if errors.Is(err, eventlog.ErrRoomRemovalEpoch) {
+			return r.roomAck(in, answerRejected(fault.CodeNotAuthentic))
+		}
+		r.daemon.report("room removal", err)
+		return carrierapi.Retry()
+	}
+	if fresh {
+		r.daemon.report("room "+in.object.RoomID, ErrRoomRemoved)
+	}
+	return ignored()
+}
+
+// forgetRemoved forgets the members an applied Commit removed: the room's
+// admission of their cards (carrier.room-cards forget; a card another
+// admission holds stays), their sequence records, and, when no room held
+// here still takes parts from them, their incomplete parts. Each is
+// receive-side bookkeeping, not authority, so a failure is reported and the
+// Commit stands.
+func (r *roomRuntime) forgetRemoved(in roomInbound, before, after []string) {
+	var removed []string
+	for _, agentID := range before {
+		if !containsAgent(after, agentID) && agentID != r.daemon.config.AgentID {
+			removed = append(removed, agentID)
+		}
+	}
+	if len(removed) == 0 {
+		return
+	}
+	for _, agentID := range removed {
+		if _, err := r.daemon.journal.ForgetRoomSender(in.object.RoomID, agentID); err != nil {
+			r.daemon.report("room removed member", err)
+		}
+		if !(roomSenders{runtime: r}).MayHold(agentID) {
+			if _, err := r.parts.DropSender(agentID); err != nil {
+				r.daemon.report("room removed member", err)
+			}
+		}
+	}
+	response, err := r.cards.ForgetRoomCards(in.ctx, in.object.RoomID, removed)
+	if err != nil {
+		r.daemon.report("room cards", err)
+		return
+	}
+	if response.Result != carrierapi.ResultApplied {
+		r.daemon.report("room cards", errors.New("the carrier did not drop the room's admission of removed members"))
+	}
 }
 
 // applyRefusal answers an MLS step that refused a Commit or Welcome. A

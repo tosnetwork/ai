@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -426,5 +427,38 @@ func TestRoomPartRefusedContradictionKeepsTheHeldCopy(t *testing.T) {
 	if result, err := parts.Add(sender, frames[2], now); err != nil || result.Status != relayframe.PartComplete ||
 		!bytes.Equal(result.Object[len(frames[0].Part):len(frames[0].Part)+len(frames[1].Part)], frames[1].Part) {
 		t.Fatalf("completion with the held copy: %+v %v", result.Status, err)
+	}
+}
+
+// A retired room's objects leave the part store's memory too: an incomplete
+// object whose part 0 names the room is dropped with its parts, so it can no
+// longer complete; another room's object stays.
+func TestRoomPartsDropARoomsObjects(t *testing.T) {
+	journal, err := Open(t.TempDir() + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	sender := fusedAgent(1)
+	now := time.Unix(1_900_000_000, 0)
+	frames, digest := splitObject(t, 1, 2500, 1024)
+	parts, _ := openParts(t, journal, allowSenders(sender), now)
+	for _, frame := range frames[:2] {
+		if _, err := parts.Add(sender, frame, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := "room_" + strings.Repeat("7", 64)
+	if dropped, err := parts.DropRoom(other); err != nil || dropped != 0 || storedPartCount(t, journal) != 2 {
+		t.Fatalf("dropping another room: %d %v", dropped, err)
+	}
+	if _, err := parts.DropRoom(fusedRoom); err != nil {
+		t.Fatal(err)
+	}
+	if storedPartCount(t, journal) != 0 || parts.reassembler.Holds(sender, digest) {
+		t.Fatal("the room's object outlived DropRoom")
+	}
+	if result, err := parts.Add(sender, frames[2], now); err != nil || result.Status == relayframe.PartComplete {
+		t.Fatalf("a dropped object completed: %+v %v", result.Status, err)
 	}
 }

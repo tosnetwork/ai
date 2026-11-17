@@ -329,6 +329,31 @@ func (p *RoomParts) DropSender(sender string) (int, error) {
 	return p.deleteUnheld()
 }
 
+// DropRoom drops the incomplete objects of a retired room from memory, and
+// forgets its complete objects left unsettled; their stored parts are
+// deleted. Retirement deletes the room's stored parts itself
+// (deleteRoomPartsOf); this keeps the Reassembler, which holds them in
+// memory, from completing an object of a room that is gone.
+func (p *RoomParts) DropRoom(roomID string) (int, error) {
+	if p == nil || !ids.Room.MatchString(roomID) {
+		return 0, errors.New("invalid room part room")
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.reassembler.DropRoom(roomID)
+	stored, _, err := p.journal.listRoomParts()
+	if err != nil {
+		return 0, err
+	}
+	roomHex := roomID[len("room_"):]
+	for _, part := range stored {
+		if part.frame.PartIndex == 0 && partNamesRoom(part.frame.Part, roomHex) {
+			delete(p.unsettled, part.key)
+		}
+	}
+	return p.deleteUnheld()
+}
+
 // ReplaceFirstPartEvidence keeps newer part-0 evidence (and card) of an
 // incomplete object, in memory and in the stored part 0.
 func (p *RoomParts) ReplaceFirstPartEvidence(sender string, digest [sha256.Size]byte, card, evidence []byte) error {
