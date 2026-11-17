@@ -222,8 +222,9 @@ const (
 	// OpRemoveRoomMember removes a member from a room this installation is
 	// the authority of.
 	OpRemoveRoomMember Operation = "rooms.remove"
-	// OpJoinRoom joins a room a pending room.invite names: it sends this
-	// installation's KeyPackage to the invite's authority.
+	// OpJoinRoom accepts one authority's pending room.invite: it sends this
+	// installation's KeyPackage to that authority and discards the room's
+	// invites from any other Agent.
 	OpJoinRoom Operation = "rooms.join"
 	// OpListRooms lists the private rooms held here and the pending joins.
 	OpListRooms Operation = "rooms.list"
@@ -415,6 +416,9 @@ type Request struct {
 	// RoomMemberAgentID names the Agent rooms.add adds or rooms.remove
 	// removes; RoomID names the room of every rooms.* operation.
 	RoomMemberAgentID string `json:"room_member_agent_id,omitempty"`
+	// RoomAuthorityAgentID names the inviting authority rooms.join accepts:
+	// several Agents may have invited this installation to one room ID.
+	RoomAuthorityAgentID string `json:"room_authority_agent_id,omitempty"`
 
 	// Device-history export terms are all owner-signed. The source device,
 	// recipient Endpoint and pair-session identifier are daemon-derived.
@@ -856,6 +860,9 @@ func ValidateRequest(request Request) error {
 	if request.Op != OpAddRoomMember && request.Op != OpRemoveRoomMember && request.RoomMemberAgentID != "" {
 		return errors.New("only adding or removing a room member names a member")
 	}
+	if request.Op != OpJoinRoom && request.RoomAuthorityAgentID != "" {
+		return errors.New("only joining a room names an authority")
+	}
 	if request.Op == OpBeginOutboundAttachment && request.Body != "" {
 		return errors.New("outbound attachment begin does not carry an inline body")
 	}
@@ -1152,6 +1159,12 @@ func ValidateRequest(request Request) error {
 	case OpCreateRoom, OpJoinRoom:
 		if !roomPattern.MatchString(request.RoomID) {
 			return errors.New("a room operation needs a canonical room")
+		}
+		// Joining names the inviting authority the owner accepts; creating
+		// names none.
+		if (request.Op == OpJoinRoom) != agentPattern.MatchString(request.RoomAuthorityAgentID) ||
+			(request.Op == OpCreateRoom && request.RoomAuthorityAgentID != "") {
+			return errors.New("joining a room names the accepted authority, and only joining does")
 		}
 		return requireEmpty(request, "a room operation", request.EventID, request.LeaseID, request.SessionID,
 			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)

@@ -47,26 +47,34 @@ func TestPendingRoomJoinLifecycle(t *testing.T) {
 	journal, ledger := openFused(t, root)
 	now := fixture.now
 	authority := fixture.delegation.AgentID
-	if _, err := journal.BeginRoomJoin(fusedRoom, []byte("identity"), []byte("{}"), now); err == nil {
+	if _, err := journal.BeginRoomJoin(fusedRoom, authority, []byte("identity"), []byte("{}"), now); err == nil {
 		t.Fatal("joined without an invite")
 	}
 	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, now.Add(time.Hour), now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinConflict) {
-		t.Fatalf("invite from another authority: %v", err)
+	// Another Agent's invite for the same room coexists until the owner
+	// accepts one.
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, now.Add(time.Hour), now); err != nil {
+		t.Fatalf("invite from another Agent: %v", err)
 	}
 	credential, ref := joinCredential(t, fusedAgent(1), 0x71, uint64(now.Unix())-10, uint64(now.Add(24*time.Hour).Unix()))
 	identity := bytes.Repeat([]byte{0x33}, MLSStateChunkBytes+10)
-	join, err := journal.BeginRoomJoin(fusedRoom, identity, credential, now)
+	join, err := journal.BeginRoomJoin(fusedRoom, authority, identity, credential, now)
 	if err != nil || join.State != JoinKeyPackageSent || join.KeyPackageRef != ref || len(join.IdentityStateChunks) != 2 {
 		t.Fatalf("join: %+v %v", join, err)
 	}
-	if again, err := journal.BeginRoomJoin(fusedRoom, identity, credential, now); err != nil || again.KeyPackageRef != ref {
+	if _, found, _ := journal.PendingRoomJoinFor(fusedRoom, fusedAgent(5), now); found {
+		t.Fatal("accepting one authority kept the other's invite")
+	}
+	if _, err := journal.RecordRoomInvite(fusedRoom, fusedAgent(5), inviteEvent, now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinConflict) {
+		t.Fatalf("an invite from another Agent after acceptance: %v", err)
+	}
+	if again, err := journal.BeginRoomJoin(fusedRoom, authority, identity, credential, now); err != nil || again.KeyPackageRef != ref {
 		t.Fatalf("repeated join: %v", err)
 	}
 	other, _ := joinCredential(t, fusedAgent(1), 0x75, uint64(now.Unix())-10, uint64(now.Add(24*time.Hour).Unix()))
-	if _, err := journal.BeginRoomJoin(fusedRoom, identity, other, now); !errors.Is(err, ErrRoomJoinConflict) {
+	if _, err := journal.BeginRoomJoin(fusedRoom, authority, identity, other, now); !errors.Is(err, ErrRoomJoinConflict) {
 		t.Fatalf("a second KeyPackage: %v", err)
 	}
 	// Restart: collection keeps the staged identity a pending join names.
@@ -75,7 +83,7 @@ func TestPendingRoomJoinLifecycle(t *testing.T) {
 	if report, err := journal.CollectRoomGarbage(); err != nil || report.FailedClosed || report.Deleted != 0 {
 		t.Fatalf("collection: %+v %v", report, err)
 	}
-	pending, found, err := journal.PendingRoomJoinFor(fusedRoom, now)
+	pending, found, err := journal.AcceptedRoomJoin(fusedRoom, now)
 	if err != nil || !found || pending.AuthorityAgentID != authority {
 		t.Fatalf("pending: %v %v", found, err)
 	}
@@ -97,7 +105,7 @@ func TestPendingRoomJoinLifecycle(t *testing.T) {
 	if err := journal.FinishRoomJoin(fusedRoom); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, _ := journal.PendingRoomJoinFor(fusedRoom, now); found {
+	if _, found, _ := journal.PendingRoomJoinFor(fusedRoom, authority, now); found {
 		t.Fatal("the join outlived its Welcome")
 	}
 	for _, chunk := range pending.IdentityStateChunks {
@@ -120,7 +128,8 @@ func TestPendingRoomJoinEndsAndIsBounded(t *testing.T) {
 	now := fixture.now
 	for index := 0; index < MaxPendingRoomJoins; index++ {
 		roomID := "room_" + strings.Repeat("0", 62) + string("0123456789abcdef"[index/16]) + string("0123456789abcdef"[index%16])
-		if _, err := journal.RecordRoomInvite(roomID, fusedAgent(1), inviteEvent, now.Add(time.Minute), now); err != nil {
+		inviter := fusedAgent(10 + index/MaxPendingRoomJoinsPerAuthority)
+		if _, err := journal.RecordRoomInvite(roomID, inviter, inviteEvent, now.Add(time.Minute), now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -136,10 +145,51 @@ func TestPendingRoomJoinEndsAndIsBounded(t *testing.T) {
 		t.Fatalf("live joins: %d %v", len(joins), err)
 	}
 	credential, _ := joinCredential(t, fusedAgent(2), 0x72, uint64(later.Unix())-1, uint64(later.Add(time.Hour).Unix()))
-	if _, err := journal.BeginRoomJoin(fusedRoom, []byte("identity"), credential, later.Add(2*time.Hour)); err == nil {
+	if _, err := journal.BeginRoomJoin(fusedRoom, fusedAgent(1), []byte("identity"), credential, later.Add(2*time.Hour)); err == nil {
 		t.Fatal("joined with an expired credential")
 	}
 	if names, _ := filepath.Glob(filepath.Join(journal.root, roomJoinDir, "*.json")); len(names) != 1 {
 		t.Fatalf("%d join records", len(names))
+	}
+}
+
+// A stranger cannot pre-empt the real authority: an invite lives at most
+// 7 days, the real authority's invite for the same room coexists with it,
+// and one Agent holds at most 8 pending joins.
+func TestRoomInvitesCannotBePreempted(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, _ := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	now := fixture.now
+	stranger := fusedAgent(5)
+	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, now.Add(100*365*24*time.Hour), now); err == nil {
+		t.Fatal("a far-future invite was recorded")
+	}
+	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, now.Add(MaxRoomInviteLifetime+time.Second), now); err == nil {
+		t.Fatal("an invite beyond 7 days was recorded")
+	}
+	if _, err := journal.RecordRoomInvite(fusedRoom, stranger, inviteEvent, now.Add(MaxRoomInviteLifetime), now); err != nil {
+		t.Fatal(err)
+	}
+	authority := fixture.delegation.AgentID
+	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, now.Add(time.Hour), now); err != nil {
+		t.Fatalf("the real authority was pre-empted: %v", err)
+	}
+	for index := 1; index < MaxPendingRoomJoinsPerAuthority; index++ {
+		roomID := "room_" + strings.Repeat("e", 63) + string("0123456789abcdef"[index])
+		if _, err := journal.RecordRoomInvite(roomID, stranger, inviteEvent, now.Add(time.Hour), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := journal.RecordRoomInvite("room_"+strings.Repeat("f", 64), stranger, inviteEvent, now.Add(time.Hour), now); !errors.Is(err, ErrRoomJoinsShareFull) {
+		t.Fatalf("a ninth pending join of one Agent: %v", err)
+	}
+	// The stranger's 7-day invite ends; a year later nothing of it is left.
+	later := now.Add(365 * 24 * time.Hour)
+	if err := journal.SweepRoomJoins(later); err != nil {
+		t.Fatal(err)
+	}
+	if joins, err := journal.ListPendingRoomJoins(later); err != nil || len(joins) != 0 {
+		t.Fatalf("%d joins outlived their invites: %v", len(joins), err)
 	}
 }

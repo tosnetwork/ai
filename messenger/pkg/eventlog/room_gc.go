@@ -37,8 +37,14 @@ type RoomGarbageReport struct {
 // recoverRooms runs at Open, before any room operation: it publishes or
 // discards every staged Commit output, then collects unnamed records.
 func (j *Journal) recoverRooms() error {
-	_, err := j.collectRoomGarbage()
-	return err
+	if _, err := j.collectRoomGarbage(); err != nil {
+		return err
+	}
+	// The receive state of a room neither held nor pending is what a crash
+	// between the room's end and ForgetRoomState left behind.
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	return j.sweepOrphanedRoomState()
 }
 
 // CollectRoomGarbage resolves staged Commit outputs and deletes every staged
@@ -147,17 +153,17 @@ func (j *Journal) namedRoomRecords() (namedRoomSet, bool, error) {
 		}
 	}
 	// A pending join names the identity state it staged for its Welcome.
-	joinIDs, err := j.roomJoinIDs()
+	joinKeys, err := j.roomJoinKeys()
 	if err != nil {
 		return named, false, nil
 	}
-	for _, roomID := range joinIDs {
-		join, found, err := j.readRoomJoin(roomID)
+	for _, key := range joinKeys {
+		join, found, err := j.readRoomJoin(key.room, key.authority)
 		if err != nil || !found {
 			return named, false, nil
 		}
 		for _, chunk := range join.IdentityStateChunks {
-			path, err := j.roomStatePath(roomID, chunk)
+			path, err := j.roomStatePath(key.room, chunk)
 			if err != nil {
 				return named, false, nil
 			}

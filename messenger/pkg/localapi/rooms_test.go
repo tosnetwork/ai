@@ -42,8 +42,8 @@ func (r *recordingRooms) RemoveRoomMember(_ context.Context, roomID, agentID str
 	r.calls = append(r.calls, "remove "+roomID+" "+agentID)
 	return r.err
 }
-func (r *recordingRooms) JoinRoom(_ context.Context, roomID string) error {
-	r.calls = append(r.calls, "join "+roomID)
+func (r *recordingRooms) JoinRoom(_ context.Context, roomID, authorityAgentID string) error {
+	r.calls = append(r.calls, "join "+roomID+" "+authorityAgentID)
 	return r.err
 }
 func (r *recordingRooms) ComposeRoomMessage(_ context.Context, composition RoomComposition) (string, bool, error) {
@@ -97,7 +97,7 @@ func roomRequests() []Request {
 		{Op: OpCreateRoom, RoomID: otherRoomID},
 		{Op: OpAddRoomMember, RoomID: otherRoomID, RoomMemberAgentID: memberID},
 		{Op: OpRemoveRoomMember, RoomID: otherRoomID, RoomMemberAgentID: memberID},
-		{Op: OpJoinRoom, RoomID: otherRoomID},
+		{Op: OpJoinRoom, RoomID: otherRoomID, RoomAuthorityAgentID: authorityID},
 	}
 }
 
@@ -124,7 +124,7 @@ func TestRoomManagementIsOwnerOnly(t *testing.T) {
 			t.Fatalf("owner %s: %+v", request.Op, response)
 		}
 	}
-	want := []string{"create " + otherRoomID, "add " + otherRoomID + " " + memberID, "remove " + otherRoomID + " " + memberID, "join " + otherRoomID}
+	want := []string{"create " + otherRoomID, "add " + otherRoomID + " " + memberID, "remove " + otherRoomID + " " + memberID, "join " + otherRoomID + " " + authorityID}
 	if strings.Join(operator.calls, "|") != strings.Join(want, "|") {
 		t.Fatalf("calls: %v", operator.calls)
 	}
@@ -143,6 +143,17 @@ func TestRoomManagementIsOwnerOnly(t *testing.T) {
 		if response := h.callAs(t, PrincipalOwner, changed); response.OK || response.Code != fault.CodeNotAuthentic {
 			t.Fatalf("a signature over another decision was accepted: %+v", response)
 		}
+	}
+	// A signature over joining one authority's invite does not accept another's.
+	issued = h.callAs(t, PrincipalOwner, Request{Op: OpChallenge})
+	join := Request{Op: OpJoinRoom, RoomID: otherRoomID, RoomAuthorityAgentID: authorityID}
+	signature, err = SignDecision(join, issued.Challenge, testOwnerKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := Request{Op: OpJoinRoom, RoomID: otherRoomID, RoomAuthorityAgentID: memberID, Challenge: issued.Challenge, OwnerSignature: signature}
+	if response := h.callAs(t, PrincipalOwner, other); response.OK || response.Code != fault.CodeNotAuthentic {
+		t.Fatalf("a signature over another authority was accepted: %+v", response)
 	}
 	// A typed refusal of the room runtime reaches the owner.
 	operator.err = fault.New(fault.CodeNotARoomMember, "no such member")
@@ -163,7 +174,9 @@ func TestRoomOperationsWithoutARuntimeAndTheirShapes(t *testing.T) {
 	for name, request := range map[string]Request{
 		"create no room":     {Op: OpCreateRoom},
 		"add no member":      {Op: OpAddRoomMember, RoomID: otherRoomID},
-		"join with member":   {Op: OpJoinRoom, RoomID: otherRoomID, RoomMemberAgentID: memberID},
+		"join with member":   {Op: OpJoinRoom, RoomID: otherRoomID, RoomAuthorityAgentID: authorityID, RoomMemberAgentID: memberID},
+		"join no authority":  {Op: OpJoinRoom, RoomID: otherRoomID},
+		"create authority":   {Op: OpCreateRoom, RoomID: otherRoomID, RoomAuthorityAgentID: authorityID},
 		"list with room":     {Op: OpListRooms, RoomID: otherRoomID},
 		"gaps no room":       {Op: OpRoomGaps},
 		"gaps over limit":    {Op: OpRoomGaps, RoomID: otherRoomID, Limit: MaxRoomGapsPerResponse + 1},

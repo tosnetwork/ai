@@ -136,8 +136,11 @@ func DecisionBytes(request Request, challenge string) ([]byte, error) {
 		canon.Text(buffer, request.InviteToken)
 	case OpRemoveContact:
 		canon.Text(buffer, request.ContactAgentID)
-	case OpCreateRoom, OpJoinRoom:
+	case OpCreateRoom:
 		canon.Text(buffer, request.RoomID)
+	case OpJoinRoom:
+		canon.Text(buffer, request.RoomID)
+		canon.Text(buffer, request.RoomAuthorityAgentID)
 	case OpAddRoomMember, OpRemoveRoomMember:
 		canon.Text(buffer, request.RoomID)
 		canon.Text(buffer, request.RoomMemberAgentID)

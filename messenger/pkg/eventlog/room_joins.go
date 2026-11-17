@@ -3,7 +3,12 @@ package eventlog
 // Pending joins of private rooms (section 11.2).
 //
 // A room.invite from a room's authority, received over the 1:1 session,
-// records a pending join naming that authority. When the owner calls
+// records a pending join keyed by (room, authority), so invites for one room
+// from several Agents coexist and a stranger's invite cannot pre-empt the
+// real authority's. An invite lives at most 7 days, and one Agent holds at
+// most 8 pending joins, so no sender can fill the list. The owner's
+// rooms.join names the authority it accepts; accepting one discards the
+// others for that room. When the owner calls
 // rooms.join, the daemon makes an MLS identity and one-time KeyPackage,
 // stages the identity's private state here (as state chunks, so its size
 // never pushes a record past its bound) and records the KeyPackage
@@ -31,14 +36,19 @@ import (
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/internal/ids"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
 )
 
 const (
 	roomJoinDir    = "room-joins"
 	roomJoinSchema = "tos.messaging.room-join.v1"
-	// MaxPendingRoomJoins bounds the rooms this installation may be invited
-	// to and not yet have joined.
+	// MaxPendingRoomJoins bounds the invites this installation holds and has
+	// not yet joined.
 	MaxPendingRoomJoins = 64
+	// MaxPendingRoomJoinsPerAuthority bounds one inviting Agent's share.
+	MaxPendingRoomJoinsPerAuthority = 8
+	// MaxRoomInviteLifetime bounds how long a pending invite is kept.
+	MaxRoomInviteLifetime = payload.MaxRoomInviteLifetimeSeconds * time.Second
 	// MaxRoomJoinCredentialBytes bounds the stored DeviceCredential JSON.
 	MaxRoomJoinCredentialBytes = 96 << 10
 )
@@ -59,6 +69,7 @@ var (
 	ErrRoomAlreadyJoined   = errors.New("this installation already holds the room")
 	ErrRoomJoinConflict    = errors.New("the room's pending join names another authority or KeyPackage")
 	ErrRoomJoinsFull       = errors.New("pending room joins reached their bound")
+	ErrRoomJoinsShareFull  = errors.New("the inviting Agent holds the most pending room joins")
 	ErrRoomJoinUnknown     = errors.New("no pending join for the room")
 	ErrRoomJoinExpired     = errors.New("the room invite has expired")
 	ErrRoomJoinNotInvited  = errors.New("the room's pending join is not awaiting the owner")
@@ -102,15 +113,16 @@ func (p PendingRoomJoin) expiresAt() uint64 {
 	return p.InviteExpiresAtUnix
 }
 
-// RecordRoomInvite records a room.invite from a room's authority. A later
-// invite for the same room from the same authority refreshes an unjoined
-// one; one from another authority is refused while a join is pending.
+// RecordRoomInvite records a room.invite from an Agent naming itself the
+// room's authority. A later invite from the same Agent for the same room
+// refreshes an unjoined one. Once the owner accepted one authority's invite,
+// invites from others for that room are refused.
 func (j *Journal) RecordRoomInvite(roomID, authorityAgentID, inviteEventID string, expires, now time.Time) (PendingRoomJoin, error) {
 	if err := j.usable(); err != nil {
 		return PendingRoomJoin{}, err
 	}
 	if !ids.Room.MatchString(roomID) || !ids.Agent.MatchString(authorityAgentID) || !ids.Event.MatchString(inviteEventID) ||
-		now.IsZero() || now.Unix() <= 0 || !expires.After(now) {
+		now.IsZero() || now.Unix() <= 0 || !expires.After(now) || expires.Sub(now) > MaxRoomInviteLifetime {
 		return PendingRoomJoin{}, errors.New("invalid room invite")
 	}
 	j.mutex.Lock()
@@ -120,40 +132,37 @@ func (j *Journal) RecordRoomInvite(roomID, authorityAgentID, inviteEventID strin
 	} else if found {
 		return PendingRoomJoin{}, ErrRoomAlreadyJoined
 	}
-	existing, found, err := j.readRoomJoin(roomID)
+	if err := j.sweepRoomJoins(now); err != nil {
+		return PendingRoomJoin{}, err
+	}
+	if accepted, found, err := j.acceptedRoomJoin(roomID); err != nil {
+		return PendingRoomJoin{}, err
+	} else if found {
+		if accepted.AuthorityAgentID != authorityAgentID {
+			return PendingRoomJoin{}, ErrRoomJoinConflict
+		}
+		return accepted, nil
+	}
+	_, found, err := j.readRoomJoin(roomID, authorityAgentID)
 	if err != nil {
 		return PendingRoomJoin{}, err
 	}
-	if found && uint64(now.Unix()) < existing.expiresAt() {
-		if existing.AuthorityAgentID != authorityAgentID {
-			return PendingRoomJoin{}, ErrRoomJoinConflict
-		}
-		if existing.State != JoinInvited {
-			return existing, nil
-		}
-	} else if found {
-		// An expired join is ended, with any identity it staged, before a
-		// new invite replaces it.
-		if err := j.deleteRoomJoin(existing, nil); err != nil {
-			return PendingRoomJoin{}, err
-		}
-		found = false
-	}
 	if !found {
-		count, err := countEntries(filepath.Join(j.root, roomJoinDir))
+		keys, err := j.roomJoinKeys()
 		if err != nil {
 			return PendingRoomJoin{}, err
 		}
-		if count >= MaxPendingRoomJoins {
-			if err := j.sweepRoomJoins(now); err != nil {
-				return PendingRoomJoin{}, err
+		share := 0
+		for _, key := range keys {
+			if key.authority == authorityAgentID {
+				share++
 			}
-			if count, err = countEntries(filepath.Join(j.root, roomJoinDir)); err != nil {
-				return PendingRoomJoin{}, err
-			}
-			if count >= MaxPendingRoomJoins {
-				return PendingRoomJoin{}, ErrRoomJoinsFull
-			}
+		}
+		if share >= MaxPendingRoomJoinsPerAuthority {
+			return PendingRoomJoin{}, ErrRoomJoinsShareFull
+		}
+		if len(keys) >= MaxPendingRoomJoins {
+			return PendingRoomJoin{}, ErrRoomJoinsFull
 		}
 	}
 	join := PendingRoomJoin{Schema: roomJoinSchema, RoomID: roomID, AuthorityAgentID: authorityAgentID,
@@ -162,15 +171,16 @@ func (j *Journal) RecordRoomInvite(roomID, authorityAgentID, inviteEventID strin
 	return join, j.writeRoomJoin(join)
 }
 
-// BeginRoomJoin records the owner's join: the identity's private state
-// (staged as chunks first), the KeyPackage reference and the signed
-// DeviceCredential sent as room.key-package. The record write is the commit
-// point; a repeat with the same KeyPackage is a no-op.
-func (j *Journal) BeginRoomJoin(roomID string, identityState []byte, credentialJSON []byte, now time.Time) (PendingRoomJoin, error) {
+// BeginRoomJoin records the owner's acceptance of one authority's invite:
+// the identity's private state (staged as chunks first), the KeyPackage
+// reference and the signed DeviceCredential sent as room.key-package. The
+// record write is the commit point; the room's other invites are then
+// discarded. A repeat with the same KeyPackage is a no-op.
+func (j *Journal) BeginRoomJoin(roomID, authorityAgentID string, identityState []byte, credentialJSON []byte, now time.Time) (PendingRoomJoin, error) {
 	if err := j.usable(); err != nil {
 		return PendingRoomJoin{}, err
 	}
-	if !ids.Room.MatchString(roomID) || now.IsZero() || now.Unix() <= 0 {
+	if !ids.Room.MatchString(roomID) || !ids.Agent.MatchString(authorityAgentID) || now.IsZero() || now.Unix() <= 0 {
 		return PendingRoomJoin{}, errors.New("invalid room join")
 	}
 	if err := validateOpaqueMLS(identityState); err != nil {
@@ -197,18 +207,20 @@ func (j *Journal) BeginRoomJoin(roomID string, identityState []byte, credentialJ
 	} else if found {
 		return PendingRoomJoin{}, ErrRoomAlreadyJoined
 	}
-	join, found, err := j.readRoomJoin(roomID)
+	if accepted, found, err := j.acceptedRoomJoin(roomID); err != nil {
+		return PendingRoomJoin{}, err
+	} else if found {
+		if accepted.AuthorityAgentID == authorityAgentID && accepted.KeyPackageRef == ref {
+			return accepted, j.discardOtherRoomJoins(roomID, authorityAgentID)
+		}
+		return PendingRoomJoin{}, ErrRoomJoinConflict
+	}
+	join, found, err := j.readRoomJoin(roomID, authorityAgentID)
 	if err != nil {
 		return PendingRoomJoin{}, err
 	}
 	if !found {
 		return PendingRoomJoin{}, ErrRoomJoinUnknown
-	}
-	if join.State == JoinKeyPackageSent {
-		if join.KeyPackageRef == ref {
-			return join, nil
-		}
-		return PendingRoomJoin{}, ErrRoomJoinConflict
 	}
 	if uint64(now.Unix()) >= join.InviteExpiresAtUnix {
 		return PendingRoomJoin{}, ErrRoomJoinExpired
@@ -231,24 +243,46 @@ func (j *Journal) BeginRoomJoin(roomID string, identityState []byte, credentialJ
 	join.CredentialBase64 = base64.StdEncoding.EncodeToString(credentialJSON)
 	join.CredentialExpiresAt = credential.ExpiresAtUnix
 	join.JoinedAtUnix = uint64(now.Unix())
-	return join, j.writeRoomJoin(join)
+	if err := j.writeRoomJoin(join); err != nil {
+		return PendingRoomJoin{}, err
+	}
+	return join, j.discardOtherRoomJoins(roomID, authorityAgentID)
 }
 
-// PendingRoomJoinFor returns a room's live pending join. An expired join is
-// dropped; one whose KeyPackage a fused record consumed has ended.
-func (j *Journal) PendingRoomJoinFor(roomID string, now time.Time) (PendingRoomJoin, bool, error) {
+// PendingRoomJoinFor returns the live pending join of one room and
+// authority. An expired join is dropped; one whose KeyPackage a fused record
+// consumed has ended.
+func (j *Journal) PendingRoomJoinFor(roomID, authorityAgentID string, now time.Time) (PendingRoomJoin, bool, error) {
 	if err := j.usable(); err != nil {
 		return PendingRoomJoin{}, false, err
 	}
-	if !ids.Room.MatchString(roomID) || now.IsZero() {
+	if !ids.Room.MatchString(roomID) || !ids.Agent.MatchString(authorityAgentID) || now.IsZero() {
 		return PendingRoomJoin{}, false, errors.New("invalid pending room join lookup")
 	}
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
-	return j.liveRoomJoin(roomID, now)
+	return j.liveRoomJoin(roomID, authorityAgentID, now)
 }
 
-// RoomJoinIdentityState reassembles the identity state a joined pending join
+// AcceptedRoomJoin returns the room's live join the owner accepted: the only
+// authority whose Welcome is taken for the room.
+func (j *Journal) AcceptedRoomJoin(roomID string, now time.Time) (PendingRoomJoin, bool, error) {
+	if err := j.usable(); err != nil {
+		return PendingRoomJoin{}, false, err
+	}
+	if !ids.Room.MatchString(roomID) || now.IsZero() {
+		return PendingRoomJoin{}, false, errors.New("invalid accepted room join lookup")
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	accepted, found, err := j.acceptedRoomJoin(roomID)
+	if err != nil || !found {
+		return PendingRoomJoin{}, false, err
+	}
+	return j.liveRoomJoin(roomID, accepted.AuthorityAgentID, now)
+}
+
+// RoomJoinIdentityState reassembles the identity state an accepted join
 // staged, verifying every chunk and the state digest.
 func (j *Journal) RoomJoinIdentityState(join PendingRoomJoin) ([]byte, error) {
 	if err := j.usable(); err != nil {
@@ -262,10 +296,10 @@ func (j *Journal) RoomJoinIdentityState(join PendingRoomJoin) ([]byte, error) {
 	return j.loadMLSState(join.RoomID, join.IdentityStateDigest, join.IdentityStateChunks)
 }
 
-// FinishRoomJoin ends a pending join once its Welcome is installed. It is
-// refused unless the fused record consumed the join's KeyPackage, so a join
-// is never ended by anything but its own Welcome. A join already ended is no
-// error.
+// FinishRoomJoin ends a room's joins once the accepted one's Welcome is
+// installed. It is refused unless the fused record consumed that join's
+// KeyPackage, so a join is never ended by anything but its own Welcome. A
+// room with no joins left is no error.
 func (j *Journal) FinishRoomJoin(roomID string) error {
 	if err := j.usable(); err != nil {
 		return err
@@ -275,7 +309,7 @@ func (j *Journal) FinishRoomJoin(roomID string) error {
 	}
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
-	join, found, err := j.readRoomJoin(roomID)
+	accepted, found, err := j.acceptedRoomJoin(roomID)
 	if err != nil || !found {
 		return err
 	}
@@ -283,13 +317,32 @@ func (j *Journal) FinishRoomJoin(roomID string) error {
 	if err != nil {
 		return err
 	}
-	if !joined || join.KeyPackageRef == "" || fused.KeyPackageRef != join.KeyPackageRef {
+	if !joined || accepted.KeyPackageRef == "" || fused.KeyPackageRef != accepted.KeyPackageRef {
 		return errors.New("the room's Welcome has not been installed")
 	}
-	return j.deleteRoomJoin(join, fused.StateChunks)
+	keys, err := j.roomJoinKeys()
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if key.room != roomID {
+			continue
+		}
+		join, found, err := j.readRoomJoin(key.room, key.authority)
+		if err != nil {
+			return err
+		}
+		if found {
+			if err := j.deleteRoomJoin(join, fused.StateChunks); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
-// ListPendingRoomJoins returns every live pending join, by room.
+// ListPendingRoomJoins returns every live pending join, by room and
+// authority.
 func (j *Journal) ListPendingRoomJoins(now time.Time) ([]PendingRoomJoin, error) {
 	if err := j.usable(); err != nil {
 		return nil, err
@@ -299,13 +352,16 @@ func (j *Journal) ListPendingRoomJoins(now time.Time) ([]PendingRoomJoin, error)
 	}
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
-	roomIDs, err := j.roomJoinIDs()
+	if err := j.sweepRoomJoins(now); err != nil {
+		return nil, err
+	}
+	keys, err := j.roomJoinKeys()
 	if err != nil {
 		return nil, err
 	}
-	joins := make([]PendingRoomJoin, 0, len(roomIDs))
-	for _, roomID := range roomIDs {
-		join, found, err := j.liveRoomJoin(roomID, now)
+	joins := make([]PendingRoomJoin, 0, len(keys))
+	for _, key := range keys {
+		join, found, err := j.readRoomJoin(key.room, key.authority)
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +372,7 @@ func (j *Journal) ListPendingRoomJoins(now time.Time) ([]PendingRoomJoin, error)
 	return joins, nil
 }
 
-// SweepRoomJoins drops every expired or ended pending join.
+// SweepRoomJoins drops every expired, ended or superseded pending join.
 func (j *Journal) SweepRoomJoins(now time.Time) error {
 	if err := j.usable(); err != nil {
 		return err
@@ -330,22 +386,23 @@ func (j *Journal) SweepRoomJoins(now time.Time) error {
 }
 
 func (j *Journal) sweepRoomJoins(now time.Time) error {
-	roomIDs, err := j.roomJoinIDs()
+	keys, err := j.roomJoinKeys()
 	if err != nil {
 		return err
 	}
-	for _, roomID := range roomIDs {
-		if _, _, err := j.liveRoomJoin(roomID, now); err != nil {
+	for _, key := range keys {
+		if _, _, err := j.liveRoomJoin(key.room, key.authority, now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// liveRoomJoin reads a join and ends it if it expired or its KeyPackage was
-// consumed. The journal mutex is held.
-func (j *Journal) liveRoomJoin(roomID string, now time.Time) (PendingRoomJoin, bool, error) {
-	join, found, err := j.readRoomJoin(roomID)
+// liveRoomJoin reads a join and ends it if it expired, its KeyPackage was
+// consumed (the room is joined), or the owner accepted another authority's
+// invite for the room. The journal mutex is held.
+func (j *Journal) liveRoomJoin(roomID, authorityAgentID string, now time.Time) (PendingRoomJoin, bool, error) {
+	join, found, err := j.readRoomJoin(roomID, authorityAgentID)
 	if err != nil || !found {
 		return PendingRoomJoin{}, false, err
 	}
@@ -357,17 +414,71 @@ func (j *Journal) liveRoomJoin(roomID string, now time.Time) (PendingRoomJoin, b
 	if joined {
 		keep = fused.StateChunks
 	}
-	if joined || now.Unix() < 0 || uint64(now.Unix()) >= join.expiresAt() {
+	superseded := false
+	if join.State == JoinInvited {
+		accepted, found, err := j.acceptedRoomJoin(roomID)
+		if err != nil {
+			return PendingRoomJoin{}, false, err
+		}
+		superseded = found && accepted.AuthorityAgentID != authorityAgentID
+	}
+	if joined || superseded || now.Unix() < 0 || uint64(now.Unix()) >= join.expiresAt() {
 		return PendingRoomJoin{}, false, j.deleteRoomJoin(join, keep)
 	}
 	return join, true, nil
+}
+
+// acceptedRoomJoin returns the room's key-package-sent join, if any. The
+// journal mutex is held.
+func (j *Journal) acceptedRoomJoin(roomID string) (PendingRoomJoin, bool, error) {
+	keys, err := j.roomJoinKeys()
+	if err != nil {
+		return PendingRoomJoin{}, false, err
+	}
+	for _, key := range keys {
+		if key.room != roomID {
+			continue
+		}
+		join, found, err := j.readRoomJoin(key.room, key.authority)
+		if err != nil {
+			return PendingRoomJoin{}, false, err
+		}
+		if found && join.State == JoinKeyPackageSent {
+			return join, true, nil
+		}
+	}
+	return PendingRoomJoin{}, false, nil
+}
+
+// discardOtherRoomJoins drops the room's invites from every authority but
+// the accepted one. The journal mutex is held.
+func (j *Journal) discardOtherRoomJoins(roomID, accepted string) error {
+	keys, err := j.roomJoinKeys()
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if key.room != roomID || key.authority == accepted {
+			continue
+		}
+		join, found, err := j.readRoomJoin(key.room, key.authority)
+		if err != nil {
+			return err
+		}
+		if found {
+			if err := j.deleteRoomJoin(join, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // deleteRoomJoin removes a join record, then the identity chunks it named
 // that the room's fused state does not share. A chunk left by a crash is
 // collected at restart. The journal mutex is held.
 func (j *Journal) deleteRoomJoin(join PendingRoomJoin, keep []string) error {
-	path := j.roomJoinPath(join.RoomID)
+	path := j.roomJoinPath(join.RoomID, join.AuthorityAgentID)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("delete pending room join")
 	}
@@ -378,33 +489,43 @@ func (j *Journal) deleteRoomJoin(join PendingRoomJoin, keep []string) error {
 	return nil
 }
 
-func (j *Journal) roomJoinPath(roomID string) string {
-	return filepath.Join(j.root, roomJoinDir, roomID[len("room_"):]+".json")
+type roomJoinKey struct{ room, authority string }
+
+func (j *Journal) roomJoinPath(roomID, authorityAgentID string) string {
+	return filepath.Join(j.root, roomJoinDir, roomID[len("room_"):]+"-"+authorityAgentID[len("agent_"):]+".json")
 }
 
-func (j *Journal) roomJoinIDs() ([]string, error) {
+// roomJoinKeys lists the pending joins by (room, authority), refusing any
+// name that is not one.
+func (j *Journal) roomJoinKeys() ([]roomJoinKey, error) {
 	entries, err := os.ReadDir(filepath.Join(j.root, roomJoinDir))
 	if err != nil {
 		return nil, errors.New("read pending room joins")
 	}
-	var roomIDs []string
+	var keys []roomJoinKey
 	for _, entry := range entries {
 		name := entry.Name()
 		if isTransitionTemp(name) {
 			continue
 		}
 		stem, ok := strings.CutSuffix(name, ".json")
-		if !ok || entry.IsDir() || !ids.Room.MatchString("room_"+stem) {
+		roomHex, authorityHex, cut := strings.Cut(stem, "-")
+		if !ok || !cut || entry.IsDir() || !ids.Room.MatchString("room_"+roomHex) || !ids.Agent.MatchString("agent_"+authorityHex) {
 			return nil, errors.New("unexpected entry in the pending room joins")
 		}
-		roomIDs = append(roomIDs, "room_"+stem)
+		keys = append(keys, roomJoinKey{room: "room_" + roomHex, authority: "agent_" + authorityHex})
 	}
-	sort.Strings(roomIDs)
-	return roomIDs, nil
+	sort.Slice(keys, func(a, b int) bool {
+		if keys[a].room != keys[b].room {
+			return keys[a].room < keys[b].room
+		}
+		return keys[a].authority < keys[b].authority
+	})
+	return keys, nil
 }
 
-func (j *Journal) readRoomJoin(roomID string) (PendingRoomJoin, bool, error) {
-	raw, err := readRecordBytes(j.roomJoinPath(roomID))
+func (j *Journal) readRoomJoin(roomID, authorityAgentID string) (PendingRoomJoin, bool, error) {
+	raw, err := readRecordBytes(j.roomJoinPath(roomID, authorityAgentID))
 	if errors.Is(err, os.ErrNotExist) {
 		return PendingRoomJoin{}, false, nil
 	}
@@ -414,7 +535,7 @@ func (j *Journal) readRoomJoin(roomID string) (PendingRoomJoin, bool, error) {
 	var join PendingRoomJoin
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&join); err != nil || join.RoomID != roomID {
+	if err := decoder.Decode(&join); err != nil || join.RoomID != roomID || join.AuthorityAgentID != authorityAgentID {
 		return PendingRoomJoin{}, false, errRoomJoinRecordValue
 	}
 	if err := validateRoomJoin(join); err != nil {
@@ -425,7 +546,8 @@ func (j *Journal) readRoomJoin(roomID string) (PendingRoomJoin, bool, error) {
 
 func validateRoomJoin(join PendingRoomJoin) error {
 	if join.Schema != roomJoinSchema || !ids.Room.MatchString(join.RoomID) || !ids.Agent.MatchString(join.AuthorityAgentID) ||
-		!ids.Event.MatchString(join.InviteEventID) || join.InvitedAtUnix == 0 || join.InviteExpiresAtUnix <= join.InvitedAtUnix {
+		!ids.Event.MatchString(join.InviteEventID) || join.InvitedAtUnix == 0 || join.InviteExpiresAtUnix <= join.InvitedAtUnix ||
+		join.InviteExpiresAtUnix-join.InvitedAtUnix > payload.MaxRoomInviteLifetimeSeconds {
 		return errRoomJoinRecordValue
 	}
 	switch join.State {
@@ -469,5 +591,5 @@ func (j *Journal) writeRoomJoin(join PendingRoomJoin) error {
 	if err != nil {
 		return err
 	}
-	return j.replace(j.roomJoinPath(join.RoomID), encoded)
+	return j.replace(j.roomJoinPath(join.RoomID, join.AuthorityAgentID), encoded)
 }

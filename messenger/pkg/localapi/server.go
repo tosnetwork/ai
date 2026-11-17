@@ -97,7 +97,7 @@ type RoomOperator interface {
 	CreateRoom(ctx context.Context, roomID string) error
 	AddRoomMember(ctx context.Context, roomID, agentID string) error
 	RemoveRoomMember(ctx context.Context, roomID, agentID string) error
-	JoinRoom(ctx context.Context, roomID string) error
+	JoinRoom(ctx context.Context, roomID, authorityAgentID string) error
 	ComposeRoomMessage(ctx context.Context, composition RoomComposition) (eventID string, fresh bool, err error)
 }
 
@@ -1092,7 +1092,7 @@ func (s *Server) changeRoom(ctx context.Context, request Request) Response {
 	case OpRemoveRoomMember:
 		err = s.config.RoomOperator.RemoveRoomMember(ctx, request.RoomID, request.RoomMemberAgentID)
 	case OpJoinRoom:
-		err = s.config.RoomOperator.JoinRoom(ctx, request.RoomID)
+		err = s.config.RoomOperator.JoinRoom(ctx, request.RoomID, request.RoomAuthorityAgentID)
 	default:
 		return refuse(fault.CodeInternal, errors.New("unknown room operation"))
 	}
