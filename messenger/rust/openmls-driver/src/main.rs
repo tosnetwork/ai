@@ -1056,6 +1056,14 @@ mod tests {
     // A sender far ahead (one message just inside the forward distance) costs
     // the receiver no more stored keys than the tolerance allows; one beyond
     // it is refused.
+    //
+    // The library stores byte strings as JSON number arrays, so a key of
+    // random bytes costs 1 to 3 characters per byte: two states holding the
+    // same number of keys differ by tens of bytes (over 200 runs the jump and
+    // the tolerance growth differed by -52 to +60 bytes, mean +4.5, the wider
+    // generation numbers of a jump adding only a few). So the jump is held to
+    // "at most the tolerance's keys", one key's cost being the margin, and to
+    // far below what keeping every skipped key would cost.
     #[test]
     fn forward_jump_keeps_only_the_tolerance() {
         let aad = b"room binding";
@@ -1070,14 +1078,25 @@ mod tests {
             }
             (state_len(&states[1]), open_as(&states[1], aad, &last))
         };
-        let (before, jumped) = growth(MAXIMUM_FORWARD_DISTANCE as usize);
-        let jump_growth = state_len(&jumped.unwrap().state) - before;
-        let (before, skipped) = growth(OUT_OF_ORDER_TOLERANCE as usize);
-        let tolerance_growth = state_len(&skipped.unwrap().state) - before;
-        eprintln!("forward jump of {MAXIMUM_FORWARD_DISTANCE}: +{jump_growth} bytes; skip of {OUT_OF_ORDER_TOLERANCE}: +{tolerance_growth} bytes");
+        let measured = |skipped: usize| -> usize {
+            let (before, opened) = growth(skipped);
+            state_len(&opened.unwrap().state) - before
+        };
+        let tolerance = OUT_OF_ORDER_TOLERANCE as usize;
+        let jump_growth = measured(MAXIMUM_FORWARD_DISTANCE as usize);
+        let tolerance_growth = measured(tolerance);
+        let in_order_growth = measured(0);
+        // The cost of one kept key: the tolerance's keys over in-order traffic.
+        let per_key = tolerance_growth.saturating_sub(in_order_growth) / tolerance;
+        eprintln!("forward jump of {MAXIMUM_FORWARD_DISTANCE}: +{jump_growth} bytes; skip of {tolerance}: +{tolerance_growth} bytes; in order: +{in_order_growth} bytes; one key: {per_key} bytes");
+        assert!(per_key > 0, "skipping keys stored nothing");
         assert!(
-            jump_growth <= tolerance_growth + 64,
-            "{jump_growth} > {tolerance_growth}"
+            jump_growth < tolerance_growth + per_key,
+            "a jump of {MAXIMUM_FORWARD_DISTANCE} kept more than {tolerance} keys: +{jump_growth} vs +{tolerance_growth}, one key {per_key}"
+        );
+        assert!(
+            jump_growth * 4 < MAXIMUM_FORWARD_DISTANCE as usize * per_key,
+            "a jump of {MAXIMUM_FORWARD_DISTANCE} costs near every skipped key: +{jump_growth}"
         );
         let (_, beyond) = growth(MAXIMUM_FORWARD_DISTANCE as usize + 1);
         assert!(beyond.is_err());
