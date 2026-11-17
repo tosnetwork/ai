@@ -109,6 +109,9 @@ func (c *roomCardsCarrier) ForgetRoomCards(_ context.Context, roomID string, age
 		c.forgotten = map[string][]string{}
 	}
 	c.forgotten[roomID] = append(c.forgotten[roomID], agentIDs...)
+	if c.admitted == nil {
+		c.admitted = map[string][]string{}
+	}
 	kept := c.admitted[roomID][:0:0]
 	for _, agentID := range c.admitted[roomID] {
 		if !containsAgent(agentIDs, agentID) {

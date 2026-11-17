@@ -291,6 +291,9 @@ type Journal struct {
 	// received counts the received room application digests on disk; nil
 	// until first use. Guarded by mutex.
 	received *roomReceivedIndex
+	// roomApplicationSends is the per-room bound of application records;
+	// zero is MaxRoomApplicationSends. Guarded by mutex.
+	roomApplicationSends int
 }
 
 // Open takes ownership of a private state directory. A second Open on the same
@@ -342,7 +345,7 @@ func openJournalAt(root string, quota Quota) (*Journal, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, errors.New("read legacy MLS ledger directory")
 	}
-	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, mandateDir, budgetDir, mandateBudgetDir, negotiationDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, roomMLSDir, roomStateDir, roomBlobDir, roomObjectChunkDir, roomOutboxDir, roomStagedDir, roomPartDir, roomBufferDir, roomAppliedDir, roomReceivedDir, roomSequenceDir, roomGapDir, roomJoinDir, roomRemovedDir, roomAddDir, roomSendDir, roomApplicationDir, presentedInviteDir, invitedContactDir, invitedContactTombstoneDir, executionDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayFloorDir, relayPullDir} {
+	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, mandateDir, budgetDir, mandateBudgetDir, negotiationDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, roomMLSDir, roomStateDir, roomBlobDir, roomObjectChunkDir, roomOutboxDir, roomStagedDir, roomPartDir, roomBufferDir, roomAppliedDir, roomReceivedDir, roomSequenceDir, roomGapDir, roomJoinDir, roomRemovedDir, roomAddDir, roomSendDir, roomApplicationDir, roomCardDir, roomStopDir, presentedInviteDir, invitedContactDir, invitedContactTombstoneDir, executionDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayFloorDir, relayPullDir} {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
 			return nil, errors.New("create event journal directory")
 		}

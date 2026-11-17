@@ -260,20 +260,8 @@ func TestRoomSenderRemovedMemberSealsNothing(t *testing.T) {
 	if err := scene.rooms(0).RemoveRoomMember(context.Background(), testRoomID, b.d.config.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := fused(t, a)
-	heads, err := a.d.journal.RoomOutboxHeads(testRoomID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, head := range heads {
-		if head.MLSEpoch != after.MLSEpoch {
-			continue
-		}
-		object, err := a.d.journal.RoomOutboxObject(head.ObjectDigest)
-		if err != nil {
-			t.Fatal(err)
-		}
-		deliverObject(t, a, b, object)
+	for _, frame := range roomObjectFrames(t, a, b.d.config.AgentID, relayframe.RoomCommit) {
+		deliver(t, a, b, frame.frame)
 	}
 	if _, removed, err := b.d.journal.RoomRemovalOf(testRoomID); err != nil || !removed {
 		t.Fatalf("the removing Commit was not taken as a removal notice: %v", err)
@@ -505,6 +493,63 @@ func TestRoomAddWaitsWhileTheJoinersEvidenceFails(t *testing.T) {
 	}
 	if adds, err := a.d.journal.RoomAdds(testRoomID, now); err != nil || len(adds) != 1 || !adds[0].Ready() {
 		t.Fatalf("the add was not kept: %+v %v", adds, err)
+	}
+}
+
+// A full application outbox refuses the composition before the seal, so no
+// retry spends an MLS generation, and the reserved message is sealed once
+// room is made (review of #42).
+func TestRoomSenderFullOutboxSpendsNoGeneration(t *testing.T) {
+	scene := twoMemberRoom(t)
+	b := scene.nodes[1]
+	if err := b.d.journal.LimitRoomApplicationSends(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := scene.compose(t, 1, "first", "1"); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := fused(t, b)
+	for attempt := 0; attempt < 3; attempt++ {
+		if _, _, err := scene.compose(t, 1, "second", "2"); !errors.Is(err, eventlog.ErrRoomSendsFull) {
+			t.Fatalf("a composition into a full outbox: %v", err)
+		}
+	}
+	if after, _ := fused(t, b); after.StateDigest != before.StateDigest {
+		t.Fatal("a refused composition spent an MLS generation")
+	}
+	// The first object's retention ends and its slot frees.
+	send, _, _ := b.d.journal.RoomApplicationSendFor(testRoomID, idem("1"))
+	if _, err := b.d.journal.SweepRoomApplicationSends(time.Unix(int64(send.AbandonAtUnix), 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := scene.compose(t, 1, "second", "2"); err != nil {
+		t.Fatalf("the composition once room was made: %v", err)
+	}
+}
+
+// Removing an Agent whose add is still pending cancels the add: no Commit
+// is made, and its later KeyPackage is refused (review of #42).
+func TestRoomRemoveCancelsAPendingAdd(t *testing.T) {
+	scene := newOperatorScene(t, 2)
+	a, b := scene.nodes[0], scene.nodes[1]
+	scene.founded(t)
+	scene.invited(t, 1)
+	before, _ := fused(t, a)
+	if err := scene.rooms(0).RemoveRoomMember(context.Background(), testRoomID, b.d.config.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if adds, err := a.d.journal.RoomAdds(testRoomID, scene.clock.now()); err != nil || len(adds) != 0 {
+		t.Fatalf("the pending add was kept: %+v %v", adds, err)
+	}
+	if after, _ := fused(t, a); after.MLSEpoch != before.MLSEpoch {
+		t.Fatal("cancelling a pending add made a Commit")
+	}
+	if err := scene.rooms(1).JoinRoom(context.Background(), testRoomID, a.d.config.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	requireRefusedCopy(t, relayOne(t, b, a))
+	if after, _ := fused(t, a); after.Membership().Contains(b.d.config.AgentID) {
+		t.Fatal("a cancelled add was committed")
 	}
 }
 

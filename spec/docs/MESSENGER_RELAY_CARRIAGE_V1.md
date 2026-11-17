@@ -1532,6 +1532,9 @@ so a roster is at most 31 × (70 + 2 + 9,216 + 2 + 18,432 + 2 + 473) =
 174,469 bytes to spare (the codec's 512-byte credential bound adds at most
 31 × 39 = 1,209 more). A roster is separate from the Welcome because a
 Welcome with its ratchet tree plus a full roster could exceed 1 MiB.
+The entry's card is the one the authority keeps for that member (11.8,
+**Member cards**); an entry is built only from a stored card inside its
+validity window, so no roster goes out with an expired card.
 
 **The header** (normative; room ID and room epoch come from the object, and
 the membership digest is recomputed from them and the members):
@@ -1635,7 +1638,11 @@ authority checks it with
 requires the leaf credential to name the same Agent, Endpoint, device,
 device-set digest, leaf signature key and window, its signature to verify,
 and the KeyPackage's identity to be the compact binding of it; and then
-commits the Add (its owner already decided).
+commits the Add (its owner already decided). The joiner's daemon always
+carries its chat card in part 0 of the `room.key-package` frame, whether or
+not the authority has acknowledged it, and the authority keeps that card
+for the Add's rosters (11.8, **Member cards**); a frame with no card, or a
+card failing those checks, refuses the KeyPackage and records nothing.
 
 **Leaf identity and leaf credential.** The identity in a leaf's MLS
 BasicCredential is copied into the ratchet tree and into every retained
@@ -1745,7 +1752,9 @@ of it; OpenFox then learns part 0's card under the D11 rule (as it does for
 kind 4, openfox `relay_chat.go:716-722`), and the daemon runs `CommitPeer` on
 part 0's evidence (newer only). A sender includes its card in part 0 until a
 room ack confirms it (application objects are never acked, so a room-only
-peer gets the card in every part 0).
+peer gets the card in every part 0). The authority's handshake objects carry its card
+in every part 0 as well, acknowledged or not: a superset of the rule above,
+and the cut does not depend on the card (11.1).
 
 **Room-scoped admission (D11).** Once the owner has joined a room, an Event
 is admitted without the allow-list only if it names that room, it is room
@@ -2052,7 +2061,11 @@ in V1, D3), journaled with its outbox entry as 11.7 requires.
   relay evidence is not deleted: it is public, signed routing data, every room
   path requires membership, so it is never used for the room, and the
   evidence store's expiry (2.5) retires it like any peer's. M gets the
-  Commit once (no re-deposit, no ack, outside its in-order queue). M treats a Commit whose verified header removes M, at any
+  Commit once (no re-deposit, no ack, outside its in-order queue). That one
+  deposit checks M's stored evidence against the evidence's own Endpoint and
+  device (`CheckStoredContact`), not pinned to M's leaf credential, because
+  the removing fused write already dropped that credential; the Commit
+  carries no content M could open. M treats a Commit whose verified header removes M, at any
   epoch above its own, as a removal notice: it marks the room removed without
   applying it to MLS. If that one deposit is lost, M is not told: its later
   room messages are refused at members and relay-acknowledged without an
@@ -2275,6 +2288,29 @@ that needs it, in roster entries staged under the Commit's `CommitRef`
   authority's included (the same digest as the invite's, which confirms it);
 - the roster of added members carries the joiners' credentials to the
   others.
+
+**Member cards.** Roster entries also carry each member's chat card, which
+the authority's daemon keeps itself, beside the member's relay evidence:
+
+- **Source.** Part 0 of the member's own frames, after admission: first
+  the joiner's `room.key-package` frame (11.2), whose card is required.
+- **Checks.** The daemon checks only that the card is one canonical key
+  card packet sent by the frame's authenticated packet sender to the
+  key-card audience, and that its validity window holds now. A card naming
+  another Agent is refused. Its signature is each receiving member's
+  carrier's to verify when it admits the card (`carrier.room-cards`), so a
+  card that does not verify is never used.
+- **Refresh.** A later admitted frame of the member (kind 1, 3 or 4)
+  replaces the stored card only with a newer one, by the card packet's
+  creation time and then its sequence, that passes the same checks.
+- **Use.** A stored card that is missing or past its window gives the
+  member no roster entry yet: the member's evidence pull starts (its kind-4
+  frames carry its card) and the roster, with the Commit it is staged with,
+  waits.
+- **Bounds and deletion.** One card per (room, member) of a room held here,
+  for a current member or a live pending add: at most 32 per room and 64
+  rooms. Remove deletes the member's card with its credential; retirement
+  deletes the room's cards with its other per-room state.
 
 A receiver takes the leaves from the driver's read-only `members` operation
 (leaf index, identity, signature key). For each entry it requires:

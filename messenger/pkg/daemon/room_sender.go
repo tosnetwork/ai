@@ -228,6 +228,14 @@ func (r *roomRuntime) resumeSeal(roomID string, intent eventlog.RoomSealIntent, 
 	if err != nil {
 		return eventlog.RoomApplicationSend{}, err
 	}
+	// A full outbox refuses before the seal, so a retry spends no MLS
+	// generation; the intent stays reserved for the next attempt.
+	if err := journal.ReserveRoomApplicationSlot(roomID); err != nil {
+		if errors.Is(err, eventlog.ErrRoomSendsFull) {
+			return eventlog.RoomApplicationSend{}, fault.Wrap(fault.CodeQuotaExceeded, err)
+		}
+		return eventlog.RoomApplicationSend{}, err
+	}
 	ciphertext, sealedRecord, err := r.controller.Seal(roomID, aad, plaintext)
 	if err != nil {
 		return eventlog.RoomApplicationSend{}, err
@@ -299,6 +307,10 @@ func (r *roomRuntime) depositApplication(ctx context.Context, send eventlog.Room
 	now := r.now()
 	for _, member := range send.Members {
 		if member.State != eventlog.RoomDeliveryPending || member.NextAttemptAtUnix > uint64(now.Unix()) {
+			continue
+		}
+		// Handshake objects go before application objects to a member.
+		if r.pendingHandshakeTo(send.RoomID, member.AgentID) {
 			continue
 		}
 		if err := r.depositApplicationTo(ctx, send, object, member.AgentID, now); err != nil {

@@ -262,12 +262,15 @@ func TestRoomApplicationSendLifecycle(t *testing.T) {
 // object was dropped makes room; with every object still kept, a new seal
 // is refused.
 func TestRoomApplicationSendsAreBounded(t *testing.T) {
-	saved := maxRoomApplicationSends
-	maxRoomApplicationSends = 2
-	t.Cleanup(func() { maxRoomApplicationSends = saved })
 	fixture := newFusedFixture(t)
 	journal, ledger := openFused(t, t.TempDir()+"/sender")
 	defer journal.Close()
+	if err := journal.LimitRoomApplicationSends(MaxRoomApplicationSends + 1); err == nil {
+		t.Fatal("the bound was raised")
+	}
+	if err := journal.LimitRoomApplicationSends(2); err != nil {
+		t.Fatal(err)
+	}
 	fixture.installFounder(ledger, []byte("founder state"))
 	now := fixture.now
 	seal := func(key string, sequence uint64, at time.Time) error {

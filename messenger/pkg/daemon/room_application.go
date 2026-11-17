@@ -394,24 +394,31 @@ func (r *roomRuntime) openBuffered(buffered eventlog.BufferedRoomObject, now tim
 // state to record it in.
 func (r *roomRuntime) recordBufferDrops(drops []eventlog.BufferedRoomDrop, now time.Time) {
 	for _, drop := range drops {
-		var reason eventlog.RoomGapReason
-		switch drop.Reason {
-		case eventlog.RoomBufferDropExpired:
-			reason = eventlog.RoomGapBufferExpired
-		case eventlog.RoomBufferDropTooOld:
-			reason = eventlog.RoomGapEpochTooOld
-		case eventlog.RoomBufferDropDamaged:
-			reason = eventlog.RoomGapRecordDamaged
-		case eventlog.RoomBufferDropLeft:
-			continue
-		default:
-			r.daemon.report("room buffer", errors.New("a buffered object was dropped for an unknown reason"))
-			continue
-		}
-		if _, err := r.daemon.journal.RecordRoomDrop(drop.RoomID, drop.SenderAgentID, reason, now); err != nil {
+		if err := r.recordBufferDrop(drop, now); err != nil {
 			r.daemon.report("room gap", err)
 		}
 	}
+}
+
+// recordBufferDrop writes the gap of one dropped buffered object; a drop
+// because the room is no longer held records none.
+func (r *roomRuntime) recordBufferDrop(drop eventlog.BufferedRoomDrop, now time.Time) error {
+	var reason eventlog.RoomGapReason
+	switch drop.Reason {
+	case eventlog.RoomBufferDropExpired:
+		reason = eventlog.RoomGapBufferExpired
+	case eventlog.RoomBufferDropTooOld:
+		reason = eventlog.RoomGapEpochTooOld
+	case eventlog.RoomBufferDropDamaged:
+		reason = eventlog.RoomGapRecordDamaged
+	case eventlog.RoomBufferDropLeft:
+		return nil
+	default:
+		r.daemon.report("room buffer", errors.New("a buffered object was dropped for an unknown reason"))
+		return nil
+	}
+	_, err := r.daemon.journal.RecordRoomDrop(drop.RoomID, drop.SenderAgentID, reason, now)
+	return err
 }
 
 // sweepApplications is the application share of the maintenance timer:
@@ -422,11 +429,12 @@ func (r *roomRuntime) sweepApplications() {
 	r.handling.Lock()
 	defer r.handling.Unlock()
 	now := r.now()
-	drops, err := r.daemon.journal.SweepRoomBuffer(now)
-	if err != nil {
+	// Each drop's gap is written before its buffered record is deleted, so
+	// a crash or a failed gap write loses no notice (review of #41).
+	if _, err := r.daemon.journal.SweepRoomBufferRecording(now, func(drop eventlog.BufferedRoomDrop) error {
+		return r.recordBufferDrop(drop, now)
+	}); err != nil {
 		r.daemon.report("room buffer sweep", err)
-	} else {
-		r.recordBufferDrops(drops, now)
 	}
 	if _, err := r.daemon.journal.SweepRoomSequences(now, r.gapDelay); err != nil {
 		r.daemon.report("room sequence sweep", err)

@@ -63,8 +63,9 @@ var (
 	// last re-deposit interval before the room's end minus the skew (D18):
 	// it could not be delivered and acknowledged before senders stop.
 	ErrRoomHandshakeTooLate = errors.New("the room ends too soon for a new membership change")
-	// ErrRoomMemberCardUnknown refuses an Add whose roster would need a chat
-	// card this installation does not hold.
+	// ErrRoomMemberCardUnknown holds back an Add whose roster needs a
+	// member's chat card this installation holds no valid copy of; the
+	// member's evidence pull, which carries its card, is started.
 	ErrRoomMemberCardUnknown = errors.New("the chat card of a room member is not held here")
 )
 
@@ -493,11 +494,18 @@ func (d *Daemon) roomKeyPackageStep(route admission.Route, event envelope.Event,
 		if _, err := r.verifyKeyPackage(keyPackage, event.SenderAgentID, sender, now); err != nil {
 			return err
 		}
+		// The joiner's card is judged before anything is recorded.
+		card, err := joinerCardOf(keyPackage.RoomID, event.SenderAgentID, sender.Card, now)
+		if err != nil {
+			return err
+		}
 		_, err = d.journal.RecordRoomAddKeyPackage(keyPackage.RoomID, event.SenderAgentID, keyPackage.DeviceCredentialJSON,
 			keyPackage.LeafCredential, now)
 		switch {
 		case err == nil:
-			return nil
+			// The joiner's card came in part 0 of this frame, bound to the
+			// authenticated packet sender.
+			return r.storeJoinerCard(card, now)
 		case errors.Is(err, eventlog.ErrRoomAddUnknown):
 			return fault.Wrap(fault.CodeNotAuthentic, err)
 		case errors.Is(err, eventlog.ErrRoomAddConflict):
@@ -596,6 +604,9 @@ func (r *roomRuntime) commitReadyAdds(roomID string) {
 			r.daemon.report("room add "+roomID, err)
 			return
 		}
+	}
+	if record, found, err := r.ledger.Current(roomID); err == nil && found {
+		r.fanOut(context.Background(), record)
 	}
 }
 
@@ -749,7 +760,7 @@ func (r *roomRuntime) stageAdd(record eventlog.RoomMLSRecord, joiner string, lea
 // authorization, the MLS Remove of its leaf, and the Commit staged to every
 // remaining member but the authority and once to the removed member
 // (section 11.4). A member no longer in the room is a no-op.
-func (r *roomRuntime) RemoveRoomMember(_ context.Context, roomID, agentID string) error {
+func (r *roomRuntime) RemoveRoomMember(ctx context.Context, roomID, agentID string) error {
 	if !ids.Agent.MatchString(agentID) {
 		return fault.New(fault.CodePayloadMalformed, "invalid member identifier")
 	}
@@ -805,8 +816,22 @@ func (r *roomRuntime) RemoveRoomMember(_ context.Context, roomID, agentID string
 		return []eventlog.StagedRoomObject{{Type: eventlog.RoomObjectCommit, RoomEpoch: clock.RoomEpoch, MLSEpoch: clock.MLSEpoch,
 			Object: commit, Recipients: recipients}}, nil
 	}
-	_, _, err = r.controller.Commit(template, &proof, operations, build, now.Add(r.retention))
-	return err
+	if _, _, err = r.controller.Commit(template, &proof, operations, build, now.Add(r.retention)); err != nil {
+		return err
+	}
+	// The removed member's card goes with its credential.
+	if err := r.daemon.journal.ForgetRoomMemberCard(roomID, agentID); err != nil {
+		return err
+	}
+	// Its in-flight generations are withdrawn, and the removing Commit goes
+	// out at once.
+	if err := r.withdrawFromRemoved(ctx, roomID, agentID, now); err != nil {
+		return err
+	}
+	if current, found, err := r.ledger.Current(roomID); err == nil && found {
+		r.fanOut(ctx, current)
+	}
+	return nil
 }
 
 // othersOf returns the members other than this installation, ascending.
@@ -860,7 +885,7 @@ func (r *roomRuntime) rosterOf(roomID string, members []string, skip string, joi
 		if err != nil {
 			return nil, err
 		}
-		card, evidence, err := r.rendezvousOf(member)
+		card, evidence, err := r.rendezvousOf(roomID, member)
 		if err != nil {
 			return nil, err
 		}
@@ -871,13 +896,29 @@ func (r *roomRuntime) rosterOf(roomID string, members []string, skip string, joi
 }
 
 // rendezvousOf returns a member's chat card and relay evidence for a roster
-// entry. This installation holds its own card and evidence, and the stored
-// relay evidence of its peers; it holds no peer's chat card (the carrier
-// does), so a roster entry for another member cannot be built yet.
-func (r *roomRuntime) rendezvousOf(member string) ([]byte, []byte, error) {
+// entry: this installation's own, or the member's stored card and committed
+// relay evidence. A member whose stored card is missing or expired gets no
+// entry yet: its evidence pull starts and the roster waits, so no roster
+// goes out with an expired card.
+func (r *roomRuntime) rendezvousOf(roomID, member string) ([]byte, []byte, error) {
+	now := r.now()
 	if member == r.daemon.config.AgentID {
 		evidence, card, _, err := r.ownEvidence()
 		return card, evidence, err
 	}
-	return nil, nil, fault.Wrap(fault.CodeNoRouteAdvertised, ErrRoomMemberCardUnknown)
+	card, err := r.storedMemberCard(roomID, member, now)
+	if err != nil {
+		return nil, nil, err
+	}
+	evidence, found, err := r.daemon.journal.LoadRelayEvidence(member)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !found {
+		if requestErr := r.relay.requestEvidence(member, now); requestErr != nil {
+			r.daemon.report("relay evidence request", requestErr)
+		}
+		return nil, nil, fault.New(fault.CodeDescriptorExpired, "a member's relay evidence is not held here")
+	}
+	return card, evidence, nil
 }

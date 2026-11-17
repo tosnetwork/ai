@@ -57,6 +57,12 @@ type roomRuntime struct {
 	// authorization is how long a MembershipAuthorization this installation
 	// signs as a room's authority lives.
 	authorization time.Duration
+	// partBytes is the test part size handshake objects are cut at; zero is
+	// the production cut.
+	partBytes int
+	// backoff holds the waits of handshake deposits the carrier answered
+	// with retry.
+	backoff fanoutBackoff
 	// skew is the daemon's clock-skew bound: the room end (D18) and the
 	// relay authorization window (D16) are applied with it at both ends.
 	skew time.Duration
@@ -147,7 +153,7 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 		return err
 	}
 	runtime := &roomRuntime{relay: d.relay, daemon: d, ledger: ledger, controller: controller, cards: settings.cards,
-		driver: settings.driver, leafs: leafs, authorization: settings.authorization,
+		driver: settings.driver, leafs: leafs, authorization: settings.authorization, partBytes: settings.partBytes,
 		skew: settings.skew, retention: settings.retention, gapDelay: settings.gapDelay, noticed: map[string]struct{}{},
 		forkNoticed: map[string]struct{}{}, pending: map[string]map[string]struct{}{}, forgotten: map[string]map[string]struct{}{}}
 	// Rooms past their retirement time are retired before anything else,
@@ -403,6 +409,10 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 			r.daemon.report("room part evidence", err)
 		}
 	}
+	if frame.PartIndex == 0 && firstPeer != nil {
+		// A member's newer card renews the authority's stored one.
+		r.refreshMemberCard(sender, frame.Card, now)
+	}
 	if result.Status != relayframe.PartComplete {
 		if firstPeer != nil {
 			r.commitMemberPeer(result.RoomID, *firstPeer, now)
@@ -622,6 +632,8 @@ func (r *roomRuntime) maintain() {
 	r.retireEnded()
 	r.sweepApplications()
 	r.commitAddsEverywhere()
+	// Handshake objects go before application objects.
+	r.sweepHandshakes(context.Background())
 	r.sweepApplicationSends(context.Background())
 	r.flushCardForgets(context.Background())
 }
