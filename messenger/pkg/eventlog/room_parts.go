@@ -111,8 +111,9 @@ type RoomParts struct {
 	reassembler *relayframe.Reassembler
 	mutex       sync.Mutex
 	// unsettled are complete objects whose stored parts the caller has not
-	// settled yet; a sweep leaves their parts alone.
-	unsettled map[roomPartKey]struct{}
+	// settled yet, with the time they completed. A sweep leaves their parts
+	// alone until the lifetime has passed since completion.
+	unsettled map[roomPartKey]time.Time
 }
 
 // OpenRoomParts binds an empty Reassembler to the part store and replays
@@ -130,7 +131,7 @@ func (j *Journal) OpenRoomParts(reassembler *relayframe.Reassembler, now time.Ti
 	if usage := reassembler.Usage(); usage.Objects != 0 {
 		return nil, RoomPartReplay{}, errors.New("the room part store replays into an empty reassembler only")
 	}
-	parts := &RoomParts{journal: j, reassembler: reassembler, unsettled: map[roomPartKey]struct{}{}}
+	parts := &RoomParts{journal: j, reassembler: reassembler, unsettled: map[roomPartKey]time.Time{}}
 	parts.mutex.Lock()
 	defer parts.mutex.Unlock()
 	report, err := parts.replay(now)
@@ -176,7 +177,7 @@ func (p *RoomParts) replay(now time.Time) (RoomPartReplay, error) {
 			stale = append(stale, part.name)
 			report.Refused++
 		case result.Status == relayframe.PartComplete:
-			p.unsettled[part.key] = struct{}{}
+			p.unsettled[part.key] = now
 			report.Completed = append(report.Completed, RoomPartCompletion{Sender: part.key.sender, Digest: part.key.digest, Result: result})
 			report.Replayed++
 		default:
@@ -215,33 +216,43 @@ func (p *RoomParts) Add(sender string, frame relayframe.Frame, now time.Time) (r
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	key := roomPartKey{sender: sender, digest: frame.ObjectDigest}
+	split := frame.PartCount > 1 && frame.PartIndex < frame.PartCount && ids.Agent.MatchString(sender)
+	// A part of a split object is stored before the Reassembler sees it, so
+	// a part the Reassembler holds, or an object it completes, is never only
+	// in memory: a store failure leaves the Reassembler unchanged and the
+	// caller answers retry. An identical stored part is left as it is.
+	wrote := false
+	if split {
+		var err error
+		if wrote, err = p.journal.storeRoomPart(sender, frame, now); err != nil {
+			return relayframe.PartResult{}, err
+		}
+	}
 	result, err := p.reassembler.Add(sender, frame, now)
 	if err != nil {
-		if frame.PartCount > 1 && ids.Agent.MatchString(sender) && !p.reassembler.Holds(sender, frame.ObjectDigest) {
-			if _, settled := p.unsettled[key]; !settled {
-				if removeErr := p.journal.removeRoomObjectParts(key); removeErr != nil {
-					return relayframe.PartResult{}, removeErr
-				}
+		if !split {
+			return relayframe.PartResult{}, err
+		}
+		_, settled := p.unsettled[key]
+		switch {
+		case settled:
+			// A complete object awaiting settlement keeps its parts.
+		case !p.reassembler.Holds(sender, frame.ObjectDigest):
+			// The object was dropped, or never held: none of it is kept.
+			if removeErr := p.journal.removeRoomObjectParts(key); removeErr != nil {
+				return relayframe.PartResult{}, removeErr
+			}
+		case wrote:
+			// The object is still held without this part: only the part
+			// just written goes.
+			if removeErr := p.journal.removeRoomPartNames([]string{roomPartName(key, frame.PartIndex)}); removeErr != nil {
+				return relayframe.PartResult{}, removeErr
 			}
 		}
 		return relayframe.PartResult{}, err
 	}
-	if frame.PartCount == 1 {
-		// An unsplit object is released at once and never stored.
-		return result, nil
-	}
-	switch result.Status {
-	case relayframe.PartStored, relayframe.PartDuplicate:
-		if err := p.journal.storeRoomPart(sender, frame, now); err != nil {
-			return relayframe.PartResult{}, err
-		}
-	case relayframe.PartComplete:
-		// The completing part is stored too, so the object completes again on
-		// replay if the caller dies before settling it.
-		if err := p.journal.storeRoomPart(sender, frame, now); err != nil {
-			return relayframe.PartResult{}, err
-		}
-		p.unsettled[key] = struct{}{}
+	if result.Status == relayframe.PartComplete && split {
+		p.unsettled[key] = now
 	}
 	return result, nil
 }
@@ -271,6 +282,13 @@ func (p *RoomParts) Sweep(now time.Time) (int, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.reassembler.Sweep(now)
+	// A complete object the caller never settled is bounded too: after the
+	// lifetime it is forgotten like an incomplete one.
+	for key, completed := range p.unsettled {
+		if now.Sub(completed) >= p.reassembler.Lifetime() {
+			delete(p.unsettled, key)
+		}
+	}
 	return p.deleteUnheld()
 }
 
@@ -354,18 +372,18 @@ func parseRoomPartName(name string) (roomPartKey, uint8, bool) {
 	return key, uint8(index), true
 }
 
-// storeRoomPart writes one held part. An identical stored part is left as
-// it is; a damaged one is replaced.
-func (j *Journal) storeRoomPart(sender string, frame relayframe.Frame, arrived time.Time) error {
+// storeRoomPart writes one part and reports whether it wrote. An identical
+// stored part is left as it is; a damaged or different one is replaced.
+func (j *Journal) storeRoomPart(sender string, frame relayframe.Frame, arrived time.Time) (bool, error) {
 	if !ids.Agent.MatchString(sender) || frame.PartCount < 2 || frame.PartIndex >= frame.PartCount || arrived.IsZero() {
-		return ErrRoomPartStore
+		return false, ErrRoomPartStore
 	}
 	key := roomPartKey{sender: sender, digest: frame.ObjectDigest}
 	path := filepath.Join(j.root, roomPartDir, roomPartName(key, frame.PartIndex))
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 	if existing, err := readRoomPart(path, filepath.Base(path)); err == nil && bytes.Equal(existing.frame.Part, frame.Part) {
-		return nil
+		return false, nil
 	}
 	record := roomPartRecord{
 		Schema: roomPartSchema, SenderAgentID: sender, ObjectDigest: hex.EncodeToString(frame.ObjectDigest[:]),
@@ -378,12 +396,12 @@ func (j *Journal) storeRoomPart(sender string, frame relayframe.Frame, arrived t
 	}
 	encoded, err := json.Marshal(record)
 	if err != nil {
-		return ErrRoomPartStore
+		return false, ErrRoomPartStore
 	}
 	if err := j.replace(path, encoded); err != nil {
-		return errors.Join(ErrRoomPartStore, err)
+		return false, errors.Join(ErrRoomPartStore, err)
 	}
-	return nil
+	return true, nil
 }
 
 // replaceRoomPartEvidence rewrites the stored part 0 of an object with newer

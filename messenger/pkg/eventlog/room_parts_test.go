@@ -296,3 +296,66 @@ func TestRoomPartNewerEvidenceIsStored(t *testing.T) {
 		}
 	}
 }
+
+// A part is stored before the Reassembler sees it: a write failure on the
+// completing part leaves the object incomplete in memory and on disk, so the
+// retried part completes it.
+func TestRoomPartStoreFailureOnTheLastPartLosesNothing(t *testing.T) {
+	journal, err := Open(t.TempDir() + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	sender := fusedAgent(1)
+	now := time.Unix(1_900_000_000, 0)
+	parts, _ := openParts(t, journal, allowSenders(sender), now)
+	frames, digest := splitObject(t, 7, 2500, 1024)
+	for _, frame := range frames[:len(frames)-1] {
+		if _, err := parts.Add(sender, frame, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := filepath.Join(journal.root, roomPartDir)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	_, err = parts.Add(sender, frames[len(frames)-1], now)
+	if restore := os.Chmod(dir, 0o700); restore != nil {
+		t.Fatal(restore)
+	}
+	if !errors.Is(err, ErrRoomPartStore) {
+		t.Fatalf("a failed write was not reported: %v", err)
+	}
+	if !parts.reassembler.Holds(sender, digest) || storedPartCount(t, journal) != len(frames)-1 {
+		t.Fatal("a failed write changed what is held")
+	}
+	result, err := parts.Add(sender, frames[len(frames)-1], now)
+	if err != nil || result.Status != relayframe.PartComplete {
+		t.Fatalf("retry: %+v %v", result.Status, err)
+	}
+}
+
+// A complete object the caller never settles is forgotten, with its parts,
+// once the lifetime has passed since it completed.
+func TestRoomPartUnsettledObjectsAreBounded(t *testing.T) {
+	journal, err := Open(t.TempDir() + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	sender := fusedAgent(1)
+	now := time.Unix(1_900_000_000, 0)
+	parts, _ := openParts(t, journal, allowSenders(sender), now)
+	frames, _ := splitObject(t, 8, 2500, 1024)
+	for _, frame := range frames {
+		if _, err := parts.Add(sender, frame, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := parts.Sweep(now.Add(24*time.Hour + 4*time.Minute)); err != nil || storedPartCount(t, journal) != len(frames) {
+		t.Fatalf("an unsettled object was dropped early: %v", err)
+	}
+	if _, err := parts.Sweep(now.Add(24*time.Hour + 5*time.Minute)); err != nil || storedPartCount(t, journal) != 0 || len(parts.unsettled) != 0 {
+		t.Fatalf("an unsettled object outlived the lifetime: %v", err)
+	}
+}
