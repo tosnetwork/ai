@@ -1020,7 +1020,8 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     current, and a second different roster for the same epoch are refused;
     a late roster for current − 1 or current − 2 is accepted and teaches only
     entries still members now; a roster with one stale entry (failing
-    `VerifyKeyCard` or `CheckPeer`) skips it, learns the rest and answers
+    `VerifyKeyCard` or `CheckPeer`) skips that entry's card and evidence
+    but learns its valid leaf credential, learns the rest and answers
     `accepted`; an MLS-only refresh Commit (room epoch unchanged) is applied,
     not refused as a fork; an authority crash between staging and the fused
     write, and right after it, leaves the Add's rosters delivered once, after
@@ -1037,8 +1038,8 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     before it; a receiver refuses at end + skew; an application object
     sealed before the end and arriving after end + skew is a gap with the
     notice. `room_ends_at` must equal the authority's leaf-credential
-    expiry: a joiner holds the Welcome's value until its full roster
-    verifies it, and a mismatch is refused `not-authentic`. Retirement at
+    expiry: a joiner checks the Welcome's value against the credential its
+    `room.invite` carried, and a mismatch is refused `not-authentic`. Retirement at
     end + retention + skew deletes the outbox heads, part store, buffer and
     receive state, then the credential list, then the fused record last; a
     crash at each step is finished at restart, and garbage collection then
@@ -1056,6 +1057,20 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
       held in the future-epoch buffer and opened once the roster arrives.
     - That object is refused `not-authentic` only after a roster arrived
       without a verifying entry for the member.
+    - A first-time joiner authenticates its Welcome with the authority's
+      leaf credential carried in the `room.invite`: an invite whose
+      credential does not verify against the finalized delegation (wrong
+      Agent, Endpoint, network, signature or window) is refused
+      `not-authentic` and records no pending join; the verified credential
+      survives a restart inside the pending join; a Welcome whose sending
+      leaf identity names another digest, or whose leaf signature key differs
+      from the credential's, is refused `not-authentic`; the Welcome's
+      install roots the credential before the pending join ends, and the
+      full roster's authority entry has the same digest.
+    - A roster entry whose card or evidence is stale but whose leaf
+      credential verifies contributes that credential (stored, listed and
+      rooted before the room ack); only the card and evidence are skipped.
+      An entry whose credential fails is skipped whole.
 
 Not proven: more than 3 live members (32 is a unit bound), multi-device
 (D3), concurrent authorities, authority transfer over the relay, fork
@@ -1241,13 +1256,15 @@ seal already carry any frame; nothing new is resolved on chain).
    with the roster window [current − 2, current] and per-entry skipping
    (11.2, 11.3); and
    received application digests (24 h 5 min); per (room, sender) sequence
-   state and `room.gap` records; pending joins; presented invites with
+   state and `room.gap` records; pending joins (each holding the
+   authority's verified leaf credential from its invite); presented invites with
    `AdmissionToken` on `Delivery` (`delivery.go:109-144`); the unswept
    invited-contact list; schema bumps, no migration.
 5. `pkg/dispatch`: set `Message.AdmissionToken` on every delivery to the
    invited Agent until one settles `accepted` (`dispatch.go:920-930`);
    refuse a room-addressed kind-1 copy on the relay route.
-6. `pkg/payload`, `pkg/envelope`: `room.key-package` (a `DeviceCredential`
+6. `pkg/payload`, `pkg/envelope`: `room.invite` gains the authority's leaf
+   credential (11.6, bound 512 bytes); `room.key-package` (a `DeviceCredential`
    and the joiner's leaf credential, 11.2)
    in the registry with class `room` (`registry.go:71-74`,
    `envelope/event.go:132-135`); a `sequence` field in `RoomMessage`
@@ -1295,7 +1312,12 @@ part, C3):
   leaf credential. This is a wire change, with no migration before launch.
 - The room-object header codec (`pkg/relayframe/room.go`) and its vectors
   gain the room's end time (D18), and `pkg/fault` gains `room-ended`.
-- C1's `room.key-package` payload gains the leaf credential.
+- C1's `room.key-package` payload gains the leaf credential, and the
+  `room.invite` payload gains the authority's leaf credential (11.6).
+- In C2 (#34), the pending-join record stores the authority's verified leaf
+  credential from the invite (11.6, 11.8); the roster learning keeps an
+  entry's verified credential when only its card or evidence is stale
+  (11.2).
 - In C2 (#34), the helpers for the old identity are removed, and
   `directory.LeafPin` takes the leaf credential instead of the
   DeviceCredential.
@@ -1479,9 +1501,11 @@ The room end time MUST equal `expires_at` of the authority's leaf credential,
 which the authority's Endpoint signs and which is identical in every roster.
 That signature authenticates it. It stays out of the MembershipAuthorization
 preimage, whose merged format is unchanged. A receiver requires the equality
-once the authority's roster entry is verified. A joiner holds its Welcome's
-value as pending until its full roster verifies it. A mismatch, or a later
-header naming another end, is refused `not-authentic`. The
+against the authority's verified leaf credential: a joiner checks its
+Welcome's value against the credential its `room.invite` carried (11.2,
+11.8), which its full roster later confirms (the same digest); a member
+already joined holds that credential since its own join. A mismatch, or a
+later header naming another end, is refused `not-authentic`. The
 codec limits stay 8,192 header bytes and 1,056,858 object bytes: a safe upper
 bound that no valid object reaches.
 
@@ -1532,7 +1556,11 @@ evidence in every part (up to 7 × 27,648 bytes per object for nothing).
 
 **Joining (1:1 first).** The authority's owner calls `rooms.add` (B), which
 sends `room.invite` to B as a kind-1 copy over their 1:1 session (an
-allow-listed contact, or an invite, 11.6). B's owner calls `rooms.join`: B's
+allow-listed contact, or an invite, 11.6). The `room.invite` payload carries
+the authority's own leaf credential (at most 473 bytes, 11.8), so the joiner
+holds a verified credential of the authority before the Welcome arrives:
+B verifies it against the authority's finalized delegation when it records
+the pending join, and stores it with that join (11.8). B's owner calls `rooms.join`: B's
 daemon makes its leaf credential (below), has its Endpoint sign it, and makes
 an MLS identity and KeyPackage (`openmls_sidecar.go:111`) whose identity is
 the compact binding naming that credential. It has the Endpoint sign a
@@ -1592,7 +1620,10 @@ How a leaf credential is issued, distributed, verified, stored and
 revoked is section 11.8; every other section refers to it. Create, add, remove and join are
 owner-only (D13); the runtime only sends and reads room messages. A Welcome
 is accepted only from the authority named in the `room.invite` of a room
-with a pending join.
+with a pending join, and only if the Welcome's sending leaf identity (the
+authority's leaf) names the digest of the leaf credential stored with that
+join, with the same Agent, Endpoint and device, and that leaf's signature
+key is the credential's.
 
 **Accepting a roster** for room R, in both cases below, requires that its
 packet sender is R's authority, that its header carries a valid
@@ -1605,14 +1636,23 @@ that the header's membership digest matches the committed membership of E,
 and that every entry names a member of E other than the receiver, so a
 roster can never add an Agent the Commits did not. Only entries that are
 still members now are learned, under D11, so a late roster degrades
-gracefully. An entry whose card fails `VerifyKeyCard` or whose evidence
-fails `CheckPeer` is skipped (the kind-4 pull repairs it later); the rest are
-learned and the roster is answered `accepted`, so one stale entry cannot
-freeze the queue.
+gracefully. An entry's leaf credential is judged independently of its
+rendezvous data, because it verifies against the finalized delegation and
+the leaf, not against the card or evidence (11.8): an entry whose card fails
+`VerifyKeyCard` or whose evidence fails `CheckPeer` still contributes its
+leaf credential if that verifies, and only the stale card or evidence is
+skipped (the kind-4 pull repairs it later). The converse does not hold: an
+entry whose credential fails is skipped whole, because its evidence is
+pinned to that credential's Endpoint and device. The rest are learned and
+the roster is answered `accepted`, so one stale entry cannot freeze the
+queue, and one roster is the only delivery a credential needs.
 
 - (a) **During a pending join:** R's authority is the one named in the
   `room.invite`; the roster is accepted once the Welcome has been applied
-  (the join then ends and E is the Welcome's epoch).
+  (the join then ends and E is the Welcome's epoch). Its authority entry
+  confirms the credential the `room.invite` carried: the authority's leaf
+  identity names that credential's digest, so an entry carrying any other
+  credential fails the digest check of 11.8.
 - (b) **Already joined:** R's authority is the current one of the
   receiver's `RoomLedger`; this is the roster of added members that follows
   an Add Commit.
@@ -1800,7 +1840,15 @@ MLS-only refresh that leaves the room epoch unchanged), in order:
 
 A joiner's Welcome arrives before the joiner has any MLS epoch, so steps 2–4
 do not apply to it: it goes through the pending-join path (11.2; from the
-authority named in the `room.invite`), with replay refused by the ledger
+authority named in the `room.invite`). The sender check of 11.5 then uses
+the authority's leaf credential stored with the pending join, which the
+joiner verified when it recorded the invite: the Welcome's sending leaf
+identity MUST name that credential's digest (with its Agent, Endpoint and
+device), its leaf signature key MUST be the credential's, and the
+credential MUST still verify against the delegation as finalized now and be
+inside its window; otherwise the Welcome is refused `not-authentic`. There
+is no bootstrap exception: the joiner never accepts a Welcome before it
+holds a verified authority credential. Replay is refused by the ledger
 (`eventlog/mls.go:98`); once installed, later copies of it answer
 `duplicate` under step 1.
 
@@ -1906,7 +1954,8 @@ commit or propose (`messenger/docs/OPEN_DECISIONS.md:147`,
 `messenger/docs/FIRST_PRINCIPLES_DECISIONS.md:76-82`). A receiver requires:
 the packet sender is the current authority Agent of its `RoomLedger`; the MLS
 committer identity (new driver output of `apply`) is that Agent's leaf
-identity, naming its verified leaf credential (11.2); and a
+identity, naming its verified leaf credential (11.2; for a joiner's
+Welcome, the one its `room.invite` carried, 11.3); and a
 membership change carries the authority's MembershipAuthorization. Anything
 else is refused `not-authentic`, relay-acknowledged, and nothing is stored.
 
@@ -1997,6 +2046,18 @@ later copy of it (a V1 limit; the owner frees entries with
 any journal write (`admit.go:323-331`), the card is not stored and
 `CheckPeer` writes nothing (2.3, 2.5).
 
+**A `room.invite` carries the authority's leaf credential.** Besides the
+room, invitee, purpose and expiry, the payload carries the inviting
+authority's leaf credential (11.2, at most 473 bytes; the payload codec
+bounds it at 512). An invite is recorded as a pending join only if that
+credential decodes strictly and names the invite's packet sender Agent, an
+Endpoint and device of its delegation as finalized now, the delegation's
+network and genesis, and a valid window that has not ended; its signature
+MUST verify under that Endpoint key. Otherwise the invite is refused
+`not-authentic` and nothing is stored. The verified credential is stored
+inside the pending-join record, which is already a garbage-collection root
+(11.7), so it survives a restart until the join ends or expires.
+
 ### 11.7 Room acks, delivery states and journals
 
 **Room ack.** A kind-2 frame carries either the copy ack of 5.2 or a room
@@ -2062,7 +2123,9 @@ A member's leaf credential (format in 11.2) is what every other member pins
 binds an MLS leaf to an Agent, Endpoint and device. Its lifecycle is the
 following, and the other sections refer here.
 
-**Issue.** A joining member's daemon (11.2) makes a fresh leaf signature key
+**Issue.** The founding authority's daemon makes its own leaf credential
+at `rooms.create`, as a joiner's is made below, and puts it in every `room.invite` it
+sends (11.6). A joining member's daemon (11.2) makes a fresh leaf signature key
 and its leaf credential. The window is the one of the `DeviceCredential` it
 makes beside it: at most 30 days, and not past the delegation's expiry. The
 authority adds the member only if that window lasts at least until the
@@ -2075,10 +2138,12 @@ other identity; the Go relay room path enforces the 128-byte length.
 
 **Distribute.** The authority sends each credential once to every member
 that needs it, in roster entries staged under the Commit's `CommitRef`
-(11.7):
+(11.7), and its own credential also in every `room.invite` (11.6):
 
+- the `room.invite` carries the authority's credential, so a joiner can
+  authenticate the Welcome's sender before any roster (11.3);
 - a joiner's full roster carries every other member's credential, the
-  authority's included;
+  authority's included (the same digest as the invite's, which confirms it);
 - the roster of added members carries the joiners' credentials to the
   others.
 
@@ -2093,8 +2158,11 @@ A receiver takes the leaves from the driver's read-only `members` operation
 - it is inside its window, and the window lasts at least until the room's
   end (D18).
 
-An entry that fails is skipped like a stale card, and the rest of the roster
-is learned.
+These checks read only the leaf, the credential and finalized state, never
+the entry's card or evidence. A credential that passes them is learned even
+when the entry's card or evidence is stale; only that card or evidence is
+skipped and later repaired by the kind-4 pull (11.2). An entry whose
+credential fails is skipped whole, and the rest of the roster is learned.
 
 **Store.** The room's credential list is a content-addressed record of the
 digests of the current members' credentials, and the fused record names it
@@ -2109,6 +2177,18 @@ ack is signed:
 3. Make a fused write naming the new list's digest, under the same
    atomic-replace and directory-fsync rules as every fused write (11.3). An
    exact repeat (the same list digest) is a no-op.
+
+**A joiner's first credential.** Until its Welcome is installed, a joiner
+keeps the authority's credential only inside its pending-join record, a
+garbage-collection root (11.6, 11.7). Installing the Welcome takes the same
+three steps: the authority's credential is written as a content-addressed
+record, then a one-entry list naming it, and the fused write that installs
+the Welcome names that list; only then does the pending join end. A crash
+before the fused write leaves the pending join, credential included, and
+the Welcome unacknowledged; a crash after it finds the credential rooted.
+The full roster that follows writes the other members' credentials and a
+list naming them all; the authority's entry has the same digest, so its
+record is an exact repeat.
 
 So a credential is rooted before it is acknowledged. A crash before step 3
 leaves unrooted records that restart collects; the roster is not yet
