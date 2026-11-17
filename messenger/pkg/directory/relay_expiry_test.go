@@ -82,3 +82,21 @@ func TestSweepKeepsTheRollbackFloor(t *testing.T) {
 		t.Fatal("the floor outlived a newer record")
 	}
 }
+
+// Evidence is unusable as soon as any part of it expires: a bundle that
+// expires before its descriptor makes the record sweepable then.
+func TestSweepRetiresEvidenceWhoseBundleExpiredFirst(t *testing.T) {
+	f := newRelayFixture(t)
+	evidence := f.evidence(relayDeviceOne, "material one", baseUnix+100, 600, func(d *Descriptor) {
+		d.ExpiresAtUnix = baseUnix + 100 + 3600
+	})
+	if !f.commitAt(evidence, baseUnix+200) {
+		t.Fatal("commit")
+	}
+	if report, err := f.verifier.SweepExpiredEvidence(at(baseUnix + 699)); err != nil || report.Retired != 0 {
+		t.Fatalf("a sweep before the bundle expired: %+v %v", report, err)
+	}
+	if report, err := f.verifier.SweepExpiredEvidence(at(baseUnix + 700)); err != nil || report.Retired != 1 {
+		t.Fatalf("a sweep once the bundle expired: %+v %v", report, err)
+	}
+}
