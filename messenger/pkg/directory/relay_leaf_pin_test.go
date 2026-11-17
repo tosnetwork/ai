@@ -36,14 +36,6 @@ func TestLeafPinPinsCheckPeerToTheMembersLeaf(t *testing.T) {
 	_, err = f.verifier.CheckPeer(agentID, removed, pin, at(baseUnix+400))
 	requireCode(t, err, fault.CodeDeviceRevoked)
 
-	identity, err := group.BasicCredentialIdentity(credential)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fromIdentity, err := LeafIdentityPin(agentID, identity)
-	if err != nil || fromIdentity != pin {
-		t.Fatalf("identity pin: %+v %v", fromIdentity, err)
-	}
 }
 
 // An expired, not yet valid or foreign credential pins nothing.
@@ -56,14 +48,4 @@ func TestLeafPinRefusesExpiredOrForeignCredentials(t *testing.T) {
 	requireCode(t, err, fault.CodeNotAuthentic)
 	_, err = LeafPin(relayLocal, credential, at(baseUnix+50))
 	requireCode(t, err, fault.CodeSenderMismatch)
-	identity, err := group.BasicCredentialIdentity(credential)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = LeafIdentityPin(relayLocal, identity)
-	requireCode(t, err, fault.CodeSenderMismatch)
-	_, err = LeafIdentityPin(agentID, append(identity, 0))
-	requireCode(t, err, fault.CodeNotAuthentic)
-	_, err = LeafIdentityPin(agentID, identity[:len(identity)-1])
-	requireCode(t, err, fault.CodeNotAuthentic)
 }

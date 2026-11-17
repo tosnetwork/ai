@@ -148,17 +148,19 @@ const (
 type Code string
 
 const (
-	CodeInvalidRequest         Code = "invalid-request"
-	CodeFrameMalformed         Code = "frame-malformed"
-	CodeRelayEvidenceTooLarge  Code = "relay-evidence-too-large"
-	CodeKindNotCarried         Code = "kind-not-carried"
-	CodeSenderMismatch         Code = "sender-mismatch"
-	CodeEvidenceRefused        Code = "evidence-refused"
-	CodeNotAccepted            Code = "not-accepted"
-	CodeNotAdmitted            Code = "not-admitted"
-	CodeNoPeerCard             Code = "no-peer-card"
-	CodePeerCap                Code = "peer-cap"
-	CodePacketTooLarge         Code = "packet-too-large"
+	CodeInvalidRequest        Code = "invalid-request"
+	CodeFrameMalformed        Code = "frame-malformed"
+	CodeRelayEvidenceTooLarge Code = "relay-evidence-too-large"
+	CodeKindNotCarried        Code = "kind-not-carried"
+	CodeSenderMismatch        Code = "sender-mismatch"
+	CodeEvidenceRefused       Code = "evidence-refused"
+	CodeNotAccepted           Code = "not-accepted"
+	CodeNotAdmitted           Code = "not-admitted"
+	CodeNoPeerCard            Code = "no-peer-card"
+	CodePeerCap               Code = "peer-cap"
+	CodePacketTooLarge        Code = "packet-too-large"
+	// CodeOperationNotServedHere: the side does not serve the operation at
+	// all; permanent, never retried (see NotServed).
 	CodeOperationNotServedHere Code = "operation-not-served"
 )
 

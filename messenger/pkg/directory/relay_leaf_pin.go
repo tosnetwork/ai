@@ -46,24 +46,3 @@ func LeafPin(memberAgentID string, credential group.DeviceCredential, now time.T
 	}
 	return pin, nil
 }
-
-// LeafIdentityPin returns the pin of a member from the BasicCredential
-// identity the MLS driver reports for a leaf (the sender of a message or
-// Commit). The identity must name the member.
-func LeafIdentityPin(memberAgentID string, identity []byte) (Pin, error) {
-	if !ids.Agent.MatchString(memberAgentID) {
-		return Pin{}, fault.New(fault.CodeSenderMismatch, "invalid room member Agent identifier")
-	}
-	decoded, err := group.DecodeBasicCredentialIdentity(identity)
-	if err != nil {
-		return Pin{}, fault.Wrap(fault.CodeNotAuthentic, err)
-	}
-	if decoded.AgentID != memberAgentID {
-		return Pin{}, fault.New(fault.CodeSenderMismatch, "the leaf identity names another Agent than the member")
-	}
-	pin := Pin{EndpointID: decoded.EndpointID, DeviceID: decoded.DeviceID}
-	if err := validatePin(pin); err != nil {
-		return Pin{}, fault.New(fault.CodeNotAuthentic, "the leaf identity names no Endpoint and device")
-	}
-	return pin, nil
-}

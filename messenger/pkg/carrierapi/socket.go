@@ -239,4 +239,9 @@ func (s *Server) Handle(ctx context.Context, raw []byte) (Op, Response) {
 }
 
 // NotServed is the answer of a side for an operation the other side owns.
+// It is a permanent refusal, like every refused answer: a client never
+// retries it. A daemon whose carrier answers carrier.room-cards or
+// carrier.withdraw operation-not-served (an older carrier) treats the
+// operation as unavailable, reports it to the owner and does not try again
+// until it restarts; nothing is retried in a loop.
 func NotServed() Response { return Refusal(CodeOperationNotServedHere) }
