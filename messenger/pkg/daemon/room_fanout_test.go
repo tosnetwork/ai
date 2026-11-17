@@ -308,6 +308,10 @@ func TestRoomFanOutAbandonsAMemberAtTheRetentionEnd(t *testing.T) {
 	if objects := objectsTo(t, a, agent); len(objects) != 0 {
 		t.Fatalf("a stopped queue deposited %d objects", len(objects))
 	}
+	// The stopped queue leaves its later objects untouched.
+	if roster, _ := memberDelivery(t, a, eventlog.RoomObjectRoster, agent); roster.State != eventlog.RoomDeliveryPending {
+		t.Fatalf("a stopped queue moved its roster: %+v", roster)
+	}
 }
 
 // A deposit the carrier answers with retry (a full mailbox) waits 30 s,
