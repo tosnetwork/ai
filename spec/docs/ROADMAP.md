@@ -114,7 +114,12 @@ decode, finalized escrow/Agent/Capability verification, one atomic durable
 purchase-intent record shared by transports, monotonic three-object finality
 evidence, and official A2A JSON-RPC and MCP streamable-HTTP bindings. This is
 implementation evidence, not the fresh external interoperability evidence
-required to accept Gate E.
+required to accept Gate E. **Retired with the escrow rail:** the escrow
+execution Gate was removed in `protocol/` commit
+`b9ad8e17c92532721ffca4fd7d2e639fbc586c53`, and the A2A and MCP bindings built
+on it were removed in `execution/` commit
+`0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c`; execution on the Service Actor
+rail is admitted by `execution/pkg/railgate`.
 
 The production buyer funding boundary is `tos` commit
 `d9d725534cb1a9120b1e49854b360c01f043c22a` and `protocol/` commit
@@ -190,6 +195,13 @@ submitted through MCP reaches the shared Gate but not the runner, yielding
 exact counters `gate=2` and `runner=1`. This closes the local protocol-switch
 replay test, not the fresh external interoperability requirement.
 
+**Retired.** The A2A and MCP adapters, the shared public listener boundary
+(`pkg/adapterhttp`) and the cross-transport acceptance test described in the
+two paragraphs above were removed with the escrow rail in `execution/` commit
+`0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c`. They are history, not current
+code or evidence. An MCP buyer adapter on the Service Actor rail is planned
+for Gate D; it has no design yet.
+
 ## 1. Gate A — Registry protocol freeze
 
 Deliver:
@@ -248,7 +260,9 @@ Deliver:
   intermediates outside the source tree and verifies this invariant in CI;
 - ✅ C++ consensus VM and Rust emulator `SHA256C` differential coverage using
   the same version-14 canonical snake vector;
-- ✅ designated initial public-testnet ConfigParam 8 at global version 14;
+- ✅ designated initial public-testnet ConfigParam 8 at global version 16 or
+  later, which provides `PQCHECKSIG_MLDSA44` for ML-DSA-44 controller
+  signatures (`NATIVE_REGISTRY_PUBLIC_TESTNET_GATE.md`, initial profile);
 - ⬜ current-domain public-testnet deployment record binding network domain, contract
   address, deployed code BOC, code hash, transaction, and exact source commit;
 - ⬜ current-domain three-validator strict-majority finalized
@@ -269,7 +283,11 @@ required by Gates F and G.
 wallet, resolver, and lifecycle tooling pass locally. The 2026-08-14 deployment
 is archived pre-migration evidence and cannot establish authority for
 `tos_service_v1`. Gate C must deploy fresh objects and repeat the complete
-quorum lifecycle under the current protocol domain.
+quorum lifecycle under the current protocol domain. The public SC-01/SC-02
+Native Registry runs of 2026-11-07 (team memo STATUS 13.338) were
+same-operator rehearsals on a public testnet that has since been halted
+(STATUS 13.559); they are not deployment records and do not close any Gate C
+item.
 
 ## 4. Gate D — First commercial lifecycle
 
@@ -285,19 +303,31 @@ evidence for this gate.
 
 Deliver on the Service Actor rail:
 
-- ⬜ Service Actor contract change for D1 (ML-DSA-44 attestor), D3 (sweep
-  returns the price to the caller) and D10 (request snapshot message), with
-  sandbox tests on both VMs, gas and size measurements and an independent
-  security review (implemented on tos branch `feat/service-actor-pq` at
-  `4c62edcae`, not merged, not deployed; no part of this item is accepted);
-- ⬜ published Service Actor release manifest and code hash;
-- ⬜ vectors generated from contract execution for `NSM1`, `NSR1`, the
+- 🟡 Service Actor contract change for D1 (ML-DSA-44 attestor), D3 (sweep
+  returns the price to the caller) and D10 (request snapshot message) — merged
+  on tos main (tosnetwork/tos#429, merge `fc5e7723e`) with its sandbox tests;
+  the both-VM replay, gas and size measurements of the design's section 9 and
+  an independent security review are not recorded;
+- ✅ published Service Actor release manifest and code hash —
+  `crypto/smartcont/tos-service-actor-v1.release.json` (tosnetwork/tos#430,
+  `4f5307523`, merge `bb34c656c`), code hash
+  `tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c`;
+- 🟡 vectors generated from contract execution for `NSM1`, `NSR1`, the
   Accepted Quote rail cell, `terms_hash`, SRP2, the request snapshot and key
-  ids, reproduced by `nativecore` and an independent codec;
+  ids — produced by the tos sandbox from the release code and reproduced byte
+  for byte by `nativecore` (`protocol/pkg/nativecore/testdata/service-actor-conformance-vectors.json`)
+  and the independent `internal/referencecodec`; the copy under
+  `spec/test-vectors/` is pending;
 - ⬜ manifest key 21 vector and negative corpus;
-- ⬜ resolver for both verification procedures of the design's section 2.4;
-- ⬜ one v16 local-network lifecycle per terminal state (responded, refunded,
-  swept) reconstructed by a second resolver.
+- 🟡 resolver for both verification procedures of the design's section 2.4 —
+  implemented as `protocol/pkg/serviceactor` (`VerifyAdmission`,
+  `VerifyExistingRequest`); not independently reviewed;
+- 🟡 one v16 local-network lifecycle per terminal state (responded, refunded,
+  swept) reconstructed by a second resolver — a same-host three-validator
+  lifecycle covering all three terminal states is recorded in
+  `deployments/local-service-actor-settlement-lifecycle-20261114.json`
+  (`qualifies_as_public_acceptance: false`); reconstruction by a second
+  resolver is not recorded.
 
 Delivered earlier:
 
@@ -347,10 +377,15 @@ history without a private gateway database.
 Do not block this gate on general marketplace ranking, generalized arbitration,
 multiple verticals, cross-chain support, or per-message settlement.
 
-**Gate status: 🟡 Provider execution implementation migrated; the settlement
-rail changed to the Service Actor on 2026-11-07 and its contract change,
-release, vectors, current-domain chain evidence and external acceptance are
-pending.** The escrow-rail summary that follows is archived history:
+**Gate status: 🟡 Service Actor contract merged and released; current-domain
+public chain evidence and external acceptance pending.** The settlement rail
+changed to the Service Actor on 2026-11-07. The contract change is merged
+(tos `fc5e7723e`, #429) and released (#430, code hash `0594f9a5…`); the
+remaining items are listed above. The public Service Actor run of 2026-11-07
+(case `scsa`, team memo STATUS 13.353) was a same-operator rehearsal with the
+discovery catalog and quote transport as local stand-ins, on a public testnet
+that has since been halted (STATUS 13.559); it is not Gate D evidence.
+The escrow-rail summary that follows is archived history:
 Accepted Quote primitives, the test-only `tUSDT` asset recorded in
 `deployments/archive/pre-tos-service-v1/initial-public-testnet-tusdt-2026-08-14.json`, the fixed-price
 escrow, canonical Receipt, objective transfer transitions, reproducible BOC,
@@ -390,22 +425,27 @@ Deliver:
   manifest afterward, recorded in
   `deployments/archive/pre-tos-service-v1/local-gate-e-role-isolated-simulation-2026-08-15.json`; an
   independently operated cross-gateway retrieval test remains;
-- ✅ A2A task and result adapter — the official A2A 1.0 Go types, exact
+- ⬜ A2A task and result adapter — **retired**: the adapter below was built on
+  the escrow execution Gate and removed with the escrow rail in `execution/`
+  commit `0d0dfc22`; no A2A adapter exists on the Service Actor rail. The
+  retired implementation: the official A2A 1.0 Go types, exact
   request/result mapping, shared production finalized-chain execution Gate,
-  synchronous JSON-RPC server binding, and negative tests are implemented;
-  the public listener and local cross-transport single-execution test are
+  synchronous JSON-RPC server binding, and negative tests were implemented;
+  the public listener and local cross-transport single-execution test were
   complete; a fresh funded purchase was admitted from a strict-majority
   finalized chain view and executed through the public TLS transport in
   `deployments/archive/pre-tos-service-v1/local-gate-e-live-chain-adapter-acceptance-2026-08-15.json`;
-  external interoperability remains an acceptance activity, not engineering;
-- ✅ MCP tool adapter — official MCP 2026-07-28 typed tool registration,
+- ⬜ MCP tool adapter — **retired**: the provider-side tool below was built on
+  the escrow execution Gate and removed with the escrow rail in `execution/`
+  commit `0d0dfc22`; an MCP buyer adapter on the Service Actor rail is planned
+  for Gate D and has no design yet. The retired implementation: official MCP
+  2026-07-28 typed tool registration,
   committed input/result mapping, shared production finalized-chain execution
-  Gate, stateless streamable-HTTP binding, and negative tests are implemented;
-  the public listener and local cross-transport single-execution test are
+  Gate, stateless streamable-HTTP binding, and negative tests were implemented;
+  the public listener and local cross-transport single-execution test were
   complete; replaying the same live funded purchase after its A2A execution
   reached the shared chain Gate but never the runner, as recorded in
   `deployments/archive/pre-tos-service-v1/local-gate-e-live-chain-adapter-acceptance-2026-08-15.json`;
-  external interoperability remains an acceptance activity, not engineering;
 - ⏸ optional x402 payment-negotiation adapter — deliberately deferred until
   Gate F demonstrates recurring buyer demand. `docs/X402_ADAPTER_DECISION.md`
   forbids a parallel facilitator-owned settlement path and limits any future
@@ -419,9 +459,13 @@ a new buyer purchases it using public documentation in one working session.
 Adapters must map into the same Agent, Capability, Accepted Quote, Receipt, and
 chain-reference objects. They cannot create parallel protocol facts.
 
-**Gate status: 🟡 Engineering migration complete; current-domain live and
-external acceptance pending.** Unit, race, adapter, and cross-transport code
-passes under the new imports and domains. The archived same-host role-isolated
+**Gate status: 🟡 Engineering migration complete except the retired adapters;
+current-domain live and external acceptance pending.** Unit and race tests
+pass under the new imports and domains. The A2A and MCP adapters and their
+cross-transport test were retired with the escrow rail (`execution/`
+`0d0dfc22`), so no protocol adapter is currently implemented; the buyer and
+provider onboarding runbooks still describe the escrow rail and await a
+Service Actor rewrite. The archived same-host role-isolated
 run is pre-migration evidence. A fresh current-domain live session must precede
 the independently operated provider and buyer acceptance sessions.
 
@@ -737,8 +781,9 @@ task is an external pilot with a buyer outside the core team, an independent
 provider, and an independently operated resolver or endpoint set. The
 same-host transaction is reproducible deployment evidence, not grounds to mark
 Gate D accepted. The role separation, execution sequence, strict verification
-command, custody-safe two-stage Receipt signing flow, and acceptance record are
-frozen in `docs/GATE_D_EXTERNAL_PILOT.md`. A fresh local preflight exercised
+command, custody-safe two-stage Receipt signing flow, and acceptance record
+were frozen for the escrow rail in `docs/GATE_D_EXTERNAL_PILOT.md`; its
+escrow-specific sections are void and a Service Actor rewrite follows. A fresh local preflight exercised
 that flow through a second 25,000,000 atomic `tUSDT` settlement and proved the
 provider balance increase between finalized checkpoints; its evidence is
 `deployments/archive/pre-tos-service-v1/initial-public-testnet-gate-d-local-preflight-2026-08-14.json`.
@@ -748,15 +793,20 @@ is not implied by Gate C's initial profile.
 14. 🟡 **Gate E external acceptance:** the public Native client, provider SDK and
     deployment template, plus the buyer's canonical purchase preflight and
     crash-safe bounded funding journal, plus the minimal authority-neutral
-    Capability catalog/manifest API, and the authority-gated A2A task/result
-    mapping, MCP tool adapter, shared production chain execution-claim Gate,
-    official server bindings, hardened public listener, local search, and
-    public-interface discovery CLI are implemented. A fresh funded purchase
-    has now passed the live 2-of-3 chain execution Gate over A2A/TLS, its MCP
+    Capability catalog/manifest API, local search, and public-interface
+    discovery CLI are implemented. On the retired escrow rail the
+    authority-gated A2A task/result mapping, MCP tool adapter, shared
+    production chain execution-claim Gate, official server bindings and
+    hardened public listener were also implemented, and a fresh funded
+    purchase passed the live 2-of-3 chain execution Gate over A2A/TLS, its MCP
     replay was rejected with one runner call, and its exact Receipt settled on
-    chain; see
-    `deployments/archive/pre-tos-service-v1/local-gate-e-live-chain-adapter-acceptance-2026-08-15.json`.
-    Engineering is complete. The remaining Gate E task is one independently
+    chain (archived:
+    `deployments/archive/pre-tos-service-v1/local-gate-e-live-chain-adapter-acceptance-2026-08-15.json`).
+    Those adapters and that Gate were removed with the escrow rail
+    (`protocol/` `b9ad8e17`, `execution/` `0d0dfc22`), so engineering is not
+    complete: an MCP buyer adapter on the Service Actor rail is planned for
+    Gate D (no design yet), and the onboarding runbooks need a Service Actor
+    rewrite. After that, the remaining Gate E task is one independently
     operated provider/buyer working session using the public onboarding docs.
     The optional x402 adapter has been evaluated and
     deferred under `docs/X402_ADAPTER_DECISION.md` until Gate F supplies real
@@ -824,9 +874,11 @@ is not implied by Gate C's initial profile.
     supply, rankings,
     coverage, and
     separately labelled operational availability. The **deterministic
-    network-level aggregator** is implemented in `protocol/`
-    `pkg/economic` (commit `f6639b6`): it consumes the verification layer's
-    verified job records and computes, per exact asset over a half-open
+    network-level aggregator** was implemented for the escrow rail in
+    `protocol/` `pkg/economic` (commit `f6639b6`) and removed with that rail in
+    `protocol/` commit `7db001135604cca6ca98b621f47423440047f656`; no
+    aggregator exists for the Service Actor rail. As implemented, it consumed the verification layer's
+    verified job records and computed, per exact asset over a half-open
     window, released cash flow and its attributed / unattributed /
     attribution-unresolved partition with the value identity, the
     accepted / funded / released / attributed / refunded counts, the unique

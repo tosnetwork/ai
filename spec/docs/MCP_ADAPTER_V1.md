@@ -1,11 +1,21 @@
 # MCP Software-Work Tool Adapter V1
 
-**Rail change (2026-11-07).** Stablecoin escrow v2 is retired and the
-software-work profile settles in native TOS on the Service Actor
+**Retired (2026-11-08).** The provider-side MCP tool this document describes
+no longer exists. It was built on the escrow execution Gate and was removed
+with the escrow rail in `execution/` commit
+`0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c` (`execution/pkg/mcpadapter`, its
+public HTTP boundary and the cross-transport acceptance test); the Gate itself
+was removed in `protocol/` commit `b9ad8e17`. The software-work profile now
+settles in native TOS on the Service Actor
 ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
 [`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-The escrow address input below is superseded by the `(actor, request_id)` of a pending Service Actor request; the settler submits `respond` with the attestor's SRP2 signature. Where this document conflicts with those, they govern; its in-place
-rewrite follows the implementation change listed in the design's section 7.
+The text below is kept as history only; it is not a current specification and
+no implementation conforms to it.
+
+A **buyer-side** MCP adapter on the Service Actor rail is planned for Gate D
+(`ROADMAP.md`), so that TOS services can be bought from an MCP client without
+an Agent runtime. It has no design yet; when one is written it will replace
+this document rather than revise it.
 
 The MCP tool `tos_service_software_work` maps the official MCP Go SDK's typed
 `tools/call` boundary into the same Native software-work runner. MCP is

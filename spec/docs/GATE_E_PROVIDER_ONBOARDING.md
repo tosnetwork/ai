@@ -1,5 +1,23 @@
 # Gate E Provider Onboarding
 
+**Partly escrow-rail runbook (rail change 2026-11-07).** Stablecoin escrow v2
+is retired and the software-work profile settles in native TOS on the Service
+Actor ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
+[`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
+
+- **Void:** "Provider sequence" step 7 (funded escrow and settlement); the
+  "commercial lifecycle" pointer to `GATE_D_EXTERNAL_PILOT.md`, itself an
+  escrow-rail runbook; and the escrow, settlement-transaction and
+  provider-wallet-delta fields of "First-slice acceptance record".
+- **Missing:** the Service Actor steps — deploy the actor, name its code hash
+  and attestor in manifest key 21 (`protocol/pkg/providersdk`
+  `CheckManifestActorPin`), answer each request with an attestor-signed
+  `respond`, and withdraw revenue.
+- **Still binding:** steps 1-6 and the authority boundary.
+- **Next:** a Service Actor rewrite of this runbook follows in a separate
+  change. Where this document conflicts with the Service Actor documents, they
+  govern.
+
 ## Status
 
 This is the first active Gate E slice. Gate D external acceptance remains open
