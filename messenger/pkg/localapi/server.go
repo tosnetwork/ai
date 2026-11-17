@@ -1074,6 +1074,12 @@ func (s *Server) composeRoom(ctx context.Context, request Request) Response {
 	if roomSendingStopped(record.RoomEndsAtUnix, s.config.RoomClockSkew, s.config.Now()) {
 		return refuse(fault.CodeRoomEnded, errors.New("the room has ended"))
 	}
+	// A member removed from the room seals nothing more in it (section 11.4).
+	if _, removed, err := s.config.Journal.RoomRemovalOf(request.RoomID); err != nil {
+		return refuse(fault.CodeInternal, err)
+	} else if removed {
+		return refuse(fault.CodeNotARoomMember, errors.New("this installation was removed from the room"))
+	}
 	// A room whose credential list cannot be read (for example one a crash
 	// left half retired) sends nothing.
 	if _, _, err := ledger.RoomCredential(request.RoomID, s.config.Dispatcher.LocalIdentity().AgentID); err != nil {

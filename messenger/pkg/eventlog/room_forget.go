@@ -2,8 +2,8 @@ package eventlog
 
 // Forgetting a room's receive state.
 //
-// The sequence, gap, applied-digest, received-digest and future-epoch
-// records of a room exist only while this installation holds the room or
+// The sequence, gap, applied-digest, received-digest, future-epoch and
+// removal records of a room exist only while this installation holds the room or
 // has a pending join for it. When the fused record goes (the member left or
 // was removed), ForgetRoomState deletes them; restart deletes what a crash
 // left behind for a room that is neither held nor pending. When a member is
@@ -25,7 +25,7 @@ var ErrRoomStillHeld = errors.New("the room is still held or pending")
 
 // roomStateDirs are the per-room receive stores, each with file names that
 // begin with the room's hex.
-var roomStateDirs = []string{roomSequenceDir, roomGapDir, roomAppliedDir, roomReceivedDir, roomBufferDir}
+var roomStateDirs = []string{roomSequenceDir, roomGapDir, roomAppliedDir, roomReceivedDir, roomBufferDir, roomRemovedDir}
 
 // ForgetRoomState deletes a room's receive state once the room is neither
 // held nor pending here. It reports how many records it deleted.

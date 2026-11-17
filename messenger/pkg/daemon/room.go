@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -33,6 +34,10 @@ import (
 // carrier.carry: the card admissions a roster teaches.
 type roomCarrier interface {
 	RoomCards(ctx context.Context, roomID string, cards []carrierapi.RoomCard) (carrierapi.Response, error)
+	// ForgetRoomCards drops the room's admission of removed members' cards;
+	// a card another admission (a contact, a session, another room) holds
+	// stays with the carrier.
+	ForgetRoomCards(ctx context.Context, roomID string, agentIDs []string) (carrierapi.Response, error)
 }
 
 // roomRuntime receives private room objects.
@@ -59,7 +64,20 @@ type roomRuntime struct {
 	// this process: one notice per room, not one per refused object.
 	noticedMutex sync.Mutex
 	noticed      map[string]struct{}
+
+	// cardsMutex guards the card-forget bookkeeping. Forgets are queued
+	// under the handling lock and sent to the carrier outside it
+	// (flushCardForgets): pending holds what is still to be sent, retried
+	// until it succeeds; forgotten holds what this process already sent,
+	// so the timer's reconciliation does not send it again.
+	cardsMutex sync.Mutex
+	pending    map[string]map[string]struct{}
+	forgotten  map[string]map[string]struct{}
 }
+
+// ErrRoomRemoved is the owner notice of a room this installation was removed
+// from (section 11.4).
+var ErrRoomRemoved = errors.New("this installation was removed from the private room; it accepts and sends nothing more there")
 
 // roomRuntimeSettings are the values the room runtime is built with.
 type roomRuntimeSettings struct {
@@ -97,7 +115,22 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 		return err
 	}
 	runtime := &roomRuntime{relay: d.relay, daemon: d, ledger: ledger, controller: controller, cards: settings.cards,
-		skew: settings.skew, retention: settings.retention, noticed: map[string]struct{}{}}
+		skew: settings.skew, retention: settings.retention, noticed: map[string]struct{}{},
+		pending: map[string]map[string]struct{}{}, forgotten: map[string]map[string]struct{}{}}
+	// Rooms past their retirement time are retired before anything else,
+	// a crash's half-retired room included, and only then is garbage
+	// collected, so the retired rooms' records are reclaimed (section 11.8).
+	if err := runtime.queueRetiringCardForgets(d.clock()); err != nil {
+		return err
+	}
+	if _, err := ledger.RetireEndedRooms(d.clock(), settings.retention, settings.skew); err != nil {
+		return err
+	}
+	if report, err := d.journal.CollectRoomGarbage(); err != nil {
+		return err
+	} else if report.FailedClosed {
+		d.report("room garbage collection", errors.New("a room root is unreadable; nothing was collected"))
+	}
 	limits := relayframe.DefaultReassemblyLimits()
 	limits.PartBytes = settings.partBytes
 	reassembler, err := relayframe.NewReassembler(limits, roomSenders{runtime: runtime})
@@ -109,10 +142,14 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 		return err
 	}
 	runtime.parts = parts
+	// A crash or a failed carrier call may have left a removed member
+	// remembered; it is forgotten before the runtime serves.
+	runtime.reconcileRemoved()
 	d.relay.rooms = runtime
 	for _, completed := range replay.Completed {
 		runtime.handleReplayed(completed)
 	}
+	runtime.flushCardForgets(context.Background())
 	return nil
 }
 
@@ -268,6 +305,9 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 		if response, refused := r.endedRoom(ended); refused {
 			return response
 		}
+		if response, refused := r.removedRoom(ended); refused {
+			return response
+		}
 		// Only the room's authority sends handshake objects (section 11.5):
 		// another member's part 0 is refused before anything of it is held.
 		if response, refused := r.nonAuthority(ended); refused {
@@ -306,6 +346,8 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 			r.daemon.report("room part settlement", err)
 		}
 	}
+	// Card forgets a removal queued are sent now, outside the handling lock.
+	r.flushCardForgets(ctx)
 	return response
 }
 
@@ -389,6 +431,11 @@ func (r *roomRuntime) handleComplete(ctx context.Context, sender string, digest 
 	r.handling.Lock()
 	defer r.handling.Unlock()
 	in := roomInbound{ctx: ctx, sender: sender, peer: peer, object: object, raw: result.Object, digest: digest, now: now}
+	// The removal marker is judged under the handling lock: a removal
+	// handled while this object waited for the lock stops it here.
+	if response, refused := r.removedRoom(in); refused {
+		return response, response.Result != carrierapi.ResultRetry
+	}
 	var response carrierapi.Response
 	switch object.Type {
 	case relayframe.RoomCommit:
@@ -489,13 +536,239 @@ func (r *roomRuntime) nonAuthority(in roomInbound) (carrierapi.Response, bool) {
 	return r.roomAck(in, answerRejected(fault.CodeNotAuthentic)), true
 }
 
+// maintain is the room runtime's share of the relay maintenance timer:
+// expired parts go, removed members are forgotten, and ended rooms are
+// retired.
+func (r *roomRuntime) maintain() {
+	r.sweepParts()
+	r.reconcileRemoved()
+	r.retireEnded()
+	r.flushCardForgets(context.Background())
+}
+
+// queueRoomCardForgets queues the forget of every member's card admission
+// of a room being retired: the room's admissions end with it. The forgets
+// are sent after the handling lock, and a failed one is retried without
+// holding retirement's journal steps back.
+func (r *roomRuntime) queueRoomCardForgets(record eventlog.RoomMLSRecord) {
+	var members []string
+	for _, agentID := range record.Members {
+		if agentID != r.daemon.config.AgentID {
+			members = append(members, agentID)
+		}
+	}
+	r.queueCardForgets(record.RoomID, members)
+}
+
+// queueRetiringCardForgets queues the card forgets of every room due for
+// retirement at now, before the start-time retirement removes its record.
+func (r *roomRuntime) queueRetiringCardForgets(now time.Time) error {
+	records, err := r.ledger.List()
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		at, err := eventlog.RoomRetireAt(record, r.retention, r.skew)
+		if err != nil || now.Before(at) {
+			continue
+		}
+		r.queueRoomCardForgets(record)
+	}
+	return nil
+}
+
+// queueCardForgets records card admissions of a room to drop at the
+// carrier, skipping those this process already dropped. The caller holds
+// the handling lock; nothing here calls the carrier.
+func (r *roomRuntime) queueCardForgets(roomID string, agentIDs []string) {
+	r.cardsMutex.Lock()
+	defer r.cardsMutex.Unlock()
+	for _, agentID := range agentIDs {
+		if _, done := r.forgotten[roomID][agentID]; done {
+			continue
+		}
+		if r.pending[roomID] == nil {
+			r.pending[roomID] = map[string]struct{}{}
+		}
+		r.pending[roomID][agentID] = struct{}{}
+	}
+}
+
+// flushCardForgets sends the queued card forgets to the carrier, one
+// carrier.room-cards forget per room, never under the handling lock. A
+// forget the carrier applied moves to the forgotten set; one that failed
+// stays pending and is sent again by the next flush. A room's pending set
+// larger than one request allows is sent in batches of MaxRoomCards.
+func (r *roomRuntime) flushCardForgets(ctx context.Context) {
+	r.cardsMutex.Lock()
+	batches := make(map[string][]string, len(r.pending))
+	for roomID, agents := range r.pending {
+		for agentID := range agents {
+			batches[roomID] = append(batches[roomID], agentID)
+		}
+	}
+	r.cardsMutex.Unlock()
+	for roomID, agentIDs := range batches {
+		sort.Strings(agentIDs)
+		// One carrier.room-cards request names at most MaxRoomCards Agents;
+		// a larger set goes in batches, each settled on its own.
+		for start := 0; start < len(agentIDs); start += carrierapi.MaxRoomCards {
+			end := min(start+carrierapi.MaxRoomCards, len(agentIDs))
+			r.forgetCardBatch(ctx, roomID, agentIDs[start:end])
+		}
+	}
+}
+
+// forgetCardBatch sends one batch of card forgets. Applied, its Agents move
+// to the forgotten set; failed, they stay pending for the next flush.
+func (r *roomRuntime) forgetCardBatch(ctx context.Context, roomID string, agentIDs []string) {
+	response, err := r.cards.ForgetRoomCards(ctx, roomID, agentIDs)
+	if err == nil && response.Result != carrierapi.ResultApplied {
+		err = errors.New("the carrier did not drop the room's admission of removed members")
+	}
+	if err != nil {
+		r.daemon.report("room cards", err)
+		return
+	}
+	r.cardsMutex.Lock()
+	defer r.cardsMutex.Unlock()
+	for _, agentID := range agentIDs {
+		delete(r.pending[roomID], agentID)
+		if r.forgotten[roomID] == nil {
+			r.forgotten[roomID] = map[string]struct{}{}
+		}
+		r.forgotten[roomID][agentID] = struct{}{}
+	}
+	if len(r.pending[roomID]) == 0 {
+		delete(r.pending, roomID)
+	}
+}
+
+// pruneCardForgets drops the forgotten set of rooms no longer held here,
+// once nothing of theirs is pending, so the sets stay bounded by the rooms
+// held.
+func (r *roomRuntime) pruneCardForgets(held map[string]struct{}) {
+	r.cardsMutex.Lock()
+	defer r.cardsMutex.Unlock()
+	for roomID := range r.forgotten {
+		if _, still := held[roomID]; still {
+			continue
+		}
+		if len(r.pending[roomID]) == 0 {
+			delete(r.forgotten, roomID)
+		}
+	}
+}
+
+// reconcileRemoved brings what the receiver derived from a room's members
+// back to its durable membership: every Agent of a retained earlier
+// membership (the two room epochs before the current one) that is not a
+// member now is forgotten again, as forgetMembers does after the Commit
+// that removed it. That step runs once, after the fused write, so a crash
+// before it, or a carrier that failed it, would leave a removed member's
+// card admitted for the room; this repeats it from the journal alone. Every
+// step is idempotent. It runs at start and on the relay timer.
+func (r *roomRuntime) reconcileRemoved() {
+	r.handling.Lock()
+	defer r.handling.Unlock()
+	records, err := r.ledger.List()
+	if err != nil {
+		r.daemon.report("room removed members", err)
+		return
+	}
+	held := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		held[record.RoomID] = struct{}{}
+	}
+	r.pruneCardForgets(held)
+	for _, record := range records {
+		var removed []string
+		for back := uint64(1); back < eventlog.RetainedRoomEpochs && back < record.RoomEpoch; back++ {
+			earlier, held, err := r.ledger.MembershipAt(record.RoomID, record.RoomEpoch-back)
+			if err != nil {
+				r.daemon.report("room removed members", err)
+				return
+			}
+			if !held {
+				continue
+			}
+			for _, agentID := range earlier.Members {
+				if !containsAgent(record.Members, agentID) && !containsAgent(removed, agentID) && agentID != r.daemon.config.AgentID {
+					removed = append(removed, agentID)
+				}
+			}
+		}
+		if len(removed) > 0 {
+			r.forgetMembers(record.RoomID, removed)
+		}
+	}
+}
+
 // sweepParts drops incomplete room objects past their lifetime, with their
-// stored parts, and forgets complete objects left unsettled that long. It
-// runs on the relay maintenance timer.
+// stored parts, and forgets complete objects left unsettled that long.
 func (r *roomRuntime) sweepParts() {
 	if _, err := r.parts.Sweep(r.now()); err != nil {
 		r.daemon.report("room part sweep", err)
 	}
+}
+
+// retireEnded retires every room past end + retention + skew (D18). The
+// room's objects are first dropped from the part store's memory, while
+// their part 0 still names the room; retirement then deletes the stored
+// parts, buffer, receive state, credential list and, last, the fused record,
+// and a collection reclaims what nothing names any more.
+func (r *roomRuntime) retireEnded() {
+	r.handling.Lock()
+	defer r.handling.Unlock()
+	now := r.now()
+	records, err := r.ledger.List()
+	if err != nil {
+		r.daemon.report("room retirement", err)
+		return
+	}
+	due := false
+	for _, record := range records {
+		at, err := eventlog.RoomRetireAt(record, r.retention, r.skew)
+		if err != nil || now.Before(at) {
+			continue
+		}
+		due = true
+		r.queueRoomCardForgets(record)
+		if _, err := r.parts.DropRoom(record.RoomID); err != nil {
+			r.daemon.report("room retirement", err)
+			return
+		}
+	}
+	if !due {
+		return
+	}
+	retired, err := r.ledger.RetireEndedRooms(now, r.retention, r.skew)
+	if err != nil {
+		r.daemon.report("room retirement", err)
+		return
+	}
+	if len(retired) == 0 {
+		return
+	}
+	if report, err := r.daemon.journal.CollectRoomGarbage(); err != nil {
+		r.daemon.report("room garbage collection", err)
+	} else if report.FailedClosed {
+		r.daemon.report("room garbage collection", errors.New("a room root is unreadable; nothing was collected"))
+	}
+}
+
+// removedRoom answers an object of a room this installation was removed
+// from: it accepts no handshake object there any more (section 11.4), and
+// nothing of it is held or answered.
+func (r *roomRuntime) removedRoom(in roomInbound) (carrierapi.Response, bool) {
+	_, removed, err := r.daemon.journal.RoomRemovalOf(in.object.RoomID)
+	if err != nil {
+		return carrierapi.Retry(), true
+	}
+	if !removed || in.object.Type == relayframe.RoomApplication {
+		return carrierapi.Response{}, false
+	}
+	return ignored(), true
 }
 
 // roomEnded reports now >= end + skew (D18), with checked arithmetic: an end

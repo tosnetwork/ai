@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,8 +58,12 @@ func (c *testClock) set(at time.Time) {
 
 // roomCardsCarrier records carrier.room-cards admissions.
 type roomCardsCarrier struct {
-	mutex    sync.Mutex
-	admitted map[string][]string
+	mutex     sync.Mutex
+	admitted  map[string][]string
+	forgotten map[string][]string
+	// failForgets makes that many forget calls fail, as an unreachable
+	// carrier would.
+	failForgets int
 }
 
 func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, cards []carrierapi.RoomCard) (carrierapi.Response, error) {
@@ -71,6 +76,39 @@ func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, cards []c
 		c.admitted[roomID] = append(c.admitted[roomID], card.AgentID)
 	}
 	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultApplied}, nil
+}
+
+func (c *roomCardsCarrier) ForgetRoomCards(_ context.Context, roomID string, agentIDs []string) (carrierapi.Response, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	// The client refuses a request naming more Agents than one may hold,
+	// before it reaches the carrier.
+	if err := carrierapi.ValidateRequest(carrierapi.Request{Schema: carrierapi.RequestSchema, Op: carrierapi.OpRoomCards,
+		RoomID: roomID, RoomCardsAction: carrierapi.RoomCardsForget, ForgetAgentIDs: agentIDs}); err != nil {
+		return carrierapi.Response{}, err
+	}
+	if c.failForgets > 0 {
+		c.failForgets--
+		return carrierapi.Response{}, errors.New("the carrier is unreachable")
+	}
+	if c.forgotten == nil {
+		c.forgotten = map[string][]string{}
+	}
+	c.forgotten[roomID] = append(c.forgotten[roomID], agentIDs...)
+	kept := c.admitted[roomID][:0:0]
+	for _, agentID := range c.admitted[roomID] {
+		if !containsAgent(agentIDs, agentID) {
+			kept = append(kept, agentID)
+		}
+	}
+	c.admitted[roomID] = kept
+	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultApplied}, nil
+}
+
+func (c *roomCardsCarrier) forgottenIn(roomID string) []string {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return append([]string(nil), c.forgotten[roomID]...)
 }
 
 func (c *roomCardsCarrier) of(roomID string) []string {
