@@ -315,6 +315,14 @@ func e2eRoomConfig(driver string) *RelayCarriageConfig {
 
 func newE2EScene(t *testing.T) *e2eScene {
 	t.Helper()
+	return newE2ESceneWith(t, nil)
+}
+
+// newE2ESceneWith is newE2EScene with every node's prekey generation
+// schedule changed by publication, when set; each node's planner then runs
+// on the scene's clock.
+func newE2ESceneWith(t *testing.T, publication func(*PublicationConfig)) *e2eScene {
+	t.Helper()
 	binary := e2eDriverPath(t)
 	start := time.Unix(1_900_000_000, 0)
 	clock := &testClock{at: start}
@@ -324,7 +332,7 @@ func newE2EScene(t *testing.T) *e2eScene {
 	digits := [][2]string{{"a", "1"}, {"b", "2"}, {"c", "3"}, {"d", "4"}}
 	daemons := make([]*Daemon, 0, len(digits))
 	for _, pair := range digits {
-		daemons = append(daemons, relayDaemon(t, start, pair[0], pair[1], func(config *Config) {
+		d := relayDaemonWith(t, start, pair[0], pair[1], func(config *Config) {
 			// C admits only its known contact A (D11, item 12): a 1:1 copy
 			// from any other Agent meets that policy.
 			if config.AgentID == "agent_"+strings.Repeat("c", 64) {
@@ -332,7 +340,11 @@ func newE2EScene(t *testing.T) *e2eScene {
 					KnownAgentIDs: []string{authority}, MaxContentBytes: config.Admission.MaxContentBytes,
 					MaxClockSkewSeconds: config.Admission.MaxClockSkewSeconds}
 			}
-		}))
+		}, publication)
+		if publication != nil {
+			d.prekeys.planner.now = clock.now
+		}
+		daemons = append(daemons, d)
 	}
 	scene.resolver = relayResolver(daemons...)
 	for _, d := range daemons {

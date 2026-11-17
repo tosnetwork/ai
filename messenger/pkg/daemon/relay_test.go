@@ -171,6 +171,14 @@ func newRelayNodes(t *testing.T, now time.Time, digits ...[2]string) []*relayNod
 // the inbox policy.
 func relayDaemon(t *testing.T, now time.Time, agentDigit, deviceDigit string, configure func(*Config)) *Daemon {
 	t.Helper()
+	return relayDaemonWith(t, now, agentDigit, deviceDigit, configure, nil)
+}
+
+// relayDaemonWith is relayDaemon with its prekey generation schedule changed
+// by publication, when set, before the first generation is planned.
+func relayDaemonWith(t *testing.T, now time.Time, agentDigit, deviceDigit string, configure func(*Config),
+	publication func(*PublicationConfig)) *Daemon {
+	t.Helper()
 	config := testConfig(t)
 	config.AgentID = "agent_" + strings.Repeat(agentDigit, 64)
 	config.DeviceID = "dev_" + strings.Repeat(deviceDigit, 64)
@@ -193,6 +201,9 @@ func relayDaemon(t *testing.T, now time.Time, agentDigit, deviceDigit string, co
 	config.Publication.GenerationLifetimeSeconds = 3600
 	config.Publication.ReplenishBeforeSeconds = 600
 	config.Publication.CheckIntervalSeconds = 60
+	if publication != nil {
+		publication(&config.Publication)
+	}
 	journal, err := eventlog.Open(config.StateDir)
 	if err != nil {
 		t.Fatal(err)

@@ -533,6 +533,15 @@ func pullEnvelopes(pull eventlog.RelayPull, now time.Time) int {
 	return count
 }
 
+// roomWaitsOnEvidence reports whether a room object to a peer waits on the
+// peer's stored evidence; without private rooms none does.
+func (r *relayRuntime) roomWaitsOnEvidence(peer string, now time.Time) (bool, error) {
+	if r.rooms == nil {
+		return false, nil
+	}
+	return r.rooms.waitsOnEvidence(peer, now)
+}
+
 // requestEvidence opens the single outstanding evidence request to a peer;
 // an already outstanding request is left on its schedule.
 func (r *relayRuntime) requestEvidence(peer string, now time.Time) error {
@@ -551,7 +560,8 @@ func (r *relayRuntime) requestEvidence(peer string, now time.Time) error {
 }
 
 // sweepPulls deposits due evidence requests and owed responses, and ends a
-// request once no copy for its peer is held pending on evidence.
+// request once no copy and no room object for its peer is held pending on
+// evidence.
 func (r *relayRuntime) sweepPulls(ctx context.Context) {
 	pulls, err := r.daemon.journal.ListRelayPulls()
 	if err != nil {
@@ -576,6 +586,9 @@ func (r *relayRuntime) sweepPulls(ctx context.Context) {
 }
 
 func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
+	// Room objects waiting on the peer's evidence are judged before the pull
+	// lock is taken: the judgement reads finalized state.
+	roomWaits, roomErr := r.roomWaitsOnEvidence(peer, r.now())
 	r.pulls.Lock()
 	defer r.pulls.Unlock()
 	now := r.now()
@@ -588,10 +601,17 @@ func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 		return err
 	}
 	if len(index.onEvidence[peer]) == 0 {
-		// No kind-4 request is sent, or kept outstanding, without a copy
-		// waiting on the peer's evidence.
-		pull.Requested, pull.RequestNextAtUnix = false, 0
-		return r.daemon.journal.PutRelayPull(pull, now)
+		if roomErr != nil {
+			// Whether a room object waits is not known: the request is left
+			// as it is and judged again on the next pass.
+			return roomErr
+		}
+		if !roomWaits {
+			// No kind-4 request is sent, or kept outstanding, without a copy
+			// or a room object waiting on the peer's evidence.
+			pull.Requested, pull.RequestNextAtUnix = false, 0
+			return r.daemon.journal.PutRelayPull(pull, now)
+		}
 	}
 	if uint64(now.Unix()) < pull.RequestNextAtUnix {
 		return nil

@@ -400,32 +400,33 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 	var firstPeer *directory.RelayPeer
 	if frame.PartIndex == 0 {
 		// Part 0 names its room, so its evidence is checked before any part
-		// of it is held: a sender whose evidence fails stores nothing.
+		// of it is held: a sender whose evidence fails stores nothing, and
+		// the later parts that arrived first are dropped with it.
 		roomID, kind, err := relayframe.RoomObjectPrefix(frame.Part)
 		if err != nil {
-			return carrierapi.Refusal(carrierapi.CodeFrameMalformed)
+			return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeFrameMalformed))
 		}
 		if !(roomSenders{runtime: r}).MayHoldInRoom(sender, roomID) {
-			return carrierapi.Refusal(carrierapi.CodeNotAdmitted)
+			return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeNotAdmitted))
 		}
 		// The room's end is judged first: at it the sender's credential has
 		// expired too, and the refusal is room-ended, not its evidence.
 		ended := roomInbound{ctx: ctx, sender: sender, object: relayframe.RoomObject{Type: kind, RoomID: roomID},
 			digest: frame.ObjectDigest, now: now}
 		if response, refused := r.endedRoom(ended); refused {
-			return response
+			return r.refuseObject(sender, frame, response)
 		}
 		if response, refused := r.removedRoom(ended); refused {
-			return response
+			return r.refuseObject(sender, frame, response)
 		}
 		// Only the room's authority sends handshake objects (section 11.5):
 		// another member's part 0 is refused before anything of it is held.
 		if response, refused := r.nonAuthority(ended); refused {
-			return response
+			return r.refuseObject(sender, frame, response)
 		}
 		peer, pinned, err := r.objectEvidence(roomID, kind, sender, frame.Evidence, now)
 		if err != nil {
-			return evidenceRefusal(err)
+			return r.refuseObject(sender, frame, evidenceRefusal(err))
 		}
 		if pinned {
 			firstPeer = &peer
@@ -434,7 +435,7 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 	// A later part names no room, but its sender must still be one parts are
 	// held from at all, judged before the part store writes anything.
 	if frame.PartIndex != 0 && !(roomSenders{runtime: r}).MayHold(sender) {
-		return carrierapi.Refusal(carrierapi.CodeNotAdmitted)
+		return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeNotAdmitted))
 	}
 	result, err := r.parts.Add(sender, frame, now)
 	if err != nil {
@@ -466,6 +467,23 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 	// sent now, outside the handling lock.
 	r.flushCardAdmissions(ctx)
 	r.flushCardForgets(ctx)
+	return response
+}
+
+// refuseObject answers an intake refusal of one of a sender's parts. Nothing
+// of a refused object is stored (sections 11.3, 11.5): the parts of it that
+// arrived before, and the Reassembler's entry, are dropped before the
+// refusal is relay-acknowledged. A retry refuses nothing and drops nothing;
+// a drop the store could not make is retried, so the redelivered part is
+// judged, and its object dropped, again.
+func (r *roomRuntime) refuseObject(sender string, frame relayframe.Frame, response carrierapi.Response) carrierapi.Response {
+	if response.Result == carrierapi.ResultRetry {
+		return response
+	}
+	if err := r.parts.Refuse(sender, frame.ObjectDigest); err != nil {
+		r.daemon.report("room part refusal", err)
+		return carrierapi.Retry()
+	}
 	return response
 }
 

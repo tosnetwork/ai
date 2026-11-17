@@ -383,6 +383,17 @@ func (r *Reassembler) DropSender(sender string) int {
 	return len(keys)
 }
 
+// DropObject drops one incomplete object of a sender, for example one whose
+// part 0 the receiver refused, and reports whether it was held.
+func (r *Reassembler) DropObject(sender string, digest [sha256.Size]byte) bool {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	key := reassemblyKey{sender: sender, digest: digest}
+	_, held := r.objects[key]
+	r.drop(key)
+	return held
+}
+
 // DropRoom drops every incomplete object whose part 0 names a room, for
 // example a room retired here. An object whose part 0 has not arrived names
 // no room and expires with the lifetime.

@@ -293,6 +293,26 @@ func (p *RoomParts) Settle(sender string, digest [sha256.Size]byte) error {
 	return nil
 }
 
+// Refuse drops one object of a sender that the caller refused at intake (its
+// part 0, or a later part, judged refused): the Reassembler's entry, every
+// stored part and an unsettled completion, so nothing of a refused object
+// stays stored until the lifetime ends. An object not held is a no-op, and
+// so is a sender that is no Agent identifier: Add stores parts only of one.
+func (p *RoomParts) Refuse(sender string, digest [sha256.Size]byte) error {
+	if p == nil {
+		return errors.New("no room part store")
+	}
+	if !ids.Agent.MatchString(sender) {
+		return nil
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	key := roomPartKey{sender: sender, digest: digest}
+	p.reassembler.DropObject(sender, digest)
+	delete(p.unsettled, key)
+	return p.journal.removeRoomObjectParts(key)
+}
+
 // Sweep drops every incomplete object past the lifetime and deletes its
 // stored parts. It returns how many stored parts it deleted.
 func (p *RoomParts) Sweep(now time.Time) (int, error) {
