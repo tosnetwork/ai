@@ -30,6 +30,9 @@ const (
 	maxRelayEvidenceBytes = 18_432
 )
 
+// relayPeerCap is MaxRelayPeers; a test lowers it to reach the bound.
+var relayPeerCap = MaxRelayPeers
+
 // ErrRelayPeersFull reports the relay evidence store at its bound.
 var ErrRelayPeersFull = errors.New("relay evidence store holds its maximum number of peers")
 
@@ -99,7 +102,7 @@ func (j *Journal) StoreRelayEvidence(agentID string, evidence []byte, previousDi
 				count++
 			}
 		}
-		if count >= MaxRelayPeers {
+		if count >= relayPeerCap {
 			return ErrRelayPeersFull
 		}
 	}
@@ -109,7 +112,11 @@ func (j *Journal) StoreRelayEvidence(agentID string, evidence []byte, previousDi
 	if err != nil {
 		return err
 	}
-	return j.replace(j.relayEvidencePath(agentID), encoded)
+	if err := j.replace(j.relayEvidencePath(agentID), encoded); err != nil {
+		return err
+	}
+	// The record is the floor again (relay_floor.go).
+	return j.dropRelayFloor(agentID)
 }
 
 func (j *Journal) readRelayEvidence(agentID string) ([]byte, bool, error) {
