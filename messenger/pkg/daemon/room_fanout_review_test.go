@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/carrierapi"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
+	"github.com/tosnetwork/ai/messenger/pkg/localapi"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 )
 
@@ -287,30 +289,44 @@ func TestRoomFanOutRemovalWithdrawsAnUnrecordedGeneration(t *testing.T) {
 	}
 }
 
-// Every handshake deposit runs under the handling lock, whichever path
-// makes it (the maintenance pass, an ack, an Add, a Remove), so a Remove
-// cannot interleave with a deposit of the member it removes.
-func TestRoomFanOutDepositsUnderTheHandlingLock(t *testing.T) {
-	scene := newFanoutScene(t, 2, roomRetention)
-	a, b := scene.nodes[0], scene.nodes[1]
+// Every handshake deposit and withdrawal runs under its room's fan-out
+// mutex and never under the handling lock, whichever path makes it (the
+// handshake sweep, an ack, an Add, a Remove): a Remove cannot interleave with
+// a deposit to the member it removes, and a slow carrier holds back no other
+// room operation.
+func TestRoomFanOutCarrierCallsHoldOnlyTheRoomFanoutLock(t *testing.T) {
+	scene := newFanoutScene(t, 3, roomRetention)
+	a, b, c := scene.nodes[0], scene.nodes[1], scene.nodes[2]
 	agent := b.d.config.AgentID
 	r := scene.rooms(0)
-	unlocked := 0
-	a.carrier.onCarry = func(record carried) {
+	calls, handlingHeld, fanoutFree := 0, 0, 0
+	check := func() {
+		calls++
 		if r.handling.TryLock() {
-			unlocked++
 			r.handling.Unlock()
+		} else {
+			handlingHeld++
+		}
+		if lock := r.roomFanoutLock(testRoomID); lock.TryLock() {
+			fanoutFree++
+			lock.Unlock()
+		}
+	}
+	// Only handshake deposits are checked: 1:1 copies go through the same
+	// carrier from the dispatcher.
+	a.carrier.onCarry = func(record carried) {
+		if frame, err := relayframe.Decode(record.frame); err == nil && frame.Kind == relayframe.KindRoom {
+			check()
 		}
 	}
 	welcome := objectsTo(t, a, agent)[0]
 	delivery, _ := memberDelivery(t, a, eventlog.RoomObjectWelcome, agent)
-	// The maintenance pass's re-deposit, through the handshake sweep itself
-	// (maintain's Add pass also fans out, under the lock).
+	// The handshake sweep's re-deposit.
 	scene.clock.set(time.Unix(int64(delivery.NextRedepositAtUnix), 0))
 	r.sweepHandshakes(context.Background())
 	again := objectsTo(t, a, agent)
-	if len(again) != 1 {
-		t.Fatalf("%d re-deposits", len(again))
+	if len(again) != 1 || again[0][0].key == welcome[0].key {
+		t.Fatalf("the sweep's re-deposit: %d objects", len(again))
 	}
 	// The ack's release of the roster.
 	if applied := ackBack(t, a, b, handOver(t, a, b, again[0])); applied.Result != carrierapi.ResultApplied {
@@ -319,11 +335,173 @@ func TestRoomFanOutDepositsUnderTheHandlingLock(t *testing.T) {
 	if roster := objectsTo(t, a, agent); len(roster) != 1 {
 		t.Fatalf("%d objects after the ack", len(roster))
 	}
-	if unlocked != 0 {
-		t.Fatalf("%d handshake deposits ran outside the handling lock", unlocked)
+	// An Add's deposits. The clock moved past the re-deposit time, so the
+	// copies of the earlier invite and KeyPackage went out again; they are
+	// set aside.
+	if _, err := a.d.dispatch.Sweep(context.Background(), 0); err != nil {
+		t.Fatal(err)
 	}
-	if again[0][0].key == welcome[0].key {
-		t.Fatal("the sweep did not deposit the next generation")
+	takeFrames(t, a, func(frame relayframe.Frame, _ string) bool { return frame.Kind == relayframe.KindCopy })
+	scene.invited(t, 2)
+	scene.joined(t, 2)
+	if objects := objectsTo(t, a, c.d.config.AgentID); len(objects) == 0 {
+		t.Fatal("the Add deposited nothing to C")
+	}
+	// A Remove's withdrawals and its single Commit.
+	withdrawing := withdrawCheck{recordingCarrier: a.carrier, check: check}
+	a.d.relay.carrier = withdrawing
+	if err := r.RemoveRoomMember(context.Background(), testRoomID, c.d.config.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.carrier.withdrawals()) == 0 {
+		t.Fatal("the Remove withdrew nothing")
+	}
+	if calls == 0 || handlingHeld != 0 || fanoutFree != 0 {
+		t.Fatalf("of %d carrier calls, %d held the handling lock and %d ran without the room's fan-out mutex",
+			calls, handlingHeld, fanoutFree)
+	}
+}
+
+// withdrawCheck runs a check inside every carrier.withdraw.
+type withdrawCheck struct {
+	*recordingCarrier
+	check func()
+}
+
+func (w withdrawCheck) Withdraw(ctx context.Context, recipient, key string) (carrierapi.Response, error) {
+	w.check()
+	return w.recordingCarrier.Withdraw(ctx, recipient, key)
+}
+
+// The lock order: a fan-out pass never takes the handling lock. With the
+// handling lock held elsewhere a due re-deposit still goes out, and with the
+// room's fan-out mutex held a composition still seals; a pass that took the
+// handling lock under its fan-out mutex would hang here.
+func TestRoomFanOutNeverTakesTheHandlingLock(t *testing.T) {
+	scene := newFanoutScene(t, 2, roomRetention)
+	a, b := scene.nodes[0], scene.nodes[1]
+	agent := b.d.config.AgentID
+	r := scene.rooms(0)
+	objectsTo(t, a, agent)
+	delivery, _ := memberDelivery(t, a, eventlog.RoomObjectWelcome, agent)
+	scene.clock.set(time.Unix(int64(delivery.NextRedepositAtUnix), 0))
+	r.handling.Lock()
+	swept := make(chan struct{})
+	go func() {
+		r.sweepHandshakes(context.Background())
+		close(swept)
+	}()
+	select {
+	case <-swept:
+	case <-time.After(10 * time.Second):
+		r.handling.Unlock()
+		<-swept
+		t.Fatal("the handshake sweep waited for the handling lock")
+	}
+	r.handling.Unlock()
+	if objects := objectsTo(t, a, agent); len(objects) != 1 {
+		t.Fatalf("%d re-deposits with the handling lock held elsewhere", len(objects))
+	}
+	lock := r.roomFanoutLock(testRoomID)
+	lock.Lock()
+	record, _ := fused(t, a)
+	composed := make(chan error, 1)
+	go func() {
+		_, _, err := r.ComposeRoomMessage(context.Background(), localapi.RoomComposition{RoomID: testRoomID,
+			ConversationID: "conv_" + strings.Repeat("c3", 32), MediaType: "text/plain; charset=utf-8", Body: "beside a fan-out",
+			IdempotencyKey: idem("e"), MembershipEpoch: record.RoomEpoch, ExpiresAtUnix: uint64(scene.clock.now().Add(time.Hour).Unix())})
+		composed <- err
+	}()
+	select {
+	case err := <-composed:
+		lock.Unlock()
+		if err != nil {
+			t.Fatalf("a composition beside a held fan-out mutex: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		lock.Unlock()
+		<-composed
+		t.Fatal("a composition waited for the room's fan-out mutex")
+	}
+}
+
+// A handshake deposit the carrier is slow to answer, a relay hanging the
+// carrier's send, holds back no other room operation: a composition seals
+// and deposits while the sweep's carry hangs.
+func TestRoomFanOutSlowDepositDoesNotStallACompose(t *testing.T) {
+	scene := newFanoutScene(t, 2, roomRetention)
+	a, b := scene.nodes[0], scene.nodes[1]
+	agent := b.d.config.AgentID
+	objectsTo(t, a, agent)
+	welcome, _ := memberDelivery(t, a, eventlog.RoomObjectWelcome, agent)
+	scene.clock.set(time.Unix(int64(welcome.NextRedepositAtUnix), 0))
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	a.carrier.mutex.Lock()
+	a.carrier.onCarry = func(record carried) {
+		frame, err := relayframe.Decode(record.frame)
+		if err != nil || frame.Kind != relayframe.KindRoom || frame.PartIndex != 0 {
+			return
+		}
+		if _, objectType, err := relayframe.RoomObjectPrefix(frame.Part); err != nil || objectType == relayframe.RoomApplication {
+			return
+		}
+		once.Do(func() { close(entered) })
+		<-release
+	}
+	a.carrier.mutex.Unlock()
+	swept := make(chan struct{})
+	go func() {
+		scene.rooms(0).sweepHandshakes(context.Background())
+		close(swept)
+	}()
+	<-entered
+	record, _ := fused(t, a)
+	composed := make(chan error, 1)
+	go func() {
+		_, _, err := scene.rooms(0).ComposeRoomMessage(context.Background(), localapi.RoomComposition{RoomID: testRoomID,
+			ConversationID: "conv_" + strings.Repeat("c3", 32), MediaType: "text/plain; charset=utf-8", Body: "while a deposit hangs",
+			IdempotencyKey: idem("d"), MembershipEpoch: record.RoomEpoch, ExpiresAtUnix: uint64(scene.clock.now().Add(time.Hour).Unix())})
+		composed <- err
+	}()
+	var stalled bool
+	select {
+	case err := <-composed:
+		if err != nil {
+			t.Errorf("the composition: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		stalled = true
+	}
+	close(release)
+	<-swept
+	if stalled {
+		<-composed
+		t.Fatal("a composition waited for the handshake sweep's carrier call")
+	}
+}
+
+// A fan-out pass reads the room it serves under the room's fan-out mutex:
+// run after an Add committed, by the sweep or by an ack, it never takes the
+// added member for a removed one, withdrawing or abandoning its Welcome.
+func TestRoomFanOutPassReadsTheRoomItServes(t *testing.T) {
+	scene := newFanoutScene(t, 3, roomRetention)
+	a, b, c := scene.nodes[0], scene.nodes[1], scene.nodes[2]
+	welcomeToB := objectsTo(t, a, b.d.config.AgentID)[0]
+	scene.invited(t, 2)
+	if answer := scene.joined(t, 2); answer.AckOutcome != relayframe.OutcomeAccepted {
+		t.Fatalf("C's room.key-package: %+v", answer)
+	}
+	agent := c.d.config.AgentID
+	before := len(a.carrier.withdrawals())
+	scene.rooms(0).fanOutRoom(context.Background(), testRoomID)
+	if applied := ackBack(t, a, b, handOver(t, a, b, welcomeToB)); applied.Result != carrierapi.ResultApplied {
+		t.Fatalf("B's ack after the Add: %+v", applied)
+	}
+	welcome, found := memberDelivery(t, a, eventlog.RoomObjectWelcome, agent)
+	if withdrawn := a.carrier.withdrawals()[before:]; len(withdrawn) != 0 || !found || welcome.State != eventlog.RoomDeliveryCarried {
+		t.Fatalf("a pass after the Add withdrew %d envelopes from C; its Welcome: %+v (found %v)", len(withdrawn), welcome, found)
 	}
 }
 
@@ -436,5 +614,63 @@ func TestRoomFanOutRejectionOfAnObjectNeverCarriedStopsNothing(t *testing.T) {
 	}
 	if objects := objectsTo(t, a, agent); len(objects) != 1 {
 		t.Fatalf("%d objects after the Welcome's ack, want the roster", len(objects))
+	}
+}
+
+// The card admissions a roster teaches go to the carrier after the handling
+// lock is released: a slow carrier.room-cards holds back no room handling.
+func TestRoomRosterCardAdmissionsAreSentOutsideTheHandlingLock(t *testing.T) {
+	scene := newFanoutScene(t, 2, roomRetention)
+	a, b := scene.nodes[0], scene.nodes[1]
+	agent := b.d.config.AgentID
+	receiver := scene.rooms(1)
+	calls, held := 0, 0
+	scene.cards[1].during = func() {
+		calls++
+		if receiver.handling.TryLock() {
+			receiver.handling.Unlock()
+		} else {
+			held++
+		}
+	}
+	for range 2 {
+		object := objectsTo(t, a, agent)
+		if len(object) != 1 {
+			t.Fatalf("%d objects in flight to B", len(object))
+		}
+		if applied := ackBack(t, a, b, handOver(t, a, b, object[0])); applied.Result != carrierapi.ResultApplied {
+			t.Fatalf("B's ack: %+v", applied)
+		}
+	}
+	if !containsAgent(scene.cards[1].of(testRoomID), a.d.config.AgentID) {
+		t.Fatal("B's full roster admitted no card")
+	}
+	if calls == 0 || held != 0 {
+		t.Fatalf("of %d card admissions, %d were sent under the handling lock", calls, held)
+	}
+}
+
+// A retired room's fan-out mutex is dropped by the next sweep: the mutexes
+// stay bounded by the rooms held here.
+func TestRoomFanOutMutexesAreDroppedWithTheirRoom(t *testing.T) {
+	scene := newFanoutScene(t, 2, 20*time.Minute)
+	r := scene.rooms(0)
+	r.sweepHandshakes(context.Background())
+	r.fanoutsMutex.Lock()
+	held := len(r.fanouts)
+	r.fanoutsMutex.Unlock()
+	if held != 1 {
+		t.Fatalf("%d fan-out mutexes for one room", held)
+	}
+	record, _ := fused(t, scene.nodes[0])
+	scene.clock.set(time.Unix(int64(record.RoomEndsAtUnix), 0).Add(20*time.Minute + 5*time.Minute))
+	r.maintain()
+	if _, found := fused(t, scene.nodes[0]); found {
+		t.Fatal("the room was not retired")
+	}
+	r.fanoutsMutex.Lock()
+	defer r.fanoutsMutex.Unlock()
+	if len(r.fanouts) != 0 {
+		t.Fatalf("%d fan-out mutexes outlived their room", len(r.fanouts))
 	}
 }

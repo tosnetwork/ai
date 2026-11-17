@@ -75,8 +75,19 @@ type roomRuntime struct {
 
 	// handling serializes the handling of complete objects, so the judgement,
 	// the MLS step and the applied-digest record of one object are never
-	// interleaved with another's.
+	// interleaved with another's; the owner's membership changes and seals
+	// take it too. No carrier call is ever made while it is held. Lock
+	// order: handling may be taken before a room's fan-out mutex, never
+	// while one is held.
 	handling sync.Mutex
+
+	// fanouts holds each room's fan-out mutex (roomFanoutLock), guarded by
+	// fanoutsMutex. A room's fan-out mutex serializes that room's handshake
+	// deposits, the settlement of its room acks and the withdrawals to its
+	// removed members; it is the only lock held across those carrier calls,
+	// and handling is never taken while it is held.
+	fanoutsMutex sync.Mutex
+	fanouts      map[string]*sync.Mutex
 
 	// noticed holds the rooms whose end was already raised to the owner by
 	// this process: one notice per room, not one per refused object.
@@ -94,7 +105,21 @@ type roomRuntime struct {
 	cardsMutex sync.Mutex
 	pending    map[string]map[string]struct{}
 	forgotten  map[string]map[string]struct{}
+	// admissions holds the card admissions rosters taught, queued under
+	// the handling lock and sent outside it (flushCardAdmissions).
+	admissions []roomCardAdmission
 }
+
+// roomCardAdmission is one carrier.room-cards admission a roster taught.
+type roomCardAdmission struct {
+	roomID         string
+	roomEndsAtUnix uint64
+	cards          []carrierapi.RoomCard
+}
+
+// maxQueuedCardAdmissions bounds the admissions waiting for a flush; each
+// handled roster flushes its own, so the queue holds at most a few.
+const maxQueuedCardAdmissions = 64
 
 // ErrRoomRemoved is the owner notice of a room this installation was removed
 // from (section 11.4).
@@ -155,7 +180,8 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 	runtime := &roomRuntime{relay: d.relay, daemon: d, ledger: ledger, controller: controller, cards: settings.cards,
 		driver: settings.driver, leafs: leafs, authorization: settings.authorization, partBytes: settings.partBytes,
 		skew: settings.skew, retention: settings.retention, gapDelay: settings.gapDelay, noticed: map[string]struct{}{},
-		forkNoticed: map[string]struct{}{}, pending: map[string]map[string]struct{}{}, forgotten: map[string]map[string]struct{}{}}
+		forkNoticed: map[string]struct{}{}, pending: map[string]map[string]struct{}{}, forgotten: map[string]map[string]struct{}{},
+		fanouts: map[string]*sync.Mutex{}}
 	// Rooms past their retirement time are retired before anything else,
 	// a crash's half-retired room included, and only then is garbage
 	// collected, so the retired rooms' records are reclaimed (section 11.8).
@@ -190,6 +216,7 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 	}
 	// A seal a crash left unfinished is finished before new compositions.
 	runtime.resumeSeals()
+	runtime.flushCardAdmissions(context.Background())
 	runtime.flushCardForgets(context.Background())
 	return nil
 }
@@ -425,7 +452,9 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 			r.daemon.report("room part settlement", err)
 		}
 	}
-	// Card forgets a removal queued are sent now, outside the handling lock.
+	// Card admissions a roster taught and card forgets a removal queued are
+	// sent now, outside the handling lock.
+	r.flushCardAdmissions(ctx)
 	r.flushCardForgets(ctx)
 	return response
 }
@@ -635,6 +664,7 @@ func (r *roomRuntime) maintain() {
 	// Handshake objects go before application objects.
 	r.sweepHandshakes(context.Background())
 	r.sweepApplicationSends(context.Background())
+	r.flushCardAdmissions(context.Background())
 	r.flushCardForgets(context.Background())
 }
 
@@ -683,6 +713,40 @@ func (r *roomRuntime) queueCardForgets(roomID string, agentIDs []string) {
 			r.pending[roomID] = map[string]struct{}{}
 		}
 		r.pending[roomID][agentID] = struct{}{}
+	}
+}
+
+// queueCardAdmission queues the admission of the cards a roster taught; it
+// is sent outside the handling lock. A full queue drops the admission with
+// a report: the cards are not authority, and part 0 of later room traffic
+// renews them.
+func (r *roomRuntime) queueCardAdmission(admission roomCardAdmission) {
+	r.cardsMutex.Lock()
+	defer r.cardsMutex.Unlock()
+	if len(r.admissions) >= maxQueuedCardAdmissions {
+		r.daemon.report("room cards", errors.New("too many room card admissions wait for the carrier; one was dropped"))
+		return
+	}
+	r.admissions = append(r.admissions, admission)
+}
+
+// flushCardAdmissions sends the queued card admissions to the carrier,
+// never under the handling lock. A failed one is reported, as the roster
+// still stands.
+func (r *roomRuntime) flushCardAdmissions(ctx context.Context) {
+	r.cardsMutex.Lock()
+	admissions := r.admissions
+	r.admissions = nil
+	r.cardsMutex.Unlock()
+	for _, admission := range admissions {
+		response, err := r.cards.RoomCards(ctx, admission.roomID, admission.roomEndsAtUnix, admission.cards)
+		if err != nil {
+			r.daemon.report("room cards", err)
+			continue
+		}
+		if response.Result != carrierapi.ResultApplied {
+			r.daemon.report("room cards", errors.New("the carrier did not apply the room's card admissions"))
+		}
 	}
 }
 

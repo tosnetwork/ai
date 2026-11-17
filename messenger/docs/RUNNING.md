@@ -735,11 +735,12 @@ names any of them, whatever the value:
 
 An object that would need more than 8 parts at the test part size is never
 deposited: pick a size at which the largest handshake object fits in 8
-parts (a roster entry is about 11 KiB). Startup prints the values in force,
-for a record to state:
+parts (a roster entry is about 11 KiB). Startup and `-check` always print
+the build variant (`production` or `roomtest`) and, with private rooms, the
+values in force, for a record to state:
 
 ```text
-room_settings room_part_bytes=0 room_handshake_retention_seconds=604800 room_authorization_seconds=86400 own_relay_max_ttl_seconds=3600 test_settings=false
+room_settings build=production private_rooms=on room_part_bytes=0 room_handshake_retention_seconds=604800 room_authorization_seconds=86400 own_relay_max_ttl_seconds=3600 test_settings=false
 ```
 
 `make messenger-test-roomtest` vets and builds the tagged variant and runs

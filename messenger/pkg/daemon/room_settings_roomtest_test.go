@@ -79,6 +79,10 @@ func TestRoomTestBuildBoundsTheRoomTestSettings(t *testing.T) {
 		stated.Authorization != 2*time.Minute || stated.OwnRelayMaxTTLSeconds != 900 {
 		t.Fatalf("the stated room settings: %+v %v", stated, err)
 	}
+	if line, err := config.RoomSettingsLine(); err != nil || line != "room_settings build=roomtest private_rooms=on "+
+		"room_part_bytes=2048 room_handshake_retention_seconds=1800 room_authorization_seconds=120 own_relay_max_ttl_seconds=900 test_settings=true" {
+		t.Fatalf("the roomtest room settings line: %q %v", line, err)
+	}
 	d := &Daemon{config: config}
 	settings, err := d.configuredRoomSettings(nil, nil)
 	if err != nil || settings.partBytes != 2_048 || settings.retention != 30*time.Minute ||

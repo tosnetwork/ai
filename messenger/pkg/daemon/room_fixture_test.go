@@ -69,10 +69,16 @@ type roomCardsCarrier struct {
 	// failForgets makes that many forget calls fail, as an unreachable
 	// carrier would.
 	failForgets int
+	// during, when set, runs at the start of every admission, outside the
+	// carrier's own mutex.
+	during func()
 }
 
 func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, roomEndsAtUnix uint64,
 	cards []carrierapi.RoomCard) (carrierapi.Response, error) {
+	if c.during != nil {
+		c.during()
+	}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	// The client refuses an admission without a room end, before it

@@ -63,6 +63,14 @@ func TestProductionBuildRefusesRoomTestSettings(t *testing.T) {
 			}
 		}
 	}
+	// The stated line names the production build, with and without rooms.
+	if line, err := production.RoomSettingsLine(); err != nil || line != "room_settings build=production private_rooms=on "+
+		"room_part_bytes=0 room_handshake_retention_seconds=604800 room_authorization_seconds=86400 own_relay_max_ttl_seconds=86400 test_settings=false" {
+		t.Fatalf("the production room settings line: %q %v", line, err)
+	}
+	if line, err := relayConfig(t).RoomSettingsLine(); err != nil || line != "room_settings build=production private_rooms=off" {
+		t.Fatalf("the production line without rooms: %q %v", line, err)
+	}
 	// The own relays' TTL is a production setting: it is accepted and
 	// derives the gap delay.
 	production.RelayCarriage.OwnRelayMaxTTLSeconds = 3_600

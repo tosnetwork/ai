@@ -6,3 +6,6 @@ package daemon
 // which accepts the room test settings within their bounds (sections 11.1
 // and 11.3). Such a build is for tests and live test records only.
 const roomTestSettingsAllowed = true
+
+// RoomBuildVariant names this build in the room settings a record states.
+const RoomBuildVariant = "roomtest"

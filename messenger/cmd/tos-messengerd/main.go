@@ -185,22 +185,16 @@ func run(configPath, publicationPath, attachmentPath, httpsListen, httpsCert, ht
 
 var errNoConfig = fmt.Errorf("a configuration file is required")
 
-// printRoomSettings states the room settings a private-room record must
-// state (sections 8 and 11.3): the handshake part size (0 is the production
-// cut), the handshake retention, the authorization lifetime and the own
-// relays' TTL. Nothing is printed when private rooms are not configured.
+// printRoomSettings states what a private-room record must state (sections
+// 8 and 11.3): always the build variant, and with private rooms the
+// handshake part size (0 is the production cut), the handshake retention,
+// the authorization lifetime and the own relays' TTL.
 func printRoomSettings(config daemon.Config) error {
-	relay := config.RelayCarriage
-	if relay == nil || relay.MLSDriverPath == "" {
-		return nil
-	}
-	settings, err := relay.RoomSettings()
+	line, err := config.RoomSettingsLine()
 	if err != nil {
 		return err
 	}
-	fmt.Printf("room_settings room_part_bytes=%d room_handshake_retention_seconds=%d room_authorization_seconds=%d own_relay_max_ttl_seconds=%d test_settings=%t\n",
-		settings.PartBytes, uint64(settings.HandshakeRetention/time.Second), uint64(settings.Authorization/time.Second),
-		settings.OwnRelayMaxTTLSeconds, settings.TestSettings)
+	fmt.Println(line)
 	return nil
 }
 

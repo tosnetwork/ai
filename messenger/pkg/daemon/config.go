@@ -763,6 +763,24 @@ type RoomSettings struct {
 	TestSettings bool
 }
 
+// RoomSettingsLine is the line the daemon prints at startup and with
+// -check for a record to state: always the build variant (production or
+// roomtest), and with private rooms configured the room settings in force.
+func (c Config) RoomSettingsLine() (string, error) {
+	relay := c.RelayCarriage
+	if relay == nil || relay.MLSDriverPath == "" {
+		return "room_settings build=" + RoomBuildVariant + " private_rooms=off", nil
+	}
+	settings, err := relay.RoomSettings()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("room_settings build=%s private_rooms=on room_part_bytes=%d room_handshake_retention_seconds=%d "+
+		"room_authorization_seconds=%d own_relay_max_ttl_seconds=%d test_settings=%t", RoomBuildVariant, settings.PartBytes,
+		uint64(settings.HandshakeRetention/time.Second), uint64(settings.Authorization/time.Second),
+		settings.OwnRelayMaxTTLSeconds, settings.TestSettings), nil
+}
+
 // ErrRoomTestSettingRefused is the refusal of a production build to run
 // with a room test setting.
 var ErrRoomTestSettingRefused = errors.New("is a test setting that only a build with the roomtest tag accepts; this production build refuses it")

@@ -108,28 +108,71 @@ func (b *fanoutBackoff) clear(key string) {
 }
 
 // sweepHandshakes deposits what every queue of every room this
-// installation is the authority of has due. It runs under the handling
-// lock, as every other path into fanOut does, so no deposit interleaves
-// with a Remove, an Add or an ack.
+// installation is the authority of has due, each room under its fan-out
+// mutex and never under the handling lock: a slow carrier holds back only
+// that room's fan-out. It then drops the fan-out mutexes of rooms no longer
+// held, so they stay bounded by the rooms held here.
 func (r *roomRuntime) sweepHandshakes(ctx context.Context) {
-	r.handling.Lock()
-	defer r.handling.Unlock()
 	records, err := r.ledger.List()
 	if err != nil {
 		r.daemon.report("room fan-out", err)
 		return
 	}
+	held := make(map[string]struct{}, len(records))
 	for _, record := range records {
+		held[record.RoomID] = struct{}{}
 		if record.AuthorityAgentID == r.daemon.config.AgentID {
-			r.fanOut(ctx, record)
+			r.fanOutRoom(ctx, record.RoomID)
+		}
+	}
+	r.fanoutsMutex.Lock()
+	defer r.fanoutsMutex.Unlock()
+	for roomID := range r.fanouts {
+		if _, found := held[roomID]; !found {
+			delete(r.fanouts, roomID)
 		}
 	}
 }
 
+// roomFanoutLock returns a room's fan-out mutex. It serializes the room's
+// handshake deposits, ack settlements and removal withdrawals, and is the
+// only lock held across their carrier calls. Lock order: the handling lock
+// may be taken before a fan-out mutex, never while one is held.
+func (r *roomRuntime) roomFanoutLock(roomID string) *sync.Mutex {
+	r.fanoutsMutex.Lock()
+	defer r.fanoutsMutex.Unlock()
+	lock, found := r.fanouts[roomID]
+	if !found {
+		lock = &sync.Mutex{}
+		r.fanouts[roomID] = lock
+	}
+	return lock
+}
+
+// fanOutRoom runs one room's fan-out under its fan-out mutex. The caller
+// holds neither that mutex nor the handling lock.
+func (r *roomRuntime) fanOutRoom(ctx context.Context, roomID string) {
+	lock := r.roomFanoutLock(roomID)
+	lock.Lock()
+	defer lock.Unlock()
+	r.fanOut(ctx, roomID)
+}
+
 // fanOut serves one room: each removed member's single Commit, the
 // withdrawals still owed to removed members, and the head of every member's
-// queue. The caller holds the handling lock.
-func (r *roomRuntime) fanOut(ctx context.Context, record eventlog.RoomMLSRecord) {
+// queue. The caller holds the room's fan-out mutex and not the handling
+// lock. The room is read here, under that mutex, so a pass never acts on a
+// membership older than the latest committed one: a member an Add committed
+// meanwhile is never taken for a removed one.
+func (r *roomRuntime) fanOut(ctx context.Context, roomID string) {
+	record, found, err := r.ledger.Current(roomID)
+	if err != nil {
+		r.daemon.report("room fan-out "+roomID, err)
+		return
+	}
+	if !found || record.AuthorityAgentID != r.daemon.config.AgentID {
+		return
+	}
 	now := r.now()
 	heads, err := r.daemon.journal.RoomOutboxHeads(record.RoomID)
 	if err != nil {
@@ -416,10 +459,12 @@ func (r *roomRuntime) roomAckReceived(ctx context.Context, sender string, frame 
 	}
 	digest := hex.EncodeToString(ack.ObjectDigest[:])
 	stateless := len(ack.EpochAuthenticator) == 0
-	// The settlement, the stop and the next deposit are serialized with
-	// every other fan-out path.
-	r.handling.Lock()
-	defer r.handling.Unlock()
+	// The stop, the settlement and the next deposit are serialized with the
+	// room's other fan-out paths under its fan-out mutex, never under the
+	// handling lock.
+	lock := r.roomFanoutLock(ack.RoomID)
+	lock.Lock()
+	defer lock.Unlock()
 	if ack.Outcome == relayframe.OutcomeRejected {
 		// The stop is written before the slot is settled: a settled
 		// rejection never leaves the queue running.
@@ -448,7 +493,7 @@ func (r *roomRuntime) roomAckReceived(ctx context.Context, sender string, frame 
 	}
 	if ack.Outcome != relayframe.OutcomeRejected {
 		// The member's next object is due now.
-		r.fanOut(ctx, record)
+		r.fanOut(ctx, ack.RoomID)
 	}
 	return carrierapi.Response{Result: carrierapi.ResultApplied}
 }
@@ -487,8 +532,8 @@ func (r *roomRuntime) rejectionStops(roomID, digest, member string, stateless bo
 // or ignored for a key it does not hold); otherwise it stays, nothing more
 // is deposited to the member, and the next fan-out pass tries again, until
 // the head's retention ends, the expiry every one of its envelopes carries.
-// It reports whether every slot is settled. The caller holds the handling
-// lock.
+// It reports whether every slot is settled. The caller holds the room's
+// fan-out mutex.
 func (r *roomRuntime) withdrawFromRemoved(ctx context.Context, roomID, member string, now time.Time) bool {
 	heads, err := r.daemon.journal.RoomOutboxHeads(roomID)
 	if err != nil {
