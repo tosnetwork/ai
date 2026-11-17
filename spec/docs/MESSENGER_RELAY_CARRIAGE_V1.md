@@ -23,7 +23,7 @@ Welcome carries no epoch authenticator and MLS epoch 0.
 
 **Errata (M-R2 journal implementation).** The MLS state bound is derived from the worst case the driver configuration allows at the relay room bound of 32 leaves, not from in-order traffic at 64: with an out-of-order tolerance of 32, 63 senders skipping 7 generations in each retained epoch exceed 512 KiB at 64 leaves. The tolerance is therefore 8 and the forward distance 1,000; the worst case at 32 leaves is measured in section 11.3 (sections 8 item 17, 9.2 item 2, 11.3), corrected by the leaf-identity erratum below. The fused record names the memberships of the two earlier room epochs by digest, because three member lists do not fit its 8,192 bytes; those content-addressed membership records are named by the fused record and collected with the other staged records (sections 9.2 item 4, 11.3, 11.7).
 
-**Errata (M-R2 leaf identity).** The 32-leaf worst case this document stated before, 272,968 bytes, was measured with 9-byte test identities (`member-NN`). The MLS BasicCredential identity of a leaf is copied into the ratchet tree and every retained epoch, and the library stores byte strings as JSON number arrays, so each identity byte costs about 384 bytes of state at 32 leaves for typical values (up to about 4 characters, "255,", per stored byte). The identity then specified (every DeviceCredential field except the KeyPackage, the validity window and the signature) was 497 bytes on the test network and 616 at a 128-character network ID. With it the worst case is 458,784 and 504,300 bytes: 12.5 % and 3.8 % headroom, under the 20 % item 17 requires. Carrying the full DeviceCredential in the identity is impossible twice over: its Endpoint signature covers the KeyPackage, which carries the identity, so the identity would have to contain itself; and a KeyPackage of up to 64 KiB exceeds the driver's 4,096-byte identity limit. Carrying the DeviceCredential in roster entries would exceed the 1 MiB body bound by about 2 MB. The leaf identity is therefore a fixed 128-byte compact binding, and the member's Endpoint-signed **leaf credential** (at most 473 bytes, no KeyPackage) is issued, distributed, stored and revoked as section 11.8 states. V1 rooms do not renew credentials: a room ends when its authority's leaf credential does (D18). Re-measured with maximal identities of the costliest byte values, the worst case is at most 334,536 bytes over repeated runs (the keys are random), 36 % under the bound (sections 8 items 17, 19, 20, 9.2, 11.1, 11.2, 11.3, 11.5, 11.8, D15, D18).
+**Errata (M-R2 leaf identity).** The 32-leaf worst case this document stated before, 272,968 bytes, was measured with 9-byte test identities (`member-NN`). The MLS BasicCredential identity of a leaf is copied into the ratchet tree and every retained epoch, and the library stores byte strings as JSON number arrays, so each identity byte costs about 384 bytes of state at 32 leaves for typical values (up to about 4 characters, "255,", per stored byte). The identity then specified (every DeviceCredential field except the KeyPackage, the validity window and the signature) was 497 bytes on the test network and 616 at a 128-character network ID. With it the worst case is 458,784 and 504,300 bytes: 12.5 % and 3.8 % headroom, under the 20 % item 17 requires. Carrying the full DeviceCredential in the identity is impossible twice over: its Endpoint signature covers the KeyPackage, which carries the identity, so the identity would have to contain itself; and a KeyPackage of up to 64 KiB exceeds the driver's 4,096-byte identity limit. Carrying the DeviceCredential in roster entries would exceed the 1 MiB body bound by about 2 MB. The leaf identity is therefore a fixed 128-byte compact binding, and the member's Endpoint-signed **leaf credential** (at most 473 bytes, no KeyPackage) is issued, distributed, stored and revoked as section 11.8 states. V1 rooms do not renew credentials: a room ends when its authority's leaf credential does (D18). Re-measured with maximal identities of the costliest byte values, the worst case is at most 339,038 bytes over repeated runs (the keys are random; 334,536 before the driver kept the past epochs' leaf keys for `open`, section 11.3), 35 % under the bound (sections 8 items 17, 19, 20, 9.2, 11.1, 11.2, 11.3, 11.5, 11.8, D15, D18).
 
 MUST, MUST NOT, SHOULD and MAY are normative. Citations are `path:line` in this
 repository at the commit this document lands on, and `openfox path:line` in
@@ -1218,8 +1218,13 @@ seal already carry any frame; nothing new is resolved on chain).
    ahead derives the skipped secrets but keeps only the last 8, so the
    forward distance bounds the work per message, not the state. `open` and
    `apply` return the sender's credential identity and leaf signature key
-   (`:443-465`, `:484-520`) and `inspect` the epoch authenticator; the Go
-   `Driver` gains those results. A read-only `members` operation returns
+   (`:443-465`, `:484-520`; for a past-epoch message, the key the sealing
+   leaf had in that epoch, which the driver keeps for the two retained
+   epochs) and `inspect` the epoch authenticator; the Go
+   `Driver` gains those results. A `signer` operation makes a leaf signature
+   key before any identity exists and `identity` then makes the KeyPackage
+   for that signer, because the identity names a credential that names the
+   key (11.8). A read-only `members` operation returns
    (leaf index, identity, signature key) for every leaf, used when learning
    roster entries and when building per-member pins (11.8). The driver keeps
    its generic
@@ -1807,9 +1812,14 @@ the relay room bound of 32 leaves: every other member's ratchet holding the 8
 skipped keys the out-of-order tolerance keeps, in the current and both
 retained epochs, with every leaf carrying a maximal 128-byte leaf identity
 (11.2) whose bytes all have the costliest stored width. Measured over repeated
-runs (the keys are random), that is 334,256 to 334,536 bytes (about 206,000
-with in-order traffic), 36 % under 524,288
+runs (the keys are random), that is 338,574 to 339,038 bytes (about 210,000
+with in-order traffic), 35 % under 524,288
 (`worst_case_state_fits_at_the_relay_room_bound` in `rust/openmls-driver`).
+That includes the leaf signature keys of the two retained past epochs, which
+the driver keeps beside the library's state (about 4.4 KB at 32 leaves): the
+library retains those epochs' trees but does not expose their keys, and
+`open` must report the key of the leaf that sealed a past-epoch message in
+that epoch.
 The library stores byte strings as JSON number arrays, so each identity byte
 costs about 384 bytes of state at 32 leaves for typical values and up to
 about 4 characters per stored byte. That is why the identity is a fixed
