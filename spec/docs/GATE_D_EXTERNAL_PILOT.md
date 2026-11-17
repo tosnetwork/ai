@@ -17,8 +17,12 @@ evidence:
   settlement fields and the `PASS_INDEPENDENT_PAID_SOFTWARE_WORK_SETTLEMENT`
   verdict of "Acceptance record".
 - **Still binding:** the purpose, the three-role independence rules, the
-  custody rules for test identities, and execution steps 2, 5 and 7 apart
-  from their escrow wording.
+  custody rules for test identities, execution steps 2 and 5 apart from their
+  escrow wording, and of step 7 only its requirement that the verifier obtain
+  a quorum from a clean environment without gateway data; the "strict evidence
+  checker" step 7 runs is the removed script of "Independent verification",
+  so that part of step 7 is void until the rewrite names a Service Actor
+  verifier.
 - **Next:** a Service Actor rewrite of this runbook (native-TOS `call`,
   attestor-signed `respond`, `expire`/`claim_refund`, and a verifier for the
   responded, refunded and swept outcomes) follows in a separate change, after
@@ -91,8 +95,8 @@ Editing a gateway record is never a substitute.
    signing key.
 6. The execution signer signs only the displayed settlement-intent hash. The
    escrow validates the full Receipt and initiates the stablecoin transfer.
-7. The verifier waits for finality and runs the strict evidence checker from a
-   clean environment. It must obtain a quorum without a private gateway
+7. The verifier waits for finality and runs the strict evidence checker
+   (void: that checker was removed; see the banner) from a clean environment. It must obtain a quorum without a private gateway
    database or files supplied by the gateway.
 
 ### Custody-safe Receipt signing
