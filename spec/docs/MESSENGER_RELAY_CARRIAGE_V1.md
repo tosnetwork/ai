@@ -1032,7 +1032,17 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     stores become collectable after the handshake retention. Unit: A refuses
     to add a member whose leaf credential ends before the room's end, and a
     receiver refuses a roster entry or a leaf whose credential does; a
-    header naming another end time than the room's is refused.
+    header naming another end time than the room's is refused. A sender
+    stops at end − skew; the authority makes no handshake in the last d
+    before it; a receiver refuses at end + skew; an application object
+    sealed before the end and arriving after end + skew is a gap with the
+    notice. `room_ends_at` must equal the authority's leaf-credential
+    expiry: a joiner holds the Welcome's value until its full roster
+    verifies it, and a mismatch is refused `not-authentic`. Retirement at
+    end + retention + skew deletes the outbox heads, part store, buffer and
+    receive state, then the credential list, then the fused record last; a
+    crash at each step is finished at restart, and garbage collection then
+    reclaims what nothing names.
 20. **Credential storage and holding (unit, 11.8).**
     - A learned leaf credential is durable before the roster's room ack.
     - The fused record's credential-list digest is a garbage-collection
@@ -1373,8 +1383,10 @@ M-R2 decisions (2026-11-16, delegated by the owner):
   end. At the end, every member stops accepting new Commits, Welcomes,
   rosters and application objects for the room: they are refused with the
   fixed code `room-ended` and an owner notice. The authority stops its
-  queues, and the room's stores become collectable after the handshake
-  retention. To continue, the owner creates a new room. Reason (first
+  queues, and the room is retired after the handshake retention (11.8). The
+  end is applied with the clock-skew bound at both ends, as D16's window is,
+  and in-flight objects are handled as 11.8 states. To continue, the owner
+  creates a new room. Reason (first
   principles): a room that never outlives any member's credential has no
   expiry inside it to store, distribute or renew. This matches task-scoped
   Agent rooms. Renewal is deferred to M-R2.1 (11.8).
@@ -1459,10 +1471,13 @@ delegation's is refused. A decoder re-encodes the header and refuses any
 other encoding of the same values. The largest valid header is therefore
 1 + 32·70 + 2 + 128 + 32 + 32 + 70 + 68 + 8 + 8 + 64 + 8 = **2,661 bytes**,
 and the largest valid object 90 + 2,661 + 1,048,576 = **1,051,327 bytes**.
-The room end time is not covered by the MembershipAuthorization signature.
-It is fixed by the first header a member accepts (its Welcome), arrives only
-in the authority's verified packets, and must be the same in every later
-header. The
+The room end time MUST equal `expires_at` of the authority's leaf credential,
+which the authority's Endpoint signs and which is identical in every roster.
+That signature authenticates it. It stays out of the MembershipAuthorization
+preimage, whose merged format is unchanged. A receiver requires the equality
+once the authority's roster entry is verified. A joiner holds its Welcome's
+value as pending until its full roster verifies it. A mismatch, or a later
+header naming another end, is refused `not-authentic`. The
 codec limits stay 8,192 header bytes and 1,056,858 object bytes: a safe upper
 bound that no valid object reaches.
 
@@ -1569,8 +1584,8 @@ identity, which names the credential's digest, so a reference back would be
 circular. It is bound to the leaf by the leaf signature key, which the leaf
 node carries and is signed with.
 
-How a leaf credential is issued, distributed, verified, stored, renewed
-and revoked is section 11.8; every other section refers to it. Create, add, remove and join are
+How a leaf credential is issued, distributed, verified, stored and
+revoked is section 11.8; every other section refers to it. Create, add, remove and join are
 owner-only (D13); the runtime only sends and reads room messages. A Welcome
 is accepted only from the authority named in the `room.invite` of a room
 with a pending join.
@@ -2090,11 +2105,39 @@ the future-epoch buffer (11.3; same caps, 24 h 5 min) and opened once the
 roster arrives. They are refused `not-authentic` only after a roster
 arrived without a verifying entry for that member.
 
-**Room end (D18).** At the room's end, every member refuses the room's new
-objects with `room-ended` and an owner notice, and the authority stops its
-queues. The room's stores (fused record, credentials, outbox, receive state)
-become collectable after the handshake retention. Credentials are never
-renewed inside a room: continuing means a new room.
+**Room end (D18).** Let `end` be the room's end time, `skew` the daemon's
+clock-skew bound, and d the re-deposit interval (80 % of the smallest relay
+TTL, 4).
+
+- **Senders stop at end − skew.** The authority's queues and every member's
+  sealing stop at end − skew, so nothing is sent that a receiver with a
+  clock ahead would refuse.
+- **No handshake near the end.** The authority makes no new Commit, Welcome
+  or roster within the last d before end − skew. Such an object could not
+  be delivered and acknowledged before senders stop.
+- **Receivers refuse at end + skew.** At now ≥ end + skew a member refuses
+  the room's Commits, Welcomes, rosters and application objects with
+  `room-ended`, relay-acknowledges them and raises one owner notice.
+- **Late application objects are gaps.** An application object sealed
+  before the end that arrives after end + skew is recorded as a gap (11.3),
+  with the `room-ended` notice.
+
+Credentials are never renewed inside a room: continuing means a new room.
+
+**Retirement.** At end + handshake retention + skew, the daemon retires the
+room, in this order:
+
+1. delete its room-outbox heads, its part-store entries, its future-epoch
+   buffer and its receive state (sequences, gaps, applied and received
+   digests);
+2. delete the room's credential list;
+3. delete the fused record last, as the commit point, with a directory
+   fsync.
+
+At restart the daemon retires again any room past that time whose fused
+record still exists, so a crash during retirement only repeats it. Ordinary
+garbage collection (11.7) then reclaims the state chunks, credentials,
+memberships, delegations and object chunks nothing names any more.
 
 **Revoke.** A credential stops counting when it expires (D15: the member's
 objects are refused `not-authentic` and the authority's queue to it stops),
