@@ -165,4 +165,3 @@ func TestPrivateRoomCapacityProfile(t *testing.T) {
 		t.Fatal("per-Agent device overflow accepted")
 	}
 }
-
