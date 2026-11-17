@@ -327,9 +327,10 @@ def check_messages(document, artifact):
         header, body = DECODERS[kind](message)
         if encode_header(kind, header) != header_json or len(body) != item["body_length"]:
             raise SystemExit(f"{item['name']}: header mismatch")
+        frame_request_id = item.get("request_id", request_id)
         if kind == 1:
-            if header["execution_id"] != binding["execution_id_hex"]:
-                raise SystemExit(f"{item['name']}: execution_id")
+            if header["execution_id"] != binding["execution_id_hex"] or header["request_id"] != frame_request_id:
+                raise SystemExit(f"{item['name']}: execution_id or request_id")
             if "archive_rule" in item["fields"] and body != archive_from(item["fields"]):
                 raise SystemExit(f"{item['name']}: archive")
         if kind == 2:
@@ -338,7 +339,7 @@ def check_messages(document, artifact):
                 raise SystemExit(f"{item['name']}: result does not carry the vector Receipt and artifact")
         if kind == 3 and header["response_hash"] != document["receipt"]["response_hash_hex"]:
             raise SystemExit(f"{item['name']}: ack response hash")
-        frames = split(kind, actor, request_id, request_hash, message)
+        frames = split(kind, actor, frame_request_id, request_hash, message)
         if len(frames) != len(item["frames"]):
             raise SystemExit(f"{item['name']}: frame count")
         for raw, expected in zip(frames, item["frames"]):

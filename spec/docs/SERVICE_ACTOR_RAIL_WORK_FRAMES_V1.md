@@ -9,7 +9,8 @@ the frames and messages that OpenFox at commit `682c8bc3`
 software work between a buyer and a provider on the Service Actor rail
 ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
 [`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-Nothing here changes that format. An implementation that follows this
+What OpenFox emits is described byte for byte; where its decoders accept more
+than they emit, section 5 and Q10 say so. Nothing here changes that format. An implementation that follows this
 document interoperates with OpenFox without a flag day, so any runtime, not
 only OpenFox, can send a paid job to a provider and get its result back.
 This is the precondition for a buyer adapter that does not embed OpenFox.
@@ -121,10 +122,12 @@ by its data.
 
 `(actor_account, request_id, request_hash)` is the **request binding** of a
 frame. A decoder MUST refuse a frame shorter than 121 bytes or longer than
-121 + 61,440 bytes, a wrong magic or version, an unknown kind, any zero
-binding field or digest, a `total_length` of 0 or above the kind's bound, a
+121 + 61,440 bytes, a wrong magic or version, an unknown kind, an all-zero
+`actor_account`, `request_hash` or `message_digest`, a `total_length` of 0 or above the kind's bound, a
 `count` of 0 or above 32, an `index` at or above `count`, and a `data_length`
-that differs from the bytes that follow.
+that differs from the bytes that follow. `request_id` 0 is valid and MUST be
+accepted: an actor numbers requests from 0 (`next_request_id` starts at 0,
+`SERVICE_ACTOR_TVM_V1.md`), so the first request of every actor has ID 0.
 
 ### 3.2 Canonical chunking
 
@@ -172,8 +175,9 @@ header struct, which is:
 - the fields in the order of the tables of section 5, each exactly once, with
   no whitespace;
 - integers in plain decimal without sign, exponent, fraction or leading zero;
-- strings in double quotes, escaping `"` as `\"`, `\` as `\\`, and `<`, `>`,
-  `&` as `<`, `>`, `&`;
+- strings in double quotes, escaping `"` as `\"` and `\` as `\\`, and each of
+  `<`, `>` and `&` as a six-character `\u` escape: backslash, `u`, then the
+  four lowercase hex digits `003c`, `003e` and `0026` respectively;
 - an optional field omitted when its value is empty, never present as `""`.
 
 Every string field except `capability_version` is restricted to characters
@@ -187,6 +191,17 @@ Patterns: `hex64` is `^[0-9a-f]{64}$`; `agent` is `^agent_[0-9a-f]{64}$`;
 `cap` is `^cap_[0-9a-f]{64}$`; `wallet` is `^0:[0-9a-f]{64}$`; `sha256` is
 `^sha256:[0-9a-f]{64}$`; `b64` is strict standard Base64 with padding (no
 non-zero pad bits, no line breaks).
+
+Senders MUST emit every Base64 field in exactly that form, and a conforming
+receiver SHOULD refuse any other. OpenFox's decoders are more lenient in two
+places, which this document records rather than requires (section 15, Q10):
+
+- Go `base64.StdEncoding.Strict()` ignores carriage returns and line feeds,
+  so OpenFox accepts `package_base64` and `receipt_boc_base64` with CR or LF
+  characters inside (JSON-escaped in the header, which stays canonical).
+- The key card fields are only length-bounded when a message is decoded;
+  their Base64 is decoded later, when the card is taken, and a card that does
+  not decode is noted and ignored without refusing the message.
 
 ### 5.1 Task (kind 1, schema `tos.openfox.rail-task.v1`)
 
@@ -511,7 +526,8 @@ decoders:
 - `messages`: a two-frame task (its archive given by a rule, its frames by
   header and data range), a one-frame task with a buyer card, results with and
   without a provider card, acks and result-requests with and without a buyer
-  card, each with its exact message bytes or digest and every frame;
+  card, and a task for `request_id` 0 (its `request_id` field overrides the
+  binding's), each with its exact message bytes or digest and every frame;
 - `negative_frames`: 18 frames each breaking one rule of section 3, given as
   edits (overwrite, then truncate, then append) of a positive frame and the
   SHA-256 of the result;
@@ -568,3 +584,8 @@ Receipt codec covers.
   and the price is paid, and a later valid redelivery is not considered. Only
   the authenticated provider can cause this. Whether a buyer must keep
   accepting redeliveries until one passes 7.2 is open.
+- **Q10. Lenient Base64 in OpenFox.** OpenFox accepts CR and LF inside
+  `package_base64` and `receipt_boc_base64`, and does not check key card
+  Base64 when it decodes a message (section 5). The vectors contain no such
+  form, positive or negative. Tightening OpenFox to refuse them, as a
+  conforming receiver should, is a follow-up.
