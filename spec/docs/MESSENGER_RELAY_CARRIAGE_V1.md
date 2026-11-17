@@ -358,6 +358,24 @@ the stored one. Otherwise it is a no-op. It runs only under the admission rule o
 
 Only provisioned or admitted peers are ever committed.
 
+**Stored evidence expires.** The store holds at most 4,096 peers and evicts
+none. A record whose evidence `CheckPeer` would refuse for its own expiry
+(its descriptor's or a bundle's `expires_at` has passed) is retired at start
+and on the relay timer, so the bound holds live peers. Retirement keeps a
+**floor**, the retired descriptor's digest and issue time, and deletes the
+record, each durably and in that order. The floor keeps the peer admitted
+and is what `CommitPeer` judges "newer" against while the peer has no
+record. It is needed because expiry is not monotonic in the ordering key:
+an older descriptor may have a longer lifetime than a newer one and still be
+unexpired. A floor may be dropped once its issue time plus the largest
+descriptor lifetime (7 days) has passed, since all evidence at or below it
+has then expired; floors are dropped only past that horizon, only when
+their own store (at most 4,096) is full, and never the floor of a contact
+(configured, or made by a claimed invite) or of a peer with a session here,
+whose admission it is; a record is kept rather than retired without a
+floor. The device-set rollback boundary is separate and
+is never swept.
+
 **Receiver.** `CheckPeer` runs on every frame. It uses the frame's evidence
 for kinds 1, 2 and 4, and for kind 3 the evidence of part 0, checked when
 part 0 arrives, pinned to the sender's MLS leaf (11.2, 11.3). This replaces
@@ -955,7 +973,9 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
    (chat outboxes); C's driver fails to open one handed to it by the harness;
    C's room messages are refused `not-a-room-member`; A's and B's pending
    envelopes to C are withdrawn; B, for whom C is no contact, has forgotten
-   C's card and evidence.
+   C's card and room leaf credential. C's relay evidence is left to the
+   evidence store's expiry (2.5): it is public, signed routing data, and every
+   room path requires membership, so it is never used for the room.
 6. **Authority only (unit, one live refusal).** A Commit from B is refused
    `not-authentic`; a second Commit for one epoch is refused `room-fork`.
 7. **Reassembly caps (named unit tests).** Each cap of section 4, an oversize object,
@@ -1999,10 +2019,13 @@ in V1, D3), journaled with its outbox entry as 11.7 requires.
 - **What M still reads:** objects sealed in epoch ≤ N, including those of
   members not yet at N+1, which M was entitled to; the window is the
   Commit's fan-out (11.2) plus a member's offline time.
-- **M's devices and cards.** Members forget M's chat card and evidence
+- **M's devices and cards.** Members forget M's chat card
   (`carrier.room-cards`) unless held under another admission (contact,
-  session). M gets the Commit once (no re-deposit, no ack, outside its
-  in-order queue). M treats a Commit whose verified header removes M, at any
+  session), and its leaf credential (the fused write drops it, 11.8). M's
+  relay evidence is not deleted: it is public, signed routing data, every room
+  path requires membership, so it is never used for the room, and the
+  evidence store's expiry (2.5) retires it like any peer's. M gets the
+  Commit once (no re-deposit, no ack, outside its in-order queue). M treats a Commit whose verified header removes M, at any
   epoch above its own, as a removal notice: it marks the room removed without
   applying it to MLS. If that one deposit is lost, M is not told: its later
   room messages are refused at members and relay-acknowledged without an

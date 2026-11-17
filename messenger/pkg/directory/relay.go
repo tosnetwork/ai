@@ -54,9 +54,17 @@ type SetJudge interface {
 // StoreRelayEvidence replaces the stored value only if it still has the
 // digest the caller read, so a slower concurrent commit cannot overwrite a
 // newer one.
+//
+// A record whose evidence expired is retired to a floor (its descriptor
+// digest and issue time): the floor keeps the newer-only rule and the
+// peer's admission, and frees the record's slot (eventlog/relay_floor.go).
 type EvidenceStore interface {
 	LoadRelayEvidence(agentID string) ([]byte, bool, error)
 	StoreRelayEvidence(agentID string, evidence []byte, previousDigest string, now time.Time) error
+	LoadRelayEvidenceFloor(agentID string) (eventlog.RelayEvidenceFloor, bool, error)
+	ListRelayEvidencePeers() ([]string, error)
+	RetireRelayEvidence(agentID, evidenceDigest string, floor eventlog.RelayEvidenceFloor, horizon time.Duration,
+		contacts map[string]struct{}, now time.Time) (bool, error)
 }
 
 // RelayVerifier holds what CheckPeer and CommitPeer read and write.
@@ -68,6 +76,9 @@ type RelayVerifier struct {
 	Admitter     PublishedSetAdmitter
 	Store        EvidenceStore
 	LocalAgentID string
+	// Contacts are this installation's configured contacts; their floors
+	// are never evicted (eventlog.RetireRelayEvidence).
+	Contacts map[string]struct{}
 }
 
 // ErrRelayEvidenceUnknown reports a peer with no committed evidence.
@@ -231,7 +242,15 @@ func (v RelayVerifier) Admitted(peerAgentID string) (bool, error) {
 	if err != nil {
 		return false, fault.Wrap(fault.CodeInternal, err)
 	}
-	return found, nil
+	if found {
+		return true, nil
+	}
+	// A peer whose expired evidence was retired stays admitted by its floor.
+	_, floored, err := v.Store.LoadRelayEvidenceFloor(peerAgentID)
+	if err != nil {
+		return false, fault.Wrap(fault.CodeInternal, err)
+	}
+	return floored, nil
 }
 
 func (v RelayVerifier) stored(peerAgentID string) ([]byte, error) {
@@ -298,6 +317,16 @@ func (v RelayVerifier) commitLocked(peer RelayPeer, now time.Time) (bool, error)
 			return false, nil
 		}
 		previousDigest = relayframe.EvidenceDigest(previous)
+	} else {
+		// A retired record left its floor: only evidence newer than the
+		// retired one is committed, as if the record were still there.
+		floor, floored, err := v.Store.LoadRelayEvidenceFloor(peer.AgentID)
+		if err != nil {
+			return false, fault.Wrap(fault.CodeInternal, err)
+		}
+		if floored && !NewerEvidence(peer.DescriptorDigest, peer.Descriptor.IssuedAtUnix, floor.DescriptorDigest, floor.DescriptorIssuedAtUnix) {
+			return false, nil
+		}
 	}
 	if _, err := v.Admitter.AdmitPublishedSet(peer.Delegation, peer.Descriptor.PrekeyBundleDigest, peer.Bundles, now); err != nil {
 		return false, fault.Wrap(fault.CodeDescriptorUnbound, err)

@@ -26,8 +26,12 @@ func buildContactFileDiscovery(config Config, journal *eventlog.Journal, observe
 	if err != nil {
 		return nil, errors.New("open peer device ledger: " + err.Error())
 	}
+	contacts := make(map[string]struct{}, len(config.Admission.KnownAgentIDs))
+	for _, agentID := range config.Admission.KnownAgentIDs {
+		contacts[agentID] = struct{}{}
+	}
 	verifier := &directory.RelayVerifier{Resolver: resolver, Network: config.Network(), Chain: chain,
-		Judge: devices, Admitter: devices, Store: journal, LocalAgentID: config.AgentID}
+		Judge: devices, Admitter: devices, Store: journal, LocalAgentID: config.AgentID, Contacts: contacts}
 	importer := &contactImporter{dir: config.Discovery.ContactDir, verifier: verifier, observer: observer,
 		localAgentID: config.AgentID, now: time.Now}
 	return &discoveryRuntime{runner: importer, contacts: relayDirectory{verifier: verifier, now: time.Now},

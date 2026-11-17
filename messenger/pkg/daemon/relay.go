@@ -148,7 +148,22 @@ func (d *Daemon) installRelayRuntime(sink *directory.RelayEvidenceSink, carrier 
 		return err
 	}
 	d.relay = runtime
+	// Expired evidence held from before a restart frees its slots now.
+	runtime.sweepEvidence()
 	return nil
+}
+
+// sweepEvidence retires committed relay evidence that has expired, so the
+// store's peer bound holds live peers (directory.SweepExpiredEvidence).
+func (r *relayRuntime) sweepEvidence() {
+	report, err := r.verifier.SweepExpiredEvidence(r.now())
+	if err != nil {
+		r.daemon.report("relay evidence sweep", err)
+		return
+	}
+	if report.Kept > 0 {
+		r.daemon.report("relay evidence sweep", errors.New("expired relay evidence kept: the floor store is full of floors inside their horizon"))
+	}
 }
 
 func (r *relayRuntime) now() time.Time { return r.daemon.clock() }
@@ -1112,8 +1127,9 @@ func refuseOpenFailure(err error) error {
 	return &relayRefusal{code: carrierapi.CodeNotAccepted, detail: err.Error()}
 }
 
-// runRelay serves the inbound carrier socket, sweeps evidence pulls and,
-// with private rooms, drops expired room parts and retires ended rooms.
+// runRelay serves the inbound carrier socket, sweeps evidence pulls,
+// retires expired relay evidence and, with private rooms, drops expired room
+// parts and retires ended rooms.
 func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync.WaitGroup) {
 	group.Add(2)
 	go func() {
@@ -1132,6 +1148,7 @@ func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync
 				return
 			case <-ticker.C:
 				r.sweepPulls(ctx)
+				r.sweepEvidence()
 				if r.rooms != nil {
 					r.rooms.maintain()
 				}
