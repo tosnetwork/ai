@@ -380,3 +380,15 @@ func TestRoomRetirementDropsTheRoomsCardAdmissions(t *testing.T) {
 		t.Fatalf("the retired room's card admissions: %v", forgotten)
 	}
 }
+
+// The timer's reconciliation repairs a forgetting that never ran, without
+// a restart.
+func TestRoomTimerReconcilesARemovalWhoseForgettingNeverRan(t *testing.T) {
+	scene := newJoinedScene(t, roomRetention)
+	b := scene.nodes[1]
+	applyWithoutForgetting(t, scene, removeCommit(t, scene, scene.c))
+	b.d.relay.rooms.maintain()
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 1 || forgotten[0] != scene.c.agent() {
+		t.Fatalf("the timer did not forget C: %v", forgotten)
+	}
+}
