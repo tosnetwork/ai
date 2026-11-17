@@ -20,7 +20,9 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
+	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
+	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
 const (
@@ -82,6 +84,10 @@ type relayRuntime struct {
 	// index is the open-delivery index of the sweep in progress.
 	indexMutex sync.Mutex
 	index      *peerIndex
+
+	// rooms receives kind-3 room objects; nil when private rooms over the
+	// relay are not configured, and then kind 3 is not carried.
+	rooms *roomRuntime
 }
 
 // configureRelayCarriage installs the relay route: the carrier client, the
@@ -105,7 +111,15 @@ func (d *Daemon) configureRelayCarriage(sink *directory.RelayEvidenceSink) error
 	if err != nil {
 		return err
 	}
-	return d.installRelayRuntime(sink, client, relay.RedepositInterval(), relay.Timeout())
+	if err := d.installRelayRuntime(sink, client, relay.RedepositInterval(), relay.Timeout()); err != nil {
+		return err
+	}
+	if relay.MLSDriverPath == "" {
+		return nil
+	}
+	driver := &group.OpenMLSSidecar{Command: []string{relay.MLSDriverPath}, Timeout: relay.MLSDriverTimeout()}
+	return d.installRoomRuntime(roomRuntimeSettings{driver: driver, cards: client, skew: d.config.RoomClockSkew(),
+		retention: room.RoomHandshakeRetention})
 }
 
 // installRelayRuntime installs the relay sender, seal gate and inbound
@@ -620,7 +634,7 @@ func (r *relayRuntime) Withdraw(context.Context, carrierapi.Request) carrierapi.
 	return carrierapi.NotServed()
 }
 
-// Deliver handles a verified packet's frame of kind 1 or 4.
+// Deliver handles a verified packet's frame of kind 1, 3 or 4.
 //
 // The carrier handler's per-connection deadline does not bound CheckPeer's
 // finalized-state reads: identity.AgentResolver takes no context. Each read
@@ -640,6 +654,11 @@ func (r *relayRuntime) Deliver(ctx context.Context, sender string, raw []byte) c
 		return r.deliverCopy(ctx, sender, frame)
 	case relayframe.KindEvidence:
 		return r.deliverEvidence(sender, frame)
+	case relayframe.KindRoom:
+		if r.rooms == nil {
+			return carrierapi.Refusal(carrierapi.CodeKindNotCarried)
+		}
+		return r.rooms.deliver(ctx, sender, frame)
 	default:
 		return carrierapi.Refusal(carrierapi.CodeKindNotCarried)
 	}
@@ -1093,7 +1112,8 @@ func refuseOpenFailure(err error) error {
 	return &relayRefusal{code: carrierapi.CodeNotAccepted, detail: err.Error()}
 }
 
-// runRelay serves the inbound carrier socket and sweeps evidence pulls.
+// runRelay serves the inbound carrier socket, sweeps evidence pulls and,
+// with private rooms, drops expired room parts.
 func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync.WaitGroup) {
 	group.Add(2)
 	go func() {
@@ -1112,6 +1132,9 @@ func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync
 				return
 			case <-ticker.C:
 				r.sweepPulls(ctx)
+				if r.rooms != nil {
+					r.rooms.sweepParts()
+				}
 			}
 		}
 	}()

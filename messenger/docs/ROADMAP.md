@@ -136,7 +136,7 @@ TOS-MLS v1 remains 🟡 until all of these are true:
 - ✅ endpoint-signed per-device MLS credential and strict KeyPackage publication codec exist; every leaf key is distinct and Endpoint-key reuse is refused;
 - ✅ specify the BasicCredential identity and group-id canonical bytes using raw 32-byte canonical genesis hashes, register every new domain/schema version, and commit positive plus adversarial candidate vectors (independent consumption still gates freeze);
 - ✅ bind credentials to current TOS Agent → Endpoint → Device authority and reject revoked/absent, stale, expired, foreign-network, foreign-Agent and wrong-key leaves;
-- ✅ convert device succession to MLS Add/Remove/Update, including revoking one device while retaining the Agent's other device;
+- ⏳ convert device succession to MLS Add/Remove/Update, including revoking one device while retaining the Agent's other device (the unused planner was removed in M-R2: relay rooms carry one device per Agent, D3, and a leaf credential stays valid across prekey renewals; multi-device succession returns with multi-device rooms);
 - ✅ persist opaque MLS state, globally consumed KeyPackages, Welcome receipts and commit ancestry across restart; replay, duplicate-Welcome, state tamper, epoch-gap, rollback and concurrent-commit cases fail closed;
 - ✅ enforce one durable current authority for membership changes and a current-Endpoint-signed, adjacent-epoch transfer verified against both finalized delegations;
 - ✅ run `pkg/group/conformance` plus MLS-specific vectors for founding agreement, joiner-no-past, removed-member-no-future, forged commit, stale membership digest, wrong network/device set, exporter/secret separation and PCS after an update;

@@ -2230,6 +2230,14 @@ when the entry's card or evidence is stale; only that card or evidence is
 skipped and later repaired by the kind-4 pull (11.2). An entry whose
 credential fails is skipped whole, and the rest of the roster is learned.
 
+The device check, here and at every later use of a credential, is that the
+credential's device is present, under the same Endpoint, in that Endpoint's
+current device set and is not revoked from it; `device_set_digest` records
+the set the credential was issued in and is never compared again. So a
+credential stays valid across the member's prekey renewals, which change the
+set's digest and not its device, and is refused once its device leaves or is
+revoked from the set.
+
 **Store.** The room's credential list is a content-addressed record of the
 digests of the current members' credentials, and the fused record names it
 by a 32-byte digest. That makes it a garbage-collection root: collection

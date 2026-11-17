@@ -25,7 +25,7 @@ package group
 //	  agent               32
 //	  endpoint            32
 //	  device              32
-//	  device_set_digest   32
+//	  device_set_digest   32   the set at issue: evidence, never compared later
 //	  leaf_signature_key  32
 //	  cipher_suite        u16  0x0001
 //	  issued_at           u64
@@ -316,7 +316,8 @@ func VerifyLeafCredential(delegation identity.Delegation, c LeafCredential, now 
 
 // VerifyRoomLeafCredential is the room path's verification of a member's
 // leaf credential (section 11.8): VerifyLeafCredential, the credential's
-// device current in the Endpoint's finalized device set, and a window that
+// device current in the Endpoint's current device set (whatever prekey
+// generation that set holds now), and a window that
 // lasts at least until the room's end (D18; never zero). It returns the leaf
 // the credential binds, which is the only way to obtain a LeafBinding, so the
 // room controller can be handed nothing but a verified credential's leaf.
@@ -357,10 +358,20 @@ func checkLeafCredentialWindow(c LeafCredential, now time.Time, lastsUntilUnix u
 	return nil
 }
 
-// checkLeafCredentialDevice requires the credential's device to be current in
-// the Endpoint's device set, the set the credential names.
+// checkLeafCredentialDevice requires the credential's device to be current
+// in the Endpoint's current device set: the set of the same Endpoint (whose
+// ID is derived from the Endpoint key that signed the credential), holding
+// the device the credential and its compact identity name. The caller passes
+// the set as it stands now, after its rollback and revocation judgement, so
+// a device that left the set, or was revoked from it, fails here.
+//
+// The set's digest is not compared with the credential's device_set_digest:
+// that digest changes at every prekey renewal, which changes neither the
+// device nor its Endpoint, and a credential stays valid across renewals
+// (section 11.8). The digest stays in the credential as evidence of the set
+// it was issued in.
 func checkLeafCredentialDevice(c LeafCredential, currentSet e2ee.SetSummary) error {
-	if currentSet.EndpointID != c.EndpointID || currentSet.Digest != c.DeviceSetDigest || !contains(currentSet.DeviceIDs, c.DeviceID) {
+	if currentSet.EndpointID != c.EndpointID || !canon.ValidDigest(currentSet.Digest) || !contains(currentSet.DeviceIDs, c.DeviceID) {
 		return ErrLeafCredentialNotAuthentic
 	}
 	return nil

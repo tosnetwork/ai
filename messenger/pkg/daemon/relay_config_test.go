@@ -46,6 +46,12 @@ func TestRelayCarriageConfigurationIsCheckedAsAWhole(t *testing.T) {
 		// pass as an interval.
 		"wrapping re-deposit": func(c *Config) { c.RelayCarriage.RedepositIntervalSeconds = 18_446_744_073 + 700 },
 		"long timeout":        func(c *Config) { c.RelayCarriage.TimeoutSeconds = 301 },
+		"relative MLS driver": func(c *Config) { c.RelayCarriage.MLSDriverPath = "tos-openmls-driver" },
+		"MLS driver in state": func(c *Config) { c.RelayCarriage.MLSDriverPath = filepath.Join(c.StateDir, "driver") },
+		"MLS timeout alone":   func(c *Config) { c.RelayCarriage.MLSDriverTimeoutSeconds = 5 },
+		"long MLS timeout": func(c *Config) {
+			c.RelayCarriage.MLSDriverPath, c.RelayCarriage.MLSDriverTimeoutSeconds = "/usr/bin/tos-openmls-driver", 61
+		},
 		"dns contacts": func(c *Config) {
 			c.ContactDNS = &ContactDNSConfig{BaseURL: "https://dns.example", BearerTokenFile: "/run/token"}
 		},
@@ -64,6 +70,14 @@ func TestRelayCarriageConfigurationIsCheckedAsAWhole(t *testing.T) {
 	}
 	if relayConfig(t).RelayCarriage.RedepositInterval() != 20*time.Hour {
 		t.Fatal("default re-deposit interval is not 20 h")
+	}
+	rooms := relayConfig(t)
+	rooms.RelayCarriage.MLSDriverPath = "/usr/bin/tos-openmls-driver"
+	if err := rooms.Validate(); err != nil || rooms.RelayCarriage.MLSDriverTimeout() != 10*time.Second {
+		t.Fatalf("private rooms over the relay: %v", err)
+	}
+	if rooms.RoomClockSkew() != time.Duration(rooms.Admission.MaxClockSkewSeconds)*time.Second || rooms.RoomClockSkew() <= 0 {
+		t.Fatalf("room clock skew: %v", rooms.RoomClockSkew())
 	}
 	contactFiles := testConfig(t)
 	contactFiles.Discovery = DiscoveryConfig{Mode: DiscoveryContactFiles, ContactDir: "/x/contacts"}

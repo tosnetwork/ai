@@ -206,8 +206,12 @@ func TestLeafCredentialDeviceIsCurrent(t *testing.T) {
 	if err := checkLeafCredentialDevice(c, set); err != nil {
 		t.Fatal(err)
 	}
+	// A newer set holding the device (a prekey renewal) keeps it current.
+	renewed := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: canon.Digest([]byte("newer")), DeviceIDs: []string{c.DeviceID}}
+	if err := checkLeafCredentialDevice(c, renewed); err != nil {
+		t.Fatalf("a renewed set: %v", err)
+	}
 	for name, stale := range map[string]e2ee.SetSummary{
-		"a newer set":      {EndpointID: c.EndpointID, Digest: canon.Digest([]byte("newer")), DeviceIDs: []string{c.DeviceID}},
 		"device removed":   {EndpointID: c.EndpointID, Digest: c.DeviceSetDigest, DeviceIDs: []string{mlsDevice("2")}},
 		"another Endpoint": {EndpointID: "mep_" + strings.Repeat("d", 64), Digest: c.DeviceSetDigest, DeviceIDs: []string{c.DeviceID}},
 	} {
@@ -328,7 +332,16 @@ func TestVerifyRoomLeafCredential(t *testing.T) {
 		t.Fatalf("a credential lasting until the end: %v", err)
 	}
 	forged := resignLeaf(t, c, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x44}, ed25519.SeedSize)))
-	stale := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: canon.Digest([]byte("newer")), DeviceIDs: []string{c.DeviceID}}
+	// A prekey renewal changes the set's digest, not its device: the
+	// credential stays valid (section 11.8).
+	renewed := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: canon.Digest([]byte("newer")), DeviceIDs: []string{c.DeviceID}}
+	if _, err := VerifyRoomLeafCredential(delegation, c, renewed, c.ExpiresAtUnix, now); err != nil {
+		t.Fatalf("a credential across a prekey renewal: %v", err)
+	}
+	other := "dev_" + strings.Repeat("e", 64)
+	left := e2ee.SetSummary{EndpointID: c.EndpointID, Digest: canon.Digest([]byte("newer")), DeviceIDs: []string{other}}
+	elsewhere := e2ee.SetSummary{EndpointID: "mep_" + strings.Repeat("e", 64), Digest: c.DeviceSetDigest, DeviceIDs: []string{c.DeviceID}}
+	unsummarized := e2ee.SetSummary{EndpointID: c.EndpointID, DeviceIDs: []string{c.DeviceID}}
 	cases := []struct {
 		name       string
 		credential LeafCredential
@@ -337,7 +350,9 @@ func TestVerifyRoomLeafCredential(t *testing.T) {
 		want       error
 	}{
 		{"not signed by the Endpoint", forged, set, c.ExpiresAtUnix, ErrLeafCredentialNotAuthentic},
-		{"device no longer current", c, stale, c.ExpiresAtUnix, ErrLeafCredentialNotAuthentic},
+		{"device left the set", c, left, c.ExpiresAtUnix, ErrLeafCredentialNotAuthentic},
+		{"set of another Endpoint", c, elsewhere, c.ExpiresAtUnix, ErrLeafCredentialNotAuthentic},
+		{"no current set", c, unsummarized, c.ExpiresAtUnix, ErrLeafCredentialNotAuthentic},
 		{"ends before the room", c, set, c.ExpiresAtUnix + 1, ErrLeafCredentialOutsideWindow},
 	}
 	for _, test := range cases {

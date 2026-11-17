@@ -440,6 +440,11 @@ func (r *Reassembler) drop(key reassemblyKey) {
 	}
 }
 
+// RoomObjectPrefix reads the type and room of a room object from part 0,
+// before the object is complete: a receiver needs the room to choose the
+// sender's pin before it holds any part.
+func RoomObjectPrefix(part []byte) (string, uint8, error) { return roomPrefix(part) }
+
 // roomPrefix reads the type and room of a room object from its first bytes,
 // which part 0 always holds.
 func roomPrefix(part []byte) (string, uint8, error) {
