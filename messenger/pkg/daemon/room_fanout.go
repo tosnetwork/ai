@@ -161,10 +161,20 @@ func (r *roomRuntime) fanOutRoom(ctx context.Context, roomID string) {
 // fanOut serves one room: each removed member's single Commit, the
 // withdrawals still owed to removed members, and the head of every member's
 // queue. The caller holds the room's fan-out mutex and not the handling
-// lock. The room is read here, under that mutex, so a pass never acts on a
-// membership older than the latest committed one: a member an Add committed
-// meanwhile is never taken for a removed one.
+// lock, so an Add or a Remove may commit while it runs. The outbox heads
+// are read before the room: every head read was staged by a membership the
+// room read is at least as new as, so an Agent addressed by a head and
+// absent from the room has left it; a joiner whose Add commits in between
+// has its heads served by the next pass.
 func (r *roomRuntime) fanOut(ctx context.Context, roomID string) {
+	heads, err := r.daemon.journal.RoomOutboxHeads(roomID)
+	if err != nil {
+		r.daemon.report("room fan-out "+roomID, err)
+		return
+	}
+	if r.betweenFanoutReads != nil {
+		r.betweenFanoutReads()
+	}
 	record, found, err := r.ledger.Current(roomID)
 	if err != nil {
 		r.daemon.report("room fan-out "+roomID, err)
@@ -174,11 +184,6 @@ func (r *roomRuntime) fanOut(ctx context.Context, roomID string) {
 		return
 	}
 	now := r.now()
-	heads, err := r.daemon.journal.RoomOutboxHeads(record.RoomID)
-	if err != nil {
-		r.daemon.report("room fan-out "+record.RoomID, err)
-		return
-	}
 	members := map[string]struct{}{}
 	for _, head := range heads {
 		for _, member := range head.Members {
@@ -187,13 +192,22 @@ func (r *roomRuntime) fanOut(ctx context.Context, roomID string) {
 			}
 		}
 	}
-	// A member no longer in the room gets nothing more: the withdrawals of
-	// its in-flight generations are retried until the carrier confirms them
-	// (section 11.4), also past the room's end.
+	// An Agent not in the room gets nothing this pass. One that left the
+	// room gets nothing more: the withdrawals of its in-flight generations
+	// are retried until the carrier confirms them (section 11.4), also past
+	// the room's end.
 	for member := range members {
-		if !containsAgent(record.Members, member) {
+		if containsAgent(record.Members, member) {
+			continue
+		}
+		delete(members, member)
+		left, err := r.leftRoom(record, member, heads)
+		if err != nil {
+			r.daemon.report("room fan-out "+record.RoomID, err)
+			continue
+		}
+		if left {
 			r.withdrawFromRemoved(ctx, record.RoomID, member, now)
-			delete(members, member)
 		}
 	}
 	// D18: the authority's queues stop at the room's end minus the skew.
@@ -242,6 +256,33 @@ func (r *roomRuntime) fanOut(ctx context.Context, roomID string) {
 			}
 		}
 	}
+}
+
+// leftRoom reports whether an Agent the room's handshake heads address, and
+// that is absent from the room's current membership, has left the room.
+// It has if it is in one of the room's retained earlier memberships (the
+// window reconcileRemoved uses), or if a head addressing it in its queue
+// was staged at or below the current room epoch: such a head was addressed
+// to a member of that epoch, so this covers a removal that has left the
+// retained window while its withdrawals were still unconfirmed. An Agent
+// never a member, such as a joiner whose Add a stale read of the room does
+// not show, has not left: its heads are skipped and served by a later pass.
+func (r *roomRuntime) leftRoom(record eventlog.RoomMLSRecord, agentID string, heads []eventlog.RoomOutboxHead) (bool, error) {
+	for back := uint64(1); back < eventlog.RetainedRoomEpochs && back < record.RoomEpoch; back++ {
+		earlier, held, err := r.ledger.MembershipAt(record.RoomID, record.RoomEpoch-back)
+		if err != nil {
+			return false, err
+		}
+		if held && containsAgent(earlier.Members, agentID) {
+			return true, nil
+		}
+	}
+	for _, head := range heads {
+		if delivery, found := head.Member(agentID); found && !delivery.Once && head.RoomEpoch <= record.RoomEpoch {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // queueStopped reports whether a member's queue stopped (a rejection, lost

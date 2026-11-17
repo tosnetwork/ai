@@ -674,3 +674,149 @@ func TestRoomFanOutMutexesAreDroppedWithTheirRoom(t *testing.T) {
 		t.Fatalf("%d fan-out mutexes outlived their room", len(r.fanouts))
 	}
 }
+
+// An Add committed while a fan-out pass reads the outbox and the room (the
+// Add commits under the handling lock only, beside the pass's fan-out
+// mutex) never makes the joiner look removed: its Welcome and roster are
+// neither withdrawn nor abandoned, and they go out.
+func TestRoomFanOutAnAddBetweenItsReadsKeepsTheJoiner(t *testing.T) {
+	scene := newFanoutScene(t, 3, roomRetention)
+	a, c := scene.nodes[0], scene.nodes[2]
+	agent := c.d.config.AgentID
+	r := scene.rooms(0)
+	scene.invited(t, 2)
+	if err := scene.rooms(2).JoinRoom(context.Background(), testRoomID, a.d.config.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.d.dispatch.Sweep(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	copies := takeFrames(t, c, func(frame relayframe.Frame, _ string) bool { return frame.Kind == relayframe.KindCopy })
+	if len(copies) != 1 {
+		t.Fatalf("%d copies from C", len(copies))
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	r.betweenFanoutReads = func() {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+	}
+	before := len(a.carrier.withdrawals())
+	swept := make(chan struct{})
+	go func() {
+		r.sweepHandshakes(context.Background())
+		close(swept)
+	}()
+	<-entered
+	// C's KeyPackage arrives while the pass is between its reads: its Add
+	// commits under the handling lock, and its own fan-out waits for the
+	// pass's mutex.
+	delivered := make(chan carrierapi.Response, 1)
+	go func() {
+		delivered <- a.d.relay.Deliver(context.Background(), agent, copies[0].frame)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if record, found, err := r.ledger.Current(testRoomID); err == nil && found && record.Membership().Contains(agent) {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(release)
+			<-swept
+			<-delivered
+			t.Fatal("the Add of C was not committed while the pass waited")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	<-swept
+	if answer := <-delivered; answer.AckOutcome != relayframe.OutcomeAccepted {
+		t.Fatalf("C's room.key-package: %+v", answer)
+	}
+	r.betweenFanoutReads = nil
+	if withdrawn := a.carrier.withdrawals()[before:]; len(withdrawn) != 0 {
+		t.Fatalf("a pass across the Add withdrew %d envelopes from the joiner", len(withdrawn))
+	}
+	welcome, found := memberDelivery(t, a, eventlog.RoomObjectWelcome, agent)
+	if !found || welcome.State != eventlog.RoomDeliveryCarried {
+		t.Fatalf("the joiner's Welcome after a pass across its Add: %+v (found %v)", welcome, found)
+	}
+	if roster, found := memberDelivery(t, a, eventlog.RoomObjectRoster, agent); !found || roster.State != eventlog.RoomDeliveryPending {
+		t.Fatalf("the joiner's roster after a pass across its Add: %+v (found %v)", roster, found)
+	}
+}
+
+// An Agent the heads address but a stale read of the room does not show has
+// not left the room unless it is in a retained earlier membership or a head
+// addressed it at or below that read's epoch: a joiner whose Add the read
+// predates is no removed member, the member A removed is.
+func TestRoomFanOutOnlyAMemberThatLeftIsTakenForRemoved(t *testing.T) {
+	scene := newFanoutScene(t, 3, roomRetention)
+	a, b, c := scene.nodes[0], scene.nodes[1], scene.nodes[2]
+	r := scene.rooms(0)
+	stale, _ := fused(t, a)
+	scene.invited(t, 2)
+	if answer := scene.joined(t, 2); answer.AckOutcome != relayframe.OutcomeAccepted {
+		t.Fatalf("C's room.key-package: %+v", answer)
+	}
+	heads := mustHeads(t, a)
+	if left, err := r.leftRoom(stale, c.d.config.AgentID, heads); err != nil || left {
+		t.Fatalf("a joiner the read predates was taken for removed: %v %v", left, err)
+	}
+	if err := r.RemoveRoomMember(context.Background(), testRoomID, b.d.config.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := fused(t, a)
+	if left, err := r.leftRoom(current, b.d.config.AgentID, heads); err != nil || !left {
+		t.Fatalf("the removed member was not taken for removed: %v %v", left, err)
+	}
+	if left, err := r.leftRoom(current, "agent_"+strings.Repeat("e", 64), heads); err != nil || left {
+		t.Fatalf("an Agent never in the room was taken for removed: %v %v", left, err)
+	}
+}
+
+// A removal that has left the retained window while its withdrawals were
+// unconfirmed is still served: the removed member's slots stay owed until
+// the carrier confirms them, and nothing is deposited to it meanwhile.
+func TestRoomFanOutRemovalOutsideTheRetainedWindowIsStillWithdrawn(t *testing.T) {
+	scene := newFanoutScene(t, 3, roomRetention)
+	a, b, c := scene.nodes[0], scene.nodes[1], scene.nodes[2]
+	agent := b.d.config.AgentID
+	r := scene.rooms(0)
+	objectsTo(t, a, agent)
+	a.d.relay.carrier = withdrawAnswer{recordingCarrier: a.carrier, response: carrierapi.Retry()}
+	if err := r.RemoveRoomMember(context.Background(), testRoomID, agent); err != nil {
+		t.Fatal(err)
+	}
+	// Two more membership changes move B's last epoch out of the window.
+	scene.invited(t, 2)
+	if answer := scene.joined(t, 2); answer.AckOutcome != relayframe.OutcomeAccepted {
+		t.Fatalf("C's room.key-package: %+v", answer)
+	}
+	if err := r.RemoveRoomMember(context.Background(), testRoomID, c.d.config.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := fused(t, a)
+	for back := uint64(1); back < eventlog.RetainedRoomEpochs && back < record.RoomEpoch; back++ {
+		if earlier, held, err := r.ledger.MembershipAt(testRoomID, record.RoomEpoch-back); err != nil || held && earlier.Contains(agent) {
+			t.Fatalf("B is still in the retained window at epoch %d: %v", record.RoomEpoch-back, err)
+		}
+	}
+	if live := liveSlots(t, a, agent); live == 0 {
+		t.Fatal("B's slots were settled before any withdrawal was confirmed")
+	}
+	takeFrames(t, a, func(relayframe.Frame, string) bool { return true })
+	a.d.relay.carrier = a.carrier
+	r.sweepHandshakes(context.Background())
+	if live := liveSlots(t, a, agent); live != 0 {
+		t.Fatalf("%d of B's slots outlived the confirmed withdrawals", live)
+	}
+	if frames := takeFrames(t, a, func(frame relayframe.Frame, to string) bool {
+		return frame.Kind == relayframe.KindRoom && to == agent
+	}); len(frames) != 0 {
+		t.Fatalf("%d frames deposited to the removed member", len(frames))
+	}
+}

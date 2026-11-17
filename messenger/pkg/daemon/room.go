@@ -113,6 +113,11 @@ type roomRuntime struct {
 	// admission is judged against the membership as it is when it is sent.
 	// It is taken without the handling lock and never with a fan-out mutex.
 	cardFlush sync.Mutex
+
+	// betweenFanoutReads, when set, runs inside fanOut between its read of
+	// the outbox heads and its read of the room, so a test can commit an
+	// Add in between. It is nil outside tests.
+	betweenFanoutReads func()
 }
 
 // roomCardAdmission is one carrier.room-cards admission a roster taught.
