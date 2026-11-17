@@ -32,7 +32,9 @@ func IdentityOf(senderAgentID string, frame Frame) Identity {
 // Assembly collects the frames of one message in memory. A runtime that
 // must survive a crash between acknowledging a packet and processing its
 // message stores frames durably instead (section 9); the refusal rules are
-// the same.
+// the same. One Assembly holds one message: bounding how many open
+// assemblies a receiver keeps (OpenFox keeps at most 8 per sender and 64 in
+// total, refused as inbox-full) is the caller's job.
 type Assembly struct {
 	identity Identity
 	total    uint32

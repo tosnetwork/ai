@@ -71,6 +71,11 @@ func (p Provider) valid() bool {
 // failure as task-not-admitted. It reads no chain state: the caller must
 // still establish item 5 from one finalized checkpoint, then call
 // CheckVerifiedBinding (item 6) and claim the slot once (item 7).
+//
+// The buyer wallet is a claim here. Quote validation is run for it, but
+// nothing in the task proves that wallet paid: only the caller's item 5
+// check (exactly one successful call from buyer_wallet carrying the derived
+// request hash, at a finalized checkpoint) binds it.
 func (p Provider) CheckTask(message Message) (*Admission, error) {
 	if !p.valid() {
 		return nil, ErrInvalidInput
