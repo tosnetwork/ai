@@ -411,3 +411,62 @@ func TestRoomFounderCredentialNamesThePublishedDevice(t *testing.T) {
 		t.Fatal("joined a room this installation founded")
 	}
 }
+
+// The KeyPackage's DeviceCredential and leaf credential must agree: a
+// DeviceCredential for the same KeyPackage under another window is refused,
+// though each credential verifies alone.
+func TestRoomKeyPackageWhoseCredentialsDisagreeIsRefused(t *testing.T) {
+	scene := newOperatorScene(t, 2)
+	a, b := scene.nodes[0], scene.nodes[1]
+	scene.founded(t)
+	scene.invited(t, 1)
+	member := newRoomMember(t, scene.driver, b, scene.clock.now(), time.Unix(int64(b.d.prekeys.planner.delegation.ExpiresAtUnix), 0))
+	device, err := group.DecodeDeviceCredentialJSON(member.deviceJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device.ExpiresAtUnix--
+	if device, err = group.SignDeviceCredential(device, b.key); err != nil {
+		t.Fatal(err)
+	}
+	deviceJSON, _ := group.EncodeDeviceCredentialJSON(device)
+	encoded, _ := group.EncodeLeafCredential(member.credential)
+	content, err := payload.Encode(payload.RoomKeyPackage{RoomID: testRoomID, DeviceCredentialJSON: deviceJSON, LeafCredential: encoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.d.sendDirectApplication(context.Background(), a.d.config.AgentID, "room.key-package", content,
+		idem("a"), uint64(scene.clock.now().Add(time.Hour).Unix())); err != nil {
+		t.Fatal(err)
+	}
+	requireRefusedCopy(t, relayOne(t, b, a))
+	if adds, err := a.d.journal.RoomAdds(testRoomID, scene.clock.now()); err != nil || len(adds) != 1 || adds[0].Ready() {
+		t.Fatalf("disagreeing credentials were recorded: %+v %v", adds, err)
+	}
+}
+
+// A crash between the recorded KeyPackage and its Add Commit is finished
+// by the next maintenance pass, from the journal.
+func TestRoomAddRecordedBeforeACrashIsCommittedOnTheNextPass(t *testing.T) {
+	scene := newOperatorScene(t, 2)
+	a, b := scene.nodes[0], scene.nodes[1]
+	record := scene.founded(t)
+	now := scene.clock.now()
+	if _, _, err := a.d.journal.RecordRoomAdd(testRoomID, b.d.config.AgentID, now.Add(time.Hour/2), now); err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := scene.rooms(1).issueLeaf(record.RoomEndsAtUnix, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.d.journal.RecordRoomAddKeyPackage(testRoomID, b.d.config.AgentID, leaf.deviceJSON, leaf.encoded, now); err != nil {
+		t.Fatal(err)
+	}
+	scene.rooms(0).maintain()
+	if after, _ := fused(t, a); !after.Membership().Contains(b.d.config.AgentID) {
+		t.Fatal("the recorded add was not committed on the next pass")
+	}
+	if adds, err := a.d.journal.RoomAdds(testRoomID, now); err != nil || len(adds) != 0 {
+		t.Fatalf("the add was not finished: %+v %v", adds, err)
+	}
+}
