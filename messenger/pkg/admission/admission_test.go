@@ -100,7 +100,7 @@ func testDelegation(t *testing.T) (identity.Delegation, []byte) {
 		EndpointID:                    endpointID,
 		IdentityPublicKey:             public,
 		AllowedProtocolVersions:       []uint32{1},
-		AllowedOutboundEventClasses:   []string{"text"},
+		AllowedOutboundEventClasses:   []string{"room", "text"},
 		NotBeforeUnix:                 baseUnix,
 		ExpiresAtUnix:                 baseUnix + 86_400,
 		MaximumSessionLifetimeSeconds: 3600,

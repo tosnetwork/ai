@@ -434,6 +434,17 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 		decision.Delegation = delegation
 		return decision, nil
 	}
+	// A room invite's lifetime is bounded by its own Event's time, which
+	// the payload alone does not know.
+	if inbound.Event.Kind == "room.invite" {
+		decoded, err := payload.Decode(inbound.Event.Kind, inbound.Event.Content)
+		invite, ok := decoded.(payload.RoomInvite)
+		if err != nil || !ok || invite.ValidateLifetime(inbound.Event.CreatedAtUnix) != nil {
+			decision := g.refuse(inbound, fault.CodePayloadMalformed, class)
+			decision.Delegation = delegation
+			return decision, nil
+		}
+	}
 	// A moderation decision's authority is verified before an invite is
 	// claimed for it, so an inauthentic one never spends a bearer.
 	var liveAuthority identity.Delegation
@@ -648,7 +659,9 @@ func (g *Gate) admit(inbound Inbound, commit Committer) (Decision, error) {
 //     the object is refused not-authentic (D15);
 //   - the packet sender must be in the committed membership of the room
 //     epoch the Event was sealed in, the current one or the two before it,
-//     or it is refused not-a-room-member.
+//     or it is refused not-a-room-member;
+//   - only room content (room.message, artifact.encrypted) is granted;
+//     another kind from a member meets the normal policy.
 //
 // An Event naming a room without room carriage gains nothing here and meets
 // the normal policy.
@@ -675,7 +688,7 @@ func (g *Gate) judgeRoomCarriage(inbound Inbound, delegation identity.Delegation
 	}
 	credential := carriage.SenderCredential
 	if credential.AgentID != delegation.AgentID || credential.EndpointID != delegation.EndpointID ||
-		credential.DeviceID != inbound.Event.SenderDeviceID {
+		credential.DeviceID != inbound.Event.SenderDeviceID || !sameNetwork(credential.Network, g.config.Network) {
 		return false, fault.CodeNotAuthentic, nil
 	}
 	preimage, err := group.CredentialSigningBytes(credential)
@@ -698,8 +711,18 @@ func (g *Gate) judgeRoomCarriage(inbound Inbound, delegation identity.Delegation
 	if !found || !membership.Contains(carriage.PacketSenderAgentID) {
 		return false, fault.CodeNotARoomMember, nil
 	}
+	// Only room content is granted: what a room's application object
+	// carries. Any other kind meets the normal policy, even from a member.
+	if _, content := roomContentKinds[inbound.Event.Kind]; !content {
+		return false, "", nil
+	}
 	return true, "", nil
 }
+
+// roomContentKinds are the Event kinds a private room's application object
+// carries (section 11.1): a room message and an encrypted attachment
+// reference. D11 grants admission to these and nothing else.
+var roomContentKinds = map[string]struct{}{"room.message": {}, "artifact.encrypted": {}}
 
 // withoutInvite is the policy answer when no invite satisfies first contact:
 // invite-or-hold holds for the owner, every other answer stands.

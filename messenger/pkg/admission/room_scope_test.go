@@ -12,7 +12,9 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	"github.com/tosnetwork/ai/messenger/pkg/room"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
 
 const privateRoom = "room_" + "9191919191919191919191919191919191919191919191919191919191919191"
@@ -92,9 +94,13 @@ func senderCredential(t *testing.T, issued, expires uint64) group.DeviceCredenti
 func roomInbound(t *testing.T, epoch uint64, label string) Inbound {
 	t.Helper()
 	delegation, encoded := testDelegation(t)
+	body, err := payload.Encode(payload.RoomMessage{RoomID: privateRoom, Epoch: epoch,
+		MediaType: "text/plain; charset=utf-8", Body: label, Sequence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	event := testEvent(t, delegation, func(e *envelope.Event) {
-		e.RoomID = privateRoom
-		e.Content = textBody(t, label)
+		e.RoomID, e.Kind, e.Content = privateRoom, "room.message", body
 	})
 	request := inbound(event, encoded)
 	request.Room = &RoomCarriage{RoomID: privateRoom, RoomEpoch: epoch, PacketSenderAgentID: senderID,
@@ -178,5 +184,57 @@ func TestRoomScopedAdmissionKeepsBlockedSendersOut(t *testing.T) {
 	gate, _, _ := roomGate(t, blockList(t, senderID))
 	if decision, err := gate.Admit(roomInbound(t, 1, "blocked")); err != nil || decision.Outcome != Rejected {
 		t.Fatalf("blocked member: %+v %v", decision, err)
+	}
+}
+
+// D11 grants only room content: a member's room-addressed Event of another
+// kind meets the normal policy, and a credential of another network is
+// refused.
+func TestRoomScopedAdmissionGrantsOnlyRoomContent(t *testing.T) {
+	gate, _, _ := roomGate(t, allowList(t, TellThem))
+	delegation, encoded := testDelegation(t)
+	event := testEvent(t, delegation, func(e *envelope.Event) {
+		e.RoomID = privateRoom
+		e.Content = textBody(t, "a text naming the room")
+	})
+	request := inbound(event, encoded)
+	request.Room = &RoomCarriage{RoomID: privateRoom, RoomEpoch: 1, PacketSenderAgentID: senderID,
+		SenderCredential: senderCredential(t, baseUnix, baseUnix+86_400)}
+	if decision, err := gate.Admit(request); err != nil || decision.Outcome != Rejected || decision.Code != fault.CodeAdmissionRequired {
+		t.Fatalf("a member's non-room kind: %+v %v", decision, err)
+	}
+	foreign := roomInbound(t, 1, "another network")
+	credential := foreign.Room.SenderCredential
+	credential.Network = &nativev1.NetworkDomain{NetworkId: "other-net",
+		GenesisRootHash: strings.Repeat("c", 64), GenesisFileHash: strings.Repeat("d", 64)}
+	// Signed by the sender's Endpoint, so only the network differs.
+	signed, err := group.SignDeviceCredential(credential, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign.Room.SenderCredential = signed
+	if decision, _ := gate.Admit(foreign); decision.Outcome != Rejected || decision.Code != fault.CodeNotAuthentic {
+		t.Fatalf("a credential of another network: %+v", decision)
+	}
+}
+
+// A room.invite expires at most 7 days after its Event.
+func TestRoomInviteLifetimeIsBounded(t *testing.T) {
+	gate, _, delegation, encoded := testGate(t, OpenInbox())
+	for _, test := range []struct {
+		lifetime uint64
+		accepted bool
+	}{{6 * 24 * 3600, true}, {payload.MaxRoomInviteLifetimeSeconds, true}, {payload.MaxRoomInviteLifetimeSeconds + 1, false}, {0, false}} {
+		body, err := payload.Encode(payload.RoomInvite{RoomID: privateRoom, InviteeAgentID: localID, Purpose: "join us",
+			ExpiresAtUnix: baseUnix + 10 + test.lifetime})
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := testEvent(t, delegation, func(e *envelope.Event) { e.Kind, e.Content = "room.invite", body })
+		decision, err := gate.Admit(inbound(event, encoded))
+		if err != nil || (decision.Outcome == Accepted) != test.accepted ||
+			(!test.accepted && decision.Code != fault.CodePayloadMalformed) {
+			t.Fatalf("lifetime %d: %+v %v", test.lifetime, decision, err)
+		}
 	}
 }
