@@ -6,16 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
-	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/room"
-	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
 
 // keySwapDriver reports every committer and sender leaf with another
@@ -47,18 +44,21 @@ func relayLeaf(t *testing.T, driver *group.OpenMLSSidecar, index int) (group.Ope
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpointKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{byte(0x70 + index)}, ed25519.SeedSize))
-	network := &nativev1.NetworkDomain{NetworkId: "tos-local", GenesisRootHash: strings.Repeat("a", 64), GenesisFileHash: strings.Repeat("b", 64)}
-	endpointID, deviceID := fmt.Sprintf("mep_%064x", index+1), fmt.Sprintf("dev_%064x", index+1)
+	// Member 0 is the fixture's authority, so its delegation is the
+	// fixture's; the others have delegations of their own.
+	seed := byte(0x70 + index)
+	if index == 0 {
+		seed = 0x61
+	}
+	delegation, endpointKey := roomDelegation(t, fusedAgent(index), seed)
+	endpointID, deviceID := delegation.EndpointID, fmt.Sprintf("dev_%064x", index+1)
 	credential, err := group.SignLeafCredential(group.LeafCredential{
-		Network: network, AgentID: fusedAgent(index), EndpointID: endpointID, DeviceID: deviceID,
+		Network: delegation.Network, AgentID: fusedAgent(index), EndpointID: endpointID, DeviceID: deviceID,
 		DeviceSetDigest: canon.Digest([]byte("set")), LeafSignaturePublicKey: signer.LeafSignaturePublicKey,
-		IssuedAtUnix: 1_000, ExpiresAtUnix: 2_000_000}, endpointKey)
+		IssuedAtUnix: 1_000, ExpiresAtUnix: testRoomEnd}, endpointKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := identity.Delegation{Network: network, AgentID: fusedAgent(index), EndpointID: endpointID,
-		IdentityPublicKey: endpointKey.Public().(ed25519.PublicKey), NotBeforeUnix: 1, ExpiresAtUnix: 3_000_000}
 	set := e2ee.SetSummary{EndpointID: endpointID, Digest: credential.DeviceSetDigest, DeviceIDs: []string{deviceID}}
 	binding, err := group.VerifyRoomLeafCredential(delegation, credential, set, credential.ExpiresAtUnix, time.Unix(10_000, 0))
 	if err != nil {
@@ -154,7 +154,7 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	join := func(index int, result CommitResult, membership room.Membership) RoomMLSRecord {
 		t.Helper()
 		binding := group.State{RoomID: fusedRoom, Clock: result.Transition.Next.Clock, MembershipDigest: membership.Digest}
-		record, err := controllers[index].Join(binding, fixture.proof(membership), groupID, identities[index].State, result.Welcomes[canon.Digest(identities[index].KeyPackage)], canon.Digest(identities[index].KeyPackage))
+		record, err := controllers[index].Join(binding, fixture.proof(membership), groupID, identities[index].State, result.Welcomes[canon.Digest(identities[index].KeyPackage)], canon.Digest(identities[index].KeyPackage), leaves[0])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -178,11 +178,23 @@ func TestOpenMLSRoomControllerIntegrationFusedRestartAndAttribution(t *testing.T
 	}
 
 	addBob, alice, withBob := add(alice, 1, nil)
+	// A Welcome is taken only from the leaf the invite's authority credential
+	// expects: under another member's credential it is refused and nothing
+	// is installed.
+	if _, err := controllers[1].Join(group.State{RoomID: fusedRoom, Clock: addBob.Transition.Next.Clock, MembershipDigest: withBob.Digest}, fixture.proof(withBob), groupID, identities[1].State, addBob.Welcomes[canon.Digest(identities[1].KeyPackage)], canon.Digest(identities[1].KeyPackage), leaves[2]); !errors.Is(err, ErrMLSSenderMismatch) {
+		t.Fatalf("a Welcome under another authority credential: %v", err)
+	}
+	if _, found, _ := ledgers[1].Current(fusedRoom); found {
+		t.Fatal("a refused Welcome installed the room")
+	}
 	bob := join(1, addBob, withBob)
+	if credential, found, err := ledgers[1].RoomCredential(fusedRoom, fusedAgent(0)); err != nil || !found || credential.ExpiresAtUnix != testRoomEnd || bob.RoomEndsAtUnix != testRoomEnd {
+		t.Fatalf("the joiner's install did not root the authority credential: %v %v", found, err)
+	}
 	if bob.MLSEpoch != 1 || bob.RoomEpoch != 2 {
 		t.Fatalf("Bob joined at %+v", bob.Binding())
 	}
-	if _, err := controllers[1].Join(group.State{RoomID: fusedRoom, Clock: addBob.Transition.Next.Clock, MembershipDigest: withBob.Digest}, fixture.proof(withBob), groupID, identities[1].State, addBob.Welcomes[canon.Digest(identities[1].KeyPackage)], canon.Digest(identities[1].KeyPackage)); err == nil {
+	if _, err := controllers[1].Join(group.State{RoomID: fusedRoom, Clock: addBob.Transition.Next.Clock, MembershipDigest: withBob.Digest}, fixture.proof(withBob), groupID, identities[1].State, addBob.Welcomes[canon.Digest(identities[1].KeyPackage)], canon.Digest(identities[1].KeyPackage), leaves[0]); err == nil {
 		t.Fatal("a Welcome was installed twice")
 	}
 
@@ -362,6 +374,7 @@ func TestOpenMLSRoomControllerMembersRefusesAnotherIdentity(t *testing.T) {
 		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founding.Digest},
 		Proof:   fixture.proof(founding), State: state, EpochAuthenticator: info.EpochAuthenticator,
 		KeyPackageRef: canon.Digest(short.KeyPackage),
+		Credentials:   fixture.credentials(), EndsAtUnix: testRoomEnd,
 	}, fixture.now); err != nil {
 		t.Fatal(err)
 	}

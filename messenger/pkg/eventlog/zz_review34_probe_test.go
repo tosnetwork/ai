@@ -17,17 +17,17 @@ func TestReviewRoomInviteExpiryUnboundedPreemption(t *testing.T) {
 	defer journal.Close()
 	now := fixture.now
 	attacker := fusedAgent(5)
-	if _, err := journal.RecordRoomInvite(fusedRoom, attacker, inviteEvent, now.Add(100*365*24*time.Hour), now); err == nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, attacker, inviteEvent, inviteBinding(t, attacker), now.Add(100*365*24*time.Hour), now); err == nil {
 		t.Fatal("a far-future invite was recorded")
 	}
-	if _, err := journal.RecordRoomInvite(fusedRoom, attacker, inviteEvent, now.Add(MaxRoomInviteLifetime), now); err != nil {
+	if _, err := journal.RecordRoomInvite(fusedRoom, attacker, inviteEvent, inviteBinding(t, attacker), now.Add(MaxRoomInviteLifetime), now); err != nil {
 		t.Fatal(err)
 	}
 	later := now.Add(365 * 24 * time.Hour)
 	if err := journal.SweepRoomJoins(later); err != nil {
 		t.Fatal(err)
 	}
-	_, err := journal.RecordRoomInvite(fusedRoom, fixture.delegation.AgentID, inviteEvent, later.Add(time.Hour), later)
+	_, err := journal.RecordRoomInvite(fusedRoom, fixture.delegation.AgentID, inviteEvent, inviteBinding(t, fixture.delegation.AgentID), later.Add(time.Hour), later)
 	if errors.Is(err, ErrRoomJoinConflict) || err != nil {
 		t.Fatalf("a year later the real authority's invite is refused: %v", err)
 	}

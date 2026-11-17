@@ -80,24 +80,41 @@ func (c *RoomMLSController) CreateRoom(binding group.State, proof RoomAuthorityP
 	if err != nil {
 		return RoomMLSRecord{}, err
 	}
-	return c.ledger.InstallFounder(RoomMLSInstall{Binding: binding, Proof: proof, State: state, EpochAuthenticator: info.EpochAuthenticator, KeyPackageRef: keyPackageRef}, c.now())
+	// The founder's own credential fixes the room's end (D18).
+	return c.ledger.InstallFounder(RoomMLSInstall{Binding: binding, Proof: proof, State: state, EpochAuthenticator: info.EpochAuthenticator,
+		KeyPackageRef: keyPackageRef, Credentials: []group.LeafBinding{own}, EndsAtUnix: own.Credential().ExpiresAtUnix}, c.now())
 }
 
 // Join processes a Welcome and installs the joined state, consuming the
-// one-time KeyPackage and recording the Welcome in the same write.
-func (c *RoomMLSController) Join(binding group.State, proof RoomAuthorityProof, expectedGroupID, identityState, welcome []byte, keyPackageRef string) (RoomMLSRecord, error) {
+// one-time KeyPackage and recording the Welcome in the same write. authority
+// is the authority's leaf as the credential its room.invite carried expects
+// it (section 11.3): a Welcome authored by any other leaf is refused before
+// anything is written, and the install roots that credential in the room's
+// list, whose expiry is the room's end (D18).
+func (c *RoomMLSController) Join(binding group.State, proof RoomAuthorityProof, expectedGroupID, identityState, welcome []byte, keyPackageRef string, authority group.LeafBinding) (RoomMLSRecord, error) {
 	if len(welcome) == 0 || len(welcome) > group.MaxOpenMLSMessageBytes {
 		return RoomMLSRecord{}, errors.New("invalid MLS Welcome")
 	}
-	state, err := c.driver.Join(identityState, welcome)
+	if err := authority.Validate(); err != nil {
+		return RoomMLSRecord{}, ErrRoomLeafIdentity
+	}
+	state, sender, err := c.driver.JoinAttributed(identityState, welcome)
 	if err != nil {
+		return RoomMLSRecord{}, err
+	}
+	if !authority.Matches(sender) {
+		return RoomMLSRecord{}, ErrMLSSenderMismatch
+	}
+	if _, err := c.relayMembers(state); err != nil {
 		return RoomMLSRecord{}, err
 	}
 	info, err := c.checkState(state, expectedGroupID, binding.Clock.MLSEpoch)
 	if err != nil {
 		return RoomMLSRecord{}, err
 	}
-	return c.ledger.InstallWelcome(RoomMLSInstall{Binding: binding, Proof: proof, State: state, EpochAuthenticator: info.EpochAuthenticator, KeyPackageRef: keyPackageRef, WelcomeRef: canon.Digest(welcome)}, c.now())
+	return c.ledger.InstallWelcome(RoomMLSInstall{Binding: binding, Proof: proof, State: state, EpochAuthenticator: info.EpochAuthenticator,
+		KeyPackageRef: keyPackageRef, WelcomeRef: canon.Digest(welcome), Credentials: []group.LeafBinding{authority},
+		EndsAtUnix: authority.Credential().ExpiresAtUnix}, c.now())
 }
 
 // Commit makes the authority's next Commit. template carries both commit

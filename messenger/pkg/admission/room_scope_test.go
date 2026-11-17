@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
+	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/envelope"
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	"github.com/tosnetwork/ai/messenger/pkg/room"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -52,6 +55,7 @@ func roomGate(t *testing.T, policy ContactPolicy) (*Gate, *eventlog.Journal, *ev
 		Binding: group.State{RoomID: privateRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founded.Digest},
 		Proof:   at(founded), State: []byte("founder state"), EpochAuthenticator: bytes.Repeat([]byte{1}, group.MLSEpochAuthenticatorBytes),
 		KeyPackageRef: canon.Digest([]byte("founder key package")),
+		Credentials:   []group.LeafBinding{roomLeafBinding(t, local, key, baseUnix, baseUnix+86_400)}, EndsAtUnix: baseUnix + 86_400,
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -341,4 +345,24 @@ func TestRoomInviteCarriesTheAuthorityLeafCredential(t *testing.T) {
 			t.Fatalf("%s: a refused invite was journaled: %v %v", test.name, found, err)
 		}
 	}
+}
+
+// roomLeafBinding signs a leaf credential for a delegation and verifies it
+// on the room path, which is the only way to obtain a binding.
+func roomLeafBinding(t *testing.T, delegation identity.Delegation, key ed25519.PrivateKey, issued, expires uint64) group.LeafBinding {
+	t.Helper()
+	leaf := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x29}, ed25519.SeedSize))
+	device := "dev_" + delegation.AgentID[len("agent_"):]
+	credential, err := group.SignLeafCredential(group.LeafCredential{Network: delegation.Network, AgentID: delegation.AgentID,
+		EndpointID: delegation.EndpointID, DeviceID: device, DeviceSetDigest: canon.Digest([]byte("set")),
+		LeafSignaturePublicKey: leaf.Public().(ed25519.PublicKey), IssuedAtUnix: issued, ExpiresAtUnix: expires}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := e2ee.SetSummary{EndpointID: delegation.EndpointID, Digest: credential.DeviceSetDigest, DeviceIDs: []string{device}}
+	binding, err := group.VerifyRoomLeafCredential(delegation, credential, set, expires, time.Unix(int64(issued), 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return binding
 }
