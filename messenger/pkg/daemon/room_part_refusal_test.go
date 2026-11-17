@@ -3,6 +3,8 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +190,76 @@ func TestRoomRefusedMalformedPartZeroDropsTheLaterParts(t *testing.T) {
 	if answer.Result != carrierapi.ResultRefused || answer.Code != carrierapi.CodeFrameMalformed {
 		t.Fatalf("a malformed part 0: %s/%s", answer.Result, answer.Code)
 	}
+	requireNothingHeld(t, b)
+}
+
+// An older generation's part 0 arriving after a newer one was accepted, its
+// evidence refused, refuses only that frame: the object, its newest part-0
+// evidence and every stored part stay (section 11.3, the newest evidence is
+// kept).
+func TestRoomRefusedOlderPartZeroKeepsTheHeldObject(t *testing.T) {
+	scene := newJoinedSceneCut(t, roomRetention, refusalPartBytes)
+	b := scene.nodes[1]
+	frames := splitInto(t, scene, scene.a, relayframe.RoomCommit, 6)
+	if answer := b.d.relay.Deliver(context.Background(), scene.a.agent(), frames[0]); answer.Result != carrierapi.ResultAdmitted {
+		t.Fatalf("the newer part 0: %s/%s", answer.Result, answer.Code)
+	}
+	for _, frame := range frames[1:3] {
+		if answer := b.d.relay.Deliver(context.Background(), scene.a.agent(), frame); answer.Result != carrierapi.ResultAdmitted {
+			t.Fatalf("a later part: %s/%s", answer.Result, answer.Code)
+		}
+	}
+	held := storedParts(t, b)
+	older := scene.a
+	now := scene.clock.now()
+	older.evidence = evidenceFor(t, scene.a.node, scene.a.node.d.config.DeviceID, uint64(scene.start.Add(-55*time.Second).Unix()),
+		uint64(now.Add(-10*time.Second).Unix()))
+	decoded, err := relayframe.Decode(frames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := relayframe.Encode(relayframe.Frame{Kind: decoded.Kind, PartIndex: 0, PartCount: decoded.PartCount,
+		ObjectDigest: decoded.ObjectDigest, Card: decoded.Card, Evidence: older.evidence, Part: decoded.Part})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := b.d.relay.Deliver(context.Background(), scene.a.agent(), stale)
+	if answer.Result != carrierapi.ResultRefused || answer.Code != carrierapi.CodeEvidenceRefused {
+		t.Fatalf("the older part 0: %s/%s", answer.Result, answer.Code)
+	}
+	if n := storedParts(t, b); n != held {
+		t.Fatalf("%d parts stored after the older part 0, want %d", n, held)
+	}
+	if usage := b.d.relay.rooms.parts.Usage(); usage.Objects != 1 {
+		t.Fatalf("the held object was dropped: %+v", usage)
+	}
+}
+
+// A refusal whose drop the store cannot make answers retry, so the
+// redelivered part 0 is judged, and its object dropped, again.
+func TestRoomRefusalWhoseDropFailsIsRetried(t *testing.T) {
+	scene := newJoinedSceneCut(t, roomRetention, refusalPartBytes)
+	b := scene.nodes[1]
+	frames := splitInto(t, scene, scene.c, relayframe.RoomCommit, 6)
+	deliverLaterParts(t, b, scene.c.agent(), frames)
+	dir := filepath.Join(b.d.config.StateDir, "room-parts")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	restore := func() {
+		if !restored {
+			restored = true
+			if err := os.Chmod(dir, 0o700); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(restore)
+	if answer := b.d.relay.Deliver(context.Background(), scene.c.agent(), frames[0]); answer.Result != carrierapi.ResultRetry {
+		t.Fatalf("a refusal whose drop failed: %s/%s", answer.Result, answer.Code)
+	}
+	restore()
+	requireRejected(t, b, b.d.relay.Deliver(context.Background(), scene.c.agent(), frames[0]), fault.CodeNotAuthentic)
 	requireNothingHeld(t, b)
 }

@@ -426,6 +426,13 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 		}
 		peer, pinned, err := r.objectEvidence(roomID, kind, sender, frame.Evidence, now)
 		if err != nil {
+			// Several generations deliver part 0, and the newest evidence is
+			// kept: an older generation's evidence, refused (a rollback, an
+			// expiry), refuses only its own frame when the object already
+			// holds an accepted part 0, and leaves the object as it is.
+			if r.parts.HoldsFirstPart(sender, frame.ObjectDigest) {
+				return evidenceRefusal(err)
+			}
 			return r.refuseObject(sender, frame, evidenceRefusal(err))
 		}
 		if pinned {

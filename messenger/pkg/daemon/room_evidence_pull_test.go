@@ -396,3 +396,39 @@ func TestRoomEvidencePullCountsOnlyTheMembersOwnObjects(t *testing.T) {
 		t.Fatalf("%d requests to C, whose object waits", len(requests))
 	}
 }
+
+// A removed member's single Commit whose head's retention ended is never
+// deposited again (its envelopes would carry an expiry in the past), so it
+// does not keep the kind-4 pull to the removed member outstanding.
+func TestRoomEvidencePullEndsForARemovedMembersCommitPastItsRetention(t *testing.T) {
+	scene := newFanoutScene(t, 2, 2*time.Minute)
+	a, b := scene.nodes[0], scene.nodes[1]
+	agent := b.d.config.AgentID
+	objectsTo(t, a, agent)
+	staleEvidenceAt(t, scene, a, b)
+	if err := scene.rooms(0).RemoveRoomMember(context.Background(), testRoomID, agent); err != nil {
+		t.Fatal(err)
+	}
+	var latest uint64
+	for _, head := range mustHeads(t, a) {
+		if delivery, found := head.Member(agent); found && delivery.Once && head.RetainUntilUnix > latest {
+			latest = head.RetainUntilUnix
+		}
+	}
+	if latest == 0 {
+		t.Fatal("no single Commit to the removed member")
+	}
+	record, _ := fused(t, a)
+	past := time.Unix(int64(latest), 0).Add(time.Minute)
+	if scene.rooms(0).sendingStopped(record.RoomEndsAtUnix, past) {
+		t.Fatalf("the room's sending stops before the Commit's retention ends (end %d, past %d)", record.RoomEndsAtUnix, past.Unix())
+	}
+	// Before the retention ends the Commit waits; after it, nothing does.
+	if waits, err := scene.rooms(0).waitsOnEvidence(agent, scene.clock.now()); err != nil || !waits {
+		t.Fatalf("the removed member's Commit inside its retention: waits=%v %v", waits, err)
+	}
+	scene.clock.set(past)
+	if waits, err := scene.rooms(0).waitsOnEvidence(agent, scene.clock.now()); err != nil || waits {
+		t.Fatalf("a removed member's single Commit past its retention keeps the pull outstanding: waits=%v %v", waits, err)
+	}
+}

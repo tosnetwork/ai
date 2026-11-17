@@ -511,6 +511,11 @@ func (r *roomRuntime) handshakeWaitsOnEvidence(record eventlog.RoomMLSRecord, me
 		if !found || !delivery.Once || delivery.State != eventlog.RoomDeliveryPending {
 			continue
 		}
+		// Past its retention the Commit is never deposited again: its
+		// envelopes would carry an expiry already passed.
+		if seconds >= head.RetainUntilUnix {
+			continue
+		}
 		if _, err := r.relay.verifier.CheckStoredContact(member, now); err != nil {
 			if fault.CodeOf(err) == fault.CodeInternal {
 				return false, err

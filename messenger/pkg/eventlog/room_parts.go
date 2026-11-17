@@ -293,6 +293,21 @@ func (p *RoomParts) Settle(sender string, digest [sha256.Size]byte) error {
 	return nil
 }
 
+// HoldsFirstPart reports whether an object of a sender already holds an
+// accepted part 0: an incomplete one holding it, or a complete one the
+// caller has not settled.
+func (p *RoomParts) HoldsFirstPart(sender string, digest [sha256.Size]byte) bool {
+	if p == nil {
+		return false
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if _, settled := p.unsettled[roomPartKey{sender: sender, digest: digest}]; settled {
+		return true
+	}
+	return p.reassembler.HoldsFirstPart(sender, digest)
+}
+
 // Refuse drops one object of a sender that the caller refused at intake (its
 // part 0, or a later part, judged refused): the Reassembler's entry, every
 // stored part and an unsettled completion, so nothing of a refused object
