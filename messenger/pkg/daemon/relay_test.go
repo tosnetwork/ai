@@ -26,6 +26,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 )
 
@@ -93,10 +94,33 @@ var relayTestPolicy = directory.DescriptorPolicy{MaxEnvelopeBytes: 64 << 10, Max
 
 func relayCard(t *testing.T, agentID string) []byte {
 	t.Helper()
-	card, err := agentpacket.EncodeJSON(agentpacket.Packet{SenderAgentID: agentID,
-		RecipientAgentID: "agent_" + strings.Repeat("f", 64), CapabilityID: "cap_" + strings.Repeat("e", 64),
-		Sequence: 1, Nonce: [32]byte{1}, Payload: []byte("chat key card body"), CreatedAtUnix: 1,
-		SenderKeyID: [mldsa44.KeyIDSize]byte{2}, Signature: make([]byte, mldsa44.SignatureSize)})
+	// The window holds the relay tests' clocks, which start at 1,900,000,000.
+	return relayCardAt(t, agentID, 1, 1, 1_899_900_000, 1_899_900_000+uint64(agentpacketseal.MaxKeyCardLifetime/time.Second))
+}
+
+// relayCardAt is an unsigned chat key card of an Agent: a canonical key card
+// packet to the key-card audience, created at createdAt with a sequence,
+// valid from notBefore to notAfter. Its signature is all zero: the daemon
+// checks only a card's shape, Agent and window, and the carrier its
+// signature.
+func relayCardAt(t *testing.T, agentID string, createdAt, sequence, notBefore, notAfter uint64) []byte {
+	t.Helper()
+	key, err := agentpacketseal.NewPrivateKey(agentID, bytes.Repeat([]byte{0x4b}, agentpacketseal.PrivateKeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := key.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := agentpacketseal.KeyCardPacket(agentID, [mldsa44.KeyIDSize]byte{2}, sequence, [32]byte{1}, createdAt,
+		agentpacketseal.KeyCard{PublicKey: public, KeyID: key.KeyID, NotBeforeUnix: notBefore, NotAfterUnix: notAfter,
+			Relays: []string{"https://relay.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet.Signature = make([]byte, mldsa44.SignatureSize)
+	card, err := agentpacket.EncodeJSON(packet)
 	if err != nil {
 		t.Fatal(err)
 	}

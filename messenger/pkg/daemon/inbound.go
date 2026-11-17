@@ -28,6 +28,9 @@ type verifiedPeer struct {
 	Delegation identity.Delegation
 	EndpointID string
 	Bundles    []e2ee.Bundle
+	// Card is the chat card part 0 of the relay frame carried, if any. It
+	// is unverified: it binds to the frame's authenticated packet sender.
+	Card []byte
 }
 
 // peerVerifier establishes a sender's current Endpoint authority. The

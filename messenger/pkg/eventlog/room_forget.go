@@ -26,7 +26,7 @@ var ErrRoomStillHeld = errors.New("the room is still held or pending")
 // roomStateDirs are the per-room receive stores, each with file names that
 // begin with the room's hex.
 var roomStateDirs = []string{roomSequenceDir, roomGapDir, roomAppliedDir, roomReceivedDir, roomBufferDir, roomRemovedDir,
-	roomAddDir, roomSendDir, roomApplicationDir}
+	roomAddDir, roomSendDir, roomApplicationDir, roomCardDir}
 
 // ForgetRoomState deletes a room's receive state once the room is neither
 // held nor pending here. It reports how many records it deleted.

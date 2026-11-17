@@ -401,6 +401,10 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 			r.daemon.report("room part evidence", err)
 		}
 	}
+	if frame.PartIndex == 0 && firstPeer != nil {
+		// A member's newer card renews the authority's stored one.
+		r.refreshMemberCard(sender, frame.Card, now)
+	}
 	if result.Status != relayframe.PartComplete {
 		if firstPeer != nil {
 			r.commitMemberPeer(result.RoomID, *firstPeer, now)

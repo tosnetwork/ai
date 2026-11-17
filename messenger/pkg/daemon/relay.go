@@ -236,7 +236,13 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 	if err != nil {
 		return fault.Wrap(fault.CodePayloadMalformed, err)
 	}
-	frame, generation, err := r.ownFrame(relayframe.KindCopy, peer, object, false)
+	// A room.key-package carries the joiner's card always: the authority
+	// keeps it for the rosters of the Add (section 11.2).
+	requireCard, err := r.carriesKeyPackage(message.DeliveryID)
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, err)
+	}
+	frame, generation, err := r.ownFrame(relayframe.KindCopy, peer, object, requireCard)
 	if err != nil {
 		if errors.Is(err, relayframe.ErrContentTooLarge) {
 			return fault.Wrap(fault.CodeContentTooLarge, err)
@@ -277,6 +283,24 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 	default:
 		return carryRefusal(response.Code, now)
 	}
+}
+
+// carriesKeyPackage reports whether a delivery copy carries a
+// room.key-package Event.
+func (r *relayRuntime) carriesKeyPackage(deliveryID string) (bool, error) {
+	delivery, found, err := r.daemon.journal.LookupDeliveryCopy(deliveryID)
+	if err != nil || !found {
+		return false, err
+	}
+	payload, err := delivery.Payload()
+	if err != nil {
+		return false, err
+	}
+	event, err := envelope.DecodeEventJSON(payload)
+	if err != nil {
+		return false, err
+	}
+	return event.Kind == "room.key-package", nil
 }
 
 // redepositDelay is how long an envelope a relay accepted waits before its
@@ -703,7 +727,7 @@ func (r *relayRuntime) deliverCopy(ctx context.Context, sender string, frame rel
 		RecipientEndpointID: value.RecipientEndpointID, RecipientDeviceID: value.RecipientDeviceID,
 		ConversationID: value.ConversationID, Bootstrap: value.Bootstrap, AdmissionToken: value.AdmissionToken,
 		Ciphertext: value.Ciphertext, ExpiresAtUnix: value.ExpiresAtUnix}
-	result, peer, err := r.daemon.ReceiveRelay(ctx, message, sender, frame.Evidence)
+	result, peer, err := r.daemon.ReceiveRelay(ctx, message, sender, frame.Evidence, frame.Card)
 	if err != nil {
 		var refusal *relayRefusal
 		switch {
@@ -727,6 +751,9 @@ func (r *relayRuntime) deliverCopy(ctx context.Context, sender string, frame rel
 			r.daemon.report("relay evidence commit", commitErr)
 		} else if committed {
 			r.wake(sender)
+		}
+		if r.rooms != nil {
+			r.rooms.refreshMemberCard(sender, frame.Card, r.now())
 		}
 	}
 	ack, err := r.ackFrame(sender, value, result)
@@ -808,6 +835,9 @@ func (r *relayRuntime) deliverEvidence(sender string, frame relayframe.Frame) ca
 	}
 	if committed {
 		r.wake(sender)
+	}
+	if r.rooms != nil {
+		r.rooms.refreshMemberCard(sender, frame.Card, now)
 	}
 	r.pulls.Lock()
 	defer r.pulls.Unlock()
@@ -1039,7 +1069,7 @@ func (r *relayRefusal) Error() string { return string(r.code) + ": " + r.detail 
 // duplicate whatever came after it. The verified peer is returned so the
 // caller can commit it once Messenger's answer admits the sender.
 func (d *Daemon) ReceiveRelay(ctx context.Context, message dispatch.Message, packetSender string,
-	evidence []byte) (ReceiveResult, *directory.RelayPeer, error) {
+	evidence, card []byte) (ReceiveResult, *directory.RelayPeer, error) {
 	if err := d.receivable(ctx, message); err != nil {
 		return ReceiveResult{}, nil, &relayRefusal{code: carrierapi.CodeNotAccepted, detail: err.Error()}
 	}
@@ -1102,7 +1132,8 @@ func (d *Daemon) ReceiveRelay(ctx context.Context, message dispatch.Message, pac
 		if agentID != peer.AgentID {
 			return verifiedPeer{}, errors.New("relay copy names another sender than its evidence")
 		}
-		return verifiedPeer{Delegation: peer.Delegation, EndpointID: peer.Descriptor.EndpointID, Bundles: peer.Bundles}, nil
+		return verifiedPeer{Delegation: peer.Delegation, EndpointID: peer.Descriptor.EndpointID, Bundles: peer.Bundles,
+			Card: card}, nil
 	}
 	if !found {
 		result, err := d.receiveFirstContact(ctx, message, bootstrap, admission.RouteRelay, now, verify)

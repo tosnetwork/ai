@@ -422,30 +422,6 @@ func keyPackageEvent(t *testing.T, scene *operatorScene, index int) []byte {
 	return content
 }
 
-// TestRoomOperatorThirdMemberNeedsTheMembersCards records the open design
-// question: a roster entry carries the member's chat card, and the daemon
-// holds no peer's card, so the Add of a member into a room that already
-// holds another is refused, reported, and left for the next pass.
-func TestRoomOperatorThirdMemberNeedsTheMembersCards(t *testing.T) {
-	scene := newOperatorScene(t, 3)
-	a := scene.nodes[0]
-	scene.founded(t)
-	scene.invited(t, 1)
-	scene.joined(t, 1)
-	before, _ := fused(t, a)
-	scene.invited(t, 2)
-	scene.joined(t, 2)
-	if after, _ := fused(t, a); after.MLSEpoch != before.MLSEpoch {
-		t.Fatal("an Add whose rosters lack a member's card was committed")
-	}
-	if scene.reports[0].count(func(err error) bool { return errors.Is(err, ErrRoomMemberCardUnknown) }) == 0 {
-		t.Fatal("the missing card was not reported")
-	}
-	if adds, err := a.d.journal.RoomAdds(testRoomID, scene.clock.now()); err != nil || len(adds) != 1 || !adds[0].Ready() {
-		t.Fatalf("the ready add was not kept for the next pass: %+v %v", adds, err)
-	}
-}
-
 // TestRoomOperatorStopsNearTheRoomEnd applies D18 on the sender side: no
 // membership change within the last re-deposit interval before the end
 // minus the skew, and no sealing from the end minus the skew.
