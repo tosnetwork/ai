@@ -50,6 +50,14 @@ var (
 	// ErrRoomMemberRetention is raised when a member did not acknowledge a
 	// handshake object within the handshake retention.
 	ErrRoomMemberRetention = errors.New("a room member did not acknowledge a handshake object within the retention; its queue stopped and it should be removed")
+	// ErrRoomMemberCarrierRefused is raised when the carrier refused a
+	// handshake deposit to a member for good (not retry, peer-cap or a
+	// missing card): its queue stops.
+	ErrRoomMemberCarrierRefused = errors.New("the carrier refused a handshake object for a room member; its queue stopped")
+	// ErrRoomWithdrawalsPending is raised when a Remove's withdrawals of
+	// the removed member's in-flight generations were not all confirmed:
+	// the fan-out retries them.
+	ErrRoomWithdrawalsPending = errors.New("withdrawals to a removed room member are not confirmed yet; they are retried")
 )
 
 // fanoutBackoff is the in-memory wait of deposits the carrier answered
@@ -100,8 +108,12 @@ func (b *fanoutBackoff) clear(key string) {
 }
 
 // sweepHandshakes deposits what every queue of every room this
-// installation is the authority of has due.
+// installation is the authority of has due. It runs under the handling
+// lock, as every other path into fanOut does, so no deposit interleaves
+// with a Remove, an Add or an ack.
 func (r *roomRuntime) sweepHandshakes(ctx context.Context) {
+	r.handling.Lock()
+	defer r.handling.Unlock()
 	records, err := r.ledger.List()
 	if err != nil {
 		r.daemon.report("room fan-out", err)
@@ -114,14 +126,11 @@ func (r *roomRuntime) sweepHandshakes(ctx context.Context) {
 	}
 }
 
-// fanOut serves one room: each removed member's single Commit, and the
-// head of every member's queue.
+// fanOut serves one room: each removed member's single Commit, the
+// withdrawals still owed to removed members, and the head of every member's
+// queue. The caller holds the handling lock.
 func (r *roomRuntime) fanOut(ctx context.Context, record eventlog.RoomMLSRecord) {
 	now := r.now()
-	// D18: the authority's queues stop at the room's end minus the skew.
-	if r.sendingStopped(record.RoomEndsAtUnix, now) {
-		return
-	}
 	heads, err := r.daemon.journal.RoomOutboxHeads(record.RoomID)
 	if err != nil {
 		r.daemon.report("room fan-out "+record.RoomID, err)
@@ -130,13 +139,29 @@ func (r *roomRuntime) fanOut(ctx context.Context, record eventlog.RoomMLSRecord)
 	members := map[string]struct{}{}
 	for _, head := range heads {
 		for _, member := range head.Members {
-			if member.Once {
-				if member.State == eventlog.RoomDeliveryPending {
-					r.depositHandshake(ctx, record, head, member, now)
-				}
-				continue
+			if !member.Once {
+				members[member.AgentID] = struct{}{}
 			}
-			members[member.AgentID] = struct{}{}
+		}
+	}
+	// A member no longer in the room gets nothing more: the withdrawals of
+	// its in-flight generations are retried until the carrier confirms them
+	// (section 11.4), also past the room's end.
+	for member := range members {
+		if !containsAgent(record.Members, member) {
+			r.withdrawFromRemoved(ctx, record.RoomID, member, now)
+			delete(members, member)
+		}
+	}
+	// D18: the authority's queues stop at the room's end minus the skew.
+	if r.sendingStopped(record.RoomEndsAtUnix, now) {
+		return
+	}
+	for _, head := range heads {
+		for _, member := range head.Members {
+			if member.Once && member.State == eventlog.RoomDeliveryPending {
+				r.depositHandshake(ctx, record, head, member, now)
+			}
 		}
 	}
 	for member := range members {
@@ -155,8 +180,11 @@ func (r *roomRuntime) fanOut(ctx context.Context, record eventlog.RoomMLSRecord)
 		delivery, _ := head.Member(member)
 		if uint64(now.Unix()) >= head.RetainUntilUnix {
 			// The stop is recorded before the slot is settled, so the
-			// stop outlives the head's retirement.
-			r.stopQueue(record.RoomID, member, fault.CodeRetentionExceeded, ErrRoomMemberRetention, now)
+			// stop outlives the head's retirement; without it the slot
+			// stays for the next pass.
+			if !r.stopQueue(record.RoomID, member, fault.CodeRetentionExceeded, ErrRoomMemberRetention, now) {
+				continue
+			}
 			if _, err := r.daemon.journal.RoomOutboxAbandon(head.ObjectDigest, member, fault.CodeRetentionExceeded, now); err != nil {
 				r.daemon.report("room fan-out "+record.RoomID, err)
 			}
@@ -181,16 +209,24 @@ func (r *roomRuntime) queueStopped(roomID, member string) (bool, error) {
 }
 
 // stopQueue records a member's stopped queue and raises the owner notice
-// once.
-func (r *roomRuntime) stopQueue(roomID, member string, code fault.Code, notice error, now time.Time) {
-	if stopped, err := r.queueStopped(roomID, member); err == nil && stopped {
-		return
+// once. It reports whether the queue is stopped durably: a caller settles
+// the slot that stopped it only then, so a crash or a failed write never
+// leaves a settled head without its stop.
+func (r *roomRuntime) stopQueue(roomID, member string, code fault.Code, notice error, now time.Time) bool {
+	stopped, err := r.queueStopped(roomID, member)
+	if err != nil {
+		r.daemon.report("room fan-out "+roomID, err)
+		return false
+	}
+	if stopped {
+		return true
 	}
 	if err := r.daemon.journal.StopRoomMemberQueue(roomID, member, code, now); err != nil {
 		r.daemon.report("room fan-out "+roomID, err)
-		return
+		return false
 	}
 	r.daemon.report("room "+roomID+" member "+member, notice)
+	return true
 }
 
 // handshakeKey names one (object, member) for the backoff.
@@ -292,6 +328,15 @@ func (r *roomRuntime) depositHandshake(ctx context.Context, record eventlog.Room
 			return
 		}
 		if response.Result != carrierapi.ResultCarried {
+			// A refusal for good: a queued member's queue stops, with its
+			// notice, before the head is abandoned, so the next object
+			// does not go out behind it. The removed member's single
+			// Commit has no queue; its refusal is reported.
+			if delivery.Once {
+				r.daemon.report("room "+record.RoomID+" member "+member, ErrRoomMemberCarrierRefused)
+			} else if !r.stopQueue(record.RoomID, member, fault.CodeRejected, ErrRoomMemberCarrierRefused, now) {
+				return
+			}
 			if _, err := r.daemon.journal.RoomOutboxAbandon(head.ObjectDigest, member, fault.CodeRejected, now); err != nil {
 				r.daemon.report("room fan-out "+record.RoomID, err)
 			}
@@ -371,34 +416,86 @@ func (r *roomRuntime) roomAckReceived(ctx context.Context, sender string, frame 
 	}
 	digest := hex.EncodeToString(ack.ObjectDigest[:])
 	stateless := len(ack.EpochAuthenticator) == 0
-	result, err := r.daemon.journal.RoomOutboxAcked(digest, sender, eventlog.RoomAckOutcome(ack.Outcome), ack.Code, stateless, now)
+	// The settlement, the stop and the next deposit are serialized with
+	// every other fan-out path.
+	r.handling.Lock()
+	defer r.handling.Unlock()
+	if ack.Outcome == relayframe.OutcomeRejected {
+		// The stop is written before the slot is settled: a settled
+		// rejection never leaves the queue running.
+		stops, lost, err := r.rejectionStops(ack.RoomID, digest, sender, stateless)
+		if err != nil {
+			return carrierapi.Retry()
+		}
+		notice := ErrRoomMemberRejected
+		if lost {
+			notice = ErrRoomMemberLostState
+		}
+		if stops && !r.stopQueue(ack.RoomID, sender, ack.Code, notice, now) {
+			return carrierapi.Retry()
+		}
+	}
+	_, err = r.daemon.journal.RoomOutboxAcked(digest, sender, eventlog.RoomAckOutcome(ack.Outcome), ack.Code, stateless, now)
 	switch {
 	case err == nil:
 	case errors.Is(err, eventlog.ErrUnknown), errors.Is(err, eventlog.ErrNotPending):
 		return carrierapi.Response{Result: carrierapi.ResultIgnored}
+	case ack.Outcome == relayframe.OutcomeRejected:
+		// The stop holds; the repeat of the ack settles the slot.
+		return carrierapi.Retry()
 	default:
 		return carrierapi.Refusal(carrierapi.CodeFrameMalformed)
 	}
-	switch {
-	case result.LostState:
-		r.stopQueue(ack.RoomID, sender, ack.Code, ErrRoomMemberLostState, now)
-	case ack.Outcome == relayframe.OutcomeRejected:
-		r.stopQueue(ack.RoomID, sender, ack.Code, ErrRoomMemberRejected, now)
-	default:
+	if ack.Outcome != relayframe.OutcomeRejected {
 		// The member's next object is due now.
 		r.fanOut(ctx, record)
 	}
 	return carrierapi.Response{Result: carrierapi.ResultApplied}
 }
 
-// withdrawFromRemoved withdraws the in-flight handshake generations to a
-// removed member and abandons its slots (section 11.4); the removing
-// Commit, addressed once, is left to its single deposit.
-func (r *roomRuntime) withdrawFromRemoved(ctx context.Context, roomID, member string, now time.Time) error {
+// rejectionStops reports whether a member's rejection of an object stops
+// its queue: only when it settles a slot of that member's queue. An ack of
+// an unknown object, of a removed member's single Commit or of an object
+// never carried to the member stops nothing and is answered by the
+// settlement itself. lost reports a stateless rejection of a Commit or
+// roster: lost state.
+func (r *roomRuntime) rejectionStops(roomID, digest, member string, stateless bool) (stops, lost bool, err error) {
 	heads, err := r.daemon.journal.RoomOutboxHeads(roomID)
 	if err != nil {
-		return err
+		return false, false, err
 	}
+	for _, head := range heads {
+		if head.ObjectDigest != digest {
+			continue
+		}
+		delivery, found := head.Member(member)
+		if !found || delivery.Once ||
+			delivery.State != eventlog.RoomDeliveryCarried && delivery.State != eventlog.RoomDeliveryRejected {
+			return false, false, nil
+		}
+		return true, stateless && head.Type != eventlog.RoomObjectWelcome, nil
+	}
+	return false, false, nil
+}
+
+// withdrawFromRemoved withdraws the in-flight handshake generations to a
+// removed member and abandons its slots (section 11.4); the removing
+// Commit, addressed once, is left to its single deposit. Both the recorded
+// generation and the next one are withdrawn: a deposit cut short by a
+// retry answer leaves parts of a generation that was never recorded. A slot
+// is abandoned only once the carrier confirmed every withdrawal (withdrawn,
+// or ignored for a key it does not hold); otherwise it stays, nothing more
+// is deposited to the member, and the next fan-out pass tries again, until
+// the head's retention ends, the expiry every one of its envelopes carries.
+// It reports whether every slot is settled. The caller holds the handling
+// lock.
+func (r *roomRuntime) withdrawFromRemoved(ctx context.Context, roomID, member string, now time.Time) bool {
+	heads, err := r.daemon.journal.RoomOutboxHeads(roomID)
+	if err != nil {
+		r.daemon.report("room fan-out "+roomID, err)
+		return false
+	}
+	settled := true
 	for _, head := range heads {
 		delivery, found := head.Member(member)
 		if !found || delivery.Once {
@@ -407,25 +504,45 @@ func (r *roomRuntime) withdrawFromRemoved(ctx context.Context, roomID, member st
 		if delivery.State != eventlog.RoomDeliveryPending && delivery.State != eventlog.RoomDeliveryCarried {
 			continue
 		}
-		if delivery.Generation != 0 {
-			sizes, err := relayframe.RoomCut(uint8(head.Type), int(head.Length), r.partBytes)
-			if err != nil {
-				return err
-			}
-			for index := range sizes {
-				key, err := relayframe.RoomIdempotencyKey(head.ObjectDigest, member, delivery.Generation, uint8(index))
-				if err != nil {
-					return err
-				}
-				if _, err := r.relay.carrier.Withdraw(ctx, member, key); err != nil {
-					return err
-				}
-			}
+		if uint64(now.Unix()) < head.RetainUntilUnix && !r.withdrawGenerations(ctx, head, delivery) {
+			settled = false
+			continue
 		}
 		if _, err := r.daemon.journal.RoomOutboxAbandon(head.ObjectDigest, member, fault.CodeNotARoomMember, now); err != nil &&
 			!errors.Is(err, eventlog.ErrNotPending) {
-			return err
+			r.daemon.report("room fan-out "+roomID, err)
+			settled = false
 		}
 	}
-	return nil
+	return settled
+}
+
+// withdrawGenerations withdraws every part of a slot's recorded generation
+// and of the next, reporting whether the carrier confirmed each one.
+func (r *roomRuntime) withdrawGenerations(ctx context.Context, head eventlog.RoomOutboxHead, delivery eventlog.RoomMemberDelivery) bool {
+	sizes, err := relayframe.RoomCut(uint8(head.Type), int(head.Length), r.partBytes)
+	if err != nil {
+		r.daemon.report("room fan-out "+head.RoomID, err)
+		return false
+	}
+	confirmed := true
+	for _, generation := range []uint32{delivery.Generation, delivery.Generation + 1} {
+		// Generation 0 is never deposited, and the next of the largest
+		// generation wraps to it.
+		if generation == 0 {
+			continue
+		}
+		for index := range sizes {
+			key, err := relayframe.RoomIdempotencyKey(head.ObjectDigest, delivery.AgentID, generation, uint8(index))
+			if err != nil {
+				r.daemon.report("room fan-out "+head.RoomID, err)
+				return false
+			}
+			response, err := r.relay.carrier.Withdraw(ctx, delivery.AgentID, key)
+			if err != nil || response.Result != carrierapi.ResultWithdrawn && response.Result != carrierapi.ResultIgnored {
+				confirmed = false
+			}
+		}
+	}
+	return confirmed
 }

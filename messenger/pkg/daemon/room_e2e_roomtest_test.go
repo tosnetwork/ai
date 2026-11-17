@@ -163,7 +163,7 @@ func (c mailCarrier) Withdraw(_ context.Context, recipient, key string) (carrier
 	c.box.mutex.Lock()
 	defer c.box.mutex.Unlock()
 	c.box.withdrawLocked(c.from, recipient, key)
-	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultApplied}, nil
+	return carrierapi.Withdrawn(), nil
 }
 
 func (b *mailbox) withdrawLocked(from, to, key string) {

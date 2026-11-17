@@ -824,9 +824,10 @@ func (r *roomRuntime) RemoveRoomMember(ctx context.Context, roomID, agentID stri
 		return err
 	}
 	// Its in-flight generations are withdrawn, and the removing Commit goes
-	// out at once.
-	if err := r.withdrawFromRemoved(ctx, roomID, agentID, now); err != nil {
-		return err
+	// out at once. The Remove is committed: withdrawals the carrier did not
+	// confirm are retried by the fan-out, never by another Remove.
+	if !r.withdrawFromRemoved(ctx, roomID, agentID, now) {
+		r.daemon.report("room "+roomID+" member "+agentID, ErrRoomWithdrawalsPending)
 	}
 	if current, found, err := r.ledger.Current(roomID); err == nil && found {
 		r.fanOut(ctx, current)

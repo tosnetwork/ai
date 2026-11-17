@@ -960,9 +960,13 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
    expired invite, are refused, and each refusal leaves C's journal, contacts,
    rollback boundary and chat-card store unchanged.
 2. **Creation and two Welcomes (live).** A adds B, then C (two Commits, two
-   Welcomes, KeyPackages over the 1:1 sessions); C's Welcome is split by the
-   recorded test part size (11.1) and reassembled. All three exchange
-   messages, each applied once.
+   Welcomes, KeyPackages over the 1:1 sessions); a handshake object of C's
+   (its full roster, the largest) is split by the recorded test part size
+   (11.1) and reassembled. The recorded part size must let the largest
+   handshake object fit in the 8-part cap: in a three-member room C's
+   Welcome measures 1,874 bytes and C's full roster 22,396 bytes, so the part
+   size is at least 2,800 bytes and the Welcome is not split. All three
+   exchange messages, each applied once.
 3. **Catch-up in epoch order (live).** C stopped, A commits twice
    (refreshes); on restart C gets the second only after acking the first,
    applies both in order, and opens buffered newer-epoch messages.
@@ -1598,8 +1602,11 @@ and 1,564,542 stored bytes; that figure is an upper bound, never reached.)
 **Test part size:** a test build MAY set
 `room_part_bytes` P in 1,024 .. 162,744, cutting every part of a *handshake*
 object at P (application objects keep the production rule); an object that
-would need more than 8 parts at P is refused at the sender. The record states
-P, and a production build refuses the setting.
+would need more than 8 parts at P is refused at the sender (staged, never
+deposited, abandoned at the handshake retention), so P must let the largest
+handshake object fit in 8 parts: a roster entry is about 11 KiB (a
+three-member room's full roster to C measures 22,396 bytes, P ≥ 2,800). The
+record states P, and a production build refuses the setting.
 
 **Application objects are never split.** Their Event plaintext is at most
 131,072 bytes, checked before the MLS seal (as 4 does for copies, refused

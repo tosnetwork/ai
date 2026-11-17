@@ -81,7 +81,7 @@ func (c *recordingCarrier) Withdraw(_ context.Context, recipient, key string) (c
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	c.withdrawn = append(c.withdrawn, carried{recipient: recipient, key: key})
-	return carrierapi.Response{Schema: carrierapi.ResponseSchema, Result: carrierapi.ResultApplied}, nil
+	return carrierapi.Withdrawn(), nil
 }
 
 func (c *recordingCarrier) withdrawals() []carried {

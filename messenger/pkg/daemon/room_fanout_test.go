@@ -392,13 +392,19 @@ func TestRoomFanOutRemoveWithdrawsTheRemovedMembersGenerations(t *testing.T) {
 	if err := scene.rooms(0).RemoveRoomMember(context.Background(), testRoomID, agent); err != nil {
 		t.Fatal(err)
 	}
+	// The Welcome's carried generation and the next one, and the pending
+	// roster's first, every part to the removed member.
 	withdrawn := a.carrier.withdrawals()
-	if len(withdrawn) != len(welcome) {
-		t.Fatalf("%d withdrawals, want the Welcome's %d parts", len(withdrawn), len(welcome))
-	}
+	first, _ := relayframe.Decode(welcome[0].frame)
 	for index, frame := range welcome {
-		if withdrawn[index].key != frame.key || withdrawn[index].recipient != agent {
-			t.Fatalf("withdrawal %d: %+v", index, withdrawn[index])
+		next, _ := relayframe.RoomIdempotencyKey(eventlogDigest(first.ObjectDigest), agent, 2, uint8(index))
+		if !withdrawnKey(withdrawn, frame.key) || !withdrawnKey(withdrawn, next) {
+			t.Fatalf("part %d of the Welcome's generations was not withdrawn: %+v", index, withdrawn)
+		}
+	}
+	for _, record := range withdrawn {
+		if record.recipient != agent {
+			t.Fatalf("a withdrawal to another member: %+v", record)
 		}
 	}
 	for _, head := range mustHeads(t, a) {
