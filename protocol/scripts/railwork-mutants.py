@@ -27,6 +27,9 @@ one alone changes no outcome:
   by the header check, and canonical non-empty Base64 never decodes empty;
 - the Receipt rebuild in DecodeReceipt: the nativecore decoder is exact,
   and a non-canonical cell could not hash to the finalized response hash.
+- the one-root count in DecodeReceipt: a BOC with a second root is never
+  the canonical encoding of its first root, so the canonical-encoding check
+  refuses it as well.
 """
 
 import argparse
@@ -173,10 +176,10 @@ MUTANTS = [
      "if hash != finalizedResponseHash {",
      "if false && hash != finalizedResponseHash {",
      "TestBuyerRefusesAResultThatDoesNotBindItsPurchase"),
-    ("receipt-single-root", "receipt.go",
-     "if err != nil || len(roots) != 1 || roots[0] == nil {",
-     "if err != nil || len(roots) == 0 || roots[0] == nil {",
-     "TestAReceiptBOCWithTwoRootsIsRefused"),
+    ("receipt-canonical-encoding", "receipt.go",
+     "if !bytes.Equal(root.ToBOC(), boc) {",
+     "if false && !bytes.Equal(root.ToBOC(), boc) {",
+     "TestAReceiptBOCMustBeTheCanonicalSingleRootEncoding"),
     ("accept-header-hash", "receipt.go",
      "if result.Header.ResponseHash != hex.EncodeToString(hash[:]) {",
      "if false && result.Header.ResponseHash != hex.EncodeToString(hash[:]) {",

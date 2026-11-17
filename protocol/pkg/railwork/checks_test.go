@@ -363,6 +363,42 @@ func TestAReceiptBOCWithTwoRootsIsRefused(t *testing.T) {
 	}
 }
 
+// A Receipt BOC must be the canonical encoding of its cell: the same cell
+// serialized without the CRC, with an index, with trailing bytes or next to
+// a second root is refused, although each hashes to the finalized response.
+func TestAReceiptBOCMustBeTheCanonicalSingleRootEncoding(t *testing.T) {
+	document := loadVectors(t)
+	finalized := mustHex32(t, document.Receipt.ResponseHashHex)
+	canonical := vectorResult(t, document).Receipt
+	root, err := cell.FromBOC(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(root.ToBOC(), canonical) {
+		t.Fatal("the vector Receipt is not the canonical encoding")
+	}
+	extra := cell.BeginCell().MustStoreUInt(7, 8).EndCell()
+	variants := map[string][]byte{
+		"two roots":      cell.ToBOCWithFlags([]*cell.Cell{root, extra}, true),
+		"without crc32":  root.ToBOCWithFlags(false),
+		"with index":     root.ToBOCWithFlags(true, true),
+		"trailing bytes": append(bytes.Clone(canonical), 0, 0, 0),
+	}
+	for name, boc := range variants {
+		if bytes.Equal(boc, canonical) {
+			t.Fatalf("%s: the variant has the canonical bytes", name)
+		}
+		if _, _, err := DecodeReceipt(boc); !errors.Is(err, ErrResultNotAccepted) {
+			t.Errorf("%s: DecodeReceipt err=%v", name, err)
+		}
+		result := vectorResult(t, document)
+		result.Receipt = boc
+		if err := ValidateResult(result, vectorReceiptBinding(t, document), finalized); !errors.Is(err, ErrResultNotAccepted) {
+			t.Errorf("%s: ValidateResult err=%v", name, err)
+		}
+	}
+}
+
 func TestArtifactMustHoldExactlyItsOutputAndReport(t *testing.T) {
 	output, report := [2]string{"output.log", "ok\n"}, [2]string{"report.json", "{}\n"}
 	if gotOutput, gotReport, err := ArtifactMembers(tarOf(t, report, output)); err != nil ||

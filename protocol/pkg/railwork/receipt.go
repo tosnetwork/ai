@@ -76,8 +76,11 @@ func BuildReceipt(binding ReceiptBinding, outcome Outcome) (*cell.Cell, [32]byte
 	return root, responseHash, nil
 }
 
-// DecodeReceipt parses a canonical single-root SoftwareWorkReceiptV1 BOC of
-// at most MaxReceiptBytes and returns its fields and cell hash.
+// DecodeReceipt parses a SoftwareWorkReceiptV1 BOC of at most
+// MaxReceiptBytes and returns its fields and cell hash. The BOC must be the
+// canonical single-root encoding of its cell (the bytes Cell.ToBOC gives):
+// another serialization of the same cell, such as one without the CRC, with
+// an index or with trailing bytes, is refused like any other bytes.
 func DecodeReceipt(boc []byte) (nativecore.SoftwareWorkReceiptV1, [32]byte, error) {
 	var hash [32]byte
 	if len(boc) == 0 || len(boc) > MaxReceiptBytes {
@@ -90,6 +93,9 @@ func DecodeReceipt(boc []byte) (nativecore.SoftwareWorkReceiptV1, [32]byte, erro
 		return nativecore.SoftwareWorkReceiptV1{}, hash, notAccepted("the Receipt BOC does not decode to exactly one root")
 	}
 	root := roots[0]
+	if !bytes.Equal(root.ToBOC(), boc) {
+		return nativecore.SoftwareWorkReceiptV1{}, hash, notAccepted("the Receipt BOC is not the canonical encoding of its cell")
+	}
 	receipt, err := nativecore.DecodeSoftwareWorkReceiptCellV1(root)
 	if err != nil {
 		return nativecore.SoftwareWorkReceiptV1{}, hash, refuseWith(RefusalResultNotAccepted, "the Receipt does not decode", err)
