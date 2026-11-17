@@ -117,6 +117,17 @@ func TestRoomReceiverJoinsAppliesAndLearnsInOrder(t *testing.T) {
 	if admitted := scene.cards[1].of(testRoomID); len(admitted) != 2 {
 		t.Fatalf("room cards admitted: %v", admitted)
 	}
+	// Every admission names the fused record's room end, so the carrier
+	// drops it on its own once the room is over (D18).
+	ends := scene.cards[1].endsOf(testRoomID)
+	if len(ends) == 0 {
+		t.Fatal("no room-cards admission was made")
+	}
+	for _, end := range ends {
+		if end != record.RoomEndsAtUnix {
+			t.Fatalf("a room-cards admission named end %d, the room ends at %d", end, record.RoomEndsAtUnix)
+		}
+	}
 	for _, member := range []roomMember{scene.a, scene.c} {
 		if _, found, err := b.d.journal.LoadRelayEvidence(member.agent()); err != nil || !found {
 			t.Fatalf("B committed no evidence of %s: %v", member.agent(), err)

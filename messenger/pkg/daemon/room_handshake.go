@@ -451,7 +451,7 @@ func (r *roomRuntime) handleRoster(in roomInbound) carrierapi.Response {
 		// Learning is idempotent; the redelivered roster learns it again.
 		return carrierapi.Retry()
 	}
-	r.admitRosterRendezvous(in, learned)
+	r.admitRosterRendezvous(in, record.RoomEndsAtUnix, learned)
 	// The roster taught credentials: the objects held for them are opened,
 	// and those of senders it did not teach are refused (section 11.8).
 	r.releaseBuffered(roomID, true, in.now)
@@ -598,15 +598,17 @@ func memberLeaf(leaves []group.MLSMember, agentID string) (group.MLSMember, bool
 // admitRosterRendezvous commits the evidence and admits the cards a roster
 // taught, after the credentials are durable. Neither is authority, so a
 // failure here is reported and the roster still stands: the kind-4 pull
-// repairs evidence, and part 0 of later room traffic renews cards.
-func (r *roomRuntime) admitRosterRendezvous(in roomInbound, learned rosterRendezvous) {
+// repairs evidence, and part 0 of later room traffic renews cards. The
+// admission carries the fused record's room end, so the carrier drops it on
+// its own once the room is over (D18), even if no forget ever reaches it.
+func (r *roomRuntime) admitRosterRendezvous(in roomInbound, roomEndsAtUnix uint64, learned rosterRendezvous) {
 	for _, peer := range learned.peers {
 		r.commitMemberPeer(in.object.RoomID, peer, in.now)
 	}
 	if len(learned.cards) == 0 {
 		return
 	}
-	response, err := r.cards.RoomCards(in.ctx, in.object.RoomID, learned.cards)
+	response, err := r.cards.RoomCards(in.ctx, in.object.RoomID, roomEndsAtUnix, learned.cards)
 	if err != nil {
 		r.daemon.report("room cards", err)
 		return

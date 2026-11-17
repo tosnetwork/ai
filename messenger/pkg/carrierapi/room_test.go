@@ -3,7 +3,10 @@ package carrierapi
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,7 +33,7 @@ func maximalCards(count int) []RoomCard {
 // idempotency key; neither carries a frame.
 func TestRoomCardsAndWithdrawRequestsAreStrict(t *testing.T) {
 	valid := []Request{
-		{Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: maximalCards(MaxRoomCards)},
+		{Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd, RoomCards: maximalCards(MaxRoomCards)},
 		{Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsForget, ForgetAgentIDs: []string{agentA, agentB}},
 		{Schema: RequestSchema, Op: OpWithdraw, RecipientAgentID: agentA, IdempotencyKey: keyOne},
 	}
@@ -46,14 +49,14 @@ func TestRoomCardsAndWithdrawRequestsAreStrict(t *testing.T) {
 	oversizedCard := maximalCards(1)
 	oversizedCard[0].CardBase64 = base64.StdEncoding.EncodeToString(make([]byte, relayframe.MaxCardBytes+1))
 	invalid := map[string]Request{
-		"no room":         {Schema: RequestSchema, Op: OpRoomCards, RoomCardsAction: RoomCardsAdmit, RoomCards: maximalCards(1)},
+		"no room":         {Schema: RequestSchema, Op: OpRoomCards, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd, RoomCards: maximalCards(1)},
 		"no action":       {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCards: maximalCards(1)},
-		"no cards":        {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit},
-		"32 cards":        {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: maximalCards(MaxRoomCards + 1)},
-		"oversized card":  {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: oversizedCard},
-		"empty card":      {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: []RoomCard{{AgentID: agentA}}},
-		"duplicate card":  {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: append(maximalCards(1), maximalCards(1)...)},
-		"admit forgets":   {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: maximalCards(1), ForgetAgentIDs: []string{agentA}},
+		"no cards":        {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd},
+		"32 cards":        {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd, RoomCards: maximalCards(MaxRoomCards + 1)},
+		"oversized card":  {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd, RoomCards: oversizedCard},
+		"empty card":      {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd, RoomCards: []RoomCard{{AgentID: agentA}}},
+		"duplicate card":  {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd, RoomCards: append(maximalCards(1), maximalCards(1)...)},
+		"admit forgets":   {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomEndsAtUnix: testRoomEnd, RoomCards: maximalCards(1), ForgetAgentIDs: []string{agentA}},
 		"forget nothing":  {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsForget},
 		"forget twice":    {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsForget, ForgetAgentIDs: []string{agentA, agentA}},
 		"cards frame":     {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsForget, ForgetAgentIDs: []string{agentA}, FrameBase64: frameBase64()},
@@ -144,9 +147,13 @@ func TestRoomCardsAndWithdrawOverTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := client.RoomCards(ctx, roomID, maximalCards(MaxRoomCards))
+	end := uint64(time.Now().Add(24 * time.Hour).Unix())
+	response, err := client.RoomCards(ctx, roomID, end, maximalCards(MaxRoomCards))
 	if err != nil || response.Result != ResultApplied || len(response.RefusedAgentIDs) != 1 || response.RefusedAgentIDs[0] != roomAgent(1) {
 		t.Fatalf("admit: %+v %v", response, err)
+	}
+	if len(handler.carried) != 1 || handler.carried[0].RoomEndsAtUnix != end {
+		t.Fatalf("the carrier was not handed the room end: %+v", handler.carried)
 	}
 	if response, err := client.ForgetRoomCards(ctx, roomID, []string{agentA}); err != nil || response.Result != ResultApplied {
 		t.Fatalf("forget: %+v %v", response, err)
@@ -159,5 +166,148 @@ func TestRoomCardsAndWithdrawOverTheSocket(t *testing.T) {
 	}
 	if response, err := client.Withdraw(ctx, agentB, keyOne); err != nil || response.Result != ResultRetry {
 		t.Fatalf("a mismatched withdraw answer: %+v %v", response, err)
+	}
+}
+
+// testRoomEnd is a room end the codec accepts; no clock bounds it there.
+const testRoomEnd uint64 = 1_800_000_000
+
+// The room end belongs to a room-cards admission only: an admission needs
+// one, and a forget or any other operation that names one is refused.
+func TestRoomEndIsNamedByAdmissionsOnly(t *testing.T) {
+	admit := Request{Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: maximalCards(1)}
+	if err := ValidateRequest(admit); !errors.Is(err, ErrRoomEnd) {
+		t.Fatalf("an admission without a room end: %v", err)
+	}
+	for _, end := range []uint64{1, testRoomEnd, math.MaxUint64} {
+		admit.RoomEndsAtUnix = end
+		if err := ValidateRequest(admit); err != nil {
+			t.Fatalf("an admission ending at %d: %v", end, err)
+		}
+	}
+	invalid := map[string]Request{
+		"forget":       {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsForget, ForgetAgentIDs: []string{agentA}},
+		"no action":    {Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCards: maximalCards(1)},
+		"withdraw":     {Schema: RequestSchema, Op: OpWithdraw, RecipientAgentID: agentA, IdempotencyKey: keyOne},
+		"carry":        {Schema: RequestSchema, Op: OpCarry, RecipientAgentID: agentA, IdempotencyKey: keyOne, ExpiresAtUnix: 1, FrameBase64: frameBase64()},
+		"deliver":      {Schema: RequestSchema, Op: OpDeliver, PacketSenderAgentID: agentA, FrameBase64: frameBase64()},
+		"delivery-ack": {Schema: RequestSchema, Op: OpDeliveryAck, PacketSenderAgentID: agentA, FrameBase64: frameBase64()},
+	}
+	for name, request := range invalid {
+		if name != "no action" {
+			if err := ValidateRequest(request); err != nil {
+				t.Fatalf("%s without a room end: %v", name, err)
+			}
+		}
+		request.RoomEndsAtUnix = testRoomEnd
+		if err := ValidateRequest(request); err == nil {
+			t.Fatalf("%s naming a room end was accepted", name)
+		}
+		encoded, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := DecodeRequest(encoded); err == nil {
+			t.Fatalf("%s naming a room end decoded", name)
+		}
+	}
+}
+
+// A room end lies at most 30 days and 1 h past the clock; an end already
+// past is valid (the carrier's sweep drops it).
+func TestValidateRoomEndBoundsTheEndByTheClock(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	latest := uint64(now.Unix()) + MaxRoomLifetimeSeconds + RoomEndSlackSeconds
+	if MaxRoomLifetimeSeconds != 30*24*3600 || RoomEndSlackSeconds != 3600 {
+		t.Fatal("the room end bounds differ from D18 and the largest clock skew")
+	}
+	for _, test := range []struct {
+		end   uint64
+		now   time.Time
+		valid bool
+	}{
+		{latest, now, true},
+		{latest + 1, now, false},
+		{latest - 1, now, true},
+		{uint64(now.Unix()), now, true},
+		{1, now, true},
+		{0, now, false},
+		{math.MaxUint64, now, false},
+		{1, time.Time{}, false},
+		{1, time.Unix(-1, 0), false},
+		{1<<62 + MaxRoomLifetimeSeconds + RoomEndSlackSeconds, time.Unix(1<<62, 0), true},
+		{1<<62 + MaxRoomLifetimeSeconds + RoomEndSlackSeconds + 1, time.Unix(1<<62, 0), false},
+	} {
+		if err := ValidateRoomEnd(test.end, test.now); (err == nil) != test.valid {
+			t.Fatalf("end %d at %v: %v, want valid=%v", test.end, test.now, err, test.valid)
+		}
+	}
+}
+
+// The carrier drops an admission at the room end plus the slack.
+func TestRoomAdmissionDropsAtTheEndPlusTheSlack(t *testing.T) {
+	for _, test := range []struct {
+		end, at uint64
+		ok      bool
+	}{
+		{testRoomEnd, testRoomEnd + 3600, true},
+		{1, 3601, true},
+		{math.MaxUint64 - 3600, math.MaxUint64, true},
+		{math.MaxUint64 - 3599, 0, false},
+		{0, 0, false},
+	} {
+		if at, ok := RoomAdmissionDropAtUnix(test.end); at != test.at || ok != test.ok {
+			t.Fatalf("end %d: %d %v", test.end, at, ok)
+		}
+	}
+}
+
+// Both ends that own a clock bound the room end: the client sends nothing
+// beyond it, and the server hands its handler nothing beyond it.
+func TestRoomEndBeyondTheClockIsRefusedAtBothEnds(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	latest := uint64(now.Unix()) + MaxRoomLifetimeSeconds + RoomEndSlackSeconds
+	path := filepath.Join(t.TempDir(), "run", "carrier.sock")
+	listener, err := Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	handler := &recordingHandler{}
+	server, err := NewServer(handler, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.now = func() time.Time { return now }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = server.Serve(ctx, listener) }()
+	client, err := NewClient(path, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.now = func() time.Time { return now }
+	for _, end := range []uint64{0, latest + 1} {
+		if _, err := client.RoomCards(ctx, roomID, end, maximalCards(1)); !errors.Is(err, ErrRoomEnd) {
+			t.Fatalf("the client sent an admission ending at %d: %v", end, err)
+		}
+	}
+	if response, err := client.RoomCards(ctx, roomID, latest, maximalCards(1)); err != nil || response.Result != ResultApplied {
+		t.Fatalf("an admission at the latest end: %+v %v", response, err)
+	}
+	if len(handler.carried) != 1 || handler.carried[0].RoomEndsAtUnix != latest {
+		t.Fatalf("the carrier was handed: %+v", handler.carried)
+	}
+	// A client whose clock runs ahead is caught by the server.
+	beyond, err := json.Marshal(Request{Schema: RequestSchema, Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit,
+		RoomEndsAtUnix: latest + 1, RoomCards: maximalCards(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op, response := server.Handle(ctx, beyond); op != OpRoomCards || response.Result != ResultRefused || response.Code != CodeInvalidRequest {
+		t.Fatalf("the server took an admission beyond its clock: %s %+v", op, response)
+	}
+	if len(handler.carried) != 1 {
+		t.Fatalf("the handler saw an admission beyond the clock: %+v", handler.carried)
 	}
 }

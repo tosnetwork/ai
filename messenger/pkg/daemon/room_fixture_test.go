@@ -64,17 +64,28 @@ type roomCardsCarrier struct {
 	mutex     sync.Mutex
 	admitted  map[string][]string
 	forgotten map[string][]string
+	// ends holds the room end each admission named, in call order.
+	ends map[string][]uint64
 	// failForgets makes that many forget calls fail, as an unreachable
 	// carrier would.
 	failForgets int
 }
 
-func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, cards []carrierapi.RoomCard) (carrierapi.Response, error) {
+func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, roomEndsAtUnix uint64,
+	cards []carrierapi.RoomCard) (carrierapi.Response, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+	// The client refuses an admission without a room end, before it
+	// reaches the carrier.
+	if err := carrierapi.ValidateRequest(carrierapi.Request{Schema: carrierapi.RequestSchema, Op: carrierapi.OpRoomCards,
+		RoomID: roomID, RoomCardsAction: carrierapi.RoomCardsAdmit, RoomEndsAtUnix: roomEndsAtUnix, RoomCards: cards}); err != nil {
+		return carrierapi.Response{}, err
+	}
 	if c.admitted == nil {
 		c.admitted = map[string][]string{}
+		c.ends = map[string][]uint64{}
 	}
+	c.ends[roomID] = append(c.ends[roomID], roomEndsAtUnix)
 	for _, card := range cards {
 		c.admitted[roomID] = append(c.admitted[roomID], card.AgentID)
 	}
@@ -112,6 +123,12 @@ func (c *roomCardsCarrier) forgottenIn(roomID string) []string {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return append([]string(nil), c.forgotten[roomID]...)
+}
+
+func (c *roomCardsCarrier) endsOf(roomID string) []uint64 {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return append([]uint64(nil), c.ends[roomID]...)
 }
 
 func (c *roomCardsCarrier) of(roomID string) []string {

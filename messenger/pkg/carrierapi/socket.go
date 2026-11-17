@@ -19,6 +19,8 @@ const DefaultTimeout = 30 * time.Second
 type Client struct {
 	path    string
 	timeout time.Duration
+	// now is the clock a room end is bounded by (ValidateRoomEnd).
+	now func() time.Time
 }
 
 // NewClient returns a client for an absolute, clean socket path.
@@ -32,7 +34,7 @@ func NewClient(path string, timeout time.Duration) (*Client, error) {
 	if timeout < time.Second || timeout > 5*time.Minute {
 		return nil, errors.New("carrier timeout is outside 1s..5m")
 	}
-	return &Client{path: path, timeout: timeout}, nil
+	return &Client{path: path, timeout: timeout, now: time.Now}, nil
 }
 
 // Carry asks the carrier to deposit one frame.
@@ -49,9 +51,18 @@ func (c *Client) Deliver(ctx context.Context, packetSenderAgentID string, frame 
 		FrameBase64: base64.StdEncoding.EncodeToString(frame)})
 }
 
-// RoomCards admits the chat cards a roster taught under a room's admission.
-func (c *Client) RoomCards(ctx context.Context, roomID string, cards []RoomCard) (Response, error) {
-	return c.do(ctx, Request{Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit, RoomCards: cards})
+// RoomCards admits the chat cards a roster taught under a room's admission,
+// which the carrier drops on its own at the room's end (D18) plus
+// RoomEndSlackSeconds. An end that ValidateRoomEnd refuses is never sent.
+func (c *Client) RoomCards(ctx context.Context, roomID string, roomEndsAtUnix uint64, cards []RoomCard) (Response, error) {
+	if c == nil || c.now == nil {
+		return Response{}, errors.New("no carrier client")
+	}
+	if err := ValidateRoomEnd(roomEndsAtUnix, c.now()); err != nil {
+		return Response{}, err
+	}
+	return c.do(ctx, Request{Op: OpRoomCards, RoomID: roomID, RoomCardsAction: RoomCardsAdmit,
+		RoomEndsAtUnix: roomEndsAtUnix, RoomCards: cards})
 }
 
 // ForgetRoomCards drops a room's admission of some Agents' chat cards.
@@ -122,6 +133,8 @@ type Server struct {
 	handler Handler
 	timeout time.Duration
 	slots   chan struct{}
+	// now is the clock a room end is bounded by (ValidateRoomEnd).
+	now func() time.Time
 }
 
 // NewServer returns a server for a handler.
@@ -135,7 +148,7 @@ func NewServer(handler Handler, timeout time.Duration) (*Server, error) {
 	if timeout < time.Second || timeout > 5*time.Minute {
 		return nil, errors.New("carrier timeout is outside 1s..5m")
 	}
-	return &Server{handler: handler, timeout: timeout, slots: make(chan struct{}, MaxConcurrentHandlers)}, nil
+	return &Server{handler: handler, timeout: timeout, slots: make(chan struct{}, MaxConcurrentHandlers), now: time.Now}, nil
 }
 
 // Listen creates the private mode-0600 socket.
@@ -193,12 +206,18 @@ func (s *Server) serveConnection(ctx context.Context, connection net.Conn) {
 
 // Handle processes one unframed request body, for in-process use and tests.
 func (s *Server) Handle(ctx context.Context, raw []byte) (Op, Response) {
-	if s == nil || ctx == nil {
+	if s == nil || ctx == nil || s.now == nil {
 		return OpDeliver, Retry()
 	}
 	request, err := DecodeRequest(raw)
 	if err != nil {
 		return OpDeliver, Refusal(CodeInvalidRequest)
+	}
+	// The carrier stores nothing under an admission whose end lies beyond
+	// the longest room its clock allows.
+	if request.Op == OpRoomCards && request.RoomCardsAction == RoomCardsAdmit &&
+		ValidateRoomEnd(request.RoomEndsAtUnix, s.now()) != nil {
+		return request.Op, Refusal(CodeInvalidRequest)
 	}
 	if err := ctx.Err(); err != nil {
 		return request.Op, Retry()
