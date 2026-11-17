@@ -19,7 +19,10 @@
 //     packet, with the packet's sender Agent;
 //   - carrier.room-cards, daemon to carrier: admit the chat cards a roster
 //     taught under a room's admission, or forget a room's admission of some
-//     Agents; a card stays stored while any other admission holds it;
+//     Agents; a card stays stored while any other admission holds it. An
+//     admission names the room's end, and the carrier drops it on its own at
+//     the end plus RoomEndSlackSeconds, so a daemon that never forgets
+//     cannot leave it behind;
 //   - carrier.withdraw, daemon to carrier: withdraw the envelope journaled
 //     under an idempotency key from every relay that holds it.
 //
@@ -33,6 +36,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
+	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/ids"
 	"github.com/tosnetwork/ai/messenger/internal/localwire"
@@ -60,6 +65,22 @@ const (
 	// MaxRoomCards bounds one carrier.room-cards request: every member of a
 	// room but the receiver.
 	MaxRoomCards = relayframe.MaxRosterEntries
+
+	// MaxRoomLifetimeSeconds is the longest a room lasts: it ends when its
+	// authority's leaf credential does (D18), at most 30 days after issue.
+	MaxRoomLifetimeSeconds uint64 = 30 * 24 * 60 * 60
+
+	// RoomEndSlackSeconds is how long after a room's end the carrier keeps
+	// the room's card admissions before it drops them on its own. It is the
+	// largest clock-skew bound a daemon may be configured with
+	// (admission.max_clock_skew_seconds ≤ 3600, AdmissionConfig.Validate in
+	// pkg/daemon/config.go; RoomClockSkew ≤ 1 h, localapi.NewServer in
+	// pkg/localapi/server.go): a daemon refuses the room's objects from
+	// end + skew on, so the carrier never drops an admission while the
+	// daemon still uses the room. It also bounds how far a room end may lie
+	// beyond now + MaxRoomLifetimeSeconds: the authority's clock may run
+	// that far ahead when it issues its credential.
+	RoomEndSlackSeconds uint64 = 3_600
 )
 
 // The largest valid request, a room-cards admission of 31 maximal cards,
@@ -189,6 +210,10 @@ type Request struct {
 	RoomCardsAction RoomCardsAction `json:"room_cards_action,omitempty"`
 	RoomCards       []RoomCard      `json:"room_cards,omitempty"`
 	ForgetAgentIDs  []string        `json:"forget_agent_ids,omitempty"`
+	// RoomEndsAtUnix is the room's end (D18) on an admission, and only
+	// there: the carrier drops the admission at the end plus
+	// RoomEndSlackSeconds. ValidateRoomEnd bounds it against a clock.
+	RoomEndsAtUnix uint64 `json:"room_ends_at_unix,omitempty"`
 }
 
 // Response is one answer.
@@ -228,6 +253,9 @@ func (r Response) AckFrame() ([]byte, error) {
 func ValidateRequest(request Request) error {
 	if request.Schema != RequestSchema {
 		return errors.New("unsupported carrier request schema")
+	}
+	if request.RoomEndsAtUnix != 0 && (request.Op != OpRoomCards || request.RoomCardsAction != RoomCardsAdmit) {
+		return errors.New("only a room-cards admission names a room end")
 	}
 	switch request.Op {
 	case OpRoomCards, OpWithdraw:
@@ -291,6 +319,9 @@ func validateRoomCards(request Request) error {
 		if len(request.RoomCards) == 0 || len(request.RoomCards) > MaxRoomCards || len(request.ForgetAgentIDs) != 0 {
 			return errors.New("a room-cards admission names 1..31 cards")
 		}
+		if request.RoomEndsAtUnix == 0 {
+			return ErrRoomEnd
+		}
 		for _, card := range request.RoomCards {
 			raw, err := base64.StdEncoding.Strict().DecodeString(card.CardBase64)
 			if !unique(card.AgentID) || err != nil || len(raw) == 0 || len(raw) > relayframe.MaxCardBytes {
@@ -310,6 +341,48 @@ func validateRoomCards(request Request) error {
 		return errors.New("unknown room-cards action")
 	}
 	return nil
+}
+
+// ErrRoomEnd is a room-cards admission whose room end is missing or lies
+// beyond the longest room a clock allows.
+var ErrRoomEnd = errors.New("carrier room end is missing or beyond now + 30 days + 1 h")
+
+// ValidateRoomEnd checks an admission's room end against a clock: non-zero
+// and at most now + MaxRoomLifetimeSeconds + RoomEndSlackSeconds. An end
+// already past is valid; the carrier's next sweep drops it.
+//
+// ValidateRequest stays a pure codec check; the two ends that own a clock
+// apply this bound: Client.RoomCards before it sends, Server.Handle before
+// the carrier's handler stores anything.
+func ValidateRoomEnd(roomEndsAtUnix uint64, now time.Time) error {
+	if roomEndsAtUnix == 0 || now.IsZero() {
+		return ErrRoomEnd
+	}
+	seconds := now.Unix()
+	if seconds < 0 {
+		return ErrRoomEnd
+	}
+	latest := uint64(seconds)
+	for _, span := range []uint64{MaxRoomLifetimeSeconds, RoomEndSlackSeconds} {
+		if latest > math.MaxUint64-span {
+			return ErrRoomEnd
+		}
+		latest += span
+	}
+	if roomEndsAtUnix > latest {
+		return ErrRoomEnd
+	}
+	return nil
+}
+
+// RoomAdmissionDropAtUnix is when the carrier drops a room's card
+// admissions on its own: the room's end plus RoomEndSlackSeconds. It
+// reports false for a zero end or one whose sum overflows.
+func RoomAdmissionDropAtUnix(roomEndsAtUnix uint64) (uint64, bool) {
+	if roomEndsAtUnix == 0 || roomEndsAtUnix > math.MaxUint64-RoomEndSlackSeconds {
+		return 0, false
+	}
+	return roomEndsAtUnix + RoomEndSlackSeconds, true
 }
 
 // ValidateResponse enforces the shape of each answer class.
