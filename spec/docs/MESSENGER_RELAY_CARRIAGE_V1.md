@@ -1318,7 +1318,20 @@ seal already carry any frame; nothing new is resolved on chain).
 10. `pkg/carrierapi`: `carrier.room-cards` (admit or forget chat cards
     learned from a roster) and `carrier.withdraw`; `carried` for kind-3
     parts; `admitted` for an admitted kind-3 object or stored part (11.2);
-    `peer-cap` also at 16 kind-3 envelopes.
+    `peer-cap` also at 16 kind-3 envelopes. An admission carries the room's
+    end (D18) in `room_ends_at_unix`, copied from the fused record's
+    `room_ends_at`; it is required on an admission and refused on a forget
+    and on every other operation. Both the client and the server refuse an
+    end later than now + 30 days + 1 h, the longest leaf credential plus the
+    largest clock-skew bound (`invalid-request` at the server, before the
+    carrier stores anything). The carrier drops the room's admissions on its
+    own at end + 1 h (`RoomEndSlackSeconds`), so a daemon that stopped
+    before its forget (11.8) cannot leave them behind. The slack is the
+    largest clock-skew bound a daemon accepts
+    (`admission.max_clock_skew_seconds` ≤ 3,600 in daemon config, the
+    local API's room clock-skew bound ≤ 1 h), and every member refuses the
+    room's objects from end + skew on (11.8), so the sweep never drops an
+    admission the daemon still uses.
 11. `pkg/daemon` and config: a room runtime beside `relayRuntime`
     (`relay.go:88-139`): the joining flow, the authority's per-member
     in-order queue (stopped on a `rejected` ack), handshake priority and the
@@ -1378,7 +1391,8 @@ part, C3):
    the room ack to `carrier.delivery-ack` (`:682-691`);
    `carrier.room-cards` against the chat peer store (cards verified with
    `VerifyKeyCard`; forgetting never removes a card stored under another
-   admission); `carrier.withdraw` through `RelayTransport.Withdraw`
+   admission; each room admission stored with its room end and dropped by a
+   sweep at end + 1 h, as a forget would drop it); `carrier.withdraw` through `RelayTransport.Withdraw`
    (`relay_transport.go:1207`).
 2. CLI: `openfox chat room create|add|remove|join|list` and
    `openfox chat invite present`, each through the owner socket;
@@ -2392,6 +2406,14 @@ member's chat card (`carrier.room-cards` forget). That call is made outside
 the journal steps and never holds them back; a failed one is retried on the
 next maintenance pass while the daemon runs (V1 keeps no journal record of
 it, so a restart before it succeeds leaves the admission to the carrier).
+The carrier does not depend on that forget: every room-cards admission
+carries the room's end (the fused record's `room_ends_at`, 9.2 item 10), and
+the carrier drops the room's admissions on its own at end + 1 h. The 1 h
+slack is the largest clock-skew bound a daemon may be configured with, so
+the carrier never drops an admission before the daemon refuses the room's
+objects (end + skew, above). The forget at retirement then finds the
+admissions already gone, which is a no-op; a daemon that crashed before it
+leaves no admission past end + 1 h.
 
 At restart the daemon retires again any room past that time whose fused
 record still exists, so a crash during retirement only repeats it. Ordinary

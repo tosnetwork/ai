@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -560,5 +562,71 @@ func TestRoomRemoveCancelsAPendingAdd(t *testing.T) {
 	requireRefusedCopy(t, relayOne(t, b, a))
 	if after, _ := fused(t, a); after.Membership().Contains(b.d.config.AgentID) {
 		t.Fatal("a cancelled add was committed")
+	}
+}
+
+// The Add's one fused write adds the joiner and learns its credential
+// (review of #42): a crash right after it, with the add expiring before the
+// next pass, leaves a member whose credential the authority holds; a write
+// that fails leaves neither, and the add is committed on a later pass.
+func TestRoomAddLearnsTheJoinerInTheSameWrite(t *testing.T) {
+	scene := newOperatorScene(t, 2)
+	a, b := scene.nodes[0], scene.nodes[1]
+	record := scene.founded(t)
+	now := scene.clock.now()
+	if _, _, err := a.d.journal.RecordRoomAdd(testRoomID, b.d.config.AgentID, now.Add(time.Hour/2), now); err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := scene.rooms(1).issueLeaf(record.RoomEndsAtUnix, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.d.journal.RecordRoomAddKeyPackage(testRoomID, b.d.config.AgentID, leaf.deviceJSON, leaf.encoded, now); err != nil {
+		t.Fatal(err)
+	}
+	r := scene.rooms(0)
+
+	// The crash point before the fused write: the write fails, and neither
+	// the membership nor the credential moved.
+	dir := filepath.Join(a.d.config.StateDir, "room-mls")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	r.handling.Lock()
+	err = r.stageAdd(record, b.d.config.AgentID, leaf.leaf, leaf.binding, now)
+	r.handling.Unlock()
+	if err == nil {
+		t.Fatal("the Add was written into an unwritable ledger")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := fused(t, a); after.Membership().Contains(b.d.config.AgentID) {
+		t.Fatal("a failed Add write left the joiner a member")
+	}
+	if _, known, err := r.ledger.RoomCredential(testRoomID, b.d.config.AgentID); err != nil || known {
+		t.Fatalf("a failed Add write learned the credential: %v %v", known, err)
+	}
+
+	// The crash point right after the fused write: nothing after it ran.
+	r.handling.Lock()
+	err = r.stageAdd(record, b.d.config.AgentID, leaf.leaf, leaf.binding, now)
+	r.handling.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := fused(t, a)
+	if _, known, err := r.ledger.RoomCredential(testRoomID, b.d.config.AgentID); err != nil || !after.Membership().Contains(b.d.config.AgentID) || !known {
+		t.Fatalf("the Add's write: member %v, credential %v (%v)", after.Membership().Contains(b.d.config.AgentID), known, err)
+	}
+	// The next pass runs after the add's expiry and finds nothing to do.
+	scene.clock.set(now.Add(time.Hour/2 + time.Minute))
+	r.maintain()
+	if again, _ := fused(t, a); again.MLSEpoch != after.MLSEpoch {
+		t.Fatal("the next pass committed the Add again")
+	}
+	if _, known, err := r.ledger.RoomCredential(testRoomID, b.d.config.AgentID); err != nil || !known {
+		t.Fatalf("the joiner's credential after the next pass: %v %v", known, err)
 	}
 }

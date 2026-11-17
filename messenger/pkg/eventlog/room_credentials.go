@@ -390,13 +390,34 @@ func (n namedRoomSet) keepCredentialBlob(stem string) (bool, bool) {
 // retainMemberCredentials returns the digest of the room's list kept to the
 // members of the next epoch, staging a new list when a member left. The
 // journal mutex is held.
-func (j *Journal) retainMemberCredentials(current RoomMLSRecord, members []string) (string, error) {
+func (j *Journal) retainMemberCredentials(current RoomMLSRecord, members []string, learned []group.LeafBinding) (string, error) {
 	list, err := j.loadCredentialList(current.RoomID, current.CredentialListDigest)
 	if err != nil {
 		return "", err
 	}
-	kept := mergeCredentials(current.RoomID, list.Entries, nil, members)
-	if len(kept.Entries) == len(list.Entries) {
+	added := make(map[string]string, len(learned))
+	for _, binding := range learned {
+		credential := binding.Credential()
+		// Only a member the advance adds is learned here: an earlier
+		// member's credential, the authority's included, is never replaced
+		// inside the room.
+		if !containsString(members, credential.AgentID) || containsString(current.Members, credential.AgentID) {
+			return "", ErrRoomCredentialMember
+		}
+		if credential.ExpiresAtUnix < current.RoomEndsAtUnix {
+			return "", ErrRoomCredentialEndsEarly
+		}
+		if _, duplicate := added[credential.AgentID]; duplicate {
+			return "", errors.New("two leaf credentials for one member")
+		}
+		agentID, digest, err := j.stageLeafCredential(binding)
+		if err != nil {
+			return "", err
+		}
+		added[agentID] = digest
+	}
+	kept := mergeCredentials(current.RoomID, list.Entries, added, members)
+	if len(added) == 0 && len(kept.Entries) == len(list.Entries) {
 		return current.CredentialListDigest, nil
 	}
 	return j.stageCredentialList(kept)

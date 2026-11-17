@@ -33,7 +33,9 @@ import (
 // roomCarrier is the part of the carrier a room receiver calls besides
 // carrier.carry: the card admissions a roster teaches.
 type roomCarrier interface {
-	RoomCards(ctx context.Context, roomID string, cards []carrierapi.RoomCard) (carrierapi.Response, error)
+	// RoomCards admits the cards under the room's admission, which the
+	// carrier drops on its own at the room's end plus its slack.
+	RoomCards(ctx context.Context, roomID string, roomEndsAtUnix uint64, cards []carrierapi.RoomCard) (carrierapi.Response, error)
 	// ForgetRoomCards drops the room's admission of removed members' cards;
 	// a card another admission (a contact, a session, another room) holds
 	// stays with the carrier.

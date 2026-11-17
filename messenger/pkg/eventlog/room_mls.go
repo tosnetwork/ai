@@ -255,6 +255,12 @@ type RoomMLSAdvance struct {
 	// reference before the fused write and published right after it, all
 	// under one hold of the journal, so it is published once or discarded.
 	Output *RoomCommitOutput
+	// Learned are verified leaf credentials of members the advance adds: the
+	// authority's Add learns its joiners' credentials in the same fused
+	// write (section 11.8: credential records, then the list, then the fused
+	// write naming the list and the new membership), so a member is never
+	// held without its credential. Only a room-epoch change carries them.
+	Learned []group.LeafBinding
 }
 
 // RoomCommitOutput is what the authority publishes for one Commit.
@@ -425,6 +431,11 @@ func (l *RoomMLSLedger) Advance(advance RoomMLSAdvance, now time.Time) (bool, Ro
 		delegationJSON = encoded
 	} else if advance.Proof != nil {
 		return false, RoomMLSRecord{}, errors.New("an MLS-only advance carries no authorization")
+	} else if len(advance.Learned) != 0 {
+		return false, RoomMLSRecord{}, errors.New("an MLS-only advance learns no credential")
+	}
+	if len(advance.Learned) > group.MaxPrivateRoomAgents {
+		return false, RoomMLSRecord{}, errors.New("invalid learned room credentials")
 	}
 	if !canon.ValidDigest(advance.ExpectedStateDigest) {
 		return false, RoomMLSRecord{}, errors.New("invalid prior MLS state digest")
@@ -488,8 +499,9 @@ func (l *RoomMLSLedger) Advance(advance RoomMLSAdvance, now time.Time) (bool, Ro
 		next.Authorization = encodeAuthorization(proof.Authorization)
 		next.PriorMemberships = retainMemberships(current.MembershipDigest, current.PriorMemberships)
 		// A removed member's credential leaves the list in the same write
-		// (section 11.4); its record is then collected.
-		listDigest, err := l.journal.retainMemberCredentials(current, next.Members)
+		// (section 11.4); its record is then collected. An added member's
+		// credential joins it in the same write.
+		listDigest, err := l.journal.retainMemberCredentials(current, next.Members, advance.Learned)
 		if err != nil {
 			return false, RoomMLSRecord{}, err
 		}
