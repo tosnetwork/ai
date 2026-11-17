@@ -108,6 +108,11 @@ type roomRuntime struct {
 	// admissions holds the card admissions rosters taught, queued under
 	// the handling lock and sent outside it (flushCardAdmissions).
 	admissions []roomCardAdmission
+	// cardFlush serializes the flushes of card admissions and forgets, so
+	// an admission is never sent concurrently with a forget, and each
+	// admission is judged against the membership as it is when it is sent.
+	// It is taken without the handling lock and never with a fan-out mutex.
+	cardFlush sync.Mutex
 }
 
 // roomCardAdmission is one carrier.room-cards admission a roster taught.
@@ -730,24 +735,78 @@ func (r *roomRuntime) queueCardAdmission(admission roomCardAdmission) {
 	r.admissions = append(r.admissions, admission)
 }
 
-// flushCardAdmissions sends the queued card admissions to the carrier,
-// never under the handling lock. A failed one is reported, as the roster
-// still stands.
+// flushCardAdmissions sends the queued card admissions to the carrier, in
+// the order they were queued, never under the handling lock and serialized
+// with the forgets. Each admission is judged again under that serialization:
+// only cards of Agents in the room's current membership with no forget
+// pending are sent, so an admission a roster queued before a removal can
+// never re-admit the removed member after its forget. One the carrier did
+// not apply stays queued, in order, for the next flush.
 func (r *roomRuntime) flushCardAdmissions(ctx context.Context) {
+	r.cardFlush.Lock()
+	defer r.cardFlush.Unlock()
 	r.cardsMutex.Lock()
 	admissions := r.admissions
 	r.admissions = nil
 	r.cardsMutex.Unlock()
-	for _, admission := range admissions {
-		response, err := r.cards.RoomCards(ctx, admission.roomID, admission.roomEndsAtUnix, admission.cards)
+	var kept []roomCardAdmission
+	for index, admission := range admissions {
+		cards, err := r.admissibleCards(admission)
 		if err != nil {
 			r.daemon.report("room cards", err)
+			kept = append(kept, admissions[index:]...)
+			break
+		}
+		if len(cards) == 0 {
 			continue
 		}
-		if response.Result != carrierapi.ResultApplied {
-			r.daemon.report("room cards", errors.New("the carrier did not apply the room's card admissions"))
+		response, err := r.cards.RoomCards(ctx, admission.roomID, admission.roomEndsAtUnix, cards)
+		if err == nil && response.Result != carrierapi.ResultApplied {
+			err = errors.New("the carrier did not apply the room's card admissions")
+		}
+		if err != nil {
+			r.daemon.report("room cards", err)
+			kept = append(kept, admissions[index:]...)
+			break
 		}
 	}
+	if len(kept) == 0 {
+		return
+	}
+	r.cardsMutex.Lock()
+	defer r.cardsMutex.Unlock()
+	// What waits goes back ahead of what was queued meanwhile, within the
+	// bound; the newest past it are dropped with a report.
+	queued := append(kept, r.admissions...)
+	if len(queued) > maxQueuedCardAdmissions {
+		r.daemon.report("room cards", errors.New("too many room card admissions wait for the carrier; the newest were dropped"))
+		queued = queued[:maxQueuedCardAdmissions]
+	}
+	r.admissions = queued
+}
+
+// admissibleCards returns the cards of an admission whose Agents are still
+// members of the room with no card forget pending; a room no longer held
+// admits none.
+func (r *roomRuntime) admissibleCards(admission roomCardAdmission) ([]carrierapi.RoomCard, error) {
+	record, found, err := r.ledger.Current(admission.roomID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	r.cardsMutex.Lock()
+	defer r.cardsMutex.Unlock()
+	pending := r.pending[admission.roomID]
+	cards := make([]carrierapi.RoomCard, 0, len(admission.cards))
+	for _, card := range admission.cards {
+		if _, forgetting := pending[card.AgentID]; forgetting || !containsAgent(record.Members, card.AgentID) {
+			continue
+		}
+		cards = append(cards, card)
+	}
+	return cards, nil
 }
 
 // flushCardForgets sends the queued card forgets to the carrier, one
@@ -756,6 +815,8 @@ func (r *roomRuntime) flushCardAdmissions(ctx context.Context) {
 // stays pending and is sent again by the next flush. A room's pending set
 // larger than one request allows is sent in batches of MaxRoomCards.
 func (r *roomRuntime) flushCardForgets(ctx context.Context) {
+	r.cardFlush.Lock()
+	defer r.cardFlush.Unlock()
 	r.cardsMutex.Lock()
 	batches := make(map[string][]string, len(r.pending))
 	for roomID, agents := range r.pending {
