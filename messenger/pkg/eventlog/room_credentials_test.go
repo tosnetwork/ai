@@ -580,3 +580,110 @@ func TestRoomRetirementKeepsAnotherRoomsParts(t *testing.T) {
 		t.Fatalf("parts before %d, after %d: retirement did not keep exactly the other room's", before, after)
 	}
 }
+
+// Retirement deletes an object's later parts before its part 0, the only
+// part that names the room: a crash in between leaves part 0, and the next
+// retirement finds and finishes the object. The fused record is never
+// deleted while a part 0 naming the room remains.
+func TestRoomRetirementDeletesPartZeroLast(t *testing.T) {
+	retention, skew := 7*24*time.Hour, 5*time.Minute
+	sender := fusedAgent(1)
+	held := func(t *testing.T, journal *Journal, ledger *RoomMLSLedger, fixture *fusedFixture, seed byte) (*RoomParts, []relayframe.Frame) {
+		t.Helper()
+		parts, _ := openParts(t, journal, allowSenders(sender), fixture.now)
+		frames, _ := splitRoomFrames(t, fusedRoom, seed)
+		for _, frame := range frames[:len(frames)-1] {
+			if _, err := parts.Add(sender, frame, fixture.now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return parts, frames
+	}
+	for _, crashAt := range []int{roomRetirePartsLater, roomRetirePartsFirst} {
+		fixture := newFusedFixture(t)
+		root := t.TempDir() + "/state"
+		journal, ledger := openFused(t, root)
+		record := fixture.installFounder(ledger, []byte("epoch zero"))
+		held(t, journal, ledger, fixture, 1)
+		at, err := RoomRetireAt(record, retention, skew)
+		if err != nil {
+			t.Fatal(err)
+		}
+		step := crashAt
+		beforeRoomRetireStep = func(n int) error {
+			if n == step {
+				return errors.New("crash")
+			}
+			return nil
+		}
+		if _, err := ledger.RetireRoom(fusedRoom, at, retention, skew); err == nil {
+			t.Fatalf("crash %d: the crash did not stop retirement", crashAt)
+		}
+		beforeRoomRetireStep = nil
+		journal, ledger = reopenFused(t, journal, root)
+		left := storedPartCount(t, journal)
+		if crashAt == roomRetirePartsLater && left != 1 {
+			t.Fatalf("crash after the later parts: %d parts left, want part 0 alone", left)
+		}
+		if crashAt == roomRetirePartsFirst && left != 0 {
+			t.Fatalf("crash after part 0: %d parts left", left)
+		}
+		if _, found, err := journal.readRoomMLS(fusedRoom); err != nil || !found {
+			t.Fatalf("crash %d: the fused record went with parts pending: %v %v", crashAt, found, err)
+		}
+		if retired, err := ledger.RetireEndedRooms(at, retention, skew); err != nil || len(retired) != 1 {
+			t.Fatalf("crash %d: retirement after the restart: %v %v", crashAt, retired, err)
+		}
+		if left := storedPartCount(t, journal); left != 0 {
+			t.Fatalf("crash %d: %d parts survived retirement", crashAt, left)
+		}
+		_ = journal.Close()
+	}
+	// A part 0 naming the room that is stored while retirement runs keeps
+	// the fused record.
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	parts, _ := held(t, journal, ledger, fixture, 1)
+	late, _ := splitRoomFrames(t, fusedRoom, 2)
+	at, err := RoomRetireAt(record, retention, skew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRoomRetireStep = func(n int) error {
+		if n == roomRetirePartsFirst {
+			_, err := parts.Add(sender, late[0], fixture.now)
+			return err
+		}
+		return nil
+	}
+	defer func() { beforeRoomRetireStep = nil }()
+	if _, err := ledger.RetireRoom(fusedRoom, at, retention, skew); err == nil {
+		t.Fatal("retirement finished with a part 0 of the room stored")
+	}
+	if _, found, err := journal.readRoomMLS(fusedRoom); err != nil || !found {
+		t.Fatalf("the fused record went with a part 0 remaining: %v %v", found, err)
+	}
+}
+
+// splitRoomFrames cuts a Commit of a room at the smallest test part size.
+func splitRoomFrames(t *testing.T, roomID string, seed byte) ([]relayframe.Frame, []byte) {
+	t.Helper()
+	object, err := relayframe.EncodeRoomObject(relayframe.RoomObject{Type: relayframe.RoomCommit, RoomID: roomID,
+		RoomEpoch: 1, MLSEpoch: 2, Body: bytes.Repeat([]byte{seed}, 4_000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := relayframe.SplitRoomObject(object, []byte("card"), []byte("evidence"), 1_024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames := make([]relayframe.Frame, len(encoded))
+	for index, raw := range encoded {
+		if frames[index], err = relayframe.Decode(raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return frames, object
+}

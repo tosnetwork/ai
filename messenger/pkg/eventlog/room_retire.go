@@ -42,9 +42,16 @@ import (
 var ErrRoomNotEnded = errors.New("the room's retirement time has not come")
 
 // beforeRoomRetireStep, when set by a test, runs before retirement step n
-// (2 or 3) and stops it if it returns an error: the crash windows a restart
-// must finish.
+// (2 or 3), and with roomRetirePartsLater after the parts other than part 0
+// are deleted and roomRetirePartsFirst after part 0 is: it stops retirement if
+// it returns an error, the crash windows a restart must finish.
 var beforeRoomRetireStep func(step int) error
+
+// The crash points inside the deletion of a room's parts.
+const (
+	roomRetirePartsLater = 11
+	roomRetirePartsFirst = 12
+)
 
 // RoomRetireAt returns when a room is retired: its end plus the handshake
 // retention plus the clock-skew bound.
@@ -227,7 +234,12 @@ func (j *Journal) deleteRoomOutbox(roomID string) error {
 }
 
 // deleteRoomPartsOf removes every stored part of an object whose part 0
-// names the room. It takes the journal mutex itself.
+// names the room. Part 0 is the only part that names the room, so the other
+// parts go first, with a directory fsync, and part 0 last: a crash in
+// between leaves part 0, by which the next retirement finds the object
+// again. It then requires that no part 0 naming the room remains, so the
+// fused record is never deleted while one does. It takes the journal mutex
+// itself.
 func (j *Journal) deleteRoomPartsOf(roomID string) error {
 	parts, _, err := j.listRoomParts()
 	if err != nil {
@@ -240,13 +252,43 @@ func (j *Journal) deleteRoomPartsOf(roomID string) error {
 			doomed[part.key] = struct{}{}
 		}
 	}
-	var names []string
+	var later, first []string
 	for _, part := range parts {
-		if _, gone := doomed[part.key]; gone {
-			names = append(names, part.name)
+		if _, gone := doomed[part.key]; !gone {
+			continue
+		}
+		if part.frame.PartIndex == 0 {
+			first = append(first, part.name)
+		} else {
+			later = append(later, part.name)
 		}
 	}
-	return j.removeRoomPartNames(names)
+	if err := j.removeRoomPartNames(later); err != nil {
+		return err
+	}
+	if beforeRoomRetireStep != nil {
+		if err := beforeRoomRetireStep(roomRetirePartsLater); err != nil {
+			return err
+		}
+	}
+	if err := j.removeRoomPartNames(first); err != nil {
+		return err
+	}
+	if beforeRoomRetireStep != nil {
+		if err := beforeRoomRetireStep(roomRetirePartsFirst); err != nil {
+			return err
+		}
+	}
+	remaining, _, err := j.listRoomParts()
+	if err != nil {
+		return err
+	}
+	for _, part := range remaining {
+		if part.frame.PartIndex == 0 && partNamesRoom(part.frame.Part, roomHex) {
+			return errors.New("a part of the retired room remains")
+		}
+	}
+	return nil
 }
 
 // partNamesRoom reports whether the first part of a room object names the
