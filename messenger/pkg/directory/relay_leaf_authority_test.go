@@ -41,6 +41,8 @@ func TestCheckLeafAuthorityRefusesWhatCheckPeerRefusesBesidesFreshness(t *testin
 	requireCode(t, err, fault.CodeDeviceRevoked)
 	_, err = f.verifier.CheckLeafAuthority(relayLocal, evidence, f.pin(relayDeviceOne), now)
 	requireCode(t, err, fault.CodeSenderMismatch)
+	_, err = f.verifier.CheckLeafAuthority("agent_"+strings.Repeat("9", 64), evidence, f.pin(relayDeviceOne), now)
+	requireCode(t, err, fault.CodeSenderMismatch)
 	unbound := f.evidence(relayDeviceOne, "material one", baseUnix+100, 3600, func(d *Descriptor) {
 		d.DelegationDigest = "sha256:" + strings.Repeat("1", 64)
 	})
