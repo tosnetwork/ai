@@ -39,8 +39,14 @@ func staleEvidenceAt(t *testing.T, scene *operatorScene, local, peer *relayNode)
 // drops every other frame its carrier holds.
 func evidenceRequests(t *testing.T, node *relayNode, peer string) []carried {
 	t.Helper()
+	return evidenceRequestsIn(t, node.carrier.take(), peer)
+}
+
+// evidenceRequestsIn selects the kind-4 requests to a peer among frames.
+func evidenceRequestsIn(t *testing.T, frames []carried, peer string) []carried {
+	t.Helper()
 	var requests []carried
-	for _, frame := range framesOfKind(t, node.carrier.take(), relayframe.KindEvidence) {
+	for _, frame := range framesOfKind(t, frames, relayframe.KindEvidence) {
 		decoded, err := relayframe.Decode(frame.frame)
 		if err != nil {
 			t.Fatal(err)
@@ -348,5 +354,45 @@ func TestRelayEvidencePullWithoutRoomsEndsWithoutACopy(t *testing.T) {
 	a.d.relay.sweepPulls(context.Background())
 	if requests := evidenceRequests(t, a, agent); len(requests) != 0 || pullRequested(t, a, agent) {
 		t.Fatalf("%d requests without a pending copy", len(requests))
+	}
+}
+
+// Only the member's own objects count: a request to B ends while the only
+// pending object waits for C, even with B's evidence failing too.
+func TestRoomEvidencePullCountsOnlyTheMembersOwnObjects(t *testing.T) {
+	scene := newOperatorScene(t, 3)
+	a, b, c := scene.nodes[0], scene.nodes[1], scene.nodes[2]
+	scene.founded(t)
+	for _, member := range []int{1, 2} {
+		scene.invited(t, member)
+		if answer := scene.joined(t, member); answer.AckOutcome != relayframe.OutcomeAccepted {
+			t.Fatalf("node %d's room.key-package: %+v", member, answer)
+		}
+	}
+	if record, _ := fused(t, a); len(record.Members) != 3 {
+		t.Fatalf("the room holds %d members", len(record.Members))
+	}
+	staleEvidenceAt(t, scene, a, c)
+	if _, _, err := scene.compose(t, 0, "waits for C only", "5"); err != nil {
+		t.Fatal(err)
+	}
+	if delivery := applicationMember(t, a, idem("5"), b.d.config.AgentID); delivery.State != eventlog.RoomDeliveryCarried {
+		t.Fatalf("B's delivery: %+v", delivery)
+	}
+	if delivery := applicationMember(t, a, idem("5"), c.d.config.AgentID); delivery.State != eventlog.RoomDeliveryPending {
+		t.Fatalf("C's delivery: %+v", delivery)
+	}
+	staleEvidenceAt(t, scene, a, b)
+	if err := a.d.relay.requestEvidence(b.d.config.AgentID, scene.clock.now()); err != nil {
+		t.Fatal(err)
+	}
+	a.carrier.take()
+	a.d.relay.sweepPulls(context.Background())
+	frames := a.carrier.take()
+	if requests := evidenceRequestsIn(t, frames, b.d.config.AgentID); len(requests) != 0 || pullRequested(t, a, b.d.config.AgentID) {
+		t.Fatalf("%d requests to B, whose objects are all carried", len(requests))
+	}
+	if requests := evidenceRequestsIn(t, frames, c.d.config.AgentID); len(requests) != 1 {
+		t.Fatalf("%d requests to C, whose object waits", len(requests))
 	}
 }
