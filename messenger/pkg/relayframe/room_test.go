@@ -195,12 +195,13 @@ func TestRosterCodec(t *testing.T) {
 	if _, err := relayframe.DecodeRoster(raw[:len(raw)-1]); err == nil {
 		t.Fatal("truncated roster accepted")
 	}
-	// A credential length of zero, or past the codec bound, is refused on
-	// decode as well.
+	// A last entry whose credential is empty, or one byte past the codec
+	// bound, is refused on decode as well.
 	credentialAt := len(raw) - len(entries[1].Credential) - 2
-	for name, length := range map[string]uint16{"zero": 0, "over the bound": relayframe.MaxRosterCredentialBytes + 1} {
-		bad := append([]byte(nil), raw...)
-		bad[credentialAt], bad[credentialAt+1] = byte(length>>8), byte(length)
+	for name, length := range map[string]int{"zero": 0, "over the bound": relayframe.MaxRosterCredentialBytes + 1} {
+		bad := append([]byte(nil), raw[:credentialAt]...)
+		bad = append(bad, byte(length>>8), byte(length))
+		bad = append(bad, bytes.Repeat([]byte{0xc3}, length)...)
 		if _, err := relayframe.DecodeRoster(bad); err == nil {
 			t.Fatalf("a %s credential length decoded", name)
 		}

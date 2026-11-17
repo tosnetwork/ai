@@ -1283,6 +1283,15 @@ mod tests {
         inspect.state = states[1].clone();
         assert!(handle(inspect).is_ok());
         let corruptions: Vec<Box<dyn Fn(&mut serde_json::Value)>> = vec![
+            // A third retained epoch, in order: one more than the group keeps.
+            Box::new(|value| {
+                let mut older = value["past_leaves"][0].clone();
+                older["epoch"] = serde_json::json!(older["epoch"].as_u64().unwrap() - 1);
+                value["past_leaves"]
+                    .as_array_mut()
+                    .unwrap()
+                    .insert(0, older);
+            }),
             Box::new(|value| {
                 let first = value["past_leaves"][0].clone();
                 value["past_leaves"].as_array_mut().unwrap().push(first);

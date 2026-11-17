@@ -258,3 +258,45 @@ func mustAuthenticator(t *testing.T, record RoomMLSRecord, mlsEpoch uint64) []by
 	}
 	return value
 }
+
+// members refuses a tree holding a leaf identity that is not the compact
+// binding: a relay room never holds one, so such a state is not a relay
+// room's.
+func TestOpenMLSRoomControllerMembersRefusesAnotherIdentity(t *testing.T) {
+	binary := os.Getenv("TOS_OPENMLS_DRIVER")
+	if binary == "" {
+		t.Skip("TOS_OPENMLS_DRIVER is set by make messenger-test-openmls")
+	}
+	driver := &group.OpenMLSSidecar{Command: []string{binary}, Timeout: 10 * time.Second}
+	short, err := driver.NewIdentity([]byte("short-leaf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupID := bytes.Repeat([]byte{0x5b}, group.MLSGroupIDBytes)
+	state, err := driver.CreateGroup(short.State, short.KeyPackage, groupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := driver.Inspect(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	founding := fixture.founding()
+	if _, err := ledger.InstallFounder(RoomMLSInstall{
+		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founding.Digest},
+		Proof:   fixture.proof(founding), State: state, EpochAuthenticator: info.EpochAuthenticator,
+		KeyPackageRef: canon.Digest(short.KeyPackage),
+	}, fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	controller, err := NewRoomMLSController(ledger, driver, func() time.Time { return fixture.now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Members(fusedRoom); !errors.Is(err, ErrRoomLeafIdentity) {
+		t.Fatalf("a tree with a short identity: %v", err)
+	}
+}

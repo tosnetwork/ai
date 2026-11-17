@@ -168,6 +168,15 @@ func TestRoomScopedAdmissionRefusals(t *testing.T) {
 		{"credential not yet valid", func(in *Inbound) { in.Room.SenderCredential = senderCredential(t, baseUnix+61, baseUnix+86_400) }, fault.CodeNotAuthentic},
 		{"forged credential", func(in *Inbound) { in.Room.SenderCredential.EndpointSignature[0] ^= 1 }, fault.CodeNotAuthentic},
 		{"another device", func(in *Inbound) { in.Room.SenderCredential.DeviceID = "dev_" + strings.Repeat("9", 64) }, fault.CodeNotAuthentic},
+		{"another device, signed", func(in *Inbound) {
+			credential := in.Room.SenderCredential
+			credential.DeviceID = "dev_" + strings.Repeat("9", 64)
+			signed, err := group.SignLeafCredential(credential, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			in.Room.SenderCredential = signed
+		}, fault.CodeNotAuthentic},
 		{"outlives its delegation", func(in *Inbound) { in.Room.SenderCredential = senderCredential(t, baseUnix, baseUnix+86_401) }, fault.CodeNotAuthentic},
 		{"leaf key is the Endpoint key", func(in *Inbound) {
 			credential := in.Room.SenderCredential
