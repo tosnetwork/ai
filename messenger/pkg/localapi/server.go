@@ -55,6 +55,11 @@ type Config struct {
 	ChallengeLifetime time.Duration
 	Now               func() time.Time
 	Timeout           time.Duration
+	// RoomClockSkew is the daemon's clock-skew bound: a member stops sealing
+	// for a private room at its end minus this bound (D18), so nothing is
+	// sent that a receiver whose clock runs ahead would refuse. Zero means
+	// DefaultRoomClockSkew.
+	RoomClockSkew time.Duration
 	// DeviceIDs is the complete, sorted current Endpoint roster. An empty
 	// roster disables owner-authorized history export.
 	DeviceIDs []string
@@ -168,6 +173,12 @@ func NewServer(config Config) (*Server, error) {
 	}
 	if config.Now == nil {
 		config.Now = time.Now
+	}
+	if config.RoomClockSkew == 0 {
+		config.RoomClockSkew = DefaultRoomClockSkew
+	}
+	if config.RoomClockSkew < 0 || config.RoomClockSkew > time.Hour {
+		return nil, errors.New("the room clock-skew bound is outside 0 .. 1 h")
 	}
 	if config.Timeout == 0 {
 		config.Timeout = DefaultRequestTimeout
@@ -1059,6 +1070,15 @@ func (s *Server) composeRoom(ctx context.Context, request Request) Response {
 	if request.MembershipEpoch != record.RoomEpoch {
 		return refuse(fault.CodeRoomEpochGap, errors.New("the composition names another room epoch than the current one"))
 	}
+	// D18: a member stops sealing at the room's end minus the skew bound.
+	if roomSendingStopped(record.RoomEndsAtUnix, s.config.RoomClockSkew, s.config.Now()) {
+		return refuse(fault.CodeRoomEnded, errors.New("the room has ended"))
+	}
+	// A room whose credential list cannot be read (for example one a crash
+	// left half retired) sends nothing.
+	if _, _, err := ledger.RoomCredential(request.RoomID, s.config.Dispatcher.LocalIdentity().AgentID); err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
 	// The sealed Event is bounded before the MLS seal; the body alone already
 	// exceeding it is refused here.
 	if len(request.Body) > relayframe.MaxRoomApplicationPlaintextBytes {
@@ -1076,6 +1096,17 @@ func (s *Server) composeRoom(ctx context.Context, request Request) Response {
 		return refuse(faultCodeOr(err, fault.CodeInternal), err)
 	}
 	return Response{OK: true, Fresh: fresh, EventID: eventID, RoomID: request.RoomID}
+}
+
+// DefaultRoomClockSkew is the default clock-skew bound of the room end.
+const DefaultRoomClockSkew = 5 * time.Minute
+
+// roomSendingStopped reports whether now is at or past end - skew.
+func roomSendingStopped(endsAtUnix uint64, skew time.Duration, now time.Time) bool {
+	if endsAtUnix == 0 || endsAtUnix > uint64(1<<62) {
+		return true
+	}
+	return !now.Before(time.Unix(int64(endsAtUnix), 0).Add(-skew))
 }
 
 // changeRoom carries one owner membership decision to the room runtime.

@@ -60,3 +60,15 @@ func (f *fusedFixture) credentials() []group.LeafBinding {
 	f.t.Helper()
 	return []group.LeafBinding{memberBinding(f.t, f.delegation.AgentID)}
 }
+
+// prepareJoin records the authority's room.invite for the fixture room and
+// the owner's rooms.join, and returns the KeyPackage reference the Welcome
+// install must consume.
+func prepareJoin(t *testing.T, journal *Journal, fixture *fusedFixture) string {
+	t.Helper()
+	authority := fixture.delegation.AgentID
+	if _, err := journal.RecordRoomInvite(fusedRoom, authority, inviteEvent, inviteBinding(t, authority), fixture.now.Add(time.Hour), fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	return acceptJoin(t, journal, fixture, authority)
+}

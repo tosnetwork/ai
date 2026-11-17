@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +31,22 @@ var otherMember = "agent_" + strings.Repeat("3", 64)
 // removes the sender.
 func roomGate(t *testing.T, policy ContactPolicy) (*Gate, *eventlog.Journal, *eventlog.RoomMLSLedger) {
 	t.Helper()
+	return roomGateAt(t, policy, "")
+}
+
+// roomGateAt is roomGate with the room ledger in its own journal at root,
+// when root is set, so a test can damage its records.
+func roomGateAt(t *testing.T, policy ContactPolicy, root string) (*Gate, *eventlog.Journal, *eventlog.RoomMLSLedger) {
+	t.Helper()
 	gate, journal, _, _ := testGate(t, policy)
+	if root != "" {
+		var err error
+		journal, err = eventlog.Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = journal.Close() })
+	}
 	ledger, err := journal.OpenRoomMLS()
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +72,7 @@ func roomGate(t *testing.T, policy ContactPolicy) (*Gate, *eventlog.Journal, *ev
 		Binding: group.State{RoomID: privateRoom, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: founded.Digest},
 		Proof:   at(founded), State: []byte("founder state"), EpochAuthenticator: bytes.Repeat([]byte{1}, group.MLSEpochAuthenticatorBytes),
 		KeyPackageRef: canon.Digest([]byte("founder key package")),
-		Credentials:   []group.LeafBinding{roomLeafBinding(t, local, key, baseUnix, baseUnix+86_400)}, EndsAtUnix: baseUnix + 86_400,
+		Credentials:   []group.LeafBinding{roomLeafBinding(t, local, key, baseUnix, baseUnix+43_200)}, EndsAtUnix: baseUnix + 43_200,
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -365,4 +382,34 @@ func roomLeafBinding(t *testing.T, delegation identity.Delegation, key ed25519.P
 		t.Fatal(err)
 	}
 	return binding
+}
+
+// D18 on the receive side: at the room's end plus the clock-skew bound D11
+// refuses room-ended, and a room whose credential list is gone (a crash left
+// it half retired) admits nothing.
+func TestRoomScopedAdmissionStopsAtTheRoomEndAndInAHalfRetiredRoom(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "rooms")
+	gate, _, ledger := roomGateAt(t, allowList(t, TellThem), root)
+	record, found, err := ledger.Current(privateRoom)
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	ended := record.RoomEndsAtUnix + gate.config.MaxClockSkewSeconds
+	before := roomInbound(t, 1, "just before the end")
+	before.ReceivedAtUnix = ended - 1
+	if decision, err := gate.Admit(before); err != nil || decision.Code == fault.CodeRoomEnded {
+		t.Fatalf("a second before the end: %+v %v", decision, err)
+	}
+	after := roomInbound(t, 1, "at the end")
+	after.ReceivedAtUnix = ended
+	if decision, err := gate.Admit(after); err != nil || decision.Outcome != Rejected || decision.Code != fault.CodeRoomEnded {
+		t.Fatalf("at the end plus skew: %+v %v", decision, err)
+	}
+	listPath := filepath.Join(root, "room-blobs", "l-"+record.CredentialListDigest[len("sha256:"):]+".json")
+	if err := os.Remove(listPath); err != nil {
+		t.Fatal(err)
+	}
+	if decision, err := gate.Admit(roomInbound(t, 1, "half retired")); err == nil && decision.Outcome == Accepted {
+		t.Fatalf("a half-retired room admitted: %+v", decision)
+	}
 }

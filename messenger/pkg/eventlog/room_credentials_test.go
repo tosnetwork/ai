@@ -1,15 +1,18 @@
 package eventlog
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 	"github.com/tosnetwork/ai/messenger/pkg/room"
 )
 
@@ -210,7 +213,7 @@ func TestRoomInstallFixesTheEndToTheAuthorityCredential(t *testing.T) {
 		Proof:   fixture.proof(membership), State: []byte("s"), EpochAuthenticator: fusedAuthenticator(1),
 		KeyPackageRef: canon.Digest([]byte("kp")),
 	}
-	otherKey := leafBindingFor(t, fixture.delegation, fixture.key, 0x44, testRoomEnd-1)
+	otherKey := leafBindingFor(t, fixture.delegation, fixture.key, 0x44, testRoomEnd+1)
 	cases := map[string]struct {
 		credentials []group.LeafBinding
 		end         uint64
@@ -218,7 +221,8 @@ func TestRoomInstallFixesTheEndToTheAuthorityCredential(t *testing.T) {
 	}{
 		"no credentials":                   {nil, testRoomEnd, ErrRoomAuthorityCredential},
 		"no end":                           {fixture.credentials(), 0, ErrRoomAuthorityCredential},
-		"an end other than the expiry":     {fixture.credentials(), testRoomEnd + 1, ErrRoomAuthorityCredential},
+		"an end other than the expiry":     {fixture.credentials(), testRoomEnd + 1, ErrRoomCredentialEndsEarly},
+		"an end before the expiry":         {fixture.credentials(), testRoomEnd - 1, ErrRoomAuthorityCredential},
 		"the expiry of another credential": {[]group.LeafBinding{otherKey}, testRoomEnd, ErrRoomAuthorityCredential},
 		"a non-member's credential":        {append(fixture.credentials(), memberBinding(t, fusedAgent(3))), testRoomEnd, ErrRoomCredentialMember},
 		"an unverified binding":            {[]group.LeafBinding{{}}, testRoomEnd, ErrRoomCredentialMember},
@@ -457,5 +461,122 @@ func TestFusedRecordNeedsItsCredentialListAndEnd(t *testing.T) {
 		if _, err := decodeRoomMLSRecord(raw); err == nil {
 			t.Fatalf("%s: decoded", name)
 		}
+	}
+}
+
+// The authority's credential fixed the room's end and is never replaced
+// inside the room; a member's credential must last until the end (D18).
+func TestLearnedCredentialsKeepTheAuthorityAndLastUntilTheEnd(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	later := leafBindingFor(t, fixture.delegation, fixture.key, 0x46, testRoomEnd+500)
+	if _, _, err := ledger.LearnRoomCredentials(fusedRoom, []group.LeafBinding{later}, fixture.now); !errors.Is(err, ErrRoomAuthorityCredential) {
+		t.Fatalf("a replacement authority credential: %v", err)
+	}
+	if stored, _, err := ledger.RoomCredential(fusedRoom, fixture.delegation.AgentID); err != nil || stored.ExpiresAtUnix != testRoomEnd {
+		t.Fatalf("the authority credential changed: %v", err)
+	}
+	// The stored authority credential itself is an exact repeat.
+	if fresh, _, err := ledger.LearnRoomCredentials(fusedRoom, fixture.credentials(), fixture.now); err != nil || fresh {
+		t.Fatalf("the stored authority credential: %v %v", fresh, err)
+	}
+	bob := fusedAgent(1)
+	transition, membership := addTransition(t, record, []string{bob}, canon.Digest([]byte("add bob")))
+	advanceMembership(t, fixture, ledger, record, transition, membership)
+	delegation, key := roomDelegation(t, bob, 0x62)
+	short := leafBindingFor(t, delegation, key, 0x29, testRoomEnd-100)
+	if _, _, err := ledger.LearnRoomCredentials(fusedRoom, []group.LeafBinding{short}, fixture.now); !errors.Is(err, ErrRoomCredentialEndsEarly) {
+		t.Fatalf("a member credential ending before the room: %v", err)
+	}
+	if _, found, _ := ledger.RoomCredential(fusedRoom, bob); found {
+		t.Fatal("a short member credential was stored")
+	}
+	exact := leafBindingFor(t, delegation, key, 0x29, testRoomEnd)
+	if fresh, _, err := ledger.LearnRoomCredentials(fusedRoom, []group.LeafBinding{exact}, fixture.now); err != nil || !fresh {
+		t.Fatalf("a member credential ending with the room: %v %v", fresh, err)
+	}
+}
+
+// A Welcome install needs the accepted pending join and consumes exactly the
+// KeyPackage that join sent.
+func TestWelcomeInstallNeedsTheAcceptedJoinAndItsKeyPackage(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	membership := fixture.founding()
+	welcome := RoomMLSInstall{
+		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 1}, MembershipDigest: membership.Digest},
+		Proof:   fixture.proof(membership), State: []byte("joined"), EpochAuthenticator: fusedAuthenticator(2),
+		KeyPackageRef: canon.Digest([]byte("kp")), WelcomeRef: canon.Digest([]byte("welcome")), EndsAtUnix: testRoomEnd,
+		Credentials: fixture.credentials(),
+	}
+	if _, err := ledger.InstallWelcome(welcome, fixture.now); !errors.Is(err, ErrRoomJoinUnknown) {
+		t.Fatalf("a Welcome with no pending join: %v", err)
+	}
+	ref := prepareJoin(t, journal, fixture)
+	if _, err := ledger.InstallWelcome(welcome, fixture.now); !errors.Is(err, ErrRoomJoinKeyPackage) {
+		t.Fatalf("a Welcome for another KeyPackage: %v", err)
+	}
+	if _, found, _ := ledger.Current(fusedRoom); found {
+		t.Fatal("a refused Welcome installed the room")
+	}
+	welcome.KeyPackageRef = ref
+	if _, err := ledger.InstallWelcome(welcome, fixture.now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Retirement deletes the parts of its own room only: another room's parts
+// stay.
+func TestRoomRetirementKeepsAnotherRoomsParts(t *testing.T) {
+	fixture := newFusedFixture(t)
+	root := t.TempDir() + "/state"
+	journal, ledger := openFused(t, root)
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	sender := fusedAgent(1)
+	parts, _ := openParts(t, journal, allowSenders(sender), fixture.now)
+	other := "room_" + strings.Repeat("6", 64)
+	add := func(roomID string, seed byte) {
+		t.Helper()
+		object, err := relayframe.EncodeRoomObject(relayframe.RoomObject{Type: relayframe.RoomCommit, RoomID: roomID,
+			RoomEpoch: 1, MLSEpoch: 2, Body: bytes.Repeat([]byte{seed}, 4_000)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := relayframe.SplitRoomObject(object, []byte("card"), []byte("evidence"), 1_024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Every part but the last, so the object stays held.
+		for _, raw := range encoded[:len(encoded)-1] {
+			frame, err := relayframe.Decode(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := parts.Add(sender, frame, fixture.now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	add(fusedRoom, 1)
+	add(other, 2)
+	before := storedPartCount(t, journal)
+	if before == 0 {
+		t.Fatal("no parts stored")
+	}
+	retention, skew := 7*24*time.Hour, 5*time.Minute
+	at, err := RoomRetireAt(record, retention, skew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.RetireRoom(fusedRoom, at, retention, skew); err != nil {
+		t.Fatal(err)
+	}
+	after := storedPartCount(t, journal)
+	if after == 0 || after*2 != before {
+		t.Fatalf("parts before %d, after %d: retirement did not keep exactly the other room's", before, after)
 	}
 }

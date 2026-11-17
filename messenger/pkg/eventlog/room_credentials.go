@@ -55,6 +55,9 @@ var (
 	// credential of the room's authority, or whose end time is not that
 	// credential's expiry (D18).
 	ErrRoomAuthorityCredential = errors.New("the room's end is not its authority's leaf credential expiry")
+	// ErrRoomCredentialEndsEarly reports a credential whose window ends
+	// before the room does (D18): such a member is never added or learned.
+	ErrRoomCredentialEndsEarly = errors.New("the leaf credential ends before the room")
 )
 
 // roomCredentialEntry names one member's credential.
@@ -207,6 +210,11 @@ func (j *Journal) stageInstallCredentials(roomID string, authority roomAuthority
 		if !containsString(members, credential.AgentID) {
 			return "", ErrRoomCredentialMember
 		}
+		// The ledger is the last check: every credential lasts until the
+		// room's end, whatever end its verification was asked about.
+		if credential.ExpiresAtUnix < endsAtUnix {
+			return "", ErrRoomCredentialEndsEarly
+		}
 		if _, duplicate := learned[credential.AgentID]; duplicate {
 			return "", errors.New("two leaf credentials for one member")
 		}
@@ -264,8 +272,20 @@ func (l *RoomMLSLedger) LearnRoomCredentials(roomID string, bindings []group.Lea
 	}
 	learned := make(map[string]string, len(bindings))
 	for _, binding := range bindings {
-		if !containsString(current.Members, binding.Credential().AgentID) {
+		credential := binding.Credential()
+		if !containsString(current.Members, credential.AgentID) {
 			return false, RoomMLSRecord{}, ErrRoomCredentialMember
+		}
+		if credential.ExpiresAtUnix < current.RoomEndsAtUnix {
+			return false, RoomMLSRecord{}, ErrRoomCredentialEndsEarly
+		}
+		// The authority's credential fixed the room's end and is never
+		// replaced inside the room (no renewal in V1, D18): a binding for
+		// the authority must be exactly the stored one.
+		if credential.AgentID == current.AuthorityAgentID {
+			if err := l.journal.requireStoredCredential(list, binding); err != nil {
+				return false, RoomMLSRecord{}, err
+			}
 		}
 		agentID, digest, err := l.journal.stageLeafCredential(binding)
 		if err != nil {
@@ -382,17 +402,43 @@ func (j *Journal) retainMemberCredentials(current RoomMLSRecord, members []strin
 	return j.stageCredentialList(kept)
 }
 
+// requireStoredCredential requires a binding to be byte-equal to the
+// credential the room's list holds for its Agent. The journal mutex is held.
+func (j *Journal) requireStoredCredential(list roomCredentialList, binding group.LeafBinding) error {
+	got, err := group.EncodeLeafCredential(binding.Credential())
+	if err != nil {
+		return ErrRoomCredentialUnverified
+	}
+	for _, entry := range list.Entries {
+		if entry.AgentID != binding.Credential().AgentID {
+			continue
+		}
+		if canon.Digest(got) != entry.Digest {
+			return ErrRoomAuthorityCredential
+		}
+		return nil
+	}
+	return ErrRoomAuthorityCredential
+}
+
 // requireJoinAuthorityCredential checks a Welcome install against the
-// room's accepted pending join: the install's credential of the authority
-// must be the one the join's room.invite carried. A room with no accepted
-// join is left to the caller's pending-join path. The journal mutex is held.
-func (j *Journal) requireJoinAuthorityCredential(roomID string, authority roomAuthorityRef, bindings []group.LeafBinding) error {
+// room's accepted pending join: there must be one, the install must consume
+// the KeyPackage that join sent, and the install's credential of the
+// authority must be byte-equal to the one the join's room.invite carried.
+// The journal mutex is held.
+func (j *Journal) requireJoinAuthorityCredential(roomID, keyPackageRef string, authority roomAuthorityRef, bindings []group.LeafBinding) error {
 	join, found, err := j.acceptedRoomJoin(roomID)
-	if err != nil || !found {
+	if err != nil {
 		return err
+	}
+	if !found {
+		return ErrRoomJoinUnknown
 	}
 	if join.AuthorityAgentID != authority.agentID {
 		return ErrRoomJoinConflict
+	}
+	if join.KeyPackageRef != keyPackageRef {
+		return ErrRoomJoinKeyPackage
 	}
 	stored, err := join.AuthorityCredential()
 	if err != nil {

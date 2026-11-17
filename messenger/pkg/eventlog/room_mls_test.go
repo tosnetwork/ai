@@ -319,7 +319,7 @@ func TestFusedLedgerKeyPackageIsOneTimeAndWelcomeReplayIsRefused(t *testing.T) {
 	journal, ledger := openFused(t, t.TempDir()+"/state")
 	defer journal.Close()
 	membership := fixture.founding()
-	kp := canon.Digest([]byte("one-time key package"))
+	kp := prepareJoin(t, journal, fixture)
 	welcome := canon.Digest([]byte("welcome"))
 	install := RoomMLSInstall{
 		Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 3}, MembershipDigest: membership.Digest},

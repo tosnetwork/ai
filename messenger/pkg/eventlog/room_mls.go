@@ -357,7 +357,7 @@ func (l *RoomMLSLedger) install(install RoomMLSInstall, now time.Time) (RoomMLSR
 	// A joiner's Welcome is checked against the authority credential its
 	// accepted join holds: the one the room.invite carried.
 	if install.WelcomeRef != "" {
-		if err := l.journal.requireJoinAuthorityCredential(binding.RoomID, authority, install.Credentials); err != nil {
+		if err := l.journal.requireJoinAuthorityCredential(binding.RoomID, install.KeyPackageRef, authority, install.Credentials); err != nil {
 			return RoomMLSRecord{}, err
 		}
 	}

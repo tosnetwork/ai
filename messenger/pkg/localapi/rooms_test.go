@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -81,12 +83,14 @@ func installPrivateRoom(t *testing.T, h *harness, members ...string) eventlog.Ro
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := ledger.InstallWelcome(eventlog.RoomMLSInstall{
-		Binding: group.State{RoomID: privateRoomID, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 1}, MembershipDigest: membership.Digest},
+	// The room is installed as its own first state: a Welcome install needs
+	// the pending join of the room.invite this harness never received.
+	record, err := ledger.InstallFounder(eventlog.RoomMLSInstall{
+		Binding: group.State{RoomID: privateRoomID, Clock: group.Clock{RoomEpoch: 1}, MembershipDigest: membership.Digest},
 		Proof:   eventlog.RoomAuthorityProof{Membership: membership, Authorization: authorization, Delegation: delegation},
 		State:   []byte("joined"), EpochAuthenticator: bytes.Repeat([]byte{7}, group.MLSEpochAuthenticatorBytes),
-		KeyPackageRef: canon.Digest([]byte("key package")), WelcomeRef: canon.Digest([]byte("welcome")),
-		Credentials: []group.LeafBinding{roomLeafBinding(t, delegation, key, 1, 2_000_000)}, EndsAtUnix: 2_000_000,
+		KeyPackageRef: canon.Digest([]byte("key package")),
+		Credentials:   []group.LeafBinding{roomLeafBinding(t, delegation, key, baseUnix-10, testRoomEnd)}, EndsAtUnix: testRoomEnd,
 	}, h.clock)
 	if err != nil {
 		t.Fatal(err)
@@ -315,5 +319,38 @@ func inviteAuthorityBinding(t *testing.T) group.LeafBinding {
 	}
 	delegation := identity.Delegation{Network: network, AgentID: authorityID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), NotBeforeUnix: 1, ExpiresAtUnix: 2_000_000_000}
-	return roomLeafBinding(t, delegation, key, 1, 2_000_000)
+	return roomLeafBinding(t, delegation, key, baseUnix-10, testRoomEnd)
+}
+
+// testRoomEnd is the end of the test room: ten days after the harness clock.
+const testRoomEnd = baseUnix + 10*24*3600
+
+// D18 on the send side: a member stops sealing at the room's end minus the
+// clock-skew bound, and a room whose credential list is gone (a crash left
+// it half retired) sends nothing.
+func TestComposeStopsAtTheRoomEndAndInAHalfRetiredRoom(t *testing.T) {
+	h := newHarness(t)
+	record := installPrivateRoom(t, h, senderID, memberID)
+	h.server.config.RoomOperator = &recordingRooms{}
+	stop := time.Unix(int64(record.RoomEndsAtUnix), 0).Add(-DefaultRoomClockSkew)
+	h.clock = stop.Add(-time.Second)
+	if response := h.call(t, roomComposition(1)); !response.OK {
+		t.Fatalf("a second before the stop: %+v", response)
+	}
+	h.clock = stop
+	second := roomComposition(1)
+	second.IdempotencyKey = "idem_" + strings.Repeat("f", 64)
+	if response := h.call(t, second); response.OK || response.Code != fault.CodeRoomEnded {
+		t.Fatalf("at the stop: %+v", response)
+	}
+	h.clock = stop.Add(-time.Hour)
+	listPath := filepath.Join(h.root, "room-blobs", "l-"+record.CredentialListDigest[len("sha256:"):]+".json")
+	if err := os.Remove(listPath); err != nil {
+		t.Fatal(err)
+	}
+	third := roomComposition(1)
+	third.IdempotencyKey = "idem_" + strings.Repeat("d", 64)
+	if response := h.call(t, third); response.OK {
+		t.Fatalf("a half-retired room sent: %+v", response)
+	}
 }

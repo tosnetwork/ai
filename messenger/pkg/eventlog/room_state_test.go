@@ -788,10 +788,11 @@ func TestJoinerWelcomeRedepositIsADuplicate(t *testing.T) {
 		if err := journal.BeginRoomHandshake(fusedRoom, 4, digest, welcomeRef); err != nil {
 			t.Fatal(err)
 		}
+		keyPackageRef := prepareJoin(t, journal, fixture)
 		if _, err := ledger.InstallWelcome(RoomMLSInstall{
 			Binding: group.State{RoomID: fusedRoom, Clock: group.Clock{RoomEpoch: 1, MLSEpoch: 4}, MembershipDigest: membership.Digest},
 			Proof:   fixture.proof(membership), State: []byte("joined"), EpochAuthenticator: fusedAuthenticator(4),
-			KeyPackageRef: canon.Digest([]byte("joiner key package")), WelcomeRef: welcomeRef,
+			KeyPackageRef: keyPackageRef, WelcomeRef: welcomeRef,
 			Credentials: fixture.credentials(), EndsAtUnix: testRoomEnd,
 		}, fixture.now); err != nil {
 			t.Fatal(err)
