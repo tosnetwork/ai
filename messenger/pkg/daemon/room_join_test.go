@@ -195,15 +195,16 @@ func TestRoomInviteRecordsAPendingJoinOnlyForAVerifiedCredential(t *testing.T) {
 	b := scene.member(t, 1, 50*time.Minute)
 	receiver := scene.nodes[1]
 	now := scene.start
-	stale := newRoomMemberWith(t, scene.driver, a.node, now, now.Add(40*time.Minute), func(c *group.LeafCredential) {
-		c.DeviceSetDigest = "sha256:" + strings.Repeat("5", 64)
+	// A credential naming a device the sender's current set does not hold.
+	absent := newRoomMemberWith(t, scene.driver, a.node, now, now.Add(40*time.Minute), func(c *group.LeafCredential) {
+		c.DeviceID = "dev_" + strings.Repeat("5", 64)
 	})
-	refused := receiver.d.roomInviteStep(admission.RouteRelay, inviteEvent(t, a, b, stale.credential, now), senderOf(t, a), now)
+	refused := receiver.d.roomInviteStep(admission.RouteRelay, inviteEvent(t, a, b, absent.credential, now), senderOf(t, a), now)
 	if refused == nil {
 		t.Fatal("a room.invite on the relay route needs its step")
 	}
 	if err := refused(); fault.CodeOf(err) != fault.CodeNotAuthentic {
-		t.Fatalf("an invite naming another device set: %v", err)
+		t.Fatalf("an invite naming a device not in the sender's set: %v", err)
 	}
 	if _, found, err := receiver.d.journal.PendingRoomJoinFor(testRoomID, a.agent(), now); err != nil || found {
 		t.Fatalf("a refused invite recorded a pending join: %v %v", found, err)
@@ -227,5 +228,13 @@ func TestRoomInviteRecordsAPendingJoinOnlyForAVerifiedCredential(t *testing.T) {
 	credential, err := join.AuthorityCredential()
 	if err != nil || credential.ExpiresAtUnix != a.credential.ExpiresAtUnix || !credential.LeafSignaturePublicKey.Equal(a.credential.LeafSignaturePublicKey) {
 		t.Fatalf("the join's authority credential: %v", err)
+	}
+	// One issued in an earlier set of the same device (a prekey renewal
+	// since) is valid.
+	renewed := newRoomMemberWith(t, scene.driver, a.node, now, now.Add(40*time.Minute), func(c *group.LeafCredential) {
+		c.DeviceSetDigest = "sha256:" + strings.Repeat("5", 64)
+	})
+	if err := receiver.d.roomInviteStep(admission.RouteRelay, inviteEvent(t, a, b, renewed.credential, now), senderOf(t, a), now)(); err != nil {
+		t.Fatalf("an invite issued before a prekey renewal: %v", err)
 	}
 }
