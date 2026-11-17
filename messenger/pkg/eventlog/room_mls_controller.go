@@ -16,6 +16,7 @@ package eventlog
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -105,7 +106,14 @@ func (c *RoomMLSController) Join(binding group.State, proof RoomAuthorityProof, 
 	if !authority.Matches(sender) {
 		return RoomMLSRecord{}, ErrMLSSenderMismatch
 	}
-	if _, err := c.relayMembers(state); err != nil {
+	leaves, err := c.relayMembers(state)
+	if err != nil {
+		return RoomMLSRecord{}, err
+	}
+	// The tree the Welcome installs must hold exactly the signed membership,
+	// one leaf per Agent: a leaf the header does not name would be a member
+	// the ledger and its owner never see.
+	if err := checkTreeMembership(leaves, proof.Membership.Members); err != nil {
 		return RoomMLSRecord{}, err
 	}
 	info, err := c.checkState(state, expectedGroupID, binding.Clock.MLSEpoch)
@@ -209,7 +217,18 @@ func (c *RoomMLSController) Apply(transition group.Transition, proof *RoomAuthor
 	// identity but the compact binding is not a relay room's, and would
 	// refuse every later members listing, so it is refused before it is
 	// written.
-	if _, err := c.relayMembers(next); err != nil {
+	leaves, err := c.relayMembers(next)
+	if err != nil {
+		return false, RoomMLSRecord{}, err
+	}
+	// The tree the Commit leaves must hold exactly the membership it is
+	// signed for (the record's own for an MLS-only refresh), one leaf per
+	// Agent: a Commit cannot add a leaf the signed membership does not name.
+	expected := record.Members
+	if transition.Next.Clock.RoomEpoch != transition.Prior.Clock.RoomEpoch {
+		expected = transition.Membership.Members
+	}
+	if err := checkTreeMembership(leaves, expected); err != nil {
 		return false, RoomMLSRecord{}, err
 	}
 	info, err := c.checkState(next, priorInfo.GroupID, transition.Next.Clock.MLSEpoch)
@@ -313,6 +332,35 @@ func (c *RoomMLSController) relayMembers(state []byte) ([]group.MLSMember, error
 		}
 	}
 	return members, nil
+}
+
+// ErrRoomTreeMembership reports an MLS tree whose leaves are not exactly the
+// signed membership, one leaf per Agent. It is a leaf identity refusal.
+var ErrRoomTreeMembership = fmt.Errorf("%w: the MLS tree is not the signed membership, one leaf per Agent", ErrRoomLeafIdentity)
+
+// checkTreeMembership requires the Agents of a tree's compact leaf
+// identities to be exactly agents, each with one leaf (D3).
+func checkTreeMembership(leaves []group.MLSMember, agents []string) error {
+	seen := make(map[string]struct{}, len(leaves))
+	for _, leaf := range leaves {
+		identity, err := group.DecodeLeafIdentity(leaf.Identity)
+		if err != nil {
+			return ErrRoomLeafIdentity
+		}
+		if _, duplicate := seen[identity.AgentID]; duplicate {
+			return ErrRoomTreeMembership
+		}
+		seen[identity.AgentID] = struct{}{}
+	}
+	if len(seen) != len(agents) {
+		return ErrRoomTreeMembership
+	}
+	for _, agentID := range agents {
+		if _, held := seen[agentID]; !held {
+			return ErrRoomTreeMembership
+		}
+	}
+	return nil
 }
 
 // MaxRoomLeaves is the leaf bound of a relay room: 32 Agents, one device

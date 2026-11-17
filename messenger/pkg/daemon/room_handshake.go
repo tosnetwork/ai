@@ -35,10 +35,11 @@ func (r *roomRuntime) handleCommit(in roomInbound) carrierapi.Response {
 		// first, so this one has nothing to apply it to.
 		return ignored()
 	}
-	// Only the room's single authority commits (section 11.5); anything else
-	// is refused, relay-acknowledged, and nothing is stored or signed.
+	// Only the room's single authority commits (section 11.5). The intake
+	// refuses another member's part 0 already; this holds for an object a
+	// restart replays.
 	if in.sender != record.AuthorityAgentID {
-		return carrierapi.Refusal(carrierapi.CodeNotAccepted)
+		return r.roomAck(in, answerRejected(fault.CodeNotAuthentic))
 	}
 	digest := in.objectDigest()
 	verdict, err := r.daemon.journal.JudgeRoomHandshake(roomID, in.object.MLSEpoch, digest)
@@ -61,18 +62,26 @@ func (r *roomRuntime) handleCommit(in roomInbound) carrierapi.Response {
 	if err != nil {
 		return r.roomAck(in, answerRejected(fault.CodeNotAuthentic))
 	}
+	// The header is authenticated before its epoch is judged, so a genuine
+	// header of a later epoch is told apart from a forged one.
 	proof, membership, code := r.commitHeader(record, in)
 	if code != "" {
 		return r.roomAck(in, answerRejected(code))
 	}
-	// A Commit whose verified header removes this member is not applied to
-	// MLS (section 11.4): the removed member gets it once, outside its queue,
-	// and answers nothing.
+	// A Commit whose verified header removes this member, at any epoch above
+	// its own, is a removal notice and is not applied to MLS (sections 11.3,
+	// 11.4): the removed member gets it once, outside its queue, and answers
+	// nothing.
 	if !membership.Contains(r.daemon.config.AgentID) {
 		return ignored()
 	}
 	if verdict == eventlog.HandshakeGap {
 		return r.roomAck(in, answerRejected(fault.CodeRoomEpochGap))
+	}
+	// Only the next MLS epoch is applied: it moves the room epoch by exactly
+	// one, or (an MLS-only refresh) not at all.
+	if code := commitEpoch(record, in); code != "" {
+		return r.roomAck(in, answerRejected(code))
 	}
 	commitRef := canon.Digest(in.object.Body)
 	transition := group.Transition{Prior: record.Binding(),
@@ -135,27 +144,42 @@ func (r *roomRuntime) authorityBinding(record eventlog.RoomMLSRecord, in roomInb
 	return memberBinding(in.peer, credential, record.RoomEndsAtUnix, in.now)
 }
 
-// commitHeader checks a Commit's header against the member's state: a
-// Commit that changes the room epoch carries the next membership, its
-// authorization in the relay window, and the room's end; an MLS-only
-// refresh carries none and keeps the room epoch. It returns the proof for
+// commitHeader authenticates a Commit's header: a Commit that changes the
+// room epoch carries the membership it makes, authorized by the room's
+// authority in the relay window, with the room's end, for a room epoch above
+// the member's; an MLS-only refresh carries none. It returns the proof for
 // the fused write and the membership the Commit makes, or the refusal code.
+// Whether the epoch is the next one is judged after, on the apply path.
 func (r *roomRuntime) commitHeader(record eventlog.RoomMLSRecord, in roomInbound) (*eventlog.RoomAuthorityProof, room.Membership, fault.Code) {
 	header := in.object.Header
 	if header == nil {
-		if in.object.RoomEpoch != record.RoomEpoch {
-			return nil, room.Membership{}, fault.CodeNotAuthentic
-		}
 		return nil, record.Membership(), ""
-	}
-	if record.RoomEpoch == ^uint64(0) || in.object.RoomEpoch != record.RoomEpoch+1 {
-		return nil, room.Membership{}, fault.CodeNotAuthentic
 	}
 	proof, code := r.headerProof(record.AuthorityAgentID, record.AuthorityEndpointID, record.RoomEndsAtUnix, in)
 	if code != "" {
 		return nil, room.Membership{}, code
 	}
+	// The object's room epoch is the header membership's (the codec binds
+	// them); a header never names an epoch the member already holds.
+	if in.object.RoomEpoch <= record.RoomEpoch {
+		return nil, room.Membership{}, fault.CodeNotAuthentic
+	}
 	return &proof, header.Membership, ""
+}
+
+// commitEpoch requires an applied Commit to move the room epoch by exactly
+// one when it carries a header, and to keep it otherwise.
+func commitEpoch(record eventlog.RoomMLSRecord, in roomInbound) fault.Code {
+	if in.object.Header == nil {
+		if in.object.RoomEpoch != record.RoomEpoch {
+			return fault.CodeNotAuthentic
+		}
+		return ""
+	}
+	if record.RoomEpoch == ^uint64(0) || in.object.RoomEpoch != record.RoomEpoch+1 {
+		return fault.CodeNotAuthentic
+	}
+	return ""
 }
 
 // headerProof checks a handshake header (section 11.1, 11.3, D18): the end
@@ -193,7 +217,7 @@ func (r *roomRuntime) handleWelcome(in roomInbound) carrierapi.Response {
 	}
 	if found {
 		if in.sender != record.AuthorityAgentID {
-			return carrierapi.Refusal(carrierapi.CodeNotAccepted)
+			return r.roomAck(in, answerRejected(fault.CodeNotAuthentic))
 		}
 		verdict, err := r.daemon.journal.JudgeRoomHandshake(roomID, in.object.MLSEpoch, in.objectDigest())
 		if err != nil {
@@ -313,7 +337,7 @@ func (r *roomRuntime) handleRoster(in roomInbound) carrierapi.Response {
 		return ignored()
 	}
 	if in.sender != record.AuthorityAgentID {
-		return carrierapi.Refusal(carrierapi.CodeNotAccepted)
+		return r.roomAck(in, answerRejected(fault.CodeNotAuthentic))
 	}
 	epoch := in.object.RoomEpoch
 	digest := in.objectDigest()
@@ -361,8 +385,7 @@ func (r *roomRuntime) handleRoster(in roomInbound) carrierapi.Response {
 	}
 	learned, err := r.learnRoster(in, record, entries)
 	if err != nil {
-		r.daemon.report("room roster", err)
-		return carrierapi.Retry()
+		return r.rosterLearnRefusal(in, err)
 	}
 	if err := r.daemon.journal.RecordRoomRoster(roomID, epoch, digest); err != nil {
 		// Learning is idempotent; the redelivered roster learns it again.
@@ -398,7 +421,12 @@ func (r *roomRuntime) learnRoster(in roomInbound, record eventlog.RoomMLSRecord,
 		if !containsAgent(record.Members, entry.AgentID) {
 			continue
 		}
-		binding, ok := r.entryBinding(record, entry, leaves, in)
+		binding, ok, err := r.entryBinding(record, entry, leaves, in)
+		if err != nil {
+			// A finalized-state or ledger read failed: nothing about the
+			// entry is known, so the roster is retried, not learned without it.
+			return rosterRendezvous{}, err
+		}
 		if !ok {
 			continue
 		}
@@ -423,6 +451,23 @@ func (r *roomRuntime) learnRoster(in roomInbound, record eventlog.RoomMLSRecord,
 	return rendezvous, nil
 }
 
+// rosterLearnRefusal answers a roster whose learning failed. A refusal the
+// credential store names is permanent and answered rejected not-authentic,
+// signed, so the authority's queue stops; anything else (a read or write
+// that failed) is retried, with nothing acknowledged.
+func (r *roomRuntime) rosterLearnRefusal(in roomInbound, err error) carrierapi.Response {
+	switch {
+	case errors.Is(err, eventlog.ErrRoomAuthorityCredential), errors.Is(err, eventlog.ErrRoomCredentialEndsEarly),
+		errors.Is(err, eventlog.ErrRoomCredentialMember), errors.Is(err, eventlog.ErrRoomCredentialUnverified):
+		return r.roomAck(in, answerRejected(fault.CodeNotAuthentic))
+	case errors.Is(err, eventlog.ErrRoomNotJoined):
+		return ignored()
+	default:
+		r.daemon.report("room roster", err)
+		return carrierapi.Retry()
+	}
+}
+
 // entryBinding verifies one roster entry's leaf credential (section 11.8):
 // the credential's digest, Agent, Endpoint and device are the member leaf's
 // compact identity, its leaf key is that leaf's, its signature verifies
@@ -430,30 +475,40 @@ func (r *roomRuntime) learnRoster(in roomInbound, record eventlog.RoomMLSRecord,
 // device set that Endpoint signed and not revoked here, and its window lasts
 // until the room's end. The entry's evidence supplies only the delegation
 // and the device set, judged without its freshness.
+//
+// It reports an error only for a read that failed (finalized state, the
+// device ledger), which says nothing about the entry; a verification
+// failure skips the entry.
 func (r *roomRuntime) entryBinding(record eventlog.RoomMLSRecord, entry relayframe.RosterEntry, leaves []group.MLSMember,
-	in roomInbound) (group.LeafBinding, bool) {
+	in roomInbound) (group.LeafBinding, bool, error) {
 	credential, err := group.DecodeLeafCredential(entry.Credential)
 	if err != nil || credential.AgentID != entry.AgentID {
-		return group.LeafBinding{}, false
+		return group.LeafBinding{}, false, nil
 	}
 	leaf, found := memberLeaf(leaves, entry.AgentID)
 	if !found || group.CheckLeaf(credential, leaf.Identity, leaf.SignatureKey) != nil {
-		return group.LeafBinding{}, false
+		return group.LeafBinding{}, false, nil
 	}
 	authority, err := r.relay.verifier.CheckLeafAuthority(entry.AgentID, entry.Evidence,
 		directory.Pin{EndpointID: credential.EndpointID, DeviceID: credential.DeviceID}, in.now)
 	if err != nil {
-		return group.LeafBinding{}, false
+		if fault.CodeOf(err) == fault.CodeInternal {
+			return group.LeafBinding{}, false, err
+		}
+		return group.LeafBinding{}, false, nil
 	}
 	standing, err := r.daemon.discovery.devices.Judge(credential.EndpointID, credential.DeviceID)
-	if err != nil || standing == eventlog.DeviceRevoked {
-		return group.LeafBinding{}, false
+	if err != nil {
+		return group.LeafBinding{}, false, err
+	}
+	if standing == eventlog.DeviceRevoked {
+		return group.LeafBinding{}, false, nil
 	}
 	binding, err := group.VerifyRoomLeafCredential(authority.Delegation, credential, authority.DeviceSet, record.RoomEndsAtUnix, in.now)
 	if err != nil || !binding.Matches(leaf) {
-		return group.LeafBinding{}, false
+		return group.LeafBinding{}, false, nil
 	}
-	return binding, true
+	return binding, true, nil
 }
 
 // memberLeaf finds the one leaf of the tree whose compact identity names an

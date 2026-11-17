@@ -268,11 +268,21 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 		if response, refused := r.endedRoom(ended); refused {
 			return response
 		}
+		// Only the room's authority sends handshake objects (section 11.5):
+		// another member's part 0 is refused before anything of it is held.
+		if response, refused := r.nonAuthority(ended); refused {
+			return response
+		}
 		peer, err := r.checkSenderEvidence(roomID, sender, frame.Evidence, now)
 		if err != nil {
 			return evidenceRefusal(err)
 		}
 		firstPeer = &peer
+	}
+	// A later part names no room, but its sender must still be one parts are
+	// held from at all, judged before the part store writes anything.
+	if frame.PartIndex != 0 && !(roomSenders{runtime: r}).MayHold(sender) {
+		return carrierapi.Refusal(carrierapi.CodeNotAdmitted)
 	}
 	result, err := r.parts.Add(sender, frame, now)
 	if err != nil {
@@ -457,6 +467,34 @@ func (r *roomRuntime) endedRoom(in roomInbound) (carrierapi.Response, bool) {
 		return r.statelessRejection(in, fault.CodeRoomEnded), true
 	default:
 		return r.roomAck(in, answerRejected(fault.CodeRoomEnded)), true
+	}
+}
+
+// nonAuthority refuses part 0 of a Commit, Welcome or roster whose sender is
+// not the authority of the room this installation holds, with a signed
+// rejected not-authentic (the sender is a member). A room being joined has
+// only its accepted join's authority as a sender, which the sender set
+// already requires.
+func (r *roomRuntime) nonAuthority(in roomInbound) (carrierapi.Response, bool) {
+	if in.object.Type == relayframe.RoomApplication {
+		return carrierapi.Response{}, false
+	}
+	record, held, err := r.ledger.Current(in.object.RoomID)
+	if err != nil {
+		return carrierapi.Retry(), true
+	}
+	if !held || in.sender == record.AuthorityAgentID {
+		return carrierapi.Response{}, false
+	}
+	return r.roomAck(in, answerRejected(fault.CodeNotAuthentic)), true
+}
+
+// sweepParts drops incomplete room objects past their lifetime, with their
+// stored parts, and forgets complete objects left unsettled that long. It
+// runs on the relay maintenance timer.
+func (r *roomRuntime) sweepParts() {
+	if _, err := r.parts.Sweep(r.now()); err != nil {
+		r.daemon.report("room part sweep", err)
 	}
 }
 

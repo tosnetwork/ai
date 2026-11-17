@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -441,69 +440,6 @@ func ValidatePrivateRoomCapacity(membership room.Membership, leaves []Leaf) erro
 type DeviceLeafCredentials struct {
 	Device DeviceCredential
 	Leaf   LeafCredential
-}
-
-// PlanDeviceSuccession converts one accepted endpoint device succession into
-// deterministic leaf work. Retained devices update because their credential
-// must bind the newly current set digest; a revoked device is only removed.
-func PlanDeviceSuccession(agentID, endpointID string, current []Leaf, succession e2ee.Succession, credentials map[string]DeviceLeafCredentials) ([]LeafOperation, error) {
-	if !ids.Agent.MatchString(agentID) || !ids.Endpoint.MatchString(endpointID) || succession.Accepted.EndpointID != endpointID || !canon.ValidDigest(succession.Accepted.Digest) {
-		return nil, errors.New("invalid device succession authority")
-	}
-	byDevice := make(map[string]Leaf, len(current))
-	for _, leaf := range current {
-		if leaf.AgentID != agentID || leaf.EndpointID != endpointID || !ids.Device.MatchString(leaf.DeviceID) {
-			return nil, errors.New("current MLS leaf belongs to another authority")
-		}
-		if _, duplicate := byDevice[leaf.DeviceID]; duplicate {
-			return nil, errors.New("duplicate current MLS leaf")
-		}
-		byDevice[leaf.DeviceID] = leaf
-	}
-	accepted := append([]string(nil), succession.Accepted.DeviceIDs...)
-	sort.Strings(accepted)
-	unchanged := len(current) == len(accepted)
-	if unchanged {
-		for _, leaf := range current {
-			if leaf.DeviceSetDigest != succession.Accepted.Digest || !contains(accepted, leaf.DeviceID) {
-				unchanged = false
-				break
-			}
-		}
-	}
-	if unchanged {
-		return nil, nil
-	}
-	ops := make([]LeafOperation, 0, len(current)+len(accepted))
-	for _, deviceID := range accepted {
-		credential, ok := credentials[deviceID]
-		if !ok || credential.Device.AgentID != agentID || credential.Device.EndpointID != endpointID || credential.Device.DeviceID != deviceID || credential.Device.DeviceSetDigest != succession.Accepted.Digest {
-			return nil, errors.New("missing current MLS credential for accepted device")
-		}
-		next, err := LeafFromCredentials(credential.Device, credential.Leaf)
-		if err != nil {
-			return nil, err
-		}
-		if prior, exists := byDevice[deviceID]; exists {
-			p := prior
-			n := next
-			ops = append(ops, LeafOperation{Kind: LeafUpdate, Prior: &p, Next: &n})
-			delete(byDevice, deviceID)
-		} else {
-			n := next
-			ops = append(ops, LeafOperation{Kind: LeafAdd, Next: &n})
-		}
-	}
-	removed := make([]string, 0, len(byDevice))
-	for device := range byDevice {
-		removed = append(removed, device)
-	}
-	sort.Strings(removed)
-	for _, device := range removed {
-		p := byDevice[device]
-		ops = append(ops, LeafOperation{Kind: LeafRemove, Prior: &p})
-	}
-	return ops, nil
 }
 
 func contains(values []string, want string) bool {

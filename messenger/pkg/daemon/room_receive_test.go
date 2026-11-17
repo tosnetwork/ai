@@ -23,12 +23,21 @@ type joinedScene struct {
 	addC      eventlog.CommitResult
 	// added is the roster of added members B accepted for room epoch 3.
 	added []byte
+	// partBytes is the test part size handshake objects are cut at.
+	partBytes int
 }
 
 func newJoinedScene(t *testing.T, retention time.Duration) *joinedScene {
 	t.Helper()
-	scene := newAddedScene(t, retention)
-	if ack := roomAckOf(t, scene.nodes[1], send(t, scene.nodes[1], scene.a.agent(), framesOf(t, scene.a, scene.added, 0))); ack.Outcome != relayframe.OutcomeAccepted {
+	return newJoinedSceneCut(t, retention, 0)
+}
+
+// newJoinedSceneCut is newJoinedScene with every handshake object cut at a
+// test part size.
+func newJoinedSceneCut(t *testing.T, retention time.Duration, partBytes int) *joinedScene {
+	t.Helper()
+	scene := newAddedSceneCut(t, retention, partBytes)
+	if ack := roomAckOf(t, scene.nodes[1], send(t, scene.nodes[1], scene.a.agent(), framesOf(t, scene.a, scene.added, partBytes))); ack.Outcome != relayframe.OutcomeAccepted {
 		t.Fatalf("B's roster of added members: %+v", ack)
 	}
 	return scene
@@ -38,7 +47,12 @@ func newJoinedScene(t *testing.T, retention time.Duration) *joinedScene {
 // the roster of added members, which the scene holds.
 func newAddedScene(t *testing.T, retention time.Duration) *joinedScene {
 	t.Helper()
-	scene := newRoomScene(t, 4, retention, 0)
+	return newAddedSceneCut(t, retention, 0)
+}
+
+func newAddedSceneCut(t *testing.T, retention time.Duration, partBytes int) *joinedScene {
+	t.Helper()
+	scene := newRoomScene(t, 4, retention, partBytes)
 	a := scene.member(t, 0, 40*time.Minute)
 	b := scene.member(t, 1, 50*time.Minute)
 	c := scene.member(t, 2, 50*time.Minute)
@@ -46,20 +60,20 @@ func newAddedScene(t *testing.T, retention time.Duration) *joinedScene {
 	receiver := scene.nodes[1]
 	invite(t, b, a, scene.start)
 	addB, withB := authority.commit(b)
-	ack := roomAckOf(t, receiver, send(t, receiver, a.agent(), framesOf(t, a, authority.welcomeObject(addB, withB, b), 0)))
+	ack := roomAckOf(t, receiver, send(t, receiver, a.agent(), framesOf(t, a, authority.welcomeObject(addB, withB, b), partBytes)))
 	if ack.Outcome != relayframe.OutcomeAccepted || ack.MLSEpoch != addB.Transition.Next.Clock.MLSEpoch {
 		t.Fatalf("B's Welcome: %+v", ack)
 	}
 	roster := authority.rosterObject(withB, rosterEntry(t, a))
-	if ack := roomAckOf(t, receiver, send(t, receiver, a.agent(), framesOf(t, a, roster, 0))); ack.Outcome != relayframe.OutcomeAccepted {
+	if ack := roomAckOf(t, receiver, send(t, receiver, a.agent(), framesOf(t, a, roster, partBytes))); ack.Outcome != relayframe.OutcomeAccepted {
 		t.Fatalf("B's full roster: %+v", ack)
 	}
 	addC, withC := authority.commit(c)
-	if ack := roomAckOf(t, receiver, send(t, receiver, a.agent(), framesOf(t, a, authority.commitObject(addC, withC), 0))); ack.Outcome != relayframe.OutcomeAccepted {
+	if ack := roomAckOf(t, receiver, send(t, receiver, a.agent(), framesOf(t, a, authority.commitObject(addC, withC), partBytes))); ack.Outcome != relayframe.OutcomeAccepted {
 		t.Fatalf("B applies the Add of C: %+v", ack)
 	}
 	added := authority.rosterObject(withC, rosterEntry(t, c))
-	return &joinedScene{roomScene: scene, authority: authority, a: a, b: b, c: c, addC: addC, added: added}
+	return &joinedScene{roomScene: scene, authority: authority, a: a, b: b, c: c, addC: addC, added: added, partBytes: partBytes}
 }
 
 // requireRejected decodes a room ack and requires a rejection with code.
@@ -165,17 +179,13 @@ func TestRoomCommitFromAnotherMemberIsRefusedAndStoresNothing(t *testing.T) {
 	before, _ := fused(t, b)
 	result, membership := scene.authority.commit()
 	object := scene.authority.commitObject(result, membership)
-	// C sends A's Commit under its own evidence: only the authority commits.
-	response := send(t, b, scene.c.agent(), framesOf(t, scene.c, object, 0))
-	if response.Result != carrierapi.ResultRefused || response.Code != carrierapi.CodeNotAccepted {
-		t.Fatalf("a member's Commit: %s/%s", response.Result, response.Code)
-	}
+	// C sends A's Commit under its own evidence: only the authority commits
+	// (section 11.5), so it is refused not-authentic.
+	requireRejected(t, b, send(t, b, scene.c.agent(), framesOf(t, scene.c, object, 0)), fault.CodeNotAuthentic)
 	requireUnmoved(t, b, before)
-	// And roster: only the authority sends them.
+	// And rosters: only the authority sends them.
 	roster := scene.authority.rosterObject(membership, rosterEntry(t, scene.c))
-	if response := send(t, b, scene.c.agent(), framesOf(t, scene.c, roster, 0)); response.Code != carrierapi.CodeNotAccepted {
-		t.Fatalf("a member's roster: %s/%s", response.Result, response.Code)
-	}
+	requireRejected(t, b, send(t, b, scene.c.agent(), framesOf(t, scene.c, roster, 0)), fault.CodeNotAuthentic)
 	// The authority's object under another Agent's evidence is refused at
 	// part 0: the evidence is pinned to the sender's leaf credential.
 	if response := send(t, b, scene.a.agent(), framesOf(t, scene.c, object, 0)); response.Code != carrierapi.CodeEvidenceRefused {

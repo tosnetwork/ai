@@ -1112,7 +1112,8 @@ func refuseOpenFailure(err error) error {
 	return &relayRefusal{code: carrierapi.CodeNotAccepted, detail: err.Error()}
 }
 
-// runRelay serves the inbound carrier socket and sweeps evidence pulls.
+// runRelay serves the inbound carrier socket, sweeps evidence pulls and,
+// with private rooms, drops expired room parts.
 func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync.WaitGroup) {
 	group.Add(2)
 	go func() {
@@ -1131,6 +1132,9 @@ func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync
 				return
 			case <-ticker.C:
 				r.sweepPulls(ctx)
+				if r.rooms != nil {
+					r.rooms.sweepParts()
+				}
 			}
 		}
 	}()
