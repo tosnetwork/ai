@@ -156,6 +156,7 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 	if refused, ok := refuseOnRoute(route, event); ok {
 		return refused, nil
 	}
+	invite := d.roomInviteStep(route, event, resolved, now)
 	delegationJSON, err := identity.EncodeJSON(resolved.Delegation)
 	if err != nil {
 		return ReceiveResult{}, err
@@ -163,6 +164,11 @@ func (d *Daemon) receiveFirstContact(ctx context.Context, message dispatch.Messa
 	decision, err := d.admission.AdmitWithCommit(admission.Inbound{Event: event,
 		DelegationJSON: delegationJSON, AdmissionToken: message.AdmissionToken,
 		Route: route, ReceivedAtUnix: uint64(now.Unix())}, func(entry eventlog.Entry) (bool, error) {
+		if invite != nil {
+			if err := invite(); err != nil {
+				return false, err
+			}
+		}
 		fresh, _, commitErr := d.journal.CommitInboundFirstContact(message.SessionID,
 			binding.AlgorithmID, next, entry, bootstrap, now)
 		return fresh, commitErr
@@ -220,6 +226,7 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 		resolved.EndpointID != a.PeerEndpointID {
 		return ReceiveResult{}, errors.New("established sender no longer has verified Endpoint authority")
 	}
+	invite := d.roomInviteStep(route, event, resolved, now)
 	delegationJSON, err := identity.EncodeJSON(resolved.Delegation)
 	if err != nil {
 		return ReceiveResult{}, err
@@ -227,6 +234,11 @@ func (d *Daemon) receiveEstablished(ctx context.Context, message dispatch.Messag
 	decision, err := d.admission.AdmitWithCommit(admission.Inbound{Event: event,
 		DelegationJSON: delegationJSON, AdmissionToken: message.AdmissionToken,
 		Route: route, ReceivedAtUnix: uint64(now.Unix())}, func(entry eventlog.Entry) (bool, error) {
+		if invite != nil {
+			if err := invite(); err != nil {
+				return false, err
+			}
+		}
 		fresh, _, commitErr := d.journal.CommitInbound(message.SessionID, record.AlgorithmID,
 			record.Generation, next, entry, now)
 		return fresh, commitErr

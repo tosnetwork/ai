@@ -714,6 +714,20 @@ type RelayCarriageConfig struct {
 	// outstanding evidence request is deposited again; the wait itself
 	// follows the relay TTL the carrier reports.
 	RedepositIntervalSeconds uint64 `json:"redeposit_interval_seconds,omitempty"`
+	// MLSDriverPath enables private rooms over the relay (kind 3): the
+	// absolute path of the OpenMLS driver executable the room runtime runs.
+	// Without it kind 3 is not carried.
+	MLSDriverPath string `json:"mls_driver_path,omitempty"`
+	// MLSDriverTimeoutSeconds bounds one driver operation; default 10 s.
+	MLSDriverTimeoutSeconds uint64 `json:"mls_driver_timeout_seconds,omitempty"`
+}
+
+// MLSDriverTimeout bounds one MLS driver operation.
+func (r RelayCarriageConfig) MLSDriverTimeout() time.Duration {
+	if r.MLSDriverTimeoutSeconds == 0 {
+		return 10 * time.Second
+	}
+	return time.Duration(r.MLSDriverTimeoutSeconds) * time.Second
 }
 
 // Timeout bounds one carrier operation.
@@ -766,7 +780,23 @@ func (r RelayCarriageConfig) Validate(stateDir, contactDir string, others []stri
 	if interval := r.RedepositInterval(); interval < MinRelayRedepositInterval || interval > DefaultRelayRedepositInterval {
 		return errors.New("relay re-deposit interval is outside 10m..20h")
 	}
+	if r.MLSDriverPath != "" && (!filepath.IsAbs(r.MLSDriverPath) || filepath.Clean(r.MLSDriverPath) != r.MLSDriverPath ||
+		pathWithin(r.MLSDriverPath, stateDir)) {
+		return errors.New("relay_carriage mls_driver_path must be absolute, clean and outside state_dir")
+	}
+	if r.MLSDriverPath == "" && r.MLSDriverTimeoutSeconds != 0 {
+		return errors.New("relay_carriage mls_driver_timeout_seconds needs mls_driver_path")
+	}
+	if r.MLSDriverTimeoutSeconds > 60 {
+		return errors.New("relay_carriage mls_driver_timeout_seconds is outside 1s..60s")
+	}
 	return nil
+}
+
+// RoomClockSkew is the daemon's clock-skew bound, applied at both ends of a
+// room's end (D18) and of the relay authorization window (D16).
+func (c Config) RoomClockSkew() time.Duration {
+	return time.Duration(c.Admission.MaxClockSkewSeconds) * time.Second
 }
 
 // Network returns the configured network tuple.

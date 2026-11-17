@@ -681,7 +681,8 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 	serverConfig := localapi.Config{
 		Policy: config.FirewallPolicy(), OwnerKey: ownerKey,
 		Journal: journal, Dispatcher: dispatcher, LocalEndpointID: config.EndpointID,
-		DeviceIDs: append([]string(nil), config.Publication.DeviceIDs...),
+		DeviceIDs:     append([]string(nil), config.Publication.DeviceIDs...),
+		RoomClockSkew: config.RoomClockSkew(),
 	}
 	if attachmentResources != nil {
 		emitter, emitterErr := attachmentResources.NewEmitter(config.StateDir, dispatcher)
@@ -797,7 +798,7 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 		gate, gateErr := admission.New(admission.Config{Network: config.Network(), Chain: discovery.chain,
 			Resolver: discovery.resolver, Journal: journal, Policy: policy, Devices: discovery.devices, Rooms: rooms,
 			LocalDelegationJSON: localDelegation, LocalAgentID: config.AgentID, LocalEndpointID: config.EndpointID,
-			Now: instance.now, InstallSalt: instance.salt})
+			Now: instance.now, InstallSalt: instance.salt, MaxClockSkewSeconds: config.Admission.MaxClockSkewSeconds})
 		if gateErr != nil {
 			_ = discovery.Close()
 			_ = journal.Close()
