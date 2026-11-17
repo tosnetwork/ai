@@ -721,6 +721,21 @@ func (r RoomInvite) Validate() error {
 	return requireTime("invitation expiry", r.ExpiresAtUnix)
 }
 
+// MaxRoomInviteLifetimeSeconds bounds a room.invite: it expires at most
+// 7 days after the Event that carries it was created, so a pending join it
+// records cannot outlive the authority's handshake retention.
+const MaxRoomInviteLifetimeSeconds = 7 * 24 * 60 * 60
+
+// ValidateLifetime checks the invite's expiry against the creation time of
+// the Event that carries it: later than it, and at most
+// MaxRoomInviteLifetimeSeconds after it.
+func (r RoomInvite) ValidateLifetime(createdAtUnix uint64) error {
+	if createdAtUnix == 0 || r.ExpiresAtUnix <= createdAtUnix || r.ExpiresAtUnix-createdAtUnix > MaxRoomInviteLifetimeSeconds {
+		return errors.New("a room invite expires within 7 days of its Event")
+	}
+	return nil
+}
+
 func (r RoomInvite) encode(buffer *bytes.Buffer) {
 	canon.Text(buffer, r.RoomID)
 	canon.Text(buffer, r.InviteeAgentID)

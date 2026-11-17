@@ -118,6 +118,25 @@ func (h *recordingHandler) DeliveryAck(context.Context, string, []byte) Response
 	return Response{Result: ResultCarried}
 }
 
+func (h *recordingHandler) RoomCards(_ context.Context, request Request) Response {
+	h.carried = append(h.carried, request)
+	if request.RoomCardsAction == RoomCardsAdmit && len(request.RoomCards) > 1 {
+		return Response{Result: ResultApplied, RefusedAgentIDs: []string{request.RoomCards[1].AgentID}}
+	}
+	return Response{Result: ResultApplied}
+}
+
+func (h *recordingHandler) Withdraw(_ context.Context, request Request) Response {
+	if request.IdempotencyKey == keyTwo {
+		return Response{Result: ResultIgnored}
+	}
+	// A withdrawal answered carried is not one: retry.
+	if request.RecipientAgentID == agentB {
+		return Carried(3600)
+	}
+	return Withdrawn()
+}
+
 func TestSocketRoundTripIsBoundedAndChecked(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run", "carrier.sock")
 	listener, err := Listen(path)
@@ -197,6 +216,8 @@ func (h *slowHandler) Carry(ctx context.Context, _ Request, _ []byte) Response {
 
 func (h *slowHandler) Deliver(context.Context, string, []byte) Response     { return NotServed() }
 func (h *slowHandler) DeliveryAck(context.Context, string, []byte) Response { return NotServed() }
+func (h *slowHandler) RoomCards(context.Context, Request) Response          { return NotServed() }
+func (h *slowHandler) Withdraw(context.Context, Request) Response           { return NotServed() }
 
 func TestServerBoundsConcurrentHandlersAndTheirTime(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run", "carrier.sock")
