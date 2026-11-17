@@ -12,8 +12,9 @@ to `tosnetwork/openfox` `main` `edd88e11`.
 **Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
 
 **Errata (M-R2 relay frame implementation).** Section 11.1 gains the
-normative room-object header layout. The largest valid header is 2,653 bytes,
-so the largest valid object is 1,051,319 bytes: five 190,464-byte frames and
+normative room-object header layout. The largest valid header is 2,653 bytes
+(2,661 since the room end time of D18 was added to it), so the largest valid
+object is 1,051,319 bytes (now 1,051,327): five 190,464-byte frames and
 one 131,072-byte frame, 1,485,354 stored bytes per member. The 8,192-byte
 header and 1,056,858-byte object limits stay as codec bounds; the six full
 frames and 1,564,542 bytes the section stated before are an upper bound no
@@ -22,7 +23,7 @@ Welcome carries no epoch authenticator and MLS epoch 0.
 
 **Errata (M-R2 journal implementation).** The MLS state bound is derived from the worst case the driver configuration allows at the relay room bound of 32 leaves, not from in-order traffic at 64: with an out-of-order tolerance of 32, 63 senders skipping 7 generations in each retained epoch exceed 512 KiB at 64 leaves. The tolerance is therefore 8 and the forward distance 1,000; the worst case at 32 leaves is measured in section 11.3 (sections 8 item 17, 9.2 item 2, 11.3), corrected by the leaf-identity erratum below. The fused record names the memberships of the two earlier room epochs by digest, because three member lists do not fit its 8,192 bytes; those content-addressed membership records are named by the fused record and collected with the other staged records (sections 9.2 item 4, 11.3, 11.7).
 
-**Errata (M-R2 leaf identity).** The 32-leaf worst case this document stated before, 272,968 bytes, was measured with 9-byte test identities (`member-NN`). The MLS BasicCredential identity of a leaf is copied into the ratchet tree and every retained epoch, and the library stores byte strings as JSON number arrays, so each identity byte costs about 384 bytes of state at 32 leaves for typical values (up to about 4 characters, "255,", per stored byte). The identity then specified (every DeviceCredential field except the KeyPackage, the validity window and the signature) was 497 bytes on the test network and 616 at a 128-character network ID. With it the worst case is 458,784 and 504,300 bytes: 12.5 % and 3.8 % headroom, under the 20 % item 17 requires. Carrying the full DeviceCredential in the identity is impossible twice over: its Endpoint signature covers the KeyPackage, which carries the identity, so the identity would have to contain itself; and a KeyPackage of up to 64 KiB exceeds the driver's 4,096-byte identity limit. Carrying the DeviceCredential in roster entries would exceed the 1 MiB body bound by about 2 MB. The leaf identity is therefore a fixed 128-byte compact binding, and the member's Endpoint-signed **leaf credential** (at most 473 bytes, no KeyPackage) is issued, distributed, stored, renewed and revoked as section 11.8 states. Re-measured with maximal identities of the costliest byte values, the worst case is at most 334,536 bytes over repeated runs (the keys are random), 36 % under the bound (sections 8 items 17, 19–21, 9.2, 11.1, 11.2, 11.3, 11.5, 11.8, D15, D17).
+**Errata (M-R2 leaf identity).** The 32-leaf worst case this document stated before, 272,968 bytes, was measured with 9-byte test identities (`member-NN`). The MLS BasicCredential identity of a leaf is copied into the ratchet tree and every retained epoch, and the library stores byte strings as JSON number arrays, so each identity byte costs about 384 bytes of state at 32 leaves for typical values (up to about 4 characters, "255,", per stored byte). The identity then specified (every DeviceCredential field except the KeyPackage, the validity window and the signature) was 497 bytes on the test network and 616 at a 128-character network ID. With it the worst case is 458,784 and 504,300 bytes: 12.5 % and 3.8 % headroom, under the 20 % item 17 requires. Carrying the full DeviceCredential in the identity is impossible twice over: its Endpoint signature covers the KeyPackage, which carries the identity, so the identity would have to contain itself; and a KeyPackage of up to 64 KiB exceeds the driver's 4,096-byte identity limit. Carrying the DeviceCredential in roster entries would exceed the 1 MiB body bound by about 2 MB. The leaf identity is therefore a fixed 128-byte compact binding, and the member's Endpoint-signed **leaf credential** (at most 473 bytes, no KeyPackage) is issued, distributed, stored and revoked as section 11.8 states. V1 rooms do not renew credentials: a room ends when its authority's leaf credential does (D18). Re-measured with maximal identities of the costliest byte values, the worst case is at most 334,536 bytes over repeated runs (the keys are random), 36 % under the bound (sections 8 items 17, 19, 20, 9.2, 11.1, 11.2, 11.3, 11.5, 11.8, D15, D18).
 
 MUST, MUST NOT, SHOULD and MAY are normative. Citations are `path:line` in this
 repository at the commit this document lands on, and `openfox path:line` in
@@ -1024,23 +1025,15 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     not refused as a fork; an authority crash between staging and the fused
     write, and right after it, leaves the Add's rosters delivered once, after
     their Commit or Welcome.
-19. **Authority renewal across a credential expiry (live, 11.8).** With a
-    test-shortened credential lifetime, A renews its own leaf before its
-    leaf credential expires: an MLS-only Commit carrying A's new identity,
-    preceded by A's renewal roster entry. B and C apply it, and the room
-    keeps working past the old credential's expiry. Unit: a Commit changing
-    the committer's identity without a verified renewal entry is refused
-    `not-authentic`; restart rebuilds the queue as (renewal roster, Commit).
-20. **Automatic member re-key (live, D17).** With a test-shortened
-    credential lifetime, C's daemon pre-submits a fresh `room.key-package`
-    inside its credential's renewal window. A's daemon commits
-    Remove(old leaf) + Add(new leaf) without any owner signature, and the
-    room's Agent set is unchanged. C applies the Welcome and keeps its room;
-    B learns C's new credential from the roster and keeps exchanging
-    messages. Unit: a re-key for another Agent or Endpoint, outside the
-    renewal window, or a second one within the rate bound is ignored with
-    no Commit.
-21. **Credential storage and holding (unit, 11.8).**
+19. **Room end (live, D18).** With a test-shortened credential lifetime,
+    the room ends at A's leaf-credential expiry. At the end, B and C refuse
+    new Commits, Welcomes, rosters and application objects for the room with
+    `room-ended` and an owner notice. A stops its queues, and the room's
+    stores become collectable after the handshake retention. Unit: A refuses
+    to add a member whose leaf credential ends before the room's end, and a
+    receiver refuses a roster entry or a leaf whose credential does; a
+    header naming another end time than the room's is refused.
+20. **Credential storage and holding (unit, 11.8).**
     - A learned leaf credential is durable before the roster's room ack.
     - The fused record's credential-list digest is a garbage-collection
       root: an unreadable list deletes nothing.
@@ -1199,9 +1192,8 @@ seal already carry any frame; nothing new is resolved on chain).
    (`:443-465`, `:484-520`) and `inspect` the epoch authenticator; the Go
    `Driver` gains those results. A read-only `members` operation returns
    (leaf index, identity, signature key) for every leaf, used when learning
-   roster entries and when building per-member pins (11.8). `refresh` gains a
-   new-identity parameter, so the authority can renew its own leaf (today it
-   uses `LeafNodeParameters::default()`). The driver keeps its generic
+   roster entries and when building per-member pins (11.8). The driver keeps
+   its generic
    4,096-byte identity limit (the lab uses other identities); the Go relay
    room path (`pkg/group` and the room controller) refuses any leaf identity
    that is not exactly the 128-byte compact binding of 11.2. A vector test
@@ -1215,7 +1207,8 @@ seal already carry any frame; nothing new is resolved on chain).
    `pkg/directory`: the `CheckPeer` pin taken from a member's verified leaf
    credential (Endpoint and device) for kind 3, beside the session pin of 2.5.
 4. `pkg/eventlog`: the fused room and MLS record (≤ 8,192 bytes, digests
-   only, now also naming the room's leaf-credential list, 11.8) with
+   only, now also naming the room's leaf-credential list and its end time,
+   11.8, D18) with
    exact-repeat no-op (11.3, replacing the two writes for MLS rooms) and its
    bound test; content-addressed leaf-credential records and the per-room
    credential list (11.8); staged MLS state chunks (≤ 2 of 262,144 bytes),
@@ -1286,6 +1279,8 @@ part, C3):
 - The roster codec (`pkg/relayframe/room.go:363-427`) and
   `internal/vectors/testdata/relay-room-vectors.json` gain each entry's
   leaf credential. This is a wire change, with no migration before launch.
+- The room-object header codec (`pkg/relayframe/room.go`) and its vectors
+  gain the room's end time (D18), and `pkg/fault` gains `room-ended`.
 - C1's `room.key-package` payload gains the leaf credential.
 - In C2 (#34), the helpers for the old identity are removed, and
   `directory.LeafPin` takes the leaf credential instead of the
@@ -1355,8 +1350,9 @@ M-R2 decisions (2026-11-16, delegated by the owner):
   across one Commit at little forward-secrecy cost; anything older already
   gets a gap notice (11.3).
 - **D15. No post-compromise security for members in V1.** Members never
-  commit, so a compromised member leaf is not healed; members are re-added
-  before their 30-day leaf credential expires (11.5). Member Updates are a
+  commit, so a compromised member leaf is not healed; a room lives no
+  longer than its authority's leaf credential (D18), so no member credential
+  needs renewing inside a room. Member Updates are a
   later change.
 - **D16. Catch-up authorization window and journal shape** (review of ai #28).
   On the relay route a header authorization is checked against the
@@ -1367,22 +1363,21 @@ M-R2 decisions (2026-11-16, delegated by the owner):
   Commit output are staged first as chunk records it names, and unnamed
   staged records are deleted on restart (11.3, 11.7). Reason: a record near
   its bound becomes unreadable once a field is added.
-- **D17. Same-member re-key needs no owner.** A member's leaf credential
-  expires after at most 30 days. The authority's daemon re-keys a member
-  automatically, without an owner signature, when that member's daemon
-  pre-submits a fresh `room.key-package` and leaf credential for the same
-  Agent and Endpoint. It commits Remove(old leaf) + Add(new leaf) in one
-  MLS-only Commit (members never commit, so there is no member Update to
-  use). Bounds:
-  - it runs only within the last 7 days of the member's current leaf
-    credential;
-  - at most one re-key per member per 24 hours;
-  - the new credential's window starts no later than the old one ends.
-
-  Anything else is ignored, with no Commit (11.8). Reason: the room's set of
-  Agents does not change, so D13 (the owner decides who is in the room) is
-  unaffected, and a room needs no two owners acting every 30 days to keep
-  its members.
+- **D18. A room ends when its authority's credential does.** A room's end
+  time is fixed at creation: the expiry of the authority's leaf credential
+  (at most 30 days). The fused record records it, and so does every header
+  the authority sends (Commits that change the room epoch, Welcomes and
+  rosters). The authority adds a member only if the member's leaf credential
+  is valid at least until the room's end. Receivers refuse a roster entry or
+  a leaf whose credential expires before it, and a header naming another
+  end. At the end, every member stops accepting new Commits, Welcomes,
+  rosters and application objects for the room: they are refused with the
+  fixed code `room-ended` and an owner notice. The authority stops its
+  queues, and the room's stores become collectable after the handshake
+  retention. To continue, the owner creates a new room. Reason (first
+  principles): a room that never outlives any member's credential has no
+  expiry inside it to store, distribute or renew. This matches task-scoped
+  Agent rooms. Renewal is deferred to M-R2.1 (11.8).
 
 ## 11. M-R2: rooms and invites
 
@@ -1455,14 +1450,19 @@ room_header =
   issued_at     u64
   expires_at    u64
   signature     64
+  room_ends_at  u64  the room's end time (D18), the same in every header
 ```
 
 The network-ID bytes are exactly the authority delegation's `network_id`
 (and so its characters): an authorization whose network differs from the
 delegation's is refused. A decoder re-encodes the header and refuses any
 other encoding of the same values. The largest valid header is therefore
-1 + 32·70 + 2 + 128 + 32 + 32 + 70 + 68 + 8 + 8 + 64 = **2,653 bytes**, and
-the largest valid object 90 + 2,653 + 1,048,576 = **1,051,319 bytes**. The
+1 + 32·70 + 2 + 128 + 32 + 32 + 70 + 68 + 8 + 8 + 64 + 8 = **2,661 bytes**,
+and the largest valid object 90 + 2,661 + 1,048,576 = **1,051,327 bytes**.
+The room end time is not covered by the MembershipAuthorization signature.
+It is fixed by the first header a member accepts (its Welcome), arrives only
+in the authority's verified packets, and must be the same in every later
+header. The
 codec limits stay 8,192 header bytes and 1,056,858 object bytes: a safe upper
 bound that no valid object reaches.
 
@@ -1484,8 +1484,8 @@ generation has byte-identical parts and the same digest although part 0's
 card is dropped once acknowledged. Every non-final part is exactly the
 190,464-byte bucket; a full part stores 1,373 + 5,432 + 4·63,488 = 260,757
 bytes at a relay (≤ 262,144). The last part is padded to its bucket (6). The
-largest valid object (1,051,319 bytes) is five 190,464-byte frames and a last
-part of 127,007 object bytes, a 127,079-byte frame in the 128 KiB bucket:
+largest valid object (1,051,327 bytes) is five 190,464-byte frames and a last
+part of 127,015 object bytes, a 127,087-byte frame in the 128 KiB bucket:
 5 · 260,757 + (1,373 + 5,432 + 4 · 43,691) = **1,485,354 stored bytes per
 member**. (An object at the 1,056,858-byte codec limit, which no valid header
 reaches, would be six 190,464-byte frames with a last part of 132,546 bytes
@@ -1750,9 +1750,10 @@ and its chunk digests, the delegation digest, the consumed KeyPackage ref and
 the processed Welcome ref (one digest each, today in `eventlog/mls.go:45-46`,
 checked by `keyPackageConsumed` `:336-358` and the replay refusal `:98`), and
 the epoch authenticators of the current and 2 previous epochs, and the
-digest of the room's leaf-credential list (11.8). Worst case about
-**5.2 KB**: measured 5,056 bytes before the credential-list digest, which
-adds about 100 bytes with its field name (the bound test re-measures it) (2,336 bytes for 32 member IDs, about 900 for an
+digest of the room's leaf-credential list (11.8) and the room's end time
+(D18). Worst case about
+**5.2 KB**: measured 5,056 bytes before the credential-list digest and the
+end time, which add about 130 bytes with their field names (the bound test re-measures it) (2,336 bytes for 32 member IDs, about 900 for an
 authorization with a maximal network ID, about 150 for the two refs, the rest
 digests and IDs, plus field names); the codec caps it at **8,192 bytes**,
 leaving 778,240 bytes (99 %) of the 768 KiB record bound
@@ -1784,13 +1785,10 @@ authority named in the `room.invite`), with replay refused by the ledger
 (`eventlog/mls.go:98`); once installed, later copies of it answer
 `duplicate` under step 1.
 
-Rosters are keyed by (room epoch E, MLS epoch): the room epoch they
-describe and the MLS epoch of the Commit or Welcome they follow (the object's
-`mls_epoch`). A re-key or renewal (11.8) sends a roster without changing E.
-They are checked as in 11.2: a digest among the last 64 applied rosters
-answers `duplicate`; a second, different roster for the same (E, MLS epoch)
-to the same receiver answers `rejected` with the dedicated code
-`room-roster-conflict` and an owner notice naming it (a
+Rosters are keyed by (roster, room epoch E) and checked as in 11.2: a digest
+among the last 64 applied rosters answers `duplicate`; a second, different
+roster for the same E to the same receiver answers `rejected` with the
+dedicated code `room-roster-conflict` and an owner notice naming it (a
 roster conflict, not `room-fork`, since a roster carries no MLS state). Welcome replay stays refused (`eventlog/mls.go:98`). On any `rejected` room
 ack the authority stops that member's queue with an owner notice.
 
@@ -1906,10 +1904,12 @@ needs an ordering service; relay arrival order is not authority.
 never commit, so a compromised member leaf is not healed by its own Update
 (only the authority's Commits refresh the path; member Updates are a later
 change). A member's leaf credential lives at most 30 days, the window of
-its `DeviceCredential` (`mls_profile.go:34`). Before it expires, the member
-is re-keyed automatically (D17, 11.8) and the authority renews its own leaf
-in its own Commit (11.8). After it expires, receivers refuse that member's
-objects `not-authentic` and the authority's queue to it stops.
+its `DeviceCredential` (`mls_profile.go:34`). No member's credential expires
+inside a room: the room ends at the authority's credential expiry, and only
+members whose credential lasts until then are added (D18). A credential that
+nevertheless fails (for example an Endpoint withdrawn on chain) makes
+receivers refuse that member's objects `not-authentic`, and the authority's
+queue to it stops.
 
 ### 11.6 Invites over the relay
 
@@ -2042,10 +2042,12 @@ A member's leaf credential (format in 11.2) is what every other member pins
 binds an MLS leaf to an Agent, Endpoint and device. Its lifecycle is the
 following, and the other sections refer here.
 
-**Issue.** A joining member's daemon (11.2), or a member being re-keyed
-(D17, below), makes a fresh leaf signature key and its leaf credential. The
-window is the one of the `DeviceCredential` it makes beside it: at most 30
-days, and not past the delegation's expiry. The Endpoint signs the
+**Issue.** A joining member's daemon (11.2) makes a fresh leaf signature key
+and its leaf credential. The window is the one of the `DeviceCredential` it
+makes beside it: at most 30 days, and not past the delegation's expiry. The
+authority adds the member only if that window lasts at least until the
+room's end (D18). The founding authority's own leaf credential fixes the
+room's end. The Endpoint signs the
 credential. The KeyPackage's identity is the 128-byte compact binding naming
 the credential's digest. `room.key-package` carries the `DeviceCredential`
 and the leaf credential. The authority checks both (11.2) and refuses any
@@ -2058,11 +2060,7 @@ that needs it, in roster entries staged under the Commit's `CommitRef`
 - a joiner's full roster carries every other member's credential, the
   authority's included;
 - the roster of added members carries the joiners' credentials to the
-  others;
-- a re-key roster (D17) carries the re-keyed member's new credential to the
-  others;
-- a renewal roster (below) carries the authority's new credential to every
-  member.
+  others.
 
 A receiver takes the leaves from the driver's read-only `members` operation
 (leaf index, identity, signature key). For each entry it requires:
@@ -2072,7 +2070,8 @@ A receiver takes the leaves from the driver's read-only `members` operation
 - its signature verifies under the Endpoint key of the member's delegation
   as finalized now;
 - its leaf signature key equals the leaf's;
-- it is inside its window.
+- it is inside its window, and the window lasts at least until the room's
+  end (D18).
 
 An entry that fails is skipped like a stale card, and the rest of the roster
 is learned.
@@ -2091,32 +2090,32 @@ the future-epoch buffer (11.3; same caps, 24 h 5 min) and opened once the
 roster arrives. They are refused `not-authentic` only after a roster
 arrived without a verifying entry for that member.
 
-**Renew, members (D17).** Within the last 7 days of its current credential,
-a member's daemon pre-submits a fresh `room.key-package` and leaf credential
-over its 1:1 session to the authority, for the same Agent and Endpoint. It
-keeps the new identity state as a pending re-key. If the pre-submission
-fits D17's bounds, the authority's daemon commits Remove(old leaf) +
-Add(new leaf) in one MLS-only Commit (the room epoch and its Agent set
-unchanged). It sends the member a Welcome and a full roster, and the others
-the Commit and a re-key roster. The member processes the Welcome through its
-pending re-key, as a joiner does (11.3), replacing its room state; until
-then it keeps opening with the old state. A pre-submission outside the
-bounds is ignored, with no Commit.
-
-**Renew, authority.** Before its own credential's last 7 days run out, the
-authority commits an MLS-only refresh whose UpdatePath carries its new
-compact identity (the same or a new leaf key); `refresh` takes the new
-identity (9.2 item 2). A one-entry renewal roster naming the authority and
-its new credential is staged under the same `CommitRef` and queued **before**
-the Commit to every member. A receiver accepts a renewal roster for MLS
-epoch r + 1 only from the authority, and keeps the credential as pending. It
-applies a Commit that changes the committer's identity only if the new
-identity names a verified pending renewal credential; otherwise it refuses
-the Commit `not-authentic`. On restart the queues are rebuilt as (renewal
-roster, Commit).
+**Room end (D18).** At the room's end, every member refuses the room's new
+objects with `room-ended` and an owner notice, and the authority stops its
+queues. The room's stores (fused record, credentials, outbox, receive state)
+become collectable after the handshake retention. Credentials are never
+renewed inside a room: continuing means a new room.
 
 **Revoke.** A credential stops counting when it expires (D15: the member's
 objects are refused `not-authentic` and the authority's queue to it stops),
-when the member is removed (11.4), when a re-key replaces it, or when the
+when the member is removed (11.4), when the room ends (D18), or when the
 delegation's Endpoint is withdrawn on chain (the signature check above reads
 finalized state on every use).
+
+**M-R2.1 (deferred): credential renewal.** These are not part of V1, and
+they wait for a later milestone:
+
+- **Authority renewal.** An MLS-only refresh whose UpdatePath carries the
+  authority's new compact identity (`refresh` gaining a new-identity
+  parameter), with a one-entry renewal roster queued before the Commit, and
+  a store, root and crash rule for the pending renewal credential.
+- **Automatic same-member re-key.** Remove(old leaf) + Add(new leaf)
+  without the owner, bounded in time and rate. It needs a fused-ledger
+  transition for the member's own Welcome into a room it already holds, and
+  a bound against churn from short windows.
+- **Roster keying.** A renewal or re-key sends a roster at an unchanged room
+  epoch, so rosters would be keyed by (room epoch, MLS epoch).
+- **Gate items** for an authority renewal across a credential expiry and an
+  automatic member re-key.
+
+Until then, D18 bounds every room by its authority's credential.
