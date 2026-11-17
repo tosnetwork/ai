@@ -18,7 +18,8 @@ package eventlog
 // commit with no record against it. A floor is safe to drop once its issue
 // time plus the largest descriptor lifetime has passed, because by then all
 // evidence at or below it has expired; floors are dropped only past that
-// horizon, and only when the floor store needs room. Floors live apart from
+// horizon, only when the floor store needs room, and never the floor of a
+// contact or of a peer with a session here, whose admission it is. Floors live apart from
 // the records, so retiring a record frees its slot in MaxRelayPeers.
 
 import (
@@ -28,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -93,7 +95,13 @@ func (j *Journal) ListRelayEvidencePeers() ([]string, error) {
 // store is full of floors still inside their horizon: the record is then
 // kept, which is always safe. horizon is the largest descriptor lifetime: a
 // floor older than it may be dropped to make room.
-func (j *Journal) RetireRelayEvidence(agentID, evidenceDigest string, floor RelayEvidenceFloor, horizon time.Duration, now time.Time) (bool, error) {
+//
+// contacts are the configured contacts of this installation. A floor whose
+// peer is a contact (configured, or made by a claimed invite) or has a
+// session here is never evicted to make room: the floor is that peer's
+// admission, which its kind-4 evidence responses need.
+func (j *Journal) RetireRelayEvidence(agentID, evidenceDigest string, floor RelayEvidenceFloor, horizon time.Duration,
+	contacts map[string]struct{}, now time.Time) (bool, error) {
 	if err := j.usable(); err != nil {
 		return false, err
 	}
@@ -117,7 +125,7 @@ func (j *Journal) RetireRelayEvidence(agentID, evidenceDigest string, floor Rela
 	// A floor only ever rises.
 	if !held || floor.DescriptorIssuedAtUnix > existing.DescriptorIssuedAtUnix {
 		if !held {
-			room, err := j.makeRelayFloorRoom(horizon, now)
+			room, err := j.makeRelayFloorRoom(horizon, contacts, now)
 			if err != nil || !room {
 				return false, err
 			}
@@ -145,10 +153,10 @@ func (j *Journal) RetireRelayEvidence(agentID, evidenceDigest string, floor Rela
 }
 
 // makeRelayFloorRoom ensures the floor store can take one more floor,
-// dropping the oldest floors past their horizon if it is full. It reports
-// false when every held floor is still inside its horizon. The journal mutex
-// is held.
-func (j *Journal) makeRelayFloorRoom(horizon time.Duration, now time.Time) (bool, error) {
+// dropping the oldest evictable floor if it is full: one past its horizon
+// whose peer is no contact and has no session here. It reports false when
+// no floor can go. The journal mutex is held.
+func (j *Journal) makeRelayFloorRoom(horizon time.Duration, contacts map[string]struct{}, now time.Time) (bool, error) {
 	agents, err := j.relayAgentsIn(relayFloorDir)
 	if err != nil {
 		return false, err
@@ -166,20 +174,64 @@ func (j *Journal) makeRelayFloorRoom(horizon time.Duration, now time.Time) (bool
 			floors = append(floors, floor)
 		}
 	}
-	if len(floors) == 0 {
-		return false, nil
-	}
 	sort.Slice(floors, func(a, b int) bool { return floors[a].DescriptorIssuedAtUnix < floors[b].DescriptorIssuedAtUnix })
-	oldest := floors[0]
 	seconds := uint64(horizon / time.Second)
-	// When the oldest floor is still inside its horizon, all are.
-	if oldest.DescriptorIssuedAtUnix > ^uint64(0)-seconds || oldest.DescriptorIssuedAtUnix+seconds > uint64(now.Unix()) {
-		return false, nil
+	var sessionPeers map[string]struct{}
+	for _, floor := range floors {
+		// Floors are in issue order: once one is inside its horizon, so are
+		// all after it.
+		if floor.DescriptorIssuedAtUnix > ^uint64(0)-seconds || floor.DescriptorIssuedAtUnix+seconds > uint64(now.Unix()) {
+			return false, nil
+		}
+		if _, contact := contacts[floor.AgentID]; contact {
+			continue
+		}
+		_, invited, err := readInvitedContact(j.agentRecordPath(invitedContactDir, floor.AgentID), floor.AgentID)
+		if err != nil {
+			return false, err
+		}
+		if invited {
+			continue
+		}
+		if sessionPeers == nil {
+			if sessionPeers, err = j.sessionPeers(); err != nil {
+				return false, err
+			}
+		}
+		if _, session := sessionPeers[floor.AgentID]; session {
+			continue
+		}
+		if err := os.Remove(j.relayFloorPath(floor.AgentID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, errors.New("delete relay evidence floor")
+		}
+		return true, syncDirectory(filepath.Join(j.root, relayFloorDir))
 	}
-	if err := os.Remove(j.relayFloorPath(oldest.AgentID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, errors.New("delete relay evidence floor")
+	return false, nil
+}
+
+// sessionPeers lists the peer Agents of every session held here. An
+// unreadable session fails the listing, so no floor is evicted on a guess.
+// The journal mutex is held.
+func (j *Journal) sessionPeers() (map[string]struct{}, error) {
+	entries, err := os.ReadDir(filepath.Join(j.root, sessionDir))
+	if err != nil {
+		return nil, errors.New("read sessions")
 	}
-	return true, syncDirectory(filepath.Join(j.root, relayFloorDir))
+	peers := map[string]struct{}{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".json" || !sessionPattern.MatchString("ses_"+strings.TrimSuffix(name, ".json")) {
+			continue
+		}
+		record, err := readSession(filepath.Join(j.root, sessionDir, name))
+		if err != nil {
+			return nil, err
+		}
+		if record.Authority != nil {
+			peers[record.Authority.PeerAgentID] = struct{}{}
+		}
+	}
+	return peers, nil
 }
 
 // dropRelayFloor deletes a peer's floor once newer evidence is committed;

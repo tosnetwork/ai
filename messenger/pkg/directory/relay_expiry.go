@@ -80,7 +80,7 @@ func (v RelayVerifier) sweepPeer(agentID string, now time.Time) (bool, bool, err
 		return false, false, nil
 	}
 	retired, err := v.Store.RetireRelayEvidence(agentID, relayframe.EvidenceDigest(evidence),
-		eventlog.RelayEvidenceFloor{DescriptorDigest: digest, DescriptorIssuedAtUnix: issued}, RelayFloorHorizon, now)
+		eventlog.RelayEvidenceFloor{DescriptorDigest: digest, DescriptorIssuedAtUnix: issued}, RelayFloorHorizon, v.Contacts, now)
 	if err != nil {
 		return false, false, err
 	}

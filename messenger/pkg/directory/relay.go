@@ -63,7 +63,8 @@ type EvidenceStore interface {
 	StoreRelayEvidence(agentID string, evidence []byte, previousDigest string, now time.Time) error
 	LoadRelayEvidenceFloor(agentID string) (eventlog.RelayEvidenceFloor, bool, error)
 	ListRelayEvidencePeers() ([]string, error)
-	RetireRelayEvidence(agentID, evidenceDigest string, floor eventlog.RelayEvidenceFloor, horizon time.Duration, now time.Time) (bool, error)
+	RetireRelayEvidence(agentID, evidenceDigest string, floor eventlog.RelayEvidenceFloor, horizon time.Duration,
+		contacts map[string]struct{}, now time.Time) (bool, error)
 }
 
 // RelayVerifier holds what CheckPeer and CommitPeer read and write.
@@ -75,6 +76,9 @@ type RelayVerifier struct {
 	Admitter     PublishedSetAdmitter
 	Store        EvidenceStore
 	LocalAgentID string
+	// Contacts are this installation's configured contacts; their floors
+	// are never evicted (eventlog.RetireRelayEvidence).
+	Contacts map[string]struct{}
 }
 
 // ErrRelayEvidenceUnknown reports a peer with no committed evidence.

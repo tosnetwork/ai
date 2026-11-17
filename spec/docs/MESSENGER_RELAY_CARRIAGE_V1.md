@@ -369,9 +369,11 @@ record. It is needed because expiry is not monotonic in the ordering key:
 an older descriptor may have a longer lifetime than a newer one and still be
 unexpired. A floor may be dropped once its issue time plus the largest
 descriptor lifetime (7 days) has passed, since all evidence at or below it
-has then expired; floors are dropped only past that horizon and only when
-their own store (at most 4,096) is full, and a record is kept rather than
-retired without a floor. The device-set rollback boundary is separate and
+has then expired; floors are dropped only past that horizon, only when
+their own store (at most 4,096) is full, and never the floor of a contact
+(configured, or made by a claimed invite) or of a peer with a session here,
+whose admission it is; a record is kept rather than retired without a
+floor. The device-set rollback boundary is separate and
 is never swept.
 
 **Receiver.** `CheckPeer` runs on every frame. It uses the frame's evidence
