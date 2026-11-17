@@ -302,3 +302,81 @@ func TestRoomRemovalKeepsAMemberSharedWithAnotherRoom(t *testing.T) {
 		t.Fatalf("this room's card admission was kept: %v", forgotten)
 	}
 }
+
+// Reconciliation forgets only former members: a current member's card
+// admission, sequence record and parts are left alone, and a forget already
+// sent is not sent again on later ticks.
+func TestRoomReconciliationLeavesCurrentMembersAlone(t *testing.T) {
+	partBytes := 4 * relayframe.MinTestPartBytes
+	scene := newJoinedSceneCut(t, roomRetention, partBytes)
+	b := scene.nodes[1]
+	if ack := roomAckOf(t, b, send(t, b, scene.a.agent(), framesOf(t, scene.a, removeCommit(t, scene, scene.c), partBytes))); ack.Outcome != relayframe.OutcomeAccepted {
+		t.Fatalf("the removal of C: %+v", ack)
+	}
+	if err := b.d.journal.ObserveRoomSequence(testRoomID, scene.a.agent(), 2, scene.clock.now()); err != nil {
+		t.Fatal(err)
+	}
+	record := scene.authority.record
+	pending := scene.authority.object(relayframe.RoomCommit, record.RoomEpoch, record.MLSEpoch+1, nil, make([]byte, 3*partBytes))
+	if response := b.d.relay.Deliver(context.Background(), scene.a.agent(), framesOf(t, scene.a, pending, partBytes)[1]); response.Result != carrierapi.ResultAdmitted {
+		t.Fatalf("A's stored part: %s/%s", response.Result, response.Code)
+	}
+	for range 2 {
+		b.d.relay.rooms.maintain()
+	}
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 1 || forgotten[0] != scene.c.agent() {
+		t.Fatalf("forgotten card admissions: %v", forgotten)
+	}
+	if storedParts(t, b) != 1 {
+		t.Fatal("a current member's part was dropped")
+	}
+	if kept, err := b.d.journal.ForgetRoomSender(testRoomID, scene.a.agent()); err != nil || !kept {
+		t.Fatalf("a current member's sequence record was deleted: %v %v", kept, err)
+	}
+}
+
+// A member removed two room epochs back is still forgotten from the
+// journal alone, after a crash left its forgetting undone.
+func TestRoomMemberRemovedTwoEpochsBackIsForgotten(t *testing.T) {
+	scene := newJoinedScene(t, roomRetention)
+	b := scene.nodes[1]
+	applyWithoutForgetting(t, scene, removeCommit(t, scene, scene.c))
+	d := scene.member(t, 3, 50*time.Minute)
+	result, membership := scene.authority.commit(d)
+	if ack := roomAckOf(t, b, send(t, b, scene.a.agent(), framesOf(t, scene.a, scene.authority.commitObject(result, membership), 0))); ack.Outcome != relayframe.OutcomeAccepted {
+		t.Fatalf("the Add of D: %+v", ack)
+	}
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 0 {
+		t.Fatalf("forgotten before the restart: %v", forgotten)
+	}
+	if err := b.d.installRoomRuntime(roomRuntimeSettings{driver: scene.driver, cards: scene.cards[1], skew: 5 * time.Minute,
+		retention: roomRetention}); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 1 || forgotten[0] != scene.c.agent() {
+		t.Fatalf("C, removed two room epochs back, was not forgotten: %v", forgotten)
+	}
+}
+
+// Retirement drops the room's admission of every member's card; a carrier
+// that fails does not hold the retirement back and is retried.
+func TestRoomRetirementDropsTheRoomsCardAdmissions(t *testing.T) {
+	retention := 10 * time.Minute
+	scene := newJoinedScene(t, retention)
+	b := scene.nodes[1]
+	scene.cards[1].failForgets = 1
+	end := time.Unix(int64(scene.a.credential.ExpiresAtUnix), 0)
+	scene.clock.set(end.Add(retention + 5*time.Minute))
+	b.d.relay.rooms.maintain()
+	if _, found := fused(t, b); found {
+		t.Fatal("a failing carrier held the retirement back")
+	}
+	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 0 {
+		t.Fatalf("forgotten while the carrier failed: %v", forgotten)
+	}
+	b.d.relay.rooms.maintain()
+	forgotten := scene.cards[1].forgottenIn(testRoomID)
+	if len(forgotten) != 2 || !containsAgent(forgotten, scene.a.agent()) || !containsAgent(forgotten, scene.c.agent()) {
+		t.Fatalf("the retired room's card admissions: %v", forgotten)
+	}
+}

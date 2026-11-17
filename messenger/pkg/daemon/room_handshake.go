@@ -10,7 +10,6 @@ package daemon
 
 import (
 	"bytes"
-	"context"
 	"errors"
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
@@ -141,16 +140,17 @@ func (r *roomRuntime) forgetRemoved(in roomInbound, before, after []string) {
 	if len(removed) == 0 {
 		return
 	}
-	r.forgetMembers(in.ctx, in.object.RoomID, removed)
+	r.forgetMembers(in.object.RoomID, removed)
 }
 
-// forgetMembers forgets members removed from a room: the room's admission
-// of their cards (carrier.room-cards forget; a card another admission holds
-// stays), their sequence records, and, when no room held here still takes
-// parts from them, their incomplete parts. Each step is idempotent
-// receive-side bookkeeping, not authority, so a failure is reported and
-// repeated by the next reconciliation.
-func (r *roomRuntime) forgetMembers(ctx context.Context, roomID string, removed []string) {
+// forgetMembers forgets members removed from a room: their sequence
+// records, their incomplete parts when no room held here still takes parts
+// from them, and the room's admission of their cards, which is queued and
+// sent to the carrier outside the handling lock (flushCardForgets; a card
+// another admission holds stays). Each step is idempotent receive-side
+// bookkeeping, not authority, so a failure is reported and repeated by the
+// next reconciliation or flush. The caller holds the handling lock.
+func (r *roomRuntime) forgetMembers(roomID string, removed []string) {
 	for _, agentID := range removed {
 		if _, err := r.daemon.journal.ForgetRoomSender(roomID, agentID); err != nil {
 			r.daemon.report("room removed member", err)
@@ -161,14 +161,7 @@ func (r *roomRuntime) forgetMembers(ctx context.Context, roomID string, removed 
 			}
 		}
 	}
-	response, err := r.cards.ForgetRoomCards(ctx, roomID, removed)
-	if err != nil {
-		r.daemon.report("room cards", err)
-		return
-	}
-	if response.Result != carrierapi.ResultApplied {
-		r.daemon.report("room cards", errors.New("the carrier did not drop the room's admission of removed members"))
-	}
+	r.queueCardForgets(roomID, removed)
 }
 
 // applyRefusal answers an MLS step that refused a Commit or Welcome. A
