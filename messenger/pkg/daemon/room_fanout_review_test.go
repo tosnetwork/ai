@@ -304,9 +304,10 @@ func TestRoomFanOutDepositsUnderTheHandlingLock(t *testing.T) {
 	}
 	welcome := objectsTo(t, a, agent)[0]
 	delivery, _ := memberDelivery(t, a, eventlog.RoomObjectWelcome, agent)
-	// The maintenance pass's re-deposit.
+	// The maintenance pass's re-deposit, through the handshake sweep itself
+	// (maintain's Add pass also fans out, under the lock).
 	scene.clock.set(time.Unix(int64(delivery.NextRedepositAtUnix), 0))
-	r.maintain()
+	r.sweepHandshakes(context.Background())
 	again := objectsTo(t, a, agent)
 	if len(again) != 1 {
 		t.Fatalf("%d re-deposits", len(again))
@@ -321,7 +322,9 @@ func TestRoomFanOutDepositsUnderTheHandlingLock(t *testing.T) {
 	if unlocked != 0 {
 		t.Fatalf("%d handshake deposits ran outside the handling lock", unlocked)
 	}
-	_ = welcome
+	if again[0][0].key == welcome[0].key {
+		t.Fatal("the sweep did not deposit the next generation")
+	}
 }
 
 // The wait after repeated retry answers doubles from 30 s and stops at
