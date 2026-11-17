@@ -1,6 +1,7 @@
 package eventlog
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -419,4 +420,30 @@ func acceptJoin(t *testing.T, journal *Journal, fixture *fusedFixture, authority
 		t.Fatal(err)
 	}
 	return ref
+}
+
+// A fused record without its credential list or its end time is refused on
+// write and on read.
+func TestFusedRecordNeedsItsCredentialListAndEnd(t *testing.T) {
+	fixture := newFusedFixture(t)
+	journal, ledger := openFused(t, t.TempDir()+"/state")
+	defer journal.Close()
+	record := fixture.installFounder(ledger, []byte("epoch zero"))
+	for name, change := range map[string]func(*RoomMLSRecord){
+		"no credential list": func(r *RoomMLSRecord) { r.CredentialListDigest = "" },
+		"no end":             func(r *RoomMLSRecord) { r.RoomEndsAtUnix = 0 },
+	} {
+		changed := record
+		change(&changed)
+		if _, err := encodeRoomMLSRecord(changed); err == nil {
+			t.Fatalf("%s: encoded", name)
+		}
+		raw, err := json.Marshal(changed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := decodeRoomMLSRecord(raw); err == nil {
+			t.Fatalf("%s: decoded", name)
+		}
+	}
 }
