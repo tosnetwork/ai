@@ -104,6 +104,9 @@ func (r *roomRuntime) handleCommit(in roomInbound) carrierapi.Response {
 		return carrierapi.Retry()
 	}
 	r.commitMemberPeer(roomID, in.peer, in.now)
+	// Buffered objects of the epoch the Commit reached are opened now, in
+	// arrival order (section 11.3).
+	r.releaseBuffered(roomID, false, in.now)
 	if !fresh {
 		return r.roomAck(in, answerDuplicate)
 	}
@@ -449,6 +452,9 @@ func (r *roomRuntime) handleRoster(in roomInbound) carrierapi.Response {
 		return carrierapi.Retry()
 	}
 	r.admitRosterRendezvous(in, learned)
+	// The roster taught credentials: the objects held for them are opened,
+	// and those of senders it did not teach are refused (section 11.8).
+	r.releaseBuffered(roomID, true, in.now)
 	return r.roomAck(in, answerAccepted)
 }
 

@@ -303,6 +303,89 @@ func (c *RoomMLSController) Open(roomID string, aad, message []byte, expectedSen
 	return plaintext, written, nil
 }
 
+// OpenedRoomMessage is an application message the driver opened whose
+// ratchet step is not durable yet. Its AAD is the message's own authenticated
+// data, authenticated by the open, for the caller to judge. Discarding the
+// value spends nothing: the driver returned the next state and nothing
+// stored it.
+type OpenedRoomMessage struct {
+	RoomID    string
+	Plaintext []byte
+	AAD       []byte
+	Sender    group.MLSMember
+	// prior is the state digest the message was opened against; next the
+	// state the open made.
+	prior string
+	next  []byte
+}
+
+// ErrRoomMessageNotOpened reports a message the driver ran on and refused to
+// open: not this group's, not of an epoch the member holds, a generation
+// already used or beyond the ratchet's tolerance, or tampered with. Any other
+// error is a driver or journal that could not run.
+var ErrRoomMessageNotOpened = errors.New("the MLS driver did not open the room message")
+
+// ErrRoomOpenedMessage reports an opened message that cannot be committed:
+// the zero value, or one whose room moved on since it was opened.
+var ErrRoomOpenedMessage = errors.New("the opened room message cannot be committed")
+
+// OpenReadback decrypts one application message of the current or a retained
+// past epoch without being told its authenticated data (the room AAD binds
+// the Event ID, which a receiver learns only by opening). expectedSender is
+// the leaf of the member the transport authenticated, as its verified leaf
+// credential expects it; a message sealed by any other leaf, or by that
+// identity under another signature key, is refused. Nothing is written: the
+// caller judges the AAD and the Event, and only then commits the step with
+// CommitOpened, so a message refused after the open spends no ratchet step.
+func (c *RoomMLSController) OpenReadback(roomID string, message []byte, expectedSender group.LeafBinding) (OpenedRoomMessage, error) {
+	if err := expectedSender.Validate(); err != nil {
+		return OpenedRoomMessage{}, ErrRoomLeafIdentity
+	}
+	if len(message) == 0 || len(message) > group.MaxOpenMLSMessageBytes {
+		return OpenedRoomMessage{}, errors.New("invalid MLS application message")
+	}
+	record, state, err := c.current(roomID)
+	if err != nil {
+		return OpenedRoomMessage{}, err
+	}
+	priorInfo, err := c.inspect.Inspect(state)
+	if err != nil {
+		return OpenedRoomMessage{}, err
+	}
+	next, plaintext, aad, sender, err := c.driver.OpenAttributedReadback(state, message)
+	if errors.Is(err, group.ErrOpenMLSRefused) {
+		return OpenedRoomMessage{}, fmt.Errorf("%w: %w", ErrRoomMessageNotOpened, err)
+	}
+	if err != nil {
+		return OpenedRoomMessage{}, err
+	}
+	if !expectedSender.Matches(sender) {
+		return OpenedRoomMessage{}, ErrMLSSenderMismatch
+	}
+	if _, err := c.checkState(next, priorInfo.GroupID, record.MLSEpoch); err != nil {
+		return OpenedRoomMessage{}, err
+	}
+	return OpenedRoomMessage{RoomID: roomID, Plaintext: plaintext, AAD: aad, Sender: sender,
+		prior: record.StateDigest, next: next}, nil
+}
+
+// CommitOpened makes an opened message's ratchet step durable. It refuses a
+// message opened against a state the room no longer holds (ErrMLSFork from
+// the ledger), so a step is never applied on top of another.
+func (c *RoomMLSController) CommitOpened(opened OpenedRoomMessage) (RoomMLSRecord, error) {
+	if opened.prior == "" || len(opened.next) == 0 {
+		return RoomMLSRecord{}, ErrRoomOpenedMessage
+	}
+	changed, written, err := c.ledger.Ratchet(opened.RoomID, opened.prior, opened.next, c.now())
+	if err != nil {
+		return RoomMLSRecord{}, err
+	}
+	if !changed {
+		return RoomMLSRecord{}, errors.New("MLS receive did not advance private state")
+	}
+	return written, nil
+}
+
 // Members lists the leaves of a room's current MLS tree (leaf index, identity
 // and signature key) without changing anything. A receiver learning roster
 // entries and building per-member pins reads them here (section 11.8). Every

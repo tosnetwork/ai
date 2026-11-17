@@ -795,8 +795,16 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 			_ = journal.Close()
 			return nil, errors.New("open room admission ledger: " + roomsErr.Error())
 		}
+		// The fused ledger of joined private rooms is the D11 room-scoped
+		// admission an Event opened from a room object is judged under.
+		roomMLS, roomMLSErr := journal.OpenRoomMLS()
+		if roomMLSErr != nil {
+			_ = discovery.Close()
+			_ = journal.Close()
+			return nil, errors.New("open private room admission ledger: " + roomMLSErr.Error())
+		}
 		gate, gateErr := admission.New(admission.Config{Network: config.Network(), Chain: discovery.chain,
-			Resolver: discovery.resolver, Journal: journal, Policy: policy, Devices: discovery.devices, Rooms: rooms,
+			Resolver: discovery.resolver, Journal: journal, Policy: policy, Devices: discovery.devices, Rooms: rooms, RoomMLS: roomMLS,
 			LocalDelegationJSON: localDelegation, LocalAgentID: config.AgentID, LocalEndpointID: config.EndpointID,
 			Now: instance.now, InstallSalt: instance.salt, MaxClockSkewSeconds: config.Admission.MaxClockSkewSeconds})
 		if gateErr != nil {

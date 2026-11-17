@@ -500,6 +500,73 @@ func EncodeRoomAAD(aad RoomAAD) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// MaxRoomAADBytes bounds an encoded room AAD; a valid one (the domain, a room
+// ID, two epochs, the authenticator and two IDs, each text with its length
+// prefix) is about 290 bytes.
+const MaxRoomAADBytes = 512
+
+// DecodeRoomAAD is the strict inverse of EncodeRoomAAD: the domain, each
+// field in order with its exact length prefix, no trailing bytes, and the
+// values re-encoded to the same bytes, so one AAD has exactly one decoding.
+func DecodeRoomAAD(raw []byte) (RoomAAD, error) {
+	if len(raw) == 0 || len(raw) > MaxRoomAADBytes || !bytes.HasPrefix(raw, []byte(canon.DomainRoomAAD)) {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	rest := raw[len(canon.DomainRoomAAD):]
+	field := func(max int) ([]byte, bool) {
+		if len(rest) < 4 {
+			return nil, false
+		}
+		length := binary.BigEndian.Uint32(rest[:4])
+		if uint64(length) > uint64(max) || uint64(len(rest)-4) < uint64(length) {
+			return nil, false
+		}
+		value := rest[4 : 4+int(length)]
+		rest = rest[4+int(length):]
+		return value, true
+	}
+	number := func() (uint64, bool) {
+		if len(rest) < 8 {
+			return 0, false
+		}
+		value := binary.BigEndian.Uint64(rest[:8])
+		rest = rest[8:]
+		return value, true
+	}
+	var aad RoomAAD
+	roomID, ok := field(MaxRoomAADBytes)
+	if !ok {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	aad.RoomID = string(roomID)
+	if aad.RoomEpoch, ok = number(); !ok {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	if aad.MLSEpoch, ok = number(); !ok {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	authenticator, ok := field(RoomAADEpochAuthenticatorBytes)
+	if !ok {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	aad.EpochAuthenticator = bytes.Clone(authenticator)
+	sender, ok := field(MaxRoomAADBytes)
+	if !ok {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	aad.SenderAgentID = string(sender)
+	eventID, ok := field(MaxRoomAADBytes)
+	if !ok || len(rest) != 0 {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	aad.EventID = string(eventID)
+	encoded, err := EncodeRoomAAD(aad)
+	if err != nil || !bytes.Equal(encoded, raw) {
+		return RoomAAD{}, ErrRoomAADMalformed
+	}
+	return aad, nil
+}
+
 // RoomCut returns the part sizes of an object of the given type and length.
 // partBytes is 0 for the production cut (part 0 FirstPartBytes, every later
 // part LaterPartBytes); a test part size P in MinTestPartBytes ..

@@ -89,6 +89,9 @@ type openMLSResponse struct {
 	SenderLeafIndex    *uint32         `json:"sender_leaf_index,omitempty"`
 	EpochAuthenticator string          `json:"epoch_authenticator,omitempty"`
 	Members            []openMLSMember `json:"members,omitempty"`
+	// AAD is the authenticated data a readback open reports; no other
+	// operation sets it.
+	AAD string `json:"aad,omitempty"`
 }
 
 type openMLSMember struct {
@@ -434,6 +437,49 @@ func (d *OpenMLSSidecar) OpenAttributed(state, aad, message []byte) ([]byte, []b
 	return next, plaintext, sender, nil
 }
 
+// MaxOpenMLSAADBytes bounds a message's authenticated data, as the driver
+// does.
+const MaxOpenMLSAADBytes = 64 << 10
+
+// OpenAttributedReadback opens a PrivateMessage of the current or a retained
+// past epoch without being told its authenticated data: the driver's explicit
+// readback operation returns the message's own authenticated data, which it
+// reports only once the message opened. The caller judges that value; an
+// absent authenticated data never selects this mode, and a message without
+// any is refused. The state is returned, never stored, so a caller that
+// refuses the message discards it and spends no ratchet step.
+func (d *OpenMLSSidecar) OpenAttributedReadback(state, message []byte) ([]byte, []byte, []byte, MLSMember, error) {
+	if len(state) == 0 || len(message) == 0 || len(message) > MaxOpenMLSMessageBytes {
+		return nil, nil, nil, MLSMember{}, errors.New("invalid OpenMLS readback request")
+	}
+	response, err := d.call(openMLSRequest{Operation: "open_readback", State: b64(state), Message: b64(message)})
+	if err != nil {
+		return nil, nil, nil, MLSMember{}, err
+	}
+	next, err := decodeOpenMLS("state", response.State, MaxOpenMLSStateBytes)
+	if err != nil {
+		return nil, nil, nil, MLSMember{}, err
+	}
+	plaintext, err := decodeOpenMLS("plaintext", response.Plaintext, MaxOpenMLSMessageBytes)
+	if err != nil {
+		return nil, nil, nil, MLSMember{}, err
+	}
+	aad, err := decodeOpenMLS("authenticated data", response.AAD, MaxOpenMLSAADBytes)
+	if err != nil {
+		return nil, nil, nil, MLSMember{}, err
+	}
+	sender, err := decodeSenderLeaf("sender", response)
+	if err != nil {
+		return nil, nil, nil, MLSMember{}, err
+	}
+	return next, plaintext, aad, sender, nil
+}
+
+// ErrOpenMLSRefused reports an operation the driver ran and refused (a
+// message that does not open, a state it does not accept), as opposed to a
+// driver that could not be run or answered out of bounds.
+var ErrOpenMLSRefused = errors.New("OpenMLS sidecar")
+
 func (d *OpenMLSSidecar) call(request openMLSRequest) (openMLSResponse, error) {
 	if d == nil || len(d.Command) == 0 || d.Command[0] == "" {
 		return openMLSResponse{}, errors.New("no OpenMLS sidecar command")
@@ -474,7 +520,7 @@ func (d *OpenMLSSidecar) call(request openMLSRequest) (openMLSResponse, error) {
 		if response.Error == "" {
 			response.Error = "operation failed"
 		}
-		return openMLSResponse{}, fmt.Errorf("OpenMLS sidecar: %s", response.Error)
+		return openMLSResponse{}, fmt.Errorf("%w: %s", ErrOpenMLSRefused, response.Error)
 	}
 	return response, nil
 }

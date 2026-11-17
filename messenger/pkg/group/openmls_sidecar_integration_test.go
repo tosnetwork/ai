@@ -310,3 +310,55 @@ func TestOpenMLSSidecarIntegrationAttributionAndPastEpochs(t *testing.T) {
 		t.Fatalf("control: the same message opens two epochs later: %v", err)
 	}
 }
+
+// The readback open is explicit: it returns the message's own authenticated
+// data with the plaintext and sender, a message without any is refused, and
+// the compare open still refuses a message whose data it was not given.
+func TestOpenMLSSidecarReadbackReturnsTheAuthenticatedData(t *testing.T) {
+	binary := os.Getenv("TOS_OPENMLS_DRIVER")
+	if binary == "" {
+		t.Skip("TOS_OPENMLS_DRIVER is set by make test-openmls")
+	}
+	driver := &OpenMLSSidecar{Command: []string{binary}, Timeout: 10 * time.Second}
+	alice, err := driver.NewIdentity([]byte("alice-authority"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := driver.NewIdentity([]byte("bob-member"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceState, err := driver.CreateGroup(alice.State, alice.KeyPackage, bytes.Repeat([]byte{0x25}, MLSGroupIDBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobRef := canon.Digest(bob.KeyPackage)
+	aliceState, _, welcomes, err := driver.Commit(aliceState, []LeafOperation{{Kind: LeafAdd, Next: &Leaf{KeyPackageRef: bobRef, KeyPackage: bob.KeyPackage, CredentialIdentity: []byte("bob-member"), LeafSignaturePublicKey: bob.LeafSignaturePublicKey}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobState, err := driver.Join(bob.State, welcomes[bobRef])
+	if err != nil {
+		t.Fatal(err)
+	}
+	aad := []byte("room binding")
+	bobState, sealed, err := driver.Seal(bobState, aad, []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, plaintext, read, sender, err := driver.OpenAttributedReadback(aliceState, sealed)
+	if err != nil || len(next) == 0 || string(plaintext) != "hello" || !bytes.Equal(read, aad) || string(sender.Identity) != "bob-member" ||
+		!bytes.Equal(sender.SignatureKey, bob.LeafSignaturePublicKey) {
+		t.Fatalf("readback: %q %q %+v %v", plaintext, read, sender, err)
+	}
+	if _, _, _, err := driver.OpenAttributed(aliceState, nil, sealed); err == nil {
+		t.Fatal("a compare open without the authenticated data opened a message carrying some")
+	}
+	_, unbound, err := driver.Seal(bobState, nil, []byte("no binding"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := driver.OpenAttributedReadback(aliceState, unbound); err == nil {
+		t.Fatal("a readback open accepted a message without authenticated data")
+	}
+}

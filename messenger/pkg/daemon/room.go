@@ -54,6 +54,9 @@ type roomRuntime struct {
 	// retention is the handshake retention the relay authorization window
 	// adds to an authorization's issue time.
 	retention time.Duration
+	// gapDelay is T of section 11.3: a missing sequence not arrived that
+	// long after a later one did is declared lost.
+	gapDelay time.Duration
 
 	// handling serializes the handling of complete objects, so the judgement,
 	// the MLS step and the applied-digest record of one object are never
@@ -64,6 +67,9 @@ type roomRuntime struct {
 	// this process: one notice per room, not one per refused object.
 	noticedMutex sync.Mutex
 	noticed      map[string]struct{}
+	// forkNoticed holds the rooms whose room-fork-suspected notice this
+	// process already raised.
+	forkNoticed map[string]struct{}
 
 	// cardsMutex guards the card-forget bookkeeping. Forgets are queued
 	// under the handling lock and sent to the carrier outside it
@@ -85,6 +91,7 @@ type roomRuntimeSettings struct {
 	cards     roomCarrier
 	skew      time.Duration
 	retention time.Duration
+	gapDelay  time.Duration
 	partBytes int
 }
 
@@ -106,6 +113,9 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 	if settings.retention <= 0 || settings.retention > room.RoomHandshakeRetention {
 		return errors.New("room handshake retention is outside its bound")
 	}
+	if settings.gapDelay <= eventlog.RoomGapGrace || settings.gapDelay > maxRoomGapDelay {
+		return errors.New("room gap delay is outside its bound")
+	}
 	ledger, err := d.journal.OpenRoomMLS()
 	if err != nil {
 		return err
@@ -115,8 +125,8 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 		return err
 	}
 	runtime := &roomRuntime{relay: d.relay, daemon: d, ledger: ledger, controller: controller, cards: settings.cards,
-		skew: settings.skew, retention: settings.retention, noticed: map[string]struct{}{},
-		pending: map[string]map[string]struct{}{}, forgotten: map[string]map[string]struct{}{}}
+		skew: settings.skew, retention: settings.retention, gapDelay: settings.gapDelay, noticed: map[string]struct{}{},
+		forkNoticed: map[string]struct{}{}, pending: map[string]map[string]struct{}{}, forgotten: map[string]map[string]struct{}{}}
 	// Rooms past their retirement time are retired before anything else,
 	// a crash's half-retired room included, and only then is garbage
 	// collected, so the retired rooms' records are reclaimed (section 11.8).
@@ -154,6 +164,10 @@ func (d *Daemon) installRoomRuntime(settings roomRuntimeSettings) error {
 }
 
 func (r *roomRuntime) now() time.Time { return r.daemon.clock() }
+
+// maxRoomGapDelay is the largest T: the relay V1 TTL ceiling plus the
+// grace.
+const maxRoomGapDelay = time.Duration(carrierapi.MaxRelayTTLSeconds)*time.Second + eventlog.RoomGapGrace
 
 // roomSenders is the Reassembler's sender set: parts are held only from a
 // current member of a room this installation holds, or from the authority
@@ -249,6 +263,34 @@ func (r *roomRuntime) checkSenderEvidence(roomID, sender string, evidence []byte
 	return r.relay.verifier.CheckPeer(sender, evidence, pin, now)
 }
 
+// objectEvidence checks a room object's part-0 evidence (read-only) and
+// reports whether it was pinned to the sender's verified leaf credential.
+// Handshake objects always are. An application object of a current member
+// whose credential is not known yet (its roster has not arrived, section
+// 11.8) has no credential to pin to: its evidence is checked against its own
+// Endpoint and device, the object can only be held in the future-epoch
+// buffer, and it is opened only once the credential is learned, against the
+// stored evidence pinned to that credential.
+func (r *roomRuntime) objectEvidence(roomID string, kind uint8, sender string, evidence []byte, now time.Time) (directory.RelayPeer, bool, error) {
+	_, found, err := r.senderCredential(roomID, sender, now)
+	if err != nil {
+		return directory.RelayPeer{}, false, fault.Wrap(fault.CodeInternal, err)
+	}
+	if found {
+		peer, err := r.checkSenderEvidence(roomID, sender, evidence, now)
+		return peer, err == nil, err
+	}
+	_, held, err := r.ledger.Current(roomID)
+	if err != nil {
+		return directory.RelayPeer{}, false, fault.Wrap(fault.CodeInternal, err)
+	}
+	if kind != relayframe.RoomApplication || !held {
+		return directory.RelayPeer{}, false, fault.New(fault.CodeNotAuthentic, "the sender's leaf credential is not known in the room")
+	}
+	peer, err := r.relay.verifier.CheckContact(sender, evidence, now)
+	return peer, false, err
+}
+
 // evidenceRefusal answers a part-0 evidence failure: a finalized-state read
 // failure is retried, anything else relay-acknowledged with a refusal.
 func evidenceRefusal(err error) carrierapi.Response {
@@ -313,11 +355,13 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 		if response, refused := r.nonAuthority(ended); refused {
 			return response
 		}
-		peer, err := r.checkSenderEvidence(roomID, sender, frame.Evidence, now)
+		peer, pinned, err := r.objectEvidence(roomID, kind, sender, frame.Evidence, now)
 		if err != nil {
 			return evidenceRefusal(err)
 		}
-		firstPeer = &peer
+		if pinned {
+			firstPeer = &peer
+		}
 	}
 	// A later part names no room, but its sender must still be one parts are
 	// held from at all, judged before the part store writes anything.
@@ -423,14 +467,14 @@ func (r *roomRuntime) handleComplete(ctx context.Context, sender string, digest 
 	}
 	// Part 0's held evidence is checked again at completion: the newest
 	// generation's, against the credential as the room stands now.
-	peer, err := r.checkSenderEvidence(object.RoomID, sender, result.Evidence, now)
+	peer, pinned, err := r.objectEvidence(object.RoomID, object.Type, sender, result.Evidence, now)
 	if err != nil {
 		response := evidenceRefusal(err)
 		return response, response.Result != carrierapi.ResultRetry
 	}
 	r.handling.Lock()
 	defer r.handling.Unlock()
-	in := roomInbound{ctx: ctx, sender: sender, peer: peer, object: object, raw: result.Object, digest: digest, now: now}
+	in := roomInbound{ctx: ctx, sender: sender, peer: peer, pinned: pinned, object: object, raw: result.Object, digest: digest, now: now}
 	// The removal marker is judged under the handling lock: a removal
 	// handled while this object waited for the lock stops it here.
 	if response, refused := r.removedRoom(in); refused {
@@ -457,6 +501,10 @@ type roomInbound struct {
 	ctx    context.Context
 	sender string
 	peer   directory.RelayPeer
+	// pinned says the evidence that established peer was pinned to the
+	// sender's verified leaf credential. Only an application object of a
+	// member whose credential is not known yet arrives unpinned.
+	pinned bool
 	object relayframe.RoomObject
 	raw    []byte
 	digest [sha256.Size]byte
@@ -466,14 +514,6 @@ type roomInbound struct {
 // objectDigest is the relay object digest as the journal keys it.
 func (in roomInbound) objectDigest() string { return eventlog.RoomObjectDigest(in.raw) }
 
-// handleApplication answers an application object. Opening application
-// objects (the e/r rules, D11, the future-epoch buffer and the gap notices)
-// is the next part of the room runtime; until then one is refused and
-// relay-acknowledged, which a sender records as a gap.
-func (r *roomRuntime) handleApplication(roomInbound) carrierapi.Response {
-	return carrierapi.Refusal(carrierapi.CodeNotAccepted)
-}
-
 // endedRoom refuses an object of a room that has ended (D18): at now >= end
 // + skew a member refuses the room's Commits, Welcomes, rosters and
 // application objects with room-ended, relay-acknowledges them and raises
@@ -481,7 +521,8 @@ func (r *roomRuntime) handleApplication(roomInbound) carrierapi.Response {
 // the expiry of the authority credential the accepted join holds, judged
 // only for that authority's objects. A handshake object is answered with a
 // rejected room ack (stateless for a pending joiner's Welcome); an
-// application object is relay-acknowledged and nothing else.
+// application object of a held room is recorded as a gap of its sender
+// (room-ended) and then relay-acknowledged.
 func (r *roomRuntime) endedRoom(in roomInbound) (carrierapi.Response, bool) {
 	roomID := in.object.RoomID
 	record, held, err := r.ledger.Current(roomID)
@@ -509,6 +550,16 @@ func (r *roomRuntime) endedRoom(in roomInbound) (carrierapi.Response, bool) {
 	r.noticeEnded(roomID)
 	switch {
 	case in.object.Type == relayframe.RoomApplication:
+		// Senders stop at end - skew, so an application object arriving now
+		// was sealed before the end: it is lost to its receivers, and a member
+		// records it as a gap of its sender (sections 11.3, 11.8). The record
+		// is written before the object is relay-acknowledged.
+		if held {
+			if _, err := r.daemon.journal.RecordRoomDrop(roomID, in.sender, eventlog.RoomGapRoomEnded, in.now); err != nil {
+				r.daemon.report("room gap", err)
+				return carrierapi.Retry(), true
+			}
+		}
 		return carrierapi.Refusal(carrierapi.CodeNotAccepted), true
 	case !held:
 		return r.statelessRejection(in, fault.CodeRoomEnded), true
@@ -537,12 +588,14 @@ func (r *roomRuntime) nonAuthority(in roomInbound) (carrierapi.Response, bool) {
 }
 
 // maintain is the room runtime's share of the relay maintenance timer:
-// expired parts go, removed members are forgotten, and ended rooms are
-// retired.
+// expired parts go, removed members are forgotten, ended rooms are retired,
+// and the application receive state is swept (buffer, sequences, received
+// digests) with the held objects tried again.
 func (r *roomRuntime) maintain() {
 	r.sweepParts()
 	r.reconcileRemoved()
 	r.retireEnded()
+	r.sweepApplications()
 	r.flushCardForgets(context.Background())
 }
 

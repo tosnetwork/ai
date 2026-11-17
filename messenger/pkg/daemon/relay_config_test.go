@@ -52,6 +52,7 @@ func TestRelayCarriageConfigurationIsCheckedAsAWhole(t *testing.T) {
 		"long MLS timeout": func(c *Config) {
 			c.RelayCarriage.MLSDriverPath, c.RelayCarriage.MLSDriverTimeoutSeconds = "/usr/bin/tos-openmls-driver", 61
 		},
+		"own relay TTL above 24 h": func(c *Config) { c.RelayCarriage.OwnRelayMaxTTLSeconds = 86_401 },
 		"dns contacts": func(c *Config) {
 			c.ContactDNS = &ContactDNSConfig{BaseURL: "https://dns.example", BearerTokenFile: "/run/token"}
 		},
@@ -78,6 +79,13 @@ func TestRelayCarriageConfigurationIsCheckedAsAWhole(t *testing.T) {
 	}
 	if rooms.RoomClockSkew() != time.Duration(rooms.Admission.MaxClockSkewSeconds)*time.Second || rooms.RoomClockSkew() <= 0 {
 		t.Fatalf("room clock skew: %v", rooms.RoomClockSkew())
+	}
+	if rooms.RelayCarriage.OwnRelayMaxTTL() != 86_400 {
+		t.Fatalf("default own relay TTL: %d", rooms.RelayCarriage.OwnRelayMaxTTL())
+	}
+	rooms.RelayCarriage.OwnRelayMaxTTLSeconds = 3_600
+	if err := rooms.Validate(); err != nil || rooms.RelayCarriage.OwnRelayMaxTTL() != 3_600 {
+		t.Fatalf("a 1 h own relay TTL: %v", err)
 	}
 	contactFiles := testConfig(t)
 	contactFiles.Discovery = DiscoveryConfig{Mode: DiscoveryContactFiles, ContactDir: "/x/contacts"}

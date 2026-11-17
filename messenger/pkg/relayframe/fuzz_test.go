@@ -168,6 +168,25 @@ func FuzzDecodeRoster(f *testing.F) {
 	})
 }
 
+func FuzzDecodeRoomAAD(f *testing.F) {
+	if seed, err := EncodeRoomAAD(RoomAAD{RoomID: "room_" + string(bytes.Repeat([]byte{'a'}, 64)), RoomEpoch: 2, MLSEpoch: 3,
+		EpochAuthenticator: bytes.Repeat([]byte{1}, 32), SenderAgentID: "agent_" + string(bytes.Repeat([]byte{'b'}, 64)),
+		EventID: "evt_" + string(bytes.Repeat([]byte{'c'}, 64))}); err == nil {
+		f.Add(seed)
+	}
+	f.Add([]byte{})
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		aad, err := DecodeRoomAAD(raw)
+		if err != nil {
+			return
+		}
+		encoded, err := EncodeRoomAAD(aad)
+		if err != nil || !bytes.Equal(encoded, raw) {
+			t.Fatalf("a decoded room AAD is not canonical: %v", err)
+		}
+	})
+}
+
 func FuzzDecodeRoomAck(f *testing.F) {
 	f.Add([]byte("tos.messaging.relay-room-ack.v1\x00"))
 	f.Add([]byte{})

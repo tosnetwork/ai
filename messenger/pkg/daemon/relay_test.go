@@ -147,6 +147,9 @@ func relayDaemon(t *testing.T, now time.Time, agentDigit, deviceDigit string, co
 	delegation.EndpointID = endpoint
 	delegation.IdentityPublicKey = key.Public().(ed25519.PublicKey)
 	delegation.ADNLID = "adnl:" + strings.Repeat(deviceDigit+agentDigit, 32)
+	// Relay nodes hold private rooms, so their delegations delegate room
+	// content too (in the delegation's sorted order).
+	delegation.AllowedOutboundEventClasses = []string{"agent.gift", "agent.packet", "commerce.profile", "negotiation", "room", "text"}
 	config.Publication.GenerationLifetimeSeconds = 3600
 	config.Publication.ReplenishBeforeSeconds = 600
 	config.Publication.CheckIntervalSeconds = 60
@@ -187,8 +190,13 @@ func newRelayNodesWith(t *testing.T, now time.Time, configure func(*Config), dig
 			resolver: resolver, devices: devices, relay: verifier}
 		localRaw, _ := identity.EncodeJSON(delegation)
 		policy, _ := d.config.AdmissionPolicy()
+		roomMLS, err := d.journal.OpenRoomMLS()
+		if err != nil {
+			t.Fatal(err)
+		}
 		gate, err := admission.New(admission.Config{Network: d.config.Network(), Chain: chain, Resolver: resolver,
-			Journal: d.journal, Devices: devices, Policy: policy, LocalDelegationJSON: localRaw,
+			Journal: d.journal, Devices: devices, Policy: policy, RoomMLS: roomMLS,
+			MaxClockSkewSeconds: d.config.Admission.MaxClockSkewSeconds, LocalDelegationJSON: localRaw,
 			LocalAgentID: d.config.AgentID, LocalEndpointID: d.config.EndpointID, Now: d.clock,
 			InstallSalt: bytes.Repeat([]byte{0x5a}, admission.MinInstallSaltBytes)})
 		if err != nil {

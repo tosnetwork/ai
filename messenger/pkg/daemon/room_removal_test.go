@@ -128,7 +128,7 @@ func TestRoomEndedRoomsAreRetiredByTheRuntime(t *testing.T) {
 		scene.clock.set(end.Add(retention + 5*time.Minute))
 		if start {
 			if err := b.d.installRoomRuntime(roomRuntimeSettings{driver: scene.driver, cards: scene.cards[1], skew: 5 * time.Minute,
-				retention: retention, partBytes: partBytes}); err != nil {
+				retention: retention, gapDelay: testRoomGapDelay, partBytes: partBytes}); err != nil {
 				t.Fatalf("restart: %v", err)
 			}
 		} else {
@@ -223,7 +223,7 @@ func TestRoomRemovedMemberIsForgottenAfterACrashOrACarrierFailure(t *testing.T) 
 		t.Fatalf("forgotten before the restart: %v", forgotten)
 	}
 	if err := b.d.installRoomRuntime(roomRuntimeSettings{driver: scene.driver, cards: scene.cards[1], skew: 5 * time.Minute,
-		retention: roomRetention}); err != nil {
+		retention: roomRetention, gapDelay: testRoomGapDelay}); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
 	if forgotten := scene.cards[1].forgottenIn(testRoomID); !containsAgent(forgotten, scene.c.agent()) {
@@ -351,7 +351,7 @@ func TestRoomMemberRemovedTwoEpochsBackIsForgotten(t *testing.T) {
 		t.Fatalf("forgotten before the restart: %v", forgotten)
 	}
 	if err := b.d.installRoomRuntime(roomRuntimeSettings{driver: scene.driver, cards: scene.cards[1], skew: 5 * time.Minute,
-		retention: roomRetention}); err != nil {
+		retention: roomRetention, gapDelay: testRoomGapDelay}); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
 	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 1 || forgotten[0] != scene.c.agent() {

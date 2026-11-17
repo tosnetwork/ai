@@ -26,6 +26,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/admission"
 	"github.com/tosnetwork/ai/messenger/pkg/attachmentapi"
 	"github.com/tosnetwork/ai/messenger/pkg/attachments"
+	"github.com/tosnetwork/ai/messenger/pkg/carrierapi"
 	"github.com/tosnetwork/ai/messenger/pkg/dispatch"
 	"github.com/tosnetwork/ai/messenger/pkg/e2ee"
 	"github.com/tosnetwork/ai/messenger/pkg/economicaction"
@@ -720,6 +721,22 @@ type RelayCarriageConfig struct {
 	MLSDriverPath string `json:"mls_driver_path,omitempty"`
 	// MLSDriverTimeoutSeconds bounds one driver operation; default 10 s.
 	MLSDriverTimeoutSeconds uint64 `json:"mls_driver_timeout_seconds,omitempty"`
+	// OwnRelayMaxTTLSeconds is the largest max_ttl_seconds of this node's own
+	// chat relays, 1..86,400; default 86,400, the relay V1 ceiling. A room
+	// sequence missing that long plus 5 minutes after a later one arrived is
+	// declared lost (section 11.3): a missing envelope can only still be
+	// waiting at one of these relays. A value above the real TTL only
+	// declares a gap later, never wrongly.
+	OwnRelayMaxTTLSeconds uint64 `json:"own_relay_max_ttl_seconds,omitempty"`
+}
+
+// OwnRelayMaxTTL is the largest relay TTL of this node's own chat relays, in
+// seconds.
+func (r RelayCarriageConfig) OwnRelayMaxTTL() uint64 {
+	if r.OwnRelayMaxTTLSeconds == 0 {
+		return carrierapi.MaxRelayTTLSeconds
+	}
+	return r.OwnRelayMaxTTLSeconds
 }
 
 // MLSDriverTimeout bounds one MLS driver operation.
@@ -789,6 +806,9 @@ func (r RelayCarriageConfig) Validate(stateDir, contactDir string, others []stri
 	}
 	if r.MLSDriverTimeoutSeconds > 60 {
 		return errors.New("relay_carriage mls_driver_timeout_seconds is outside 1s..60s")
+	}
+	if err := carrierapi.ValidateRelayTTL(r.OwnRelayMaxTTL()); err != nil {
+		return errors.New("relay_carriage own_relay_max_ttl_seconds is outside 1s..24h")
 	}
 	return nil
 }
