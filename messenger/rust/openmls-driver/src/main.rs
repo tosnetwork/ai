@@ -690,10 +690,14 @@ mod tests {
     // it, never with a short test name.
     const LEAF_IDENTITY_BYTES: usize = 128;
 
-    // A distinct maximal identity for member `index`.
+    // A distinct maximal identity for member `index`. The library's storage
+    // encodes byte strings as JSON number arrays, so a byte costs up to four
+    // characters ("255,"); every byte here is at least 100, the costliest
+    // width, so the measurement is the upper bound for any digest values.
     fn leaf_identity(index: usize) -> Vec<u8> {
-        let mut identity = vec![0x5a; LEAF_IDENTITY_BYTES];
-        identity[..8].copy_from_slice(&(index as u64).to_be_bytes());
+        let mut identity = vec![0xff; LEAF_IDENTITY_BYTES];
+        // At most 64 leaves (the profile bound): 0x80 + 63 stays three digits.
+        identity[0] = 0x80 + u8::try_from(index).expect("at most 64 leaves");
         identity
     }
 
@@ -701,13 +705,20 @@ mod tests {
     // adapter caps one Commit at 32 leaf operations) and returns every
     // member's state, founder first. Every leaf carries a maximal identity.
     fn full_group(leaves: usize) -> Vec<String> {
+        try_full_group(leaves).unwrap()
+    }
+
+    // full_group, reporting the driver's refusal instead of panicking: a
+    // group above the relay room bound may exceed the state bound while it
+    // is being built.
+    fn try_full_group(leaves: usize) -> Result<Vec<String>, String> {
         let names: Vec<Vec<u8>> = (0..leaves).map(leaf_identity).collect();
         let ids: Vec<Response> = names.iter().map(|n| identity(n)).collect();
         let mut create = request("create");
         create.state = ids[0].state.clone();
         create.key_package = ids[0].key_package.clone();
         create.group_id = B64.encode(b"0123456789abcdef0123456789abcdef");
-        let mut states = vec![handle(create).unwrap().state];
+        let mut states = vec![handle(create)?.state];
         let batches: Vec<std::ops::Range<usize>> = (1..leaves)
             .step_by(32)
             .map(|start| start..(start + 32).min(leaves))
@@ -716,19 +727,22 @@ mod tests {
             let mut add = request("commit");
             add.state = states[0].clone();
             add.key_packages = batch.clone().map(|i| ids[i].key_package.clone()).collect();
-            let added = handle(add).unwrap();
+            let added = handle(add)?;
             for existing in 1..states.len() {
-                states[existing] = apply_as(&states[existing], &added.commit).state;
+                let mut apply = request("apply");
+                apply.state = states[existing].clone();
+                apply.message = added.commit.clone();
+                states[existing] = handle(apply)?.state;
             }
             states[0] = added.state;
             for i in batch {
                 let mut join = request("join");
                 join.state = ids[i].state.clone();
                 join.welcome = added.welcome.clone();
-                states.push(handle(join).unwrap().state);
+                states.push(handle(join)?.state);
             }
         }
-        states
+        Ok(states)
     }
 
     fn refresh_all(states: &mut [String]) -> String {
@@ -762,7 +776,11 @@ mod tests {
                     continue;
                 }
                 for index in 0..per_sender {
-                    let sealed = seal_as(&states[sender], aad, b"m");
+                    let mut seal = request("seal");
+                    seal.state = states[sender].clone();
+                    seal.aad = B64.encode(aad);
+                    seal.plaintext = B64.encode(b"m");
+                    let sealed = handle(seal)?;
                     states[sender] = sealed.state;
                     if !skip || index + 1 == per_sender {
                         states[observer] = open_as(&states[observer], aad, &sealed.message)?.state;
@@ -772,7 +790,17 @@ mod tests {
             for state in states.iter() {
                 largest = largest.max(state_len(state));
             }
-            refresh_all(states);
+            // A refresh over the bound is the driver's refusal, reported.
+            let mut refresh = request("refresh");
+            refresh.state = states[0].clone();
+            let refreshed = handle(refresh)?;
+            for state in states.iter_mut().skip(1) {
+                let mut apply = request("apply");
+                apply.state = state.clone();
+                apply.message = refreshed.commit.clone();
+                *state = handle(apply)?.state;
+            }
+            states[0] = refreshed.state;
         }
         Ok(largest)
     }
@@ -837,9 +865,15 @@ mod tests {
     // there the same maximal skipping exceeds 512 KiB.
     #[test]
     fn state_over_bound_fails_closed() {
-        let mut states = full_group(64);
-        let per_sender = OUT_OF_ORDER_TOLERANCE as usize + 1;
-        let error = traffic(&mut states, MAX_PAST_EPOCHS + 1, per_sender, true).unwrap_err();
+        // With maximal identities a 64-leaf group may already exceed the
+        // bound while it is built; either way the driver refuses the state.
+        let error = match try_full_group(64) {
+            Err(error) => error,
+            Ok(mut states) => {
+                let per_sender = OUT_OF_ORDER_TOLERANCE as usize + 1;
+                traffic(&mut states, MAX_PAST_EPOCHS + 1, per_sender, true).unwrap_err()
+            }
+        };
         assert_eq!(error, "state snapshot exceeds bound");
     }
 
