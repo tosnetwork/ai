@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"os"
@@ -390,5 +391,32 @@ func TestRoomTimerReconcilesARemovalWhoseForgettingNeverRan(t *testing.T) {
 	b.d.relay.rooms.maintain()
 	if forgotten := scene.cards[1].forgottenIn(testRoomID); len(forgotten) != 1 || forgotten[0] != scene.c.agent() {
 		t.Fatalf("the timer did not forget C: %v", forgotten)
+	}
+}
+
+// A room's pending forgets larger than one carrier.room-cards request are
+// sent in batches of MaxRoomCards; a failed batch stays pending and is sent
+// again, while the others settle.
+func TestRoomCardForgetsAreSentInBatches(t *testing.T) {
+	scene := newJoinedScene(t, roomRetention)
+	r := scene.nodes[1].d.relay.rooms
+	agents := make([]string, 40)
+	for index := range agents {
+		agents[index] = fmt.Sprintf("agent_%064x", index+1)
+	}
+	r.queueCardForgets(testRoomID, agents)
+	scene.cards[1].failForgets = 1
+	r.flushCardForgets(context.Background())
+	if n := len(scene.cards[1].forgottenIn(testRoomID)); n != len(agents)-carrierapi.MaxRoomCards {
+		t.Fatalf("%d forgotten after the first flush, want %d", n, len(agents)-carrierapi.MaxRoomCards)
+	}
+	r.flushCardForgets(context.Background())
+	forgotten := scene.cards[1].forgottenIn(testRoomID)
+	if len(forgotten) != len(agents) {
+		t.Fatalf("%d forgotten after the retry, want %d", len(forgotten), len(agents))
+	}
+	r.flushCardForgets(context.Background())
+	if n := len(scene.cards[1].forgottenIn(testRoomID)); n != len(agents) {
+		t.Fatalf("a settled batch was sent again: %d", n)
 	}
 }

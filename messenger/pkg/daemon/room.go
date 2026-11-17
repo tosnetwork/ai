@@ -597,7 +597,8 @@ func (r *roomRuntime) queueCardForgets(roomID string, agentIDs []string) {
 // flushCardForgets sends the queued card forgets to the carrier, one
 // carrier.room-cards forget per room, never under the handling lock. A
 // forget the carrier applied moves to the forgotten set; one that failed
-// stays pending and is sent again by the next flush.
+// stays pending and is sent again by the next flush. A room's pending set
+// larger than one request allows is sent in batches of MaxRoomCards.
 func (r *roomRuntime) flushCardForgets(ctx context.Context) {
 	r.cardsMutex.Lock()
 	batches := make(map[string][]string, len(r.pending))
@@ -609,26 +610,37 @@ func (r *roomRuntime) flushCardForgets(ctx context.Context) {
 	r.cardsMutex.Unlock()
 	for roomID, agentIDs := range batches {
 		sort.Strings(agentIDs)
-		response, err := r.cards.ForgetRoomCards(ctx, roomID, agentIDs)
-		if err == nil && response.Result != carrierapi.ResultApplied {
-			err = errors.New("the carrier did not drop the room's admission of removed members")
+		// One carrier.room-cards request names at most MaxRoomCards Agents;
+		// a larger set goes in batches, each settled on its own.
+		for start := 0; start < len(agentIDs); start += carrierapi.MaxRoomCards {
+			end := min(start+carrierapi.MaxRoomCards, len(agentIDs))
+			r.forgetCardBatch(ctx, roomID, agentIDs[start:end])
 		}
-		if err != nil {
-			r.daemon.report("room cards", err)
-			continue
+	}
+}
+
+// forgetCardBatch sends one batch of card forgets. Applied, its Agents move
+// to the forgotten set; failed, they stay pending for the next flush.
+func (r *roomRuntime) forgetCardBatch(ctx context.Context, roomID string, agentIDs []string) {
+	response, err := r.cards.ForgetRoomCards(ctx, roomID, agentIDs)
+	if err == nil && response.Result != carrierapi.ResultApplied {
+		err = errors.New("the carrier did not drop the room's admission of removed members")
+	}
+	if err != nil {
+		r.daemon.report("room cards", err)
+		return
+	}
+	r.cardsMutex.Lock()
+	defer r.cardsMutex.Unlock()
+	for _, agentID := range agentIDs {
+		delete(r.pending[roomID], agentID)
+		if r.forgotten[roomID] == nil {
+			r.forgotten[roomID] = map[string]struct{}{}
 		}
-		r.cardsMutex.Lock()
-		for _, agentID := range agentIDs {
-			delete(r.pending[roomID], agentID)
-			if r.forgotten[roomID] == nil {
-				r.forgotten[roomID] = map[string]struct{}{}
-			}
-			r.forgotten[roomID][agentID] = struct{}{}
-		}
-		if len(r.pending[roomID]) == 0 {
-			delete(r.pending, roomID)
-		}
-		r.cardsMutex.Unlock()
+		r.forgotten[roomID][agentID] = struct{}{}
+	}
+	if len(r.pending[roomID]) == 0 {
+		delete(r.pending, roomID)
 	}
 }
 

@@ -81,6 +81,12 @@ func (c *roomCardsCarrier) RoomCards(_ context.Context, roomID string, cards []c
 func (c *roomCardsCarrier) ForgetRoomCards(_ context.Context, roomID string, agentIDs []string) (carrierapi.Response, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+	// The client refuses a request naming more Agents than one may hold,
+	// before it reaches the carrier.
+	if err := carrierapi.ValidateRequest(carrierapi.Request{Schema: carrierapi.RequestSchema, Op: carrierapi.OpRoomCards,
+		RoomID: roomID, RoomCardsAction: carrierapi.RoomCardsForget, ForgetAgentIDs: agentIDs}); err != nil {
+		return carrierapi.Response{}, err
+	}
 	if c.failForgets > 0 {
 		c.failForgets--
 		return carrierapi.Response{}, errors.New("the carrier is unreachable")
