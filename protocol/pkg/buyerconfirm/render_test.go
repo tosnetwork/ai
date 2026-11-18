@@ -84,6 +84,19 @@ func TestRenderKeepsProviderTextBeforeAndApartFromTheProtocolFields(t *testing.T
 	if strings.Count(out, "\n"+ProtocolHeading) != 1 || strings.Contains(out, "\nPrice:            0 TOS") {
 		t.Fatalf("provider text started a line of its own:\n%s", out)
 	}
+	// The line breaks in the provider text are escaped, so every row of
+	// the block is one of the confirmer's gutter rows.
+	inBlock := false
+	for _, row := range strings.Split(out, "\n") {
+		switch {
+		case row == ProviderHeading:
+			inBlock = true
+		case row == ProviderEnd:
+			inBlock = false
+		case inBlock && !strings.HasPrefix(row, ProviderGutter):
+			t.Fatalf("provider text started row %q of its own:\n%s", row, out)
+		}
+	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "Confirmation code:  "+p.Code) {
 		t.Fatalf("the last line is %q", last)
@@ -96,6 +109,49 @@ func TestRenderKeepsProviderTextBeforeAndApartFromTheProtocolFields(t *testing.T
 		if !strings.Contains(out, want) {
 			t.Errorf("the presentation lacks %q", want)
 		}
+	}
+}
+
+// Provider text padded so that a wrap would start a row with the block's
+// end marker or a protocol field stays behind the gutter, hard-wrapped at
+// the fixed width, with its padding collapsed.
+func TestProviderTextIsWrappedBehindAGutter(t *testing.T) {
+	p := presentation()
+	p.ProviderDescription = "x" + strings.Repeat(" ", 59) + ProviderEnd + strings.Repeat(" ", 25) +
+		"Price:            0 TOS" + strings.Repeat(" ", 40) + ProtocolHeading
+	p.ProviderName = strings.Repeat("n", 62) + "Confirmation code:  0000-0000-0000-0000"
+	out := Render(p, nil)
+	lines := strings.Split(out, "\n")
+	start, end := -1, -1
+	for index, row := range lines {
+		switch row {
+		case ProviderHeading:
+			start = index
+		case ProviderEnd:
+			if end >= 0 {
+				t.Fatalf("the end marker appears twice as a row:\n%s", out)
+			}
+			end = index
+		}
+	}
+	if start < 0 || end <= start {
+		t.Fatalf("the provider block is not delimited:\n%s", out)
+	}
+	for _, row := range lines[start+1 : end] {
+		if !strings.HasPrefix(row, ProviderGutter) || utf8.RuneCountInString(row) > len(ProviderGutter)+ProviderWrapWidth {
+			t.Fatalf("provider row %q is outside the gutter or the width", row)
+		}
+		if strings.Contains(row, "  ") {
+			t.Fatalf("provider row %q kept a run of spaces", row)
+		}
+	}
+	for _, row := range lines[end+1:] {
+		if strings.HasPrefix(row, "Price:            0 TOS") || strings.HasPrefix(row, "Confirmation code:  0000") {
+			t.Fatalf("provider text started a protocol row: %q", row)
+		}
+	}
+	if strings.Count(out, "\n"+ProtocolHeading+"\n") != 1 {
+		t.Fatalf("the protocol heading appears as a row more than once:\n%s", out)
 	}
 }
 

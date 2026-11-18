@@ -69,13 +69,12 @@ type keyRecord struct {
 // quoteRecord is a Quote the agent built or validated, stored under its
 // quote ID for a later prepare.
 type quoteRecord struct {
-	Schema            string     `json:"schema"`
-	QuoteID           string     `json:"quote_id"`
-	CapabilityID      string     `json:"capability_id"`
-	CapabilityVersion string     `json:"capability_version"`
-	BuyerAddress      string     `json:"buyer_address"`
-	PackageBase64     string     `json:"package_base64"`
-	Terms             OfferTerms `json:"offer_terms"`
+	Schema            string `json:"schema"`
+	QuoteID           string `json:"quote_id"`
+	CapabilityID      string `json:"capability_id"`
+	CapabilityVersion string `json:"capability_version"`
+	BuyerAddress      string `json:"buyer_address"`
+	PackageBase64     string `json:"package_base64"`
 }
 
 // store is the agent's owner-private state directory.

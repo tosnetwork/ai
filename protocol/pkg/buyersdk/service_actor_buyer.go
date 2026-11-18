@@ -194,7 +194,9 @@ func (b *ServiceActorBuyer) Prepare(ctx context.Context, request *nativev1.Reque
 		TermsHash: hex.EncodeToString(admission.TermsHash[:]), PolicyVersion: admission.Policy.PolicyVersion,
 		PriceNanoTOS: admission.Policy.PricePerCall.String(), StorageFeeNanoTOS: admission.Policy.StorageFee.String(),
 		AttestorKeyID: mldsa44.KeyIDText(admission.Binding.AttestorKeyID), PaymentNanoTOS: payment.String(),
-		ExpiresAtUnix: validated.Proposal.ExpiresAtUnixSeconds, Phase: PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix()}
+		ExpiresAtUnix: validated.Proposal.ExpiresAtUnixSeconds, Phase: PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix(),
+		ResponseSLASeconds: admission.Policy.ResponseSLA, RefundClaimWindowSeconds: admission.Policy.RefundClaimWindow,
+		CleanupBountyNanoTOS: admission.Policy.CleanupBounty.String()}
 	if err := b.config.Journal.Create(record, b.config.Limits, now); err != nil {
 		return CallRecord{}, err
 	}

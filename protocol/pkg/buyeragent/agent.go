@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"sync"
@@ -124,46 +123,13 @@ func (a *Agent) notifyLocked() {
 
 func (a *Agent) now() time.Time { return a.config.Now() }
 
-// OfferTerms are the finalized offer's terms that the Quote package does
-// not carry and the confirmer must show: the response SLA, the refund
-// claim window and the cleanup bounty (MCP_BUYER_ADAPTER_V1 sections 5.2
-// and 8). The caller reads them from the same finalized checkpoint as the
-// offer it verified.
-type OfferTerms struct {
-	ResponseSLASeconds       uint32 `json:"response_sla_seconds"`
-	RefundClaimWindowSeconds uint32 `json:"refund_claim_window_seconds"`
-	CleanupBountyNanoTOS     string `json:"cleanup_bounty_nanotos"`
-}
-
-// Service Actor bounds on the SLA and the refund window
-// (SERVICE_ACTOR_TVM_V1 section 2).
-const (
-	minWindowSeconds = 3_600
-	maxWindowSeconds = 2_592_000
-)
-
-var decimalPattern = regexp.MustCompile(`^(0|[1-9][0-9]{0,35})$`)
-
-func (t OfferTerms) check() error {
-	if t.ResponseSLASeconds < minWindowSeconds || t.ResponseSLASeconds > maxWindowSeconds ||
-		t.RefundClaimWindowSeconds < minWindowSeconds || t.RefundClaimWindowSeconds > maxWindowSeconds ||
-		!decimalPattern.MatchString(t.CleanupBountyNanoTOS) {
-		return refusal(CodeOfferInvalid, "the offer terms are outside the Service Actor bounds", nil)
-	}
-	return nil
-}
-
-// StoreQuote keeps a validated Quote and its offer terms for a later
-// prepare and returns its quote ID, the SHA-256 of the package's
-// deterministic encoding. A Quote already stored with other terms is
-// refused.
-func (a *Agent) StoreQuote(request *nativev1.RequestQuoteProposalRequest, value *nativev1.QuoteProposalPackageV1,
-	terms OfferTerms) (string, error) {
+// StoreQuote keeps a validated Quote for a later prepare and returns its
+// quote ID, the SHA-256 of the package's deterministic encoding. The terms
+// the confirmer shows are not taken from here: they come from the
+// admission at prepare, bound by the terms hash the call pins.
+func (a *Agent) StoreQuote(request *nativev1.RequestQuoteProposalRequest, value *nativev1.QuoteProposalPackageV1) (string, error) {
 	if request == nil || value == nil {
 		return "", refusal(CodeBadInput, "no Quote was given", nil)
-	}
-	if err := terms.check(); err != nil {
-		return "", err
 	}
 	if _, err := quoteexchange.ValidatePortable(a.config.Network, request, value); err != nil {
 		return "", refusal(CodeOfferInvalid, "the Quote does not validate", err)
@@ -176,21 +142,10 @@ func (a *Agent) StoreQuote(request *nativev1.RequestQuoteProposalRequest, value 
 	id := hex.EncodeToString(sum[:])
 	record := quoteRecord{Schema: quoteSchema, QuoteID: id, CapabilityID: request.CapabilityId,
 		CapabilityVersion: request.CapabilityVersion, BuyerAddress: request.BuyerAddress,
-		PackageBase64: base64.StdEncoding.EncodeToString(raw), Terms: terms}
+		PackageBase64: base64.StdEncoding.EncodeToString(raw)}
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	err = writeJSON(a.store.quotePath(id), record, true)
-	if errors.Is(err, os.ErrExist) {
-		stored, readErr := a.store.readQuote(id)
-		if readErr != nil {
-			return "", readErr
-		}
-		if stored.Terms != terms {
-			return "", refusal(CodeConflict, "this Quote is already stored with other offer terms", nil)
-		}
-		return id, nil
-	}
-	if err != nil {
+	if err := writeJSON(a.store.quotePath(id), record, true); err != nil && !errors.Is(err, os.ErrExist) {
 		return "", err
 	}
 	return id, nil
@@ -727,6 +682,12 @@ func (a *Agent) Present(requestHash string) (Presentation, error) {
 	if record.Phase != buyersdk.PhasePrepared || purchase.RequestedUnix == 0 {
 		return Presentation{}, refusal(CodeConflict, "the purchase is not waiting for a decision", nil)
 	}
+	// The terms shown come from the journal record, which Prepare filled
+	// from the admitted policy. A record without them cannot be shown
+	// honestly, so it is never presented.
+	if record.ResponseSLASeconds == 0 || record.RefundClaimWindowSeconds == 0 || record.CleanupBountyNanoTOS == "" {
+		return Presentation{}, refusal(CodeOfferInvalid, "the purchase record lacks its admitted terms", nil)
+	}
 	if purchase.ConfirmationNonce == "" || !now.Before(time.Unix(purchase.PresentedUnix, 0).Add(ConfirmationLifetime)) {
 		var nonce [ConfirmationNonceBytes]byte
 		if err := a.config.Random(nonce[:]); err != nil {
@@ -745,10 +706,6 @@ func (a *Agent) Present(requestHash string) (Presentation, error) {
 	if err != nil {
 		return Presentation{}, err
 	}
-	quote, err := a.store.readQuote(purchase.QuoteID)
-	if err != nil {
-		return Presentation{}, err
-	}
 	request, value, err := a.loadQuote(purchase.QuoteID)
 	if err != nil {
 		return Presentation{}, err
@@ -760,8 +717,8 @@ func (a *Agent) Present(requestHash string) (Presentation, error) {
 	return Presentation{Purchase: a.viewOf(record, purchase), NetworkID: record.NetworkID, BuyerWallet: record.BuyerWallet,
 		Budget: budget, ProviderAgentID: validated.Proposal.ProviderAgentId, ManifestDigest: validated.Proposal.ManifestDigest,
 		ProviderName: validated.Manifest.Name, ProviderDescription: validated.Manifest.Description,
-		ResponseSLASeconds: quote.Terms.ResponseSLASeconds, RefundClaimWindowSeconds: quote.Terms.RefundClaimWindowSeconds,
-		RetentionSeconds: validated.Manifest.RetentionSeconds, CleanupBountyNanoTOS: quote.Terms.CleanupBountyNanoTOS,
+		ResponseSLASeconds: record.ResponseSLASeconds, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,
+		RetentionSeconds: validated.Manifest.RetentionSeconds, CleanupBountyNanoTOS: record.CleanupBountyNanoTOS,
 		AllowanceNanoTOS: strconv.Itoa(nativecore.ServiceActorAdmissionGasAllowance), NowUnix: now.Unix(),
 		Code:           ConfirmationCode(nonce, fieldsOf(record, purchase)),
 		ValidUntilUnix: time.Unix(purchase.PresentedUnix, 0).Add(ConfirmationLifetime).Unix()}, nil

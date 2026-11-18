@@ -517,12 +517,18 @@ Deployment requirements, stated in the user guide and checked where possible:
 
   A terminal opened from the developer's desktop session, IDE, multiplexer or
   shell is not acceptable, whatever account it then switches to;
-- the confirmer refuses to run unless its standard input is a terminal, and
-  unless its controlling terminal is owned by the custody account. A
+- the confirmer refuses to run unless its standard input is a terminal
+  device that is all of:
+  - owned by the custody account, as `fstat` of standard input reports;
+  - the controlling terminal of the confirmer's own session (`TIOCGSID`
+    equals `getsid(0)`).
+
+  It does not consult `/dev/tty` for this: on Linux that generic node is
+  owned by root and says nothing about the real terminal behind it. A
   pseudo-terminal that a developer-account terminal emulator, multiplexer or
   `script` allocated is owned by the developer account, so this refuses the
-  common mistakes. It reads the decision from that terminal only, never from a
-  pipe or file;
+  common mistakes. It reads the decision from that terminal only, reopened by
+  its own path and checked to be the same device, never from a pipe or file;
 - the agent checks at start that its files are private (2.3);
 - the MCP server refuses to start when `VAULT_URL` is set in its environment,
   when it can read the agent's state directory, or when its effective uid is
@@ -589,14 +595,20 @@ protocol fields:
   `U+FEFF`;
 - it replaces invalid UTF-8 with `U+FFFD`;
 - it bounds each provider string at 256 characters and the provider block at
-  4,096, marking truncation, and every other string at 512.
+  4,096, marking truncation, and every other string at 512;
+- it collapses runs of spaces in provider text, hard-wraps it at 64
+  characters, and starts every provider row with the gutter `| `. A
+  terminal's soft wrap of a long line can then never put provider text at
+  the start of a row, where it could pass for the end marker or a protocol
+  field.
 
 The provider text it shows is the manifest's `name` and `description`. The
 response SLA, the refund claim window and the cleanup bounty come from the
-finalized offer: the agent stores them with the Quote when it verifies the
-offer, and refuses a Quote stored again with other terms. The retention
-comes from the manifest. The confirmer computes every deadline from the
-agent's clock at presentation.
+admission: `Prepare` takes them from the admitted policy, whose fields the
+`terms_hash` the call pins binds, and keeps them in the journal record. No
+caller supplies them. A record without them is never presented. The
+retention comes from the manifest. The confirmer computes every deadline
+from the agent's clock at presentation.
 
 Archive member names are already restricted to the safe charset of 4.5, and
 the agent refuses any other, so none of them needs escaping. The rendering

@@ -85,6 +85,33 @@ func Escape(s string, limit int) string {
 // field escapes a protocol field.
 func field(s string) string { return Escape(s, MaxProtocolString) }
 
+// Provider text layout. Every provider row is hard-wrapped at a fixed width
+// and starts with a gutter. A terminal's own soft wrap of a long line can
+// therefore never put provider text at the start of a row, where it could
+// pass for the block's end marker or a protocol field.
+const (
+	ProviderWrapWidth = 64
+	ProviderGutter    = "| "
+)
+
+// collapseSpaces turns every run of spaces into one space and trims the
+// ends, so padding cannot push text to a chosen column.
+func collapseSpaces(s string) string {
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return r == ' ' }), " ")
+}
+
+// providerRows hard-wraps already escaped text into rows of at most
+// ProviderWrapWidth characters, each behind the gutter.
+func providerRows(text string) []string {
+	runes := []rune(text)
+	var rows []string
+	for len(runes) > ProviderWrapWidth {
+		rows = append(rows, ProviderGutter+string(runes[:ProviderWrapWidth]))
+		runes = runes[ProviderWrapWidth:]
+	}
+	return append(rows, ProviderGutter+string(runes))
+}
+
 // DefaultSensitive are the member-name patterns highlighted by default: a
 // pattern ending in "/" matches a directory segment, any other one a
 // segment's name.
@@ -166,11 +193,14 @@ func Render(p buyeragent.Presentation, sensitive []string) string {
 			limit = budget
 		}
 		if limit <= 0 {
-			line("%s: %s", item.label, strings.TrimSpace(truncationMark))
+			line("%s%s: %s", ProviderGutter, item.label, strings.TrimSpace(truncationMark))
 			continue
 		}
-		budget -= utf8.RuneCountInString(item.value)
-		line("%s: %s", item.label, Escape(item.value, limit))
+		value := collapseSpaces(item.value)
+		budget -= utf8.RuneCountInString(value)
+		for _, row := range providerRows(item.label + ": " + Escape(value, limit)) {
+			line("%s", row)
+		}
 	}
 	line("%s", ProviderEnd)
 	line("")

@@ -36,7 +36,14 @@ var (
 	fxKey   = bytes.Repeat([]byte{0x5a}, mldsa44.PublicKeySize)
 	fxKeyID = func() [32]byte { id, _ := mldsa44.KeyID(fxKey); return id }()
 	fxNow   = time.Unix(2_000_000_000, 0)
-	fxTerms = OfferTerms{ResponseSLASeconds: 3_600, RefundClaimWindowSeconds: 7_200, CleanupBountyNanoTOS: "100000000"}
+)
+
+// The admitted policy's terms the fake buyer journals, as buyersdk
+// Prepare takes them from the admission.
+const (
+	fxResponseSLA   = 3_600
+	fxRefundWindow  = 7_200
+	fxCleanupBounty = "100000000"
 )
 
 // fakeBuyer stands in for buyersdk.ServiceActorBuyer over a real journal:
@@ -87,7 +94,8 @@ func (f *fakeBuyer) Prepare(_ context.Context, request *nativev1.RequestQuotePro
 		TermsHash: validated.Proposal.TermsHash, PriceNanoTOS: validated.Proposal.PriceNanotos,
 		StorageFeeNanoTOS: validated.Proposal.StorageFeeNanotos, AttestorKeyID: validated.Proposal.AttestorKeyId,
 		PaymentNanoTOS: "700000000", ExpiresAtUnix: validated.Proposal.ExpiresAtUnixSeconds,
-		Phase: buyersdk.PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix()}
+		Phase: buyersdk.PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix(),
+		ResponseSLASeconds: fxResponseSLA, RefundClaimWindowSeconds: fxRefundWindow, CleanupBountyNanoTOS: fxCleanupBounty}
 	if err := f.journal.Create(record, f.limits, now); err != nil {
 		return buyersdk.CallRecord{}, err
 	}
@@ -279,7 +287,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(agent.Close)
 	request, value := quotePackage(t, fxNow)
-	quoteID, err := agent.StoreQuote(request, value, fxTerms)
+	quoteID, err := agent.StoreQuote(request, value)
 	if err != nil {
 		t.Fatal(err)
 	}

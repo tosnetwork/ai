@@ -27,7 +27,7 @@ func TestTheClientCarriesResultsAndRefusals(t *testing.T) {
 	}
 	var presentation Presentation
 	if err := client.Call(ctx, "present", RequestHashParams{RequestHash: view.RequestHash}, &presentation); err != nil ||
-		presentation.Code == "" || presentation.ResponseSLASeconds != fxTerms.ResponseSLASeconds {
+		presentation.Code == "" || presentation.ResponseSLASeconds != fxResponseSLA {
 		t.Fatalf("present: %+v %v", presentation, err)
 	}
 	var refused PurchaseView
