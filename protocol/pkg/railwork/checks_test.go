@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"testing"
@@ -527,6 +529,174 @@ func TestArtifactMustEndExactlyAtItsEndOfArchiveMarker(t *testing.T) {
 	}
 }
 
+// The receiver bounds of the amended spec: capability_version charset,
+// package and Receipt bounds, non-zero response hashes, with each bound
+// itself accepted.
+func TestReceiverBoundsAcceptTheBoundAndRefuseOnePast(t *testing.T) {
+	fixture := newTaskFixture(t)
+	encodeTask := func(version string, pkg []byte) error {
+		header := fixture.header
+		header.CapabilityVersion = version
+		_, err := EncodeTask(Task{Header: header, Package: pkg, Archive: fixture.archive})
+		return err
+	}
+	decodeTask := func(version string, pkg []byte) error {
+		header := fixture.header
+		header.Schema, header.CapabilityVersion = TaskSchema, version
+		header.PackageBase64 = base64.StdEncoding.EncodeToString(pkg)
+		header.SourceDigest = sha256Text(sha256.Sum256(fixture.archive))
+		_, err := DecodeTask(canonicalMessage(t, header, fixture.archive))
+		return err
+	}
+	for _, version := range []string{"!", "~", "1.0.0", strings.Repeat("v", MaxCapabilityVersionBytes)} {
+		if err := encodeTask(version, []byte{1}); err != nil {
+			t.Errorf("version %q refused by the encoder: %v", version, err)
+		}
+		if err := decodeTask(version, []byte{1}); err != nil {
+			t.Errorf("version %q refused by the decoder: %v", version, err)
+		}
+	}
+	for _, version := range []string{"1.0 0", "1.0\x7f", "1.0\u00e9", "1.0\n", "1.0\t"} {
+		if err := decodeTask(version, []byte{1}); !errors.Is(err, ErrMessageInvalid) {
+			t.Errorf("version %q decoded: %v", version, err)
+		}
+		if err := encodeTask(version, []byte{1}); !errors.Is(err, ErrMessageInvalid) {
+			t.Errorf("version %q encoded: %v", version, err)
+		}
+	}
+	if err := decodeTask("1.0.0", make([]byte, MaxPackageBytes)); err != nil {
+		t.Errorf("an 8192-byte package refused: %v", err)
+	}
+	if err := encodeTask("1.0.0", make([]byte, MaxPackageBytes)); err != nil {
+		t.Errorf("an 8192-byte package not encoded: %v", err)
+	}
+	if err := decodeTask("1.0.0", make([]byte, MaxPackageBytes+1)); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("an 8193-byte package decoded: %v", err)
+	}
+	if err := encodeTask("1.0.0", make([]byte, MaxPackageBytes+1)); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("an 8193-byte package encoded: %v", err)
+	}
+	if err := decodeTask("1.0.0", make([]byte, MaxPackageBytes+3)); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("a package over the Base64 bound decoded: %v", err)
+	}
+	result := func(responseHash string, receipt []byte) error {
+		header := ResultHeader{Schema: ResultSchema, ResponseHash: responseHash,
+			ReceiptBOCBase64: base64.StdEncoding.EncodeToString(receipt)}
+		_, err := DecodeResult(canonicalMessage(t, header, []byte{1}))
+		return err
+	}
+	if err := result(strings.Repeat("ab", 32), make([]byte, MaxReceiptBytes)); err != nil {
+		t.Errorf("a 512-byte Receipt refused: %v", err)
+	}
+	if err := result(strings.Repeat("ab", 32), make([]byte, MaxReceiptBytes+1)); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("a 513-byte Receipt decoded: %v", err)
+	}
+	if err := result(strings.Repeat("ab", 32), make([]byte, MaxReceiptBytes+3)); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("a Receipt over the Base64 bound decoded: %v", err)
+	}
+	if _, err := EncodeResult([32]byte{1}, make([]byte, MaxReceiptBytes+1), []byte{1}, nil); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("a 513-byte Receipt encoded: %v", err)
+	}
+	if err := result(zeroHex64, []byte{1}); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("a zero result response hash decoded: %v", err)
+	}
+	if err := result(strings.Repeat("0", 63)+"1", []byte{1}); err != nil {
+		t.Errorf("a non-zero result response hash refused: %v", err)
+	}
+	ack := canonicalMessage(t, AckHeader{Schema: AckSchema, ResponseHash: zeroHex64}, nil)
+	if _, err := DecodeAck(ack); !errors.Is(err, ErrMessageInvalid) {
+		t.Errorf("a zero ack response hash decoded: %v", err)
+	}
+}
+
+// Every field of SoftwareWorkReceiptV1 has a fixed width, so a canonical
+// Receipt BOC with four distinct child cells is 384 bytes, the largest
+// there is, and coinciding cells only make it smaller.
+func TestTheLargestCanonicalReceiptIsWithinItsBound(t *testing.T) {
+	document := loadVectors(t)
+	binding := vectorReceiptBinding(t, document)
+	binding.Price = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 120), big.NewInt(1))
+	distinct := Outcome{ResultDigest: "sha256:" + strings.Repeat("e1", 32), ArtifactDigest: "sha256:" + strings.Repeat("e2", 32),
+		ReportDigest: "sha256:" + strings.Repeat("e3", 32), CompletedAtUnix: math.MaxUint64}
+	root, _, err := BuildReceipt(binding, distinct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size := len(root.ToBOC()); size != 384 || size > MaxReceiptBytes {
+		t.Fatalf("the largest canonical Receipt is %d bytes", size)
+	}
+	if size := len(mustBase64(t, document.Receipt.ReceiptBOCBase64)); size != 384 {
+		t.Fatalf("the vector Receipt is %d bytes", size)
+	}
+	// Outcome digests equal to the binding's make two child cells coincide.
+	same := binding
+	same.SourceDigest = "sha256:" + strings.Repeat("e1", 32)
+	same.ToolchainDigest = "sha256:" + strings.Repeat("e2", 32)
+	same.SandboxDigest = "sha256:" + strings.Repeat("e3", 32)
+	root, _, err = BuildReceipt(same, distinct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size := len(root.ToBOC()); size >= 384 {
+		t.Fatalf("a Receipt with coinciding cells is %d bytes", size)
+	}
+}
+
+// Each member header must be one USTAR block with type flag '0'. The Go
+// tar writer, as the software-work runner uses it (FormatUSTAR, no type
+// flag set), writes exactly that; a PAX extended header or the legacy
+// '\x00' flag is refused.
+func TestArtifactMemberHeadersMustBeSingleUSTARBlocksOfTypeZero(t *testing.T) {
+	write := func(format tar.Format, records map[string]string, flag byte) []byte {
+		var buffer bytes.Buffer
+		writer := tar.NewWriter(&buffer)
+		for _, member := range [][2]string{{"output.log", "ok\n"}, {"report.json", "{}\n"}} {
+			if err := writer.WriteHeader(&tar.Header{Name: member[0], Mode: 0o444, Size: int64(len(member[1])),
+				Typeflag: flag, Format: format, PAXRecords: records}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.Write([]byte(member[1])); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buffer.Bytes()
+	}
+	runner := write(tar.FormatUSTAR, nil, 0)
+	if runner[tarTypeflagOffset] != tar.TypeReg || runner[2*tarBlock+tarTypeflagOffset] != tar.TypeReg {
+		t.Fatal("the USTAR writer did not write type flag 0")
+	}
+	if _, _, err := ArtifactMembers(runner); err != nil {
+		t.Fatalf("the runner's archive shape refused: %v", err)
+	}
+	pax := write(tar.FormatPAX, map[string]string{"comment": "extended"}, tar.TypeReg)
+	if pax[tarTypeflagOffset] != tar.TypeXHeader {
+		t.Fatal("the PAX archive has no extended header")
+	}
+	if _, _, err := ArtifactMembers(pax); !errors.Is(err, ErrResultNotAccepted) {
+		t.Fatalf("a PAX extended header accepted: %v", err)
+	}
+	legacy := bytes.Clone(runner)
+	legacy[tarTypeflagOffset] = 0
+	block := legacy[:tarBlock]
+	for index := 148; index < 156; index++ {
+		block[index] = ' '
+	}
+	sum := 0
+	for _, value := range block {
+		sum += int(value)
+	}
+	copy(block[148:156], fmt.Sprintf("%06o\x00 ", sum))
+	if header, err := tar.NewReader(bytes.NewReader(legacy)).Next(); err != nil || header.Name != "output.log" {
+		t.Fatalf("the legacy-flag archive does not parse: %v", err)
+	}
+	if _, _, err := ArtifactMembers(legacy); !errors.Is(err, ErrResultNotAccepted) {
+		t.Fatalf("the legacy '\\x00' flag accepted: %v", err)
+	}
+}
+
 func TestArtifactMustHoldExactlyItsOutputAndReport(t *testing.T) {
 	output, report := [2]string{"output.log", "ok\n"}, [2]string{"report.json", "{}\n"}
 	if gotOutput, gotReport, err := ArtifactMembers(tarOf(t, report, output)); err != nil ||
@@ -802,10 +972,10 @@ func TestTheLargestMessagesTakeNineteenAndTwentyFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	cardBytes := bytes.Repeat([]byte{'c'}, MaxKeyCardBytes)
-	// Pad the package so the task header is as large as the 64 KiB bound
-	// allows; the archive is the full 1 MiB.
+	// Pad the package to its bound, with the largest card; the archive is
+	// the full 1 MiB.
 	archive := make([]byte, MaxInlineInputBytes)
-	padded := append(bytes.Clone(packageBytes), make([]byte, 30000)...)
+	padded := append(bytes.Clone(packageBytes), make([]byte, MaxPackageBytes-len(packageBytes))...)
 	raw, err := EncodeTask(Task{Header: fixture.header, Package: padded, Archive: archive, BuyerKeyCard: cardBytes})
 	if err != nil {
 		t.Fatal(err)
@@ -821,7 +991,7 @@ func TestTheLargestMessagesTakeNineteenAndTwentyFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact := make([]byte, MaxResultBytes)
-	result, err := EncodeResult([32]byte{1}, make([]byte, 3000), artifact, cardBytes)
+	result, err := EncodeResult([32]byte{1}, make([]byte, MaxReceiptBytes), artifact, cardBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

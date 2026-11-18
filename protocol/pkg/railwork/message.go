@@ -21,7 +21,29 @@ const (
 
 	// MaxCapabilityVersionBytes bounds a task's capability_version.
 	MaxCapabilityVersionBytes = 128
+
+	zeroHex64 = "0000000000000000000000000000000000000000000000000000000000000000"
 )
+
+// printableVersion reports whether a capability_version is 1 to 128 bytes of
+// printable ASCII 0x21 to 0x7e (section 5.1), the Registry's protocol text.
+func printableVersion(version string) bool {
+	if version == "" || len(version) > MaxCapabilityVersionBytes {
+		return false
+	}
+	for index := 0; index < len(version); index++ {
+		if version[index] < 0x21 || version[index] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// responseHashText reports whether a response hash is 64 lowercase hex and
+// not all zero (sections 5.2, 5.3).
+func responseHashText(value string) bool {
+	return hex64Pattern.MatchString(value) && value != zeroHex64
+}
 
 var (
 	agentIDPattern    = regexp.MustCompile(`^agent_[0-9a-f]{64}$`)
@@ -217,10 +239,12 @@ func validateTaskHeader(header TaskHeader, archiveBytes int) error {
 		return invalidMessage("buyer_wallet is not a workchain-0 raw address")
 	case !capabilityPattern.MatchString(header.CapabilityID):
 		return invalidMessage("capability_id is not a Capability ID")
-	case header.CapabilityVersion == "" || len(header.CapabilityVersion) > MaxCapabilityVersionBytes:
-		return invalidMessage("capability_version is outside 1 to 128 bytes")
+	case !printableVersion(header.CapabilityVersion):
+		return invalidMessage("capability_version is not 1 to 128 bytes of 0x21 to 0x7e")
 	case header.PackageBase64 == "":
 		return invalidMessage("package_base64 is empty")
+	case len(header.PackageBase64) > MaxPackageBase64:
+		return invalidMessage("package_base64 exceeds its bound")
 	case !hex64Pattern.MatchString(header.ExecutionID):
 		return invalidMessage("execution_id is not 64 lowercase hex")
 	case !hex64Pattern.MatchString(header.ExecutionNonce):
@@ -256,8 +280,8 @@ func EncodeTask(task Task) ([]byte, error) {
 		(header.BuyerKeyCard != "" && header.BuyerKeyCard != card) {
 		return nil, invalidMessage("the task header disagrees with the task's bytes")
 	}
-	if len(task.Package) == 0 {
-		return nil, invalidMessage("the task carries no Quote package")
+	if len(task.Package) == 0 || len(task.Package) > MaxPackageBytes {
+		return nil, invalidMessage("the task carries no Quote package or one over its bound")
 	}
 	header.PackageBase64, header.SourceDigest, header.BuyerKeyCard = packageText, sourceDigest, card
 	if err = validateTaskHeader(header, len(task.Archive)); err != nil {
@@ -285,8 +309,8 @@ func DecodeTask(raw []byte) (Task, error) {
 		return Task{}, invalidMessage("the source archive does not match source_digest")
 	}
 	pkg, ok := strictBase64(header.PackageBase64)
-	if !ok || len(pkg) == 0 {
-		return Task{}, invalidMessage("package_base64 is not canonical Base64 of a non-empty package")
+	if !ok || len(pkg) == 0 || len(pkg) > MaxPackageBytes {
+		return Task{}, invalidMessage("package_base64 is not canonical Base64 of a 1 to 8192-byte package")
 	}
 	return Task{Header: header, Package: pkg, Archive: bytes.Clone(archive), BuyerKeyCard: card}, nil
 }
@@ -296,7 +320,7 @@ func EncodeResult(responseHash [32]byte, receiptBOC, artifact, providerKeyCard [
 	if responseHash == ([32]byte{}) {
 		return nil, invalidMessage("the response hash is zero")
 	}
-	if len(receiptBOC) == 0 || len(artifact) == 0 || len(artifact) > MaxResultBytes {
+	if len(receiptBOC) == 0 || len(receiptBOC) > MaxReceiptBytes || len(artifact) == 0 || len(artifact) > MaxResultBytes {
 		return nil, invalidMessage("the result is empty or oversized")
 	}
 	card, err := encodeKeyCard(providerKeyCard)
@@ -320,18 +344,20 @@ func DecodeResult(raw []byte) (Result, error) {
 	switch {
 	case header.Schema != ResultSchema:
 		return Result{}, invalidMessage("the result schema is wrong")
-	case !hex64Pattern.MatchString(header.ResponseHash):
-		return Result{}, invalidMessage("response_hash is not 64 lowercase hex")
+	case !responseHashText(header.ResponseHash):
+		return Result{}, invalidMessage("response_hash is not 64 lowercase hex, or is all zero")
 	case len(artifact) == 0 || len(artifact) > MaxResultBytes:
 		return Result{}, invalidMessage("the artifact is outside 1 to 1114112 bytes")
+	case len(header.ReceiptBOCBase64) > MaxReceiptBase64:
+		return Result{}, invalidMessage("receipt_boc_base64 exceeds its bound")
 	}
 	card, err := decodeKeyCard(header.ProviderKeyCard)
 	if err != nil {
 		return Result{}, err
 	}
 	receipt, ok := strictBase64(header.ReceiptBOCBase64)
-	if !ok || len(receipt) == 0 {
-		return Result{}, invalidMessage("receipt_boc_base64 is not canonical Base64 of a non-empty Receipt")
+	if !ok || len(receipt) == 0 || len(receipt) > MaxReceiptBytes {
+		return Result{}, invalidMessage("receipt_boc_base64 is not canonical Base64 of a 1 to 512-byte Receipt")
 	}
 	return Result{Header: header, Receipt: receipt, Artifact: bytes.Clone(artifact), ProviderKeyCard: card}, nil
 }
@@ -361,8 +387,8 @@ func DecodeAck(raw []byte) (Ack, error) {
 		return Ack{}, invalidMessage("an acknowledgement has a body")
 	case header.Schema != AckSchema:
 		return Ack{}, invalidMessage("the acknowledgement schema is wrong")
-	case !hex64Pattern.MatchString(header.ResponseHash):
-		return Ack{}, invalidMessage("response_hash is not 64 lowercase hex")
+	case !responseHashText(header.ResponseHash):
+		return Ack{}, invalidMessage("response_hash is not 64 lowercase hex, or is all zero")
 	}
 	card, err := decodeKeyCard(header.BuyerKeyCard)
 	if err != nil {

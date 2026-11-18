@@ -100,6 +100,11 @@ type vectorDocument struct {
 		Rule   string           `json:"rule"`
 		Frames []vectorFrameRef `json:"frames"`
 	} `json:"negative_joins"`
+	NegativeArtifacts []struct {
+		Name   string `json:"name"`
+		Rule   string `json:"rule"`
+		Base64 string `json:"base64"`
+	} `json:"negative_artifacts"`
 }
 
 func loadVectors(t *testing.T) *vectorDocument {
@@ -534,11 +539,23 @@ func decodeAny(kind Kind, raw []byte) error {
 
 func TestVectorNegativeMessagesAreRefused(t *testing.T) {
 	document := loadVectors(t)
-	if len(document.NegativeMessages) != 24 {
+	if len(document.NegativeMessages) != 30 {
 		t.Fatalf("%d negative messages", len(document.NegativeMessages))
 	}
 	for _, item := range document.NegativeMessages {
 		if err := decodeAny(Kind(item.Kind), mustBase64(t, item.Base64)); !errors.Is(err, ErrMessageInvalid) {
+			t.Errorf("%s (%s): err=%v", item.Name, item.Rule, err)
+		}
+	}
+}
+
+func TestVectorNegativeArtifactsAreRefused(t *testing.T) {
+	document := loadVectors(t)
+	if len(document.NegativeArtifacts) != 5 {
+		t.Fatalf("%d negative artifacts", len(document.NegativeArtifacts))
+	}
+	for _, item := range document.NegativeArtifacts {
+		if _, _, err := ArtifactMembers(mustBase64(t, item.Base64)); !errors.Is(err, ErrResultNotAccepted) {
 			t.Errorf("%s (%s): err=%v", item.Name, item.Rule, err)
 		}
 	}
