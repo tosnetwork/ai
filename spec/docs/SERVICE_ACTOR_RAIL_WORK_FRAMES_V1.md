@@ -25,9 +25,9 @@ This is the precondition for a buyer adapter that does not embed OpenFox.
   item 6).
 
 No deployed OpenFox sender emits anything these rules refuse: its versions
-follow the manifest version syntax, its largest Quote package is 2,195 bytes,
-every canonical Receipt is at most 384 bytes, and its artifacts are the
-software-work runner's USTAR archives. The shared implementation,
+follow the manifest version syntax, its offers' Quote packages are at most
+2,195 bytes, every canonical Receipt is at most 384 bytes, and its artifacts
+are the software-work runner's USTAR archives. The shared implementation,
 `protocol/pkg/railwork`, applies the amended rules. OpenFox at `682c8bc3`
 decodes more leniently, as this section and section 15 record.
 
@@ -170,6 +170,9 @@ bytes whose SHA-256 is `message_digest`. Frames may arrive in any order. A
 receiver MUST refuse to join any other set, and MUST refuse a second frame
 for an index it holds whose bytes differ from the first. OpenFox discards a
 complete set whose digest does not match and waits for a fresh delivery.
+A receiver also records the packet `capability_id` and `quote_commitment` of
+a message's first frame. It MUST refuse a later frame of that message whose
+packet names other values (2.1).
 
 ## 4. Message container
 
@@ -239,7 +242,7 @@ Sent by the buyer once its `call` is finalized.
 | 3 | `buyer_wallet` | string | `wallet`; the wallet that sent the `call` |
 | 4 | `capability_id` | string | `cap` |
 | 5 | `capability_version` | string | 1 to 128 bytes, each `0x21` to `0x7e`; the Quote's version |
-| 6 | `package_base64` | string | `b64` of 1 to 8,192 bytes (at most 10,924 characters): the serialized `QuoteProposalPackageV1` the buyer accepted |
+| 6 | `package_base64` | string | `b64` of 1 to 31,611 bytes (at most 42,148 characters): the serialized `QuoteProposalPackageV1` the buyer accepted |
 | 7 | `execution_id` | string | `hex64`; section 6.2 |
 | 8 | `execution_nonce` | string | `hex64`; opens `execution_id` (section 6.2) |
 | 9 | `source_digest` | string | `sha256` of the body |
@@ -250,19 +253,38 @@ Sent by the buyer once its `call` is finalized.
 
 Body: the source archive, 1 to 1,048,576 bytes, whose SHA-256 is
 `source_digest`. A decoder MUST also refuse a `package_base64` that is not
-strict Base64, decodes to nothing or decodes to more than 8,192 bytes.
+strict Base64, decodes to nothing or decodes to more than 31,611 bytes.
 
-The 8,192-byte package bound is about 3.7 times the largest Quote package an
-OpenFox offer produces. That largest package is 2,195 bytes, measured with
-every variable field at its maximum:
-- a 64-byte version, the manifest version syntax's limit;
-- the 30-day maximum retention;
-- prices just below 2^120;
-- a 256-byte proposal ID;
-- the largest expiry.
+**Package bound.** The bound is the largest package whose Base64 still fits
+the 65,536-byte header (4) when every other field is at its maximum:
+- the canonical header without `package_base64`'s value takes 23,386 bytes:
+  - 770 bytes of field names, punctuation and fixed-length values, with
+    `request_id` and `call_lt` at 2^64-1;
+  - a 128-byte `capability_version` whose every byte needs a six-character
+    escape (768 characters);
+  - a 21,848-character `buyer_key_card_base64`;
+- that leaves 42,150 characters;
+- the largest multiple of four within them is 42,148 characters, which is
+  31,611 decoded bytes.
 
-The software-work manifest is the only part of the package that grows, and
-its fields are bounded by `SOFTWARE_WORK_MANIFEST_V1.md`.
+So every task whose package is at most 31,611 bytes can be carried, whatever
+its other fields hold, and no larger package can be carried with a maximal
+key card.
+
+**Carriable Quotes only.** The software-work manifest inside a package can
+be larger than this bound and still be valid: a manifest at its own field
+limits gives a package of about 43 KB. A buyer that paid for such a Quote
+could never send its task. So, for transport mode 2:
+- a provider MUST NOT publish a Capability version whose manifest can
+  produce a package over 31,611 bytes. The test is the package built from
+  that manifest, its transport binding and a Quote Proposal with every
+  field at its maximum: a 256-byte proposal ID, the largest expiry and
+  policy version, prices just below 2^120.
+- a provider or gateway MUST NOT return a Quote Proposal whose package is
+  over the bound;
+- a buyer MUST NOT send the `call` for such a Quote.
+
+OpenFox's offers produce packages of at most 2,195 bytes.
 
 ### 5.2 Result (kind 2, schema `tos.openfox.rail-result.v1`)
 
@@ -403,13 +425,19 @@ purchase's frame binding, and only after its respond is finalized:
    once, whose SHA-256 values are the Receipt's `result_digest` and
    `report_digest`.
 
-   Each member's header is one 512-byte block whose type flag is `0`. A buyer
-   MUST refuse:
+   Each member's header is one 512-byte USTAR block:
+   - the magic `ustar\0` at offset 257;
+   - the version `00` at offset 263;
+   - the type flag `0` at offset 156.
+
+   A buyer MUST refuse:
    - PAX extended headers (`x`, `g`);
-   - GNU long-name blocks;
+   - GNU headers (magic `ustar  \0`) and GNU long-name blocks;
    - the legacy regular-file flag `\0`.
 
-   The runner writes USTAR headers with flag `0` and nothing else.
+   The runner writes `archive/tar` `FormatUSTAR` headers, and Go's default
+   writer writes USTAR headers for such members; both have exactly this
+   shape and nothing else.
 
    The archive ends with the end-of-archive marker (two
    512-byte zero blocks) directly after the last member's padded data, and
@@ -483,7 +511,7 @@ the purchase as `receipt-mismatch` when it fails (Q9).
 | result message | at most 1,179,652 (4 + 65,536 + 1,114,112) |
 | ack message | at most 25,948 (4 + 4,096 + 21,848) |
 | result-request message | at most 25,948 |
-| Quote package (`package_base64`, decoded) | 1 to 8,192 (Base64 at most 10,924 characters) |
+| Quote package (`package_base64`, decoded) | 1 to 31,611 (Base64 at most 42,148 characters; 5.1) |
 | Receipt BOC (`receipt_boc_base64`, decoded; 7.2) | 1 to 512 (Base64 at most 684 characters; every canonical Receipt is at most 384) |
 | inbound packet JSON (OpenFox) | at most 131,072 |
 
@@ -499,6 +527,7 @@ The largest task takes 19 frames and the largest result 20.
 | task-sent | pending and 600 s since the last task | send the task again (fresh packets) |
 | any open | respond finalized, no stored result | send a result-request at once, then at most every 21,600 s until retention end (OpenFox: only when it receives over the relay carrier) |
 | any open | respond finalized, result stored | validate (7.2); on success send ack, go to completed |
+| any open | respond finalized, stored result fails 7.2 | discard it; stay open and wait for a redelivery, sending a result-request when its interval allows |
 | completed | result arrives again | send ack again |
 | any open | request overdue | send `expire`; then `claim_refund` from the wallet before `refund_claim_deadline` |
 | any | request refunded, swept or lapsed | terminal; no frames |
@@ -604,7 +633,7 @@ decoders:
   SHA-256 of the result;
 - `negative_messages`: 30 messages each breaking one rule of section 4 or 5;
 - `negative_joins`: 4 frame sets that must not join;
-- `negative_artifacts`: 5 artifacts that 7.2 item 3 refuses. The tar shape
+- `negative_artifacts`: 6 artifacts that 7.2 item 3 refuses. The tar shape
   alone refuses them; they need no Receipt.
 
 The receiver-bound negatives were added after the OpenFox-generated set. They
@@ -631,7 +660,9 @@ Receipt codec covers.
   OpenFox at `682c8bc3` decodes any 1 to 128 bytes.
 - **Q3. Binding check after slot claim.** Resolved: the derived binding is
   checked before the slot claim (7.1 item 6).
-- **Q4. Package size.** Resolved: at most 8,192 bytes decoded (5.1).
+- **Q4. Package size.** Resolved: at most 31,611 bytes decoded, the most a
+  maximal task header carries. Quotes over it are neither published,
+  proposed nor called (5.1).
 - **Q5. Receipt size.** Resolved: at most 512 bytes decoded at decode time
   and at acceptance (5.2, 7.2). OpenFox at `682c8bc3` bounds it only at
   acceptance, at 4,096 bytes.

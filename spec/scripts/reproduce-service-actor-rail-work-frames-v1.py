@@ -30,7 +30,7 @@ MAX_HEADER = 65536
 MAX_INPUT = 1 << 20
 MAX_RESULT = (1 << 20) + (64 << 10)
 MAX_CARD = 16384
-MAX_PACKAGE = 8192
+MAX_PACKAGE = 31611
 MAX_RECEIPT = 512
 CARD_B64 = (MAX_CARD + 2) // 3 * 4
 BOUNDS = {
@@ -295,8 +295,8 @@ def check_binding(document):
 
 def artifact_members(raw):
     """Section 7.2 item 3: exactly output.log and report.json, each a single
-    512-byte header block with type flag 0, then the end-of-archive marker
-    and nothing after it."""
+    512-byte USTAR header block (magic ustar\0, version 00) with type flag
+    0, then the end-of-archive marker and nothing after it."""
     require(0 < len(raw) <= MAX_RESULT, "artifact size")
     members = {}
     offset = 0
@@ -315,7 +315,8 @@ def artifact_members(raw):
             raise Refused("an artifact header does not parse") from error
         require(stored == sum(block[:148]) + 8 * 32 + sum(block[156:]), "an artifact header checksum")
         require(block[156:157] == b"0", "an artifact member's type flag is not 0")
-        if block[257:263] == b"ustar\0" and prefix:
+        require(block[257:265] == b"ustar\x0000", "an artifact member header is not USTAR (magic ustar\\0, version 00)")
+        if prefix:
             name = prefix + "/" + name
         require(name in ("output.log", "report.json") and name not in members, "artifact members")
         start = offset + 512
