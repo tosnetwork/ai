@@ -30,6 +30,8 @@ MAX_HEADER = 65536
 MAX_INPUT = 1 << 20
 MAX_RESULT = (1 << 20) + (64 << 10)
 MAX_CARD = 16384
+MAX_PACKAGE = 8192
+MAX_RECEIPT = 512
 CARD_B64 = (MAX_CARD + 2) // 3 * 4
 BOUNDS = {
     1: 4 + MAX_HEADER + MAX_INPUT,
@@ -146,7 +148,7 @@ def decode_task(raw):
     require(AGENT.fullmatch(header["buyer_agent_id"]) and WALLET.fullmatch(header["buyer_wallet"]) and
             CAP.fullmatch(header["capability_id"]), "identities")
     version = header["capability_version"]
-    require(0 < len(version.encode("utf-8")) <= 128, "capability_version")
+    require(0 < len(version) <= 128 and all(0x21 <= ord(char) <= 0x7E for char in version), "capability_version")
     require(header["package_base64"] != "", "package_base64 is empty")
     for name in ("execution_id", "execution_nonce", "call_hash"):
         require(HEX64.fullmatch(header[name]), name)
@@ -155,22 +157,22 @@ def decode_task(raw):
     card(header, "buyer_key_card_base64")
     require(0 < len(body) <= MAX_INPUT, "archive size")
     require(header["source_digest"] == "sha256:" + hashlib.sha256(body).hexdigest(), "archive digest")
-    require(len(strict_b64(header["package_base64"], "package_base64")) > 0, "package is empty")
+    require(0 < len(strict_b64(header["package_base64"], "package_base64")) <= MAX_PACKAGE, "package size")
     return header, body
 
 
 def decode_result(raw):
     header, body = decode_message(raw, 2)
-    require(HEX64.fullmatch(header["response_hash"]), "response_hash")
+    require(HEX64.fullmatch(header["response_hash"]) and header["response_hash"] != "0" * 64, "response_hash")
     require(0 < len(body) <= MAX_RESULT, "artifact size")
     card(header, "provider_key_card_base64")
-    require(len(strict_b64(header["receipt_boc_base64"], "receipt")) > 0, "receipt is empty")
+    require(0 < len(strict_b64(header["receipt_boc_base64"], "receipt")) <= MAX_RECEIPT, "receipt size")
     return header, body
 
 
 def decode_ack(raw):
     header, body = decode_message(raw, 3)
-    require(body == b"" and HEX64.fullmatch(header["response_hash"]), "ack")
+    require(body == b"" and HEX64.fullmatch(header["response_hash"]) and header["response_hash"] != "0" * 64, "ack")
     card(header, "buyer_key_card_base64")
     return header, body
 
@@ -291,23 +293,53 @@ def check_binding(document):
     return execution, input_digest
 
 
+def artifact_members(raw):
+    """Section 7.2 item 3: exactly output.log and report.json, each a single
+    512-byte header block with type flag 0, then the end-of-archive marker
+    and nothing after it."""
+    require(0 < len(raw) <= MAX_RESULT, "artifact size")
+    members = {}
+    offset = 0
+    while True:
+        require(offset + 512 <= len(raw), "the artifact ends without its end-of-archive marker")
+        block = raw[offset:offset + 512]
+        if block == bytes(512):
+            require(raw[offset:] == bytes(1024), "the end-of-archive marker is not exactly the last 1024 bytes")
+            break
+        try:
+            stored = int(block[148:156].split(b"\0")[0].strip(), 8)
+            size = int(block[124:136].split(b"\0")[0].strip(), 8)
+            name = block[0:100].split(b"\0")[0].decode("ascii")
+            prefix = block[345:500].split(b"\0")[0].decode("ascii")
+        except (ValueError, UnicodeDecodeError) as error:
+            raise Refused("an artifact header does not parse") from error
+        require(stored == sum(block[:148]) + 8 * 32 + sum(block[156:]), "an artifact header checksum")
+        require(block[156:157] == b"0", "an artifact member's type flag is not 0")
+        if block[257:263] == b"ustar\0" and prefix:
+            name = prefix + "/" + name
+        require(name in ("output.log", "report.json") and name not in members, "artifact members")
+        start = offset + 512
+        require(start + size <= len(raw), "an artifact member is cut short")
+        members[name] = raw[start:start + size]
+        offset = start + (size + 511) // 512 * 512
+    require(set(members) == {"output.log", "report.json"}, "artifact members")
+    return members
+
+
 def check_receipt(document):
     receipt = document["receipt"]
     artifact = base64.b64decode(receipt["artifact_base64"], validate=True)
     if "sha256:" + hashlib.sha256(artifact).hexdigest() != receipt["artifact_digest"]:
         raise SystemExit("artifact digest mismatch")
-    members = {}
-    end = 0
+    try:
+        members = artifact_members(artifact)
+    except Refused as error:
+        raise SystemExit(f"vector artifact refused: {error}") from error
+    # The stdlib reader must agree on the members.
     with tarfile.open(fileobj=io.BytesIO(artifact), mode="r:") as archive:
         for member in archive.getmembers():
-            if not member.isreg() or member.name in members or member.name not in ("output.log", "report.json"):
-                raise SystemExit("artifact members")
-            members[member.name] = archive.extractfile(member).read()
-            end = max(end, member.offset_data + (member.size + 511) // 512 * 512)
-    # Section 7.2: the end-of-archive marker follows the last member and
-    # nothing follows the marker.
-    if artifact[end:] != bytes(1024):
-        raise SystemExit("artifact does not end exactly with the end-of-archive marker")
+            if not member.isreg() or archive.extractfile(member).read() != members.get(member.name):
+                raise SystemExit("artifact members differ from the stdlib reader")
     if set(members) != {"output.log", "report.json"} or \
             "sha256:" + hashlib.sha256(members["output.log"]).hexdigest() != receipt["result_digest"] or \
             "sha256:" + hashlib.sha256(members["report.json"]).hexdigest() != receipt["report_digest"]:
@@ -377,7 +409,7 @@ def apply_edits(positive, reference):
 
 def check_negatives(document, positive):
     names = set()
-    for group in ("negative_frames", "negative_messages", "negative_joins"):
+    for group in ("negative_frames", "negative_messages", "negative_joins", "negative_artifacts"):
         for item in document[group]:
             if item["name"] in names:
                 raise SystemExit(f"duplicate negative case {item['name']}")
@@ -393,7 +425,11 @@ def check_negatives(document, positive):
         raws = [apply_edits(positive, reference) for reference in item["frames"]]
         if not refused(join, raws):
             raise SystemExit(f"negative frame set joined: {item['name']}")
-    return len(document["negative_frames"]), len(document["negative_messages"]), len(document["negative_joins"])
+    for item in document["negative_artifacts"]:
+        if not refused(artifact_members, base64.b64decode(item["base64"], validate=True)):
+            raise SystemExit(f"negative artifact accepted: {item['name']}")
+    return (len(document["negative_frames"]), len(document["negative_messages"]), len(document["negative_joins"]),
+            len(document["negative_artifacts"]))
 
 
 def main():
@@ -413,9 +449,9 @@ def main():
     check_binding(document)
     artifact = check_receipt(document)
     positive = check_messages(document, artifact)
-    frames, messages, joins = check_negatives(document, positive)
-    print(f"rail work frames v1 vectors: PASS ({len(positive)} messages; {frames} frame, {messages} message and "
-          f"{joins} join negatives refused)")
+    frames, messages, joins, artifacts = check_negatives(document, positive)
+    print(f"rail work frames v1 vectors: PASS ({len(positive)} messages; {frames} frame, {messages} message, "
+          f"{joins} join and {artifacts} artifact negatives refused)")
 
 
 if __name__ == "__main__":
