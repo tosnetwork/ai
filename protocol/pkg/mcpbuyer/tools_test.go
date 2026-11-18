@@ -23,6 +23,10 @@ type fakeAgent struct {
 	params  []any
 	refuse  error
 	provide string
+	// accepted answers the result method; notReady refuses it with the
+	// purchase's status.
+	accepted *buyeragent.AcceptedView
+	notReady bool
 }
 
 func (f *fakeAgent) Call(_ context.Context, method string, params, result any) error {
@@ -48,11 +52,21 @@ func (f *fakeAgent) Call(_ context.Context, method string, params, result any) e
 		answer = buyeragent.PurchasesView{Purchases: []buyeragent.PurchaseView{view},
 			Budget: buyeragent.BudgetView{ReservedNanoTOS: "700000000", ReservedCalls: 1}}
 	}
+	if method == "result" && !f.notReady {
+		answer = f.accepted
+	}
 	raw, err := json.Marshal(answer)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(raw, result)
+	if err := json.Unmarshal(raw, result); err != nil {
+		return err
+	}
+	if method == "result" && f.notReady {
+		return &buyeragent.Error{Code: buyeragent.CodeResultNotReady, Disposition: buyeragent.DispositionSameAfterBackoff,
+			Message: "no result has been accepted for this purchase"}
+	}
+	return nil
 }
 
 func (f *fakeAgent) recorded() ([]string, []any) {
@@ -70,8 +84,13 @@ type harness struct {
 
 func connect(t *testing.T, agent *fakeAgent) *harness {
 	t.Helper()
+	return connectWith(t, agent, "")
+}
+
+func connectWith(t *testing.T, agent *fakeAgent, results string) *harness {
+	t.Helper()
 	root := t.TempDir()
-	tools, err := NewTools(Config{Agent: agent, Roots: rootsFor(t, root)})
+	tools, err := NewTools(Config{Agent: agent, Roots: rootsFor(t, root), ResultsDir: results})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +154,7 @@ func TestTheToolSetIsFixedAndSaysWhatIsUntrusted(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{ToolPrepare: false, ToolRequestPayment: false, ToolWithdraw: false, ToolStatus: true,
-		ToolPurchases: true, ToolRefund: false}
+		ToolPurchases: true, ToolRefund: false, ToolResult: true}
 	if len(listed.Tools) != len(want) {
 		t.Fatalf("%d tools", len(listed.Tools))
 	}

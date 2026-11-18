@@ -78,6 +78,7 @@ var methodRoles = map[string]map[Role]bool{
 	"status":          {RoleClient: true, RoleCustody: true},
 	"purchases":       {RoleClient: true, RoleCustody: true},
 	"refund_now":      {RoleClient: true, RoleCustody: true},
+	"result":          {RoleClient: true, RoleCustody: true},
 	"pending":         {RoleCustody: true},
 	"present":         {RoleCustody: true},
 	"decide":          {RoleCustody: true},
@@ -383,6 +384,12 @@ func (s *Server) call(ctx context.Context, request Request) (any, error) {
 			return nil, err
 		}
 		return agent.RefundNow(ctx, params.RequestHash)
+	case "result":
+		var params RequestHashParams
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return agent.Result(params.RequestHash)
 	case "pending":
 		var params struct{}
 		if err := decodeParams(request.Params, &params); err != nil {

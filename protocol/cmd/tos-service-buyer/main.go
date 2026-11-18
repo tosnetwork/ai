@@ -28,7 +28,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const usage = "usage: tos-service-buyer <discover|prepare|call|status|requests|confirm> [flags]"
+const usage = "usage: tos-service-buyer <discover|prepare|call|status|requests|agent|confirm> [flags]"
 
 // usageOutput receives flag errors and usage text.
 var usageOutput io.Writer = os.Stderr
@@ -88,6 +88,9 @@ func run(arguments []string, out io.Writer) error {
 	command, rest := arguments[0], arguments[1:]
 	if command == "confirm" {
 		return runConfirm(rest)
+	}
+	if command == "agent" {
+		return runAgent(rest)
 	}
 	set := flag.NewFlagSet(command, flag.ContinueOnError)
 	set.SetOutput(usageOutput)
@@ -269,8 +272,19 @@ func (c *commonFlags) open() (*environment, error) {
 		return nil, fmt.Errorf("--network-domain: %w", err)
 	}
 	network := &nativev1.NetworkDomain{NetworkId: domain.NetworkID, GenesisRootHash: domain.GenesisRootHash, GenesisFileHash: domain.GenesisFileHash}
-	endpoints := strings.Split(c.endpoints, ",")
-	quorum := c.quorum
+	reader, err := openReader(network, strings.Split(c.endpoints, ","), c.quorum, c.registryCodePath,
+		c.registryCodeHash, int32(c.registryWorkchain), c.actorCodeHash, c.stateDir)
+	if err != nil {
+		return nil, err
+	}
+	return &environment{flags: c, network: network, reader: reader}, nil
+}
+
+// openReader builds the quorum-finalized Service Actor reader: the
+// endpoints at a strict-majority quorum (zero means a majority), the
+// Native Registry located from its code, and checkpoints kept in stateDir.
+func openReader(network *nativev1.NetworkDomain, endpoints []string, quorum int, registryCodePath, registryCodeHash string,
+	registryWorkchain int32, actorCodeHash, stateDir string) (*toschain.ServiceActorReader, error) {
 	if quorum == 0 {
 		quorum = len(endpoints)/2 + 1
 	}
@@ -278,24 +292,20 @@ func (c *commonFlags) open() (*environment, error) {
 	if err != nil {
 		return nil, err
 	}
-	code, err := readBounded(c.registryCodePath, 1<<20)
+	code, err := readBounded(registryCodePath, 1<<20)
 	if err != nil {
 		return nil, err
 	}
-	locator, err := nativecore.NewLocator(network, int32(c.registryWorkchain), strings.Join(strings.Fields(string(code)), ""), c.registryCodeHash)
+	locator, err := nativecore.NewLocator(network, registryWorkchain, strings.Join(strings.Fields(string(code)), ""), registryCodeHash)
 	if err != nil {
 		return nil, err
 	}
-	registry, err := toschain.NewSimplifiedNativeResolver(chain, locator, filepath.Join(c.stateDir, "registry.checkpoint"))
+	registry, err := toschain.NewSimplifiedNativeResolver(chain, locator, filepath.Join(stateDir, "registry.checkpoint"))
 	if err != nil {
 		return nil, err
 	}
-	reader, err := toschain.NewServiceActorReader(toschain.ServiceActorReaderConfig{Chain: chain, Network: network,
-		ActorCodeHash: c.actorCodeHash, Registry: registry, CheckpointPath: filepath.Join(c.stateDir, "service-actor.checkpoint")})
-	if err != nil {
-		return nil, err
-	}
-	return &environment{flags: c, network: network, reader: reader}, nil
+	return toschain.NewServiceActorReader(toschain.ServiceActorReaderConfig{Chain: chain, Network: network,
+		ActorCodeHash: actorCodeHash, Registry: registry, CheckpointPath: filepath.Join(stateDir, "service-actor.checkpoint")})
 }
 
 func (e *environment) buyer(sender buyersdk.ServiceActorSender) (*buyersdk.ServiceActorBuyer, error) {

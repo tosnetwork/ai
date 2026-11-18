@@ -46,6 +46,7 @@ func run(arguments []string) error {
 	stateDir := set.String("agent-state-dir", "", "absolute path of the buyer agent's state directory, which this account must not be able to read")
 	var roots rootsFlag
 	set.Var(&roots, "workspace-root", "a directory sources may be taken from; repeatable")
+	results := set.String("results-dir", "", "absolute path of the directory accepted results are written under")
 	if err := set.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -63,12 +64,16 @@ func run(arguments []string) error {
 	if err != nil {
 		return err
 	}
+	resultsDir, err := mcpbuyer.NewResultsDir(*results)
+	if err != nil {
+		return err
+	}
 	// The longest call is a payment request that waits up to 300 seconds.
 	client, err := buyeragent.NewClient(*socket, 6*time.Minute)
 	if err != nil {
 		return err
 	}
-	tools, err := mcpbuyer.NewTools(mcpbuyer.Config{Agent: client, Roots: resolved})
+	tools, err := mcpbuyer.NewTools(mcpbuyer.Config{Agent: client, Roots: resolved, ResultsDir: resultsDir})
 	if err != nil {
 		return err
 	}
