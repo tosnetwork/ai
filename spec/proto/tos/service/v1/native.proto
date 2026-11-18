@@ -477,6 +477,15 @@ message QuoteProposalPackageV1 {
 
 message RequestQuoteProposalResponse {
   QuoteProposalPackageV1 package = 1;
+  // Optional and non-authoritative: the provider's current encryption key
+  // card for the Agent Packet Relay (AGENT_PACKET_RELAY_V1.md section 6), as
+  // signed Agent Packet JSON of 1 to 16,384 bytes, or empty. It travels next
+  // to the package, never inside it, so it is not part of the Quote, the
+  // Accepted Quote or the rail task's package. A gateway serves it only when
+  // it is a key card packet of the proposal's provider Agent, valid now; a
+  // buyer seals to it only after verifying it against finalized state and the
+  // Capability's finalized owner (API.md, "Provider key card").
+  bytes provider_key_card_packet_json = 2;
 }
 
 service NativeService {

@@ -213,6 +213,16 @@ The card's Agent:
   taken from the offer file, before sealing to it. `VerifyKeyCard` proves only
   that the card's own Agent signed it; it cannot know which Capability the
   card is used for, so this owner check is the client's.
+- **Provider, through a gateway Quote.** A gateway MAY serve the provider's
+  current card next to a Quote package
+  (`RequestQuoteProposalResponse.provider_key_card_packet_json`,
+  [`API.md`](API.md) "Provider key card"). It is never inside the package.
+  The gateway checks only the card's shape, its sender against the
+  proposal's provider and its validity window. The buyer treats it exactly
+  like an offer-file card: the owner check above and `VerifyKeyCard` against
+  finalized state before sealing. A provider whose card a gateway serves
+  SHOULD keep that card long-lived and republish it as it does its
+  offer-file card, because a returning buyer may hold nothing newer.
 - **Provider, in band.** A card lives at most 30 days, but a request can run
   longer (a response SLA of up to 30 days plus the redelivery horizon), so the
   card a buyer took from the offer file can expire while the buyer still has

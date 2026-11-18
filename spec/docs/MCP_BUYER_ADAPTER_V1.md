@@ -14,7 +14,9 @@ The stdio MCP server (`protocol/pkg/mcpbuyer`, `tos-service-buyer-mcp`) is
 implemented with `tos_buyer_prepare`, `tos_buyer_request_payment`,
 `tos_buyer_withdraw`, `tos_buyer_status` and `tos_buyer_purchases`. Its
 search, quote, result and refund tools come with the agent methods behind
-them.
+them. The gateway's Quote-carried provider key card and the buyer's
+verification of a provider card from any source
+(`buyersdk.ServiceActorBuyer.VerifyProviderCard`, 3.3) are implemented.
 
 Not yet implemented are the relay carriage, the lifecycle duties, the
 finalized-state reads behind search, quote and result, and `init`; section
@@ -33,7 +35,10 @@ provider does not answer. It is a Gate D component: the external buyer of the
 Gate D pilot (section 15) will most naturally be such a developer.
 
 **Normative inputs.** This design adds no protocol object, frame, contract
-message or authority. It composes:
+message or authority. Its one wire addition is the optional,
+non-authoritative provider key card that a gateway serves next to a Quote
+package (`RequestQuoteProposalResponse.provider_key_card_packet_json`,
+[`API.md`](API.md), "Provider key card"). It composes:
 
 - the Service Actor contract and its settlement binding
   ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
@@ -235,12 +240,19 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
   response deadline can always be issued. It keeps each private key until
   `not_after_unix + 86,400 + 300` and polls every relay of every card whose key
   it holds.
-- **Provider card.** Taken from an offer file (schema
-  `tos.openfox.rail-offer.v2`, an untrusted input the user or a catalog
-  supplies) or in band from a result of the same purchase. The agent uses a
-  card only after `VerifyKeyCard` against finalized state at most 10 minutes
-  before sealing **and** only when the card's Agent equals the Capability's
-  finalized owner (relay 6.4).
+- **Provider card.** Taken from one of three sources, all untrusted:
+  an offer file (schema `tos.openfox.rail-offer.v2`, which the user or a
+  catalog supplies), a gateway Quote response (the card served next to the
+  package, [`API.md`](API.md) "Provider key card"), or in band from a result
+  of the same purchase. Every source goes through one check,
+  `buyersdk.ServiceActorBuyer.VerifyProviderCard`. The card's Agent must
+  equal the Capability's finalized owner, read at the verifying checkpoint,
+  and the card must pass `VerifyKeyCard` against finalized state (relay 6.4).
+  The agent seals to a card only while `VerifiedProviderCard.UsableAt`
+  holds, which means it was verified at most 10 minutes earlier and is inside
+  its own validity window (relay 6.3). Otherwise it verifies the card again.
+  Of several usable cards it seals to the one relay 6.3 selects. Without a
+  verified card it does not pay (7.1 item 3).
 - **Polling.** The agent lists each relay every 15 seconds with up to 20 %
   jitter, backs off to at most 5 minutes on error or `429`, opens envelopes
   under relay 8.5, verifies the inner packet (`agentpacket.Verify`), checks the
@@ -324,7 +336,10 @@ The agent:
 3. builds the Quote Proposal **locally** with `quoteprovider` from the same
    finalized checkpoint, so no gateway Quote is needed; a gateway Quote MAY be
    used instead and is then validated by `quoteexchange.Validate` and
-   cross-checked field by field against the finalized offer;
+   cross-checked field by field against the finalized offer. A gateway
+   Quote may come with the provider's key card, which is how a buyer with no
+   offer file reaches a provider it can contact only through a relay. The
+   agent verifies that card under 3.3 like a card from any other source;
 4. runs the source-independent items of the carriability check (7.1 items 1
    and 3 to 5, and item 2 for the package and version).
 
@@ -1056,7 +1071,13 @@ refusals, crash recovery and the confirmation boundary:
 
 - `protocol/pkg/buyersdk`: a terminal `withdrawn` phase that holds no
   reservation; journaled `expire`, `claim_refund` (destination fixed to the
-  buyer wallet) and sweep senders over the pinned `tosctl`;
+  buyer wallet) and sweep senders over the pinned `tosctl`; provider key
+  card verification for every card source (`VerifyProviderCard`);
+- the gateway's Quote-carried provider key card: the protobuf field, the
+  quote profile's `provider_key_card_file`, and the shape check
+  `quoteexchange.CheckProviderKeyCard`. The provider half, where OpenFox
+  writes its current card to that file and republishes it, is an OpenFox
+  follow-up;
 - a buyer agent package in `protocol/` (purchase records, relay carrier, the
   buyer state machine of frames 11.1, the socket API with peer-credential
   checks, full re-validation of client requests, the random confirmation code

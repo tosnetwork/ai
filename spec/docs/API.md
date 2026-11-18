@@ -141,6 +141,44 @@ The response remains discardable and non-canonical. Only a finalized Service
 Actor `call` committing to the Accepted Quote through its `request_hash`
 records accepted terms.
 
+### Provider key card
+
+A Quote whose transport binding is security mode `2` (Agent Packets) is
+answered over the Agent Packet Relay. The buyer can seal to the provider only
+with the provider's encryption key card
+([`AGENT_PACKET_RELAY_V1.md`](AGENT_PACKET_RELAY_V1.md) section 6). So a
+response MAY carry, in `provider_key_card_packet_json`, the provider's
+current key card as signed Agent Packet JSON. A buyer that has no offer file
+can then reach a provider that receives only through a relay.
+
+- **Bounds.** The field is empty, or 1 to 16,384 bytes. That is the key card
+  bound of the rail frames, so a served card also fits the frames that carry
+  cards.
+- **Next to the package, never in it.** The card is not part of
+  `QuoteProposalPackageV1`. It is therefore not part of the Quote, the
+  Accepted Quote, the `request_hash` or the package a rail task carries, and
+  it does not count toward the package's carriage bound.
+- **Gateway.** A gateway serves a card only when the card passes
+  `quoteexchange.CheckProviderKeyCard`. The card must decode as an Agent
+  Packet that is a key card packet: the fixed audience and Capability, and no
+  Quote commitment. Its sender must be the proposal's `provider_agent_id`,
+  and its body must be canonical with a validity window containing the
+  gateway's clock. The gateway checks no signature and holds no state about
+  the card. A card it cannot read or that fails the check is left out, and
+  the Quote is still served. In the reference gateway the provider names an
+  owner-only `provider_key_card_file` in its quote profile. The gateway reads
+  the file for every Quote, so the provider republishes a card by replacing
+  the file. A configured card that is missing or invalid when the gateway
+  starts stops the gateway from starting.
+- **Buyer.** The card is a hint, like an offer file. Before sealing to it,
+  the buyer requires the card's Agent to equal the Capability's finalized
+  owner, read from finalized state and never taken from the response or the
+  proposal. It also verifies the card with `VerifyKeyCard` against finalized
+  state at most 10 minutes before sealing (relay 6.3, 6.4). The reference
+  buyer does both in `buyersdk.ServiceActorBuyer.VerifyProviderCard`. A card
+  that fails is discarded and does not invalidate the Quote. The card's own
+  `not_after_unix` bounds its use; the Quote's expiry does not extend it.
+
 ## Next commercial surface
 
 Minimal Capability discovery, manifest retrieval, and complete-preimage Quote
