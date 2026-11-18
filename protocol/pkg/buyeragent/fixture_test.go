@@ -74,6 +74,8 @@ type fakeBuyer struct {
 	// lifecycleUnsettled makes every send report an earlier send of the
 	// operation that may still execute, as buyersdk does.
 	lifecycleUnsettled bool
+	// responseSLA, when set, replaces fxResponseSLA in the journaled terms.
+	responseSLA uint32
 }
 
 func (f *fakeBuyer) Resolve(_ context.Context, requestHash string) (*buyersdk.RequestReport, error) {
@@ -165,6 +167,9 @@ func (f *fakeBuyer) Prepare(_ context.Context, request *nativev1.RequestQuotePro
 		Phase: buyersdk.PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix(),
 		ResponseSLASeconds: fxResponseSLA, RefundClaimWindowSeconds: fxRefundWindow, CleanupBountyNanoTOS: fxCleanupBounty,
 		BuyerAddressInReq: request.BuyerAddress}
+	if f.responseSLA != 0 {
+		record.ResponseSLASeconds = f.responseSLA
+	}
 	// The package is journaled as buyersdk journals it, so a real carriage
 	// check can read it.
 	packageBytes, err := proto.Marshal(value)

@@ -304,8 +304,11 @@ func (a *Agent) Prepare(ctx context.Context, params PrepareParams) (PurchaseView
 	}
 	purchase, err := a.store.readPurchase(requestHash)
 	if err == nil {
-		if purchase.Outcome == outcomeNotCarriable {
+		switch purchase.Outcome {
+		case outcomeNotCarriable:
 			return PurchaseView{}, refusal(CodeNotCarriable, "the purchase cannot be carried to its provider", nil)
+		case outcomeCardWindow:
+			return PurchaseView{}, carriageRefusal(ErrCardWindowTooLong)
 		}
 		return a.viewOf(record, purchase), nil
 	}
@@ -323,10 +326,13 @@ func (a *Agent) Prepare(ctx context.Context, params PrepareParams) (PurchaseView
 				return PurchaseView{}, err
 			}
 			purchase.Outcome = outcomeNotCarriable
+			if errors.Is(carriageErr, ErrCardWindowTooLong) {
+				purchase.Outcome = outcomeCardWindow
+			}
 			if err := a.store.writePurchase(purchase); err != nil {
 				return PurchaseView{}, err
 			}
-			return PurchaseView{}, refusal(CodeNotCarriable, "the purchase cannot be carried to its provider", carriageErr)
+			return PurchaseView{}, carriageRefusal(carriageErr)
 		}
 	}
 	if err := writePrivate(a.store.archivePath(requestHash), archive, false); err != nil {
@@ -370,6 +376,7 @@ const (
 	outcomeWithdrawn    = "withdrawn"
 	outcomeCodeFailures = "code-failures"
 	outcomeNotCarriable = "not-carriable"
+	outcomeCardWindow   = "card-window-too-long"
 )
 
 // Decision states a client sees (MCP_BUYER_ADAPTER_V1 section 4.6).
@@ -864,7 +871,7 @@ func (a *Agent) pay(ctx context.Context, record buyersdk.CallRecord, purchase Pu
 		return PurchaseView{}, errors.New("the stored source archive does not match its digest")
 	}
 	if err := a.config.Carriage.CheckCarriage(ctx, record, archive); err != nil {
-		return a.viewOf(record, purchase), refusal(CodeNotCarriable, "the purchase cannot be carried to its provider", err)
+		return a.viewOf(record, purchase), carriageRefusal(err)
 	}
 	called, callErr := a.config.Buyer.Call(ctx, record.RequestHash)
 	a.withLock(a.notifyLocked)
