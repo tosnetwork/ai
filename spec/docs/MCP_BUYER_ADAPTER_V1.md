@@ -540,12 +540,15 @@ holds at the moment of the check:
 1. the Quote's transport binding is security mode `2` naming the Quote's
    provider Agent (`ACCEPTED_QUOTE_TVM_V1.md`), and that Agent is the
    Capability's finalized owner;
-2. the task message for this purchase encodes under `railwork` with the
-   receiver bounds of the frames amendment: a `capability_version` of 1 to
-   128 bytes in `0x21` to `0x7e`, a package of at most 8,192 bytes, an archive
-   within `min(max_request_bytes, 1,048,576)` bytes, and a buyer card within
-   its bound. The not-yet-known `call_lt` and `call_hash` are fixed width, so
-   the encoded size is known before the call;
+2. the Quote is carriable (frames 5.1, "Carriable Quotes only"):
+   `railwork.CheckCarriableQuote` accepts its package for its transport
+   binding, so the package is at most 31,611 bytes; the `capability_version`
+   is 1 to 128 bytes in `0x21` to `0x7e`; and the task message for this
+   purchase encodes under `railwork` with an archive within
+   `min(max_request_bytes, 1,048,576)` bytes and a buyer card within its
+   bound. The 31,611-byte bound already leaves room for a maximal key card
+   and maximal `request_id` and `call_lt`, and `call_hash` is fixed width, so
+   carriage is decided before the call;
 3. a provider key card verified under 3.3 is held, is usable now and has
    `not_after_unix` at or after the response deadline the call would get
    (`now + response_sla`), so the task can be redelivered for the whole
@@ -557,9 +560,11 @@ holds at the moment of the check:
    provider's card answered its relay description (relay 9.6) within the last
    10 minutes.
 
-This is the buyer-side form of the rule that an uncarriable Quote must not be
-paid for. A purchase that fails it costs nothing; a purchase paid without it
-could only end in a timeout refund that keeps the storage fee.
+Item 2 is the frames rule that a buyer MUST NOT send the `call` for a Quote
+whose package cannot be carried; items 3 to 5 extend it to everything else
+the task and its result need. A purchase that fails the check costs nothing;
+a purchase paid without it could only end in a timeout refund that keeps the
+storage fee.
 
 ### 7.2 Delivery
 
@@ -574,7 +579,13 @@ expiry follows frames 2.3.
 The agent accepts a result only from the purchase's provider Agent, for the
 purchase's frame binding, after the respond is finalized, and only when
 `railwork.ValidateResult` passes against the finalized `response_hash`
-(frames 7.2). On acceptance it sends the ack (frames 5.3) and answers every
+(frames 7.2). Before acceptance it refuses any message whose packets name
+another `capability_id` or `quote_commitment` than the purchase
+(`railwork.CheckPacketFields`, frames 2.1). A delivery that fails is
+discarded and never ends the purchase: the agent keeps accepting
+redeliveries from the provider until one passes, and bounds how many failing
+deliveries it examines per purchase (default 16) (frames 7.2, Q9). On
+acceptance it sends the ack (frames 5.3) and answers every
 redelivery with the ack again. It takes a provider card carried in the result
 only under relay 6.4.
 
