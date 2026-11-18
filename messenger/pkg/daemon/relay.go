@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,12 @@ const (
 	relayRedepositPercent = 80
 	// relayResponseWindow is the per (peer, own descriptor) response limit.
 	relayResponseWindow = time.Hour
+	// relayDemandWindow is how long a demand for a peer's evidence keeps its
+	// request outstanding without being refreshed: the caller that needs the
+	// evidence (a roster waiting to be built) refreshes it on every retry, so
+	// the need ends by itself within this window once the caller stops. It
+	// spans two retry passes so one late pass does not end it.
+	relayDemandWindow = 2 * relayEvidenceRetry
 	// descriptorExpiredBase and descriptorExpiredCap bound the wait after a
 	// descriptor-expired ack when this node's evidence is not newer.
 	descriptorExpiredBase = 30 * time.Second
@@ -81,6 +88,10 @@ type relayRuntime struct {
 
 	// pulls serializes read-modify-write of evidence pull records.
 	pulls sync.Mutex
+	// demands holds, per peer, the last time a caller with no object of its
+	// own waiting on the peer's evidence asked for it (guarded by pulls). It
+	// is in memory only: after a restart the caller's next retry asks again.
+	demands map[string]time.Time
 
 	// index is the open-delivery index of the sweep in progress.
 	indexMutex sync.Mutex
@@ -547,6 +558,39 @@ func (r *relayRuntime) roomWaitsOnEvidence(peer string, now time.Time) (bool, er
 func (r *relayRuntime) requestEvidence(peer string, now time.Time) error {
 	r.pulls.Lock()
 	defer r.pulls.Unlock()
+	return r.requestEvidenceLocked(peer, now)
+}
+
+// demandEvidence is requestEvidence for a caller that needs a peer's
+// evidence before it can build anything (a roster entry), so no copy or
+// room object waits on it yet. The demand keeps the request outstanding for
+// relayDemandWindow after its last refresh; it never moves the request's
+// deposit schedule, so a demand cannot raise the pull rate.
+func (r *relayRuntime) demandEvidence(peer string, now time.Time) error {
+	r.pulls.Lock()
+	defer r.pulls.Unlock()
+	if r.demands == nil {
+		r.demands = map[string]time.Time{}
+	}
+	r.demands[peer] = now
+	return r.requestEvidenceLocked(peer, now)
+}
+
+// demandedLocked reports whether a peer's evidence was demanded within the
+// demand window; an older demand is dropped. The caller holds pulls.
+func (r *relayRuntime) demandedLocked(peer string, now time.Time) bool {
+	at, found := r.demands[peer]
+	if !found {
+		return false
+	}
+	if now.Sub(at) > relayDemandWindow {
+		delete(r.demands, peer)
+		return false
+	}
+	return true
+}
+
+func (r *relayRuntime) requestEvidenceLocked(peer string, now time.Time) error {
 	pull, _, err := r.daemon.journal.LoadRelayPull(peer)
 	if err != nil {
 		return err
@@ -600,7 +644,7 @@ func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 	if err != nil {
 		return err
 	}
-	if len(index.onEvidence[peer]) == 0 {
+	if len(index.onEvidence[peer]) == 0 && !r.demandedLocked(peer, now) {
 		if roomErr != nil {
 			// Whether a room object waits is not known: the request is left
 			// as it is and judged again on the next pass.
@@ -646,6 +690,10 @@ func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 		pull.RequestNextAtUnix = uint64(now.Add(delay).Unix())
 	} else {
 		pull.RequestNextAtUnix = uint64(now.Add(relayEvidenceRetry).Unix())
+		if err == nil && response.Result != carrierapi.ResultRetry {
+			r.daemon.report("relay evidence request", fmt.Errorf("the carrier refused the evidence request to %s: "+
+				"%s %s; it is tried again in %s", peer, response.Result, response.Code, relayEvidenceRetry))
+		}
 	}
 	if putErr := r.daemon.journal.PutRelayPull(pull, now); putErr != nil {
 		return putErr
@@ -699,7 +747,12 @@ func (r *relayRuntime) sendResponse(ctx context.Context, peer string) error {
 	case carrierapi.ResultRetry:
 		return nil
 	default:
+		// The carrier will not take the response (no card of the peer, a
+		// cap, an invalid request): it is not sent again for this request,
+		// and the reason is reported rather than dropped silently.
 		pull.ResponsePending = false
+		r.daemon.report("relay evidence response", fmt.Errorf("the carrier refused the evidence response to %s: %s %s; "+
+			"it is not sent again for this request", peer, response.Result, response.Code))
 	}
 	return r.daemon.journal.PutRelayPull(pull, now)
 }

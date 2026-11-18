@@ -424,14 +424,31 @@ On the network route it is noticed within the cached refresh window, at most
     peer because the stored evidence fails `CheckPeer`. It is re-deposited on
     the copies' TTL-derived schedule (section 4), and ends when no copy is
     pending any more, or when it is answered. No kind-4 *request* is ever sent
-    to a peer with no pending copy; responses go only to requesters.
+    to a peer with no pending copy, except under a demand; responses go only
+    to requesters.
+  - **Demand (M-R2).** A room authority building a roster (section 11.2)
+    needs every current member's committed evidence before any object exists
+    that could wait on it. Its Commit retry therefore *demands* the evidence:
+    the demand keeps the one outstanding request alive while it is refreshed,
+    and lapses two request-retry intervals (2 minutes) after the last refresh,
+    so the request ends by itself once the Commit is made or abandoned (the
+    room ended, the add finished). A demand is held in memory only; after a
+    restart the next retry demands again. It never moves the request's
+    deposit schedule, so it cannot raise the pull rate
+    (`messenger/pkg/daemon/relay.go` `demandEvidence`, `sendRequest`).
   - **Receiving a request.** The node runs `CheckPeer` on the frame's evidence,
     read-only. If the sender is an established or admitted peer and the check
     passes, it runs `CommitPeer` (for the frame's evidence and card) and
     answers with one kind-4 response carrying its own current evidence and
     card. It sends at most one response per (peer, own
     descriptor digest) per hour. A stranger gets the relay ack only: no
-    response and no write. Kind-4 evidence is checked against its own pin
+    response and no write. **Privacy rule:** a node answers a kind-4 request
+    only from a peer it admitted on this route before, one with committed
+    evidence or its floor (`RelayVerifier.Admitted`); room membership alone
+    does not make a peer admitted, so a pull cannot probe whether a node runs
+    or which rooms it is in. A member admits its authority through the
+    room.invite copy, and keeps that floor across evidence expiry and
+    `contacts.remove`, so an authority's pull to its members is answered. Kind-4 evidence is checked against its own pin
     (the Endpoint and single device it names), not a session's pin, because
     its purpose includes learning a newer descriptor that removed a device;
     it still has to be a live finalized delegation committed by the sender

@@ -936,7 +936,11 @@ func (r *roomRuntime) rendezvousOf(roomID, member string) ([]byte, []byte, error
 		return nil, nil, err
 	}
 	if !found {
-		if requestErr := r.relay.requestEvidence(member, now); requestErr != nil {
+		// No object waits on this evidence yet: the roster is not built
+		// until it arrives. The demand keeps the pull outstanding while the
+		// Commit is retried, and lets it end once the Commit is made or
+		// abandoned.
+		if requestErr := r.relay.demandEvidence(member, now); requestErr != nil {
 			r.daemon.report("relay evidence request", requestErr)
 		}
 		return nil, nil, fault.New(fault.CodeDescriptorExpired, "a member's relay evidence is not held here")
