@@ -275,20 +275,22 @@ Deliver:
   confirmation and fee-payer destination, amount, body, and StateInit binding;
 - ✅ registry typed-state checker with machine-readable three-endpoint quorum
   evidence; and
-- ⬜ recovery, transfer, former-owner rejection, and revocation drills on the
-  designated initial public test network.
+- ✅ recovery, transfer, former-owner rejection, and revocation drills on the
+  designated initial public test network (epoch 7, designated by the owner
+  2026-11-18; `deployments/public-testnet-epoch7-gate-c-20261118.json`).
 
 Accept the initial profile when distinct controller keys register, update,
 transfer, revoke, and resolve objects through validator-backed quorum without
 trusting the reference gateway. Independent operators and public HTTPS are
 required by Gates F and G.
 
-**Gate status: lifecycle evidence published; owner designation and the
-independent review of release `d3bb66d0` pending.** The epoch-7 record of
+**Gate status: initial profile accepted on the owner-designated epoch-7
+network; the independent review of release `d3bb66d0` pending.** The epoch-7 record of
 2026-11-18 deploys fresh objects and completes the quorum lifecycle under
 `tos_service_v1`
-(`deployments/public-testnet-epoch7-gate-c-20261118.json`). The drills item
-stays open until the owner designates that network. The 2026-08-14 deployment
+(`deployments/public-testnet-epoch7-gate-c-20261118.json`). The owner
+designated that network as the initial public test network for Gate C on
+2026-11-18. The 2026-08-14 deployment
 is archived pre-migration evidence and cannot establish authority for
 `tos_service_v1`. The public SC-01/SC-02
 Native Registry runs of 2026-11-07 (team memo STATUS 13.338) were

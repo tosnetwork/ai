@@ -135,9 +135,10 @@ outputs are under
 - Every step was resolved by `native-gate-c-check` against three
   validator-backed endpoints with quorum two.
 
-**Verdict: the lifecycle passed under the initial public-testnet profile. It
-does not qualify as Gate C acceptance until the owner designates the network,
-and the record states `qualifies_as_public_testnet_gate_c: false`.** All validators are run by one project operator. The
+**Verdict: the lifecycle passed under the initial public-testnet profile. The
+owner designated the epoch-7 network as the initial public test network for
+Gate C on 2026-11-18, and the record states
+`qualifies_as_public_testnet_gate_c: true`.** All validators are run by one project operator. The
 endpoints are validator loopback JSON-RPC listeners reached through SSH
 forwards. The independent security review of release `d3bb66d0` remains open.
 Independent operators, public HTTPS and Internet reachability remain Gate F/G

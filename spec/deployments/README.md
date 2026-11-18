@@ -25,7 +25,8 @@ operator-independence claim.
 
 The first `tos_service_v1` deployment record is
 `public-testnet-epoch7-gate-c-20261118.json` (Gate C lifecycle on the epoch-7
-public testnet; owner designation pending), with its labeled quorum outputs in
+public testnet, designated by the owner on 2026-11-18 as the initial
+public test network for Gate C), with its labeled quorum outputs in
 `artifacts/public-testnet-epoch7-gate-c-20261118/`.
 Evidence produced under the pre-release protocol domain is preserved unchanged
 under `archive/pre-tos-service-v1/` for audit history. Because protocol-domain
