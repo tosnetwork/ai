@@ -154,7 +154,11 @@ func TestWalletHistoryNamesExternalMessagesAndTheirOutMessages(t *testing.T) {
 		t.Fatal("a walk without an anchor was accepted")
 	}
 	// An internal inbound message has no external hash.
-	if reduced, err := reduceWalletTransaction(anchor); err != nil || reduced.ExternalMessageHash != "" {
+	anchorCell, err := anchor.ToCell()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reduced, err := reduceWalletTransaction(anchor, anchorCell); err != nil || reduced.ExternalMessageHash != "" {
 		t.Fatalf("an internal inbound message got an external hash: %+v %v", reduced, err)
 	}
 }

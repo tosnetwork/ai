@@ -511,7 +511,28 @@ func finalizedActorLastTransaction(ctx context.Context, node *rpcNode, address s
 
 // walkActorHistory pages backwards with hash and logical-time continuity.
 func walkActorHistory(ctx context.Context, node *rpcNode, address string, last transactionID, anchor *ActorTxID, bound int) ([]tlb.Transaction, HistoryResult, error) {
-	var out []tlb.Transaction
+	entries, result, err := walkHistoryEntries(ctx, node, address, last, anchor, bound)
+	if err != nil {
+		return nil, result, err
+	}
+	transactions := make([]tlb.Transaction, 0, len(entries))
+	for _, entry := range entries {
+		transactions = append(transactions, entry.transaction)
+	}
+	return transactions, result, nil
+}
+
+// historyEntry is one finalized transaction with the exact cell it was
+// served as, so a reader can hash its parts as stored rather than as
+// re-encoded.
+type historyEntry struct {
+	transaction tlb.Transaction
+	root        *cell.Cell
+}
+
+// walkHistoryEntries is walkActorHistory keeping each transaction's cell.
+func walkHistoryEntries(ctx context.Context, node *rpcNode, address string, last transactionID, anchor *ActorTxID, bound int) ([]historyEntry, HistoryResult, error) {
+	var out []historyEntry
 	next := last
 	if anchor != nil && lastMatches(last, *anchor) {
 		return nil, HistoryAnchorReached, nil
@@ -523,11 +544,12 @@ func walkActorHistory(ctx context.Context, node *rpcNode, address string, last t
 			}
 			return out, HistoryComplete, nil
 		}
-		page, err := actorHistoryPageAt(ctx, node, address, next)
+		page, err := historyEntriesAt(ctx, node, address, next, actorHistoryPage)
 		if err != nil {
 			return nil, "", err
 		}
-		for _, transaction := range page {
+		for _, entry := range page {
+			transaction := entry.transaction
 			if anchor != nil && transaction.LT == anchor.LT && hex.EncodeToString(transaction.Hash) == anchor.Hash {
 				return out, HistoryAnchorReached, nil
 			}
@@ -537,9 +559,9 @@ func walkActorHistory(ctx context.Context, node *rpcNode, address string, last t
 			if len(out) >= bound {
 				return nil, "", ErrHistoryBoundExceeded
 			}
-			out = append(out, transaction)
+			out = append(out, entry)
 		}
-		oldest := page[len(page)-1]
+		oldest := page[len(page)-1].transaction
 		if oldest.PrevTxLT == 0 {
 			if anchor != nil {
 				return nil, "", ErrHistoryAnchorMissing
@@ -556,13 +578,22 @@ func lastMatches(last transactionID, anchor ActorTxID) bool {
 	return err == nil && last.LT == strconv.FormatUint(anchor.LT, 10) && hex.EncodeToString(raw) == anchor.Hash
 }
 
-func actorHistoryPageAt(ctx context.Context, node *rpcNode, address string, start transactionID) ([]tlb.Transaction, error) {
-	return historyPageAt(ctx, node, address, start, actorHistoryPage)
-}
-
 // historyPageAt reads up to limit finalized transactions of address, newest
 // first, starting exactly at start, with hash and logical-time continuity.
 func historyPageAt(ctx context.Context, node *rpcNode, address string, start transactionID, limit int) ([]tlb.Transaction, error) {
+	entries, err := historyEntriesAt(ctx, node, address, start, limit)
+	if err != nil {
+		return nil, err
+	}
+	transactions := make([]tlb.Transaction, 0, len(entries))
+	for _, entry := range entries {
+		transactions = append(transactions, entry.transaction)
+	}
+	return transactions, nil
+}
+
+// historyEntriesAt is historyPageAt keeping each transaction's cell.
+func historyEntriesAt(ctx context.Context, node *rpcNode, address string, start transactionID, limit int) ([]historyEntry, error) {
 	var values []rawTransaction
 	if err := node.client.Call(ctx, "getTransactions", struct {
 		Address string `json:"address"`
@@ -576,7 +607,7 @@ func historyPageAt(ctx context.Context, node *rpcNode, address string, start tra
 		return nil, errors.New("Service Actor history page does not start at the requested transaction")
 	}
 	account := strings.SplitN(address, ":", 2)[1]
-	transactions := make([]tlb.Transaction, 0, len(values))
+	entries := make([]historyEntry, 0, len(values))
 	var previous *tlb.Transaction
 	for _, value := range values {
 		if value.Type != "raw.transaction" || value.Data == "" || value.TransactionID.Type != "internal.transactionId" ||
@@ -608,10 +639,10 @@ func historyPageAt(ctx context.Context, node *rpcNode, address string, start tra
 		if previous != nil && (previous.PrevTxLT != transaction.LT || !bytes.Equal(previous.PrevTxHash, hash)) {
 			return nil, errors.New("discontinuous Service Actor transaction history")
 		}
-		transactions = append(transactions, transaction)
-		previous = &transactions[len(transactions)-1]
+		entries = append(entries, historyEntry{transaction: transaction, root: root})
+		previous = &entries[len(entries)-1].transaction
 	}
-	return transactions, nil
+	return entries, nil
 }
 
 // CheckEndpointGenesis reads one endpoint, without a quorum, and requires its

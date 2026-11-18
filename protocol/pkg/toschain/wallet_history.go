@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/tosnetwork/tosutils-go/tlb"
+	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
 // WalletOutMessage is one internal out-message of a wallet transaction.
@@ -93,7 +94,7 @@ func (s *ServiceActorSession) WalletHistory(ctx context.Context, wallet string, 
 		if err != nil {
 			return vote{}, err
 		}
-		raw, _, err := walkActorHistory(ctx, node, canonical, last, &anchor, s.reader.maxHistory)
+		raw, _, err := walkHistoryEntries(ctx, node, canonical, last, &anchor, s.reader.maxHistory)
 		switch {
 		case errors.Is(err, ErrHistoryAnchorMissing):
 			return vote{Result: historyAnchorMissing, History: WalletHistory{BlockRoot: root, BlockFile: file}}, nil
@@ -103,8 +104,8 @@ func (s *ServiceActorSession) WalletHistory(ctx context.Context, wallet string, 
 			return vote{}, err
 		}
 		transactions := make([]WalletTransaction, 0, len(raw))
-		for _, transaction := range raw {
-			reduced, err := reduceWalletTransaction(transaction)
+		for _, entry := range raw {
+			reduced, err := reduceWalletTransaction(entry.transaction, entry.root)
 			if err != nil {
 				return vote{}, err
 			}
@@ -132,6 +133,33 @@ func (s *ServiceActorSession) WalletHistory(ctx context.Context, wallet string, 
 	return &value.History, nil
 }
 
+// storedInboundMessage returns the inbound message cell as the transaction
+// cell stores it. In the TL-B Transaction the first reference holds
+// ^[ in_msg:(Maybe ^Message) out_msgs:(HashmapE 15 ^Message) ], and a
+// present in_msg is that cell's first reference.
+func storedInboundMessage(root *cell.Cell) (*cell.Cell, error) {
+	if root == nil {
+		return nil, errors.New("the wallet transaction cell is missing")
+	}
+	io, err := root.PeekRef(0)
+	if err != nil {
+		return nil, errors.New("the wallet transaction has no message cell")
+	}
+	slice, err := io.BeginParse()
+	if err != nil {
+		return nil, errors.New("the wallet transaction message cell does not parse")
+	}
+	present, err := slice.LoadBoolBit()
+	if err != nil || !present {
+		return nil, errors.New("the wallet transaction stores no inbound message")
+	}
+	message, err := slice.LoadRefCell()
+	if err != nil {
+		return nil, errors.New("the wallet transaction's inbound message reference is missing")
+	}
+	return message, nil
+}
+
 func txIDOf(id transactionID) (ActorTxID, error) {
 	lt, err := strconv.ParseUint(id.LT, 10, 64)
 	if err != nil {
@@ -145,13 +173,17 @@ func txIDOf(id transactionID) (ActorTxID, error) {
 }
 
 // reduceWalletTransaction keeps the inbound external message hash and the
-// internal out-messages' destinations and query IDs.
-func reduceWalletTransaction(transaction tlb.Transaction) (WalletTransaction, error) {
+// internal out-messages' destinations and query IDs. The hash is that of
+// the inbound message cell exactly as the transaction stores it (root is
+// the transaction's served cell): re-encoding the parsed message may store
+// its body inline where the sender stored it in a reference, or the other
+// way round, and so give another hash than the sender's.
+func reduceWalletTransaction(transaction tlb.Transaction, root *cell.Cell) (WalletTransaction, error) {
 	reduced := WalletTransaction{LT: transaction.LT, Hash: hex.EncodeToString(transaction.Hash), Now: transaction.Now}
 	if transaction.IO.In != nil && transaction.IO.In.MsgType == tlb.MsgTypeExternalIn {
-		message, err := transaction.IO.In.ToCell()
+		message, err := storedInboundMessage(root)
 		if err != nil {
-			return WalletTransaction{}, errors.New("wallet inbound external message does not serialize")
+			return WalletTransaction{}, err
 		}
 		reduced.ExternalMessageHash = hex.EncodeToString(message.Hash())
 	}

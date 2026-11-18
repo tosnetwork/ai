@@ -876,6 +876,10 @@ MUTANTS = [
      "if transaction.IO.In != nil && transaction.IO.In.MsgType == tlb.MsgTypeExternalIn {",
      "if transaction.IO.In != nil {",
      "TestWalletHistoryNamesExternalMessagesAndTheirOutMessages"),
+    ("wallet-history-stored-cell", CHAIN + "wallet_history.go",
+     "\t\tmessage, err := storedInboundMessage(root)\n",
+     "\t\tmessage, err := transaction.IO.In.ToCell()\n",
+     "TestTheExternalMessageHashIsTheStoredCellsAsTosctlAnnouncesIt"),
     # The carriage check (section 7.1) and the buyer's relay keys and cards.
     ("carrier-relay-count", AGENT + "carrier.go",
      "if len(config.Relays) == 0 || len(config.Relays) > agentpacketseal.MaxRelays {",
