@@ -1035,7 +1035,10 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     and no member forks.
 16. **Renewal among non-contacts (live, 11.2).** With test-shortened card and
     descriptor lifetimes, B and C (no contacts) keep exchanging room messages
-    across several expiries, renewed only by kind-3 part 0.
+    across several expiries, in steady state renewed only by kind-3 part 0;
+    a kind-4 pull may occur only for a peer whose evidence went stale while
+    it was offline (in the record: inside an offline window of the run or
+    within one re-deposit interval after it ends).
 17. **Driver bounds (unit).** The 512 KiB state bound holds, with at least
     20 % headroom, for the worst case at 32 leaves with `max_past_epochs(2)`,
     every leaf carrying a maximal (128-byte) leaf identity, never a short test
