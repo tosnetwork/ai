@@ -462,7 +462,7 @@ func TestQuoteInputsAreValidated(t *testing.T) {
 	}
 	// Without a gateway only local Quotes are served.
 	f.offers.config.Gateway = nil
-	if _, err := f.agent.Quote(context.Background(), gatewayParams()); err == nil || codeOf(t, err) != CodeBadInput {
+	if _, err := f.agent.Quote(context.Background(), gatewayParams()); err == nil || codeOf(t, err) != CodeNotConfigured {
 		t.Fatalf("a gateway Quote without a gateway: %v", err)
 	}
 }
@@ -542,7 +542,7 @@ func TestSearchReturnsOnlyOffersFinalizedStateConfirms(t *testing.T) {
 		t.Fatalf("every source failed: %v", err)
 	}
 	f.offers.config.Hints = nil
-	if _, err := f.agent.Search(context.Background(), SearchParams{PageSize: 10}); err == nil || codeOf(t, err) != CodeBadInput {
+	if _, err := f.agent.Search(context.Background(), SearchParams{PageSize: 10}); err == nil || codeOf(t, err) != CodeNotConfigured {
 		t.Fatalf("no source: %v", err)
 	}
 }
@@ -716,10 +716,10 @@ func TestOffersConfigurationIsValidated(t *testing.T) {
 	}
 	// An agent without search and quote refuses both.
 	f.agent.config.Offers = nil
-	if _, err := f.agent.Search(context.Background(), SearchParams{PageSize: 1}); err == nil {
+	if _, err := f.agent.Search(context.Background(), SearchParams{PageSize: 1}); err == nil || codeOf(t, err) != CodeNotConfigured {
 		t.Fatal("an agent without offers searched")
 	}
-	if _, err := f.agent.Quote(context.Background(), localParams()); err == nil {
+	if _, err := f.agent.Quote(context.Background(), localParams()); err == nil || codeOf(t, err) != CodeNotConfigured {
 		t.Fatal("an agent without offers quoted")
 	}
 }

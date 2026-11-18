@@ -38,9 +38,9 @@ the relay poller over pinned-CA HTTPS relay clients.
 writes the configuration `tos-service-buyer agent` reads.
 
 The agent subcommand serves search and quote by `capability_id` and offer
-file with local Quotes. Not yet implemented is the agent configuration of
-gateway and catalog sources for search and gateway Quotes;
-section 16 lists that work. It supersedes the retired
+file with local Quotes, and, with a configured gateway or catalog (2.4), by
+search hints and gateway Quotes. Section 16 lists the implementation work.
+This document supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
 
@@ -208,7 +208,22 @@ refused. It names:
 - the pinned `tosctl` (path and SHA-256), its configuration, the wallet name,
   and the packet controller's name and key ID;
 - the buyer's relays and the relay CA file;
-- the budget of section 6, plus the duty interval, at most 60 seconds.
+- the budget of section 6, plus the duty interval, at most 60 seconds;
+- optionally a gateway, a search hint source and the source of gateway
+  Quotes (4.3, 4.4):
+  - `gateway_url`, a bare base URL (no user, path, query or fragment):
+    `https`, or `http` only on a loopback address;
+  - `gateway_ca_file`, required for `https` and refused for `http`. The
+    gateway is verified against it only, never the system pool, with TLS 1.2
+    at least;
+  - `gateway_token_file`, required with a gateway: an owner-private regular
+    file holding one bearer token of visible ASCII. The token is read anew for
+    every call and never logged;
+- optionally `catalog_dir`, an owner-private capability catalog used as a
+  search hint source, its Capabilities read from finalized state.
+
+Without a gateway or catalog, search works by `capability_id` only, and a
+gateway Quote is refused with `MCP_BUYER_NOT_CONFIGURED`.
 
 The vault credential is read only from `VAULT_URL`. The agent refuses to
 start without it, and when the `tosctl` configuration is readable by group
@@ -460,7 +475,7 @@ The page also carries `dropped_candidates`, `failed_sources` and, when more
 candidates follow, `next_page_token`.
 
 Refusals: no source configured and no `capability_id`
-(`MCP_BUYER_BAD_INPUT`); every source failed
+(`MCP_BUYER_NOT_CONFIGURED`); every source failed
 (`MCP_BUYER_DEPENDENCY_UNAVAILABLE`); a `capability_id` finalized state does
 not hold (`MCP_BUYER_NOT_FOUND`).
 
@@ -1419,6 +1434,7 @@ request the SDK rejects against the input schema is a JSON-RPC error
 | `MCP_BUYER_AGENT_UNAVAILABLE` | the agent socket does not answer | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_BUYER_AMBIGUOUS` | a `call` or lifecycle send may have been submitted | `RESOLVE_BEFORE_RETRY` |
 | `MCP_BUYER_PERMISSION_DENIED` | the socket peer's account may not call this method (2.3) | `NEVER` |
+| `MCP_BUYER_NOT_CONFIGURED` | the agent's configuration does not serve the request: a gateway Quote without a gateway, a search with neither a source nor a `capability_id` (2.4) | `NEVER` |
 | `MCP_BUYER_INTERNAL` | anything else | `NEVER` |
 
 `awaiting_confirmation`, `submitted` and `ambiguous` are states, not errors,

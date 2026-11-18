@@ -270,7 +270,7 @@ func (o *Offers) Search(ctx context.Context, params SearchParams) (SearchView, e
 	}
 	if params.CapabilityID == "" {
 		if len(o.config.Hints) == 0 {
-			return SearchView{}, refusal(CodeBadInput, "no search source is configured; name a capability_id", nil)
+			return SearchView{}, refusal(CodeNotConfigured, "no search source is configured; name a capability_id", nil)
 		}
 		for _, source := range o.config.Hints {
 			hints, err := source.Hints(ctx, params.Query, MaxHintsPerSource)
@@ -448,7 +448,7 @@ func (o *Offers) Quote(ctx context.Context, params QuoteParams) (*nativev1.Reque
 	var gatewayCard []byte
 	if source == QuoteSourceGateway {
 		if o.config.Gateway == nil {
-			return nil, nil, QuoteView{}, refusal(CodeBadInput, "no gateway is configured; ask for a local Quote", nil)
+			return nil, nil, QuoteView{}, refusal(CodeNotConfigured, "no gateway is configured; ask for a local Quote", nil)
 		}
 		stamped, err := o.stamped(request)
 		if err != nil {
@@ -648,7 +648,7 @@ func carriageItem(err error) string {
 // Search runs a client's search (section 4.3).
 func (a *Agent) Search(ctx context.Context, params SearchParams) (SearchView, error) {
 	if a.config.Offers == nil {
-		return SearchView{}, refusal(CodeInternal, "this agent is not configured for search and quote", nil)
+		return SearchView{}, refusal(CodeNotConfigured, "this agent is not configured for search and quote", nil)
 	}
 	return a.config.Offers.Search(ctx, params)
 }
@@ -657,7 +657,7 @@ func (a *Agent) Search(ctx context.Context, params SearchParams) (SearchView, er
 // later prepare under its quote ID.
 func (a *Agent) Quote(ctx context.Context, params QuoteParams) (QuoteView, error) {
 	if a.config.Offers == nil {
-		return QuoteView{}, refusal(CodeInternal, "this agent is not configured for search and quote", nil)
+		return QuoteView{}, refusal(CodeNotConfigured, "this agent is not configured for search and quote", nil)
 	}
 	request, value, view, err := a.config.Offers.Quote(ctx, params)
 	if err != nil {

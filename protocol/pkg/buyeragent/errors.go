@@ -19,7 +19,11 @@ const (
 	CodeAgentUnavailable      = "MCP_BUYER_AGENT_UNAVAILABLE"
 	CodeAmbiguous             = "MCP_BUYER_AMBIGUOUS"
 	CodePermissionDenied      = "MCP_BUYER_PERMISSION_DENIED"
-	CodeInternal              = "MCP_BUYER_INTERNAL"
+	// CodeNotConfigured refuses a request the agent's configuration does
+	// not serve: a gateway Quote without a gateway, or a search with
+	// neither a hint source nor a capability_id.
+	CodeNotConfigured = "MCP_BUYER_NOT_CONFIGURED"
+	CodeInternal      = "MCP_BUYER_INTERNAL"
 
 	DispositionNever              = "NEVER"
 	DispositionSameAfterBackoff   = "SAME_REQUEST_AFTER_BACKOFF"
