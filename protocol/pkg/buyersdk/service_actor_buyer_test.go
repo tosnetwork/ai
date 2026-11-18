@@ -75,6 +75,48 @@ type saWallet struct {
 	chainTime time.Time
 	// onSeqno runs inside the seqno read, as a concurrent writer would.
 	onSeqno func()
+	// txs is the wallet's finalized history, newest first; empty means one
+	// transaction, saWalletAnchor.
+	txs        []toschain.WalletTransaction
+	lastErr    error
+	historyErr error
+}
+
+var saWalletAnchor = toschain.WalletTransaction{LT: 100, Hash: strings.Repeat("a0", 32), Now: uint32(saNow.Unix()) - 600}
+
+func (w saWallet) history() []toschain.WalletTransaction {
+	if len(w.txs) == 0 {
+		return []toschain.WalletTransaction{saWalletAnchor}
+	}
+	return w.txs
+}
+
+func (s *saSession) WalletLastTransaction(_ context.Context, wallet string) (toschain.ActorTxID, error) {
+	if wallet != saBuyer {
+		return toschain.ActorTxID{}, errors.New("the last transaction of another wallet was read")
+	}
+	if s.wallet.lastErr != nil {
+		return toschain.ActorTxID{}, s.wallet.lastErr
+	}
+	head := s.wallet.history()[0]
+	return toschain.ActorTxID{LT: head.LT, Hash: head.Hash}, nil
+}
+
+func (s *saSession) WalletHistory(_ context.Context, wallet string, anchor toschain.ActorTxID) (*toschain.WalletHistory, error) {
+	if wallet != saBuyer {
+		return nil, errors.New("the history of another wallet was read")
+	}
+	if s.wallet.historyErr != nil {
+		return nil, s.wallet.historyErr
+	}
+	txs := s.wallet.history()
+	for index, transaction := range txs {
+		if transaction.LT == anchor.LT && transaction.Hash == anchor.Hash {
+			return &toschain.WalletHistory{Head: toschain.ActorTxID{LT: txs[0].LT, Hash: txs[0].Hash},
+				Transactions: append([]toschain.WalletTransaction(nil), txs[:index]...)}, nil
+		}
+	}
+	return nil, toschain.ErrHistoryAnchorMissing
 }
 
 func (c *saChain) BeginBuyerSession(context.Context) (ServiceActorSession, error) {
