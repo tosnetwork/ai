@@ -20,6 +20,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactorindex"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
@@ -176,6 +177,11 @@ func (b *ServiceActorBuyer) Prepare(ctx context.Context, request *nativev1.Reque
 	}
 	packageBytes, err := canonicalPackageBytes(value)
 	if err != nil {
+		return CallRecord{}, err
+	}
+	// Over Agent Packets the package travels inside the rail task: a Quote
+	// whose task could never be sent is not paid for.
+	if err = railwork.CheckCarriablePackage(len(packageBytes), validated.TransportBinding); err != nil {
 		return CallRecord{}, err
 	}
 	record := CallRecord{Schema: callRecordSchema, RequestHash: hex.EncodeToString(serviceRequest.Hash()), QueryID: queryID,

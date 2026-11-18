@@ -9,6 +9,7 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -33,6 +34,29 @@ type PublicationOptions struct {
 	// release is refused before anything is journaled: an immutable
 	// manifest cannot be repaired after publication.
 	PinnedActorCodeHash string
+	// Transport, when set, is the transport binding the Capability version
+	// will be quoted with. For Agent Packets (mode 2) a manifest whose
+	// largest Quote package no rail task can carry is refused before
+	// anything is journaled (SERVICE_ACTOR_RAIL_WORK_FRAMES_V1 section 5.1).
+	Transport *nativecore.TransportBindingV1
+}
+
+// CheckManifestCarriable refuses a manifest that, quoted with transport,
+// could produce a Quote package a rail task cannot carry. It reads no chain
+// state and passes every transport but Agent Packets.
+func CheckManifestCarriable(manifestJSON []byte, transport nativecore.TransportBindingV1) error {
+	if len(manifestJSON) == 0 || len(manifestJSON) > MaxManifestJSONBytes {
+		return errors.New("invalid provider manifest input")
+	}
+	manifest, err := nativecore.DecodeSoftwareWorkManifestJSON(manifestJSON)
+	if err != nil {
+		return fmt.Errorf("decode provider manifest: %w", err)
+	}
+	manifestCBOR, _, err := nativecore.CanonicalSoftwareWorkManifest(manifest)
+	if err != nil {
+		return fmt.Errorf("encode provider manifest: %w", err)
+	}
+	return railwork.CheckCarriableManifest(manifestCBOR, transport)
 }
 
 // CheckManifestActorPin refuses a manifest whose key 21 Service Actor code
@@ -85,6 +109,11 @@ func (p *Provider) PrepareJournaledPublication(journal *PublicationJournal, mani
 	}
 	if options.PinnedActorCodeHash != "" {
 		if err := CheckManifestActorPin(manifestJSON, options.PinnedActorCodeHash); err != nil {
+			return PublicationRecord{}, false, err
+		}
+	}
+	if options.Transport != nil {
+		if err := CheckManifestCarriable(manifestJSON, *options.Transport); err != nil {
 			return PublicationRecord{}, false, err
 		}
 	}

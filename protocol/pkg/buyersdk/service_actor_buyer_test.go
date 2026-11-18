@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/internal/servicefixture"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -195,10 +197,22 @@ type buyerFixture struct {
 
 func newBuyerFixture(t *testing.T, limits ServiceActorLimits) *buyerFixture {
 	t.Helper()
+	return newBuyerFixtureWith(t, limits, nil, nativecore.TransportBindingV1{
+		SecurityMode: nativecore.TransportHTTPS, MaxRequestBytes: 1 << 20, BaseURL: "https://provider.example"})
+}
+
+// newBuyerFixtureWith is newBuyerFixture with an edited manifest and the
+// given quoted transport.
+func newBuyerFixtureWith(t *testing.T, limits ServiceActorLimits, edit func(*nativecore.SoftwareWorkManifestV1),
+	transportBinding nativecore.TransportBindingV1) *buyerFixture {
+	t.Helper()
 	network := servicefixture.Network()
 	settlement := servicefixture.Settlement{ActorAccount: bytes.Repeat([]byte{0x77}, 32), ActorCodeHash: bytes.Repeat([]byte{0x88}, 32),
 		AttestorKey: mldsa44.KeyIDText(saKeyID)}
 	manifest := servicefixture.Manifest("1.0.0", settlement)
+	if edit != nil {
+		edit(&manifest)
+	}
 	manifestCBOR, digest, err := nativecore.CanonicalSoftwareWorkManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -220,8 +234,7 @@ func newBuyerFixture(t *testing.T, limits ServiceActorLimits) *buyerFixture {
 		capability: &nativev1.NativeStateV1{Network: network, State: &nativev1.NativeStateV1_Capability{Capability: &nativev1.CapabilityStateV1{
 			CapabilityId: saCapability, OwnerAgentId: saAgent, Versions: []*nativev1.CapabilityVersionV1{{Version: "1.0.0", ManifestDigest: digest}}}}},
 		agent: &nativev1.NativeStateV1{Network: network, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: saAgent}}}}
-	transport, transportDigest, err := nativecore.BuildTransportBindingCellV1(nativecore.TransportBindingV1{
-		SecurityMode: nativecore.TransportHTTPS, MaxRequestBytes: 1 << 20, BaseURL: "https://provider.example"})
+	transport, transportDigest, err := nativecore.BuildTransportBindingCellV1(transportBinding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,6 +310,43 @@ func (f *buyerFixture) land(t *testing.T, record CallRecord, requestID uint64, s
 	f.chain.history = append([]toschain.ActorTransaction{call}, f.chain.history...)
 	f.chain.data = data
 	return call
+}
+
+// A Quote delivered over Agent Packets whose package no rail task can
+// carry is refused before anything is journaled or paid; a carriable one
+// is prepared (SERVICE_ACTOR_RAIL_WORK_FRAMES_V1 section 5.1).
+func TestBuyerNeverPaysForAQuoteItsTaskCannotCarry(t *testing.T) {
+	agentPackets, err := nativecore.AgentPacketTransportBinding(saAgent, nativecore.MaxAgentPacketTransportRequestBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	carriable := newBuyerFixtureWith(t, defaultLimits(), nil, agentPackets)
+	if _, err = carriable.buyer.Prepare(ctx, carriable.request, carriable.pkg, digest32(1), digest32(2)); err != nil {
+		t.Fatalf("a carriable Quote was refused: %v", err)
+	}
+	large := newBuyerFixtureWith(t, defaultLimits(), func(m *nativecore.SoftwareWorkManifestV1) {
+		m.Description = strings.Repeat("d", 2048)
+		m.Invocation.Arguments = nil
+		for index := 0; index < 64; index++ {
+			m.Invocation.Arguments = append(m.Invocation.Arguments, fmt.Sprintf("%02d%s", index, strings.Repeat("a", 510)))
+		}
+	}, agentPackets)
+	if size := proto.Size(large.pkg); size <= railwork.MaxPackageBytes {
+		t.Fatalf("the large package is only %d bytes", size)
+	}
+	before, err := os.ReadDir(large.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = large.buyer.Prepare(ctx, large.request, large.pkg, digest32(1), digest32(2)); !errors.Is(err, railwork.ErrQuoteNotCarriable) {
+		t.Fatalf("an uncarriable Quote was prepared: %v", err)
+	}
+	after, err := os.ReadDir(large.dir)
+	if err != nil || len(after) != len(before) || len(large.sender.sends) != 0 {
+		t.Fatalf("an uncarriable Quote left %d journal entries (was %d) and %d sends: %v", len(after), len(before),
+			len(large.sender.sends), err)
+	}
 }
 
 func TestBuyerDiscoversVerifiesCallsAndResolves(t *testing.T) {

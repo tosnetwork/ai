@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"google.golang.org/protobuf/proto"
@@ -190,5 +192,46 @@ func TestReadFailuresCarryTheirCauseAndThePublicFormDropsIt(t *testing.T) {
 	}
 	if other := errors.New("other"); PublicError(other) != other {
 		t.Fatal("PublicError changed an error that is not a read failure")
+	}
+}
+
+// Over Agent Packets a provider never serves a manifest whose largest Quote
+// package no rail task can carry (SERVICE_ACTOR_RAIL_WORK_FRAMES_V1
+// section 5.1); the same manifest over HTTPS is served.
+func TestProviderRefusesAManifestWhoseQuotesNoRailTaskCanCarry(t *testing.T) {
+	agentID := "agent_" + strings.Repeat("44", 32)
+	agentPackets, err := nativecore.AgentPacketTransportBinding(agentID, nativecore.MaxAgentPacketTransportRequestBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	https := nativecore.TransportBindingV1{SecurityMode: nativecore.TransportHTTPS, MaxRequestBytes: 1 << 20,
+		BaseURL: "https://provider.example"}
+	open := func(edit func(*nativecore.SoftwareWorkManifestV1), transport nativecore.TransportBindingV1) error {
+		manifest := servicefixture.Manifest("1.0.0", servicefixture.DefaultSettlement())
+		edit(&manifest)
+		manifestCBOR, _, err := nativecore.CanonicalSoftwareWorkManifest(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = New(Config{Sessions: &actors{}, Network: servicefixture.Network(),
+			RegistryCodeHash: "tvm-cell-sha256:" + strings.Repeat("55", 32), ProviderAgentID: agentID,
+			ManifestCBOR: manifestCBOR, Transport: transport, CallerID: "provider"})
+		return err
+	}
+	large := func(m *nativecore.SoftwareWorkManifestV1) {
+		m.Description = strings.Repeat("d", 2048)
+		m.Invocation.Arguments = nil
+		for index := 0; index < 64; index++ {
+			m.Invocation.Arguments = append(m.Invocation.Arguments, fmt.Sprintf("%02d%s", index, strings.Repeat("a", 510)))
+		}
+	}
+	if err = open(func(*nativecore.SoftwareWorkManifestV1) {}, agentPackets); err != nil {
+		t.Fatalf("a carriable manifest was refused: %v", err)
+	}
+	if err = open(large, agentPackets); !errors.Is(err, railwork.ErrQuoteNotCarriable) {
+		t.Fatalf("an uncarriable manifest was served over Agent Packets: %v", err)
+	}
+	if err = open(large, https); err != nil {
+		t.Fatalf("the same manifest over HTTPS was refused: %v", err)
 	}
 }
