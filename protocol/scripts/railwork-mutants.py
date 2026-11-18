@@ -30,6 +30,23 @@ one alone changes no outcome:
 - the offset guard before the end-of-archive comparison: the tar reader
   fails on a last member whose padding is missing, so the offset never
   passes the end; the guard only keeps the slice in range;
+- the Base64 text bound of receipt_boc_base64: canonical Base64 longer than
+  it always decodes past the 512-byte bound checked after it;
+- the package bound's text check and its decoded byte checks (at decode
+  and encode): MaxPackageBytes is a multiple of three, so each alone
+  refuses exactly the packages over the bound and removing one changes no
+  outcome; the bound itself is red-controlled through its derivation
+  (package-bound-derivation) and the tests at and one byte over it;
+- the one-block header position in ArtifactMembers: any extension block
+  (PAX, GNU long name) sits where the member header should be and carries
+  a type flag other than '0', which the type-flag check refuses;
+- the 64 KiB header length bound: with the package, Receipt and key card
+  bounded, no header that passes the field checks reaches it, so it only
+  bounds the JSON a decoder reads;
+- the TypeReg check on the header the tar reader returns: the raw type-flag
+  check refuses every other flag first;
+- the check of each proposal quoteprovider builds against the rail bound:
+  New already refused every manifest one of whose Quotes could exceed it;
 - the one-root count in DecodeReceipt: a BOC with a second root is never
   the canonical encoding of its first root, so the canonical-encoding check
   refuses it as well.
@@ -47,8 +64,57 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "./protocol/pkg/railwork"
 SOURCE = ROOT / "protocol/pkg/railwork"
 
-# (name, file, original text, mutated text, test that must fail)
+# (name, file, original text, mutated text, test that must fail). A bare
+# file name is in protocol/pkg/railwork; a path names a file from the
+# repository root, tested in its own package.
 MUTANTS = [
+    # Package bound and carriable Quotes (section 5.1).
+    ("package-bound-derivation", "frame.go",
+     "maxTaskHeaderWithoutPackage = 770 + 6*MaxCapabilityVersionBytes + MaxKeyCardBase64",
+     "maxTaskHeaderWithoutPackage = 766 + 6*MaxCapabilityVersionBytes + MaxKeyCardBase64",
+     "TestThePackageBoundIsTheLargestAMaximalTaskHeaderCarries"),
+    ("carriable-package-bound", "carriage.go",
+     "if packageBytes > MaxPackageBytes {",
+     "if packageBytes > MaxPackageBytes+1 {",
+     "TestValidQuotesAreCarriedAndUncarriableOnesAreRefusedBeforePayment"),
+    ("carriable-manifest-proposal-id", "carriage.go",
+     "ProposalId: strings.Repeat(\"p\", maxProposalIDBytes)",
+     "ProposalId: strings.Repeat(\"p\", 1)",
+     "TestTheManifestCheckSizesTheLargestProposal"),
+    ("carriable-manifest-price", "carriage.go",
+     "PriceNanotos: largestAmount,",
+     "PriceNanotos: \"1\",",
+     "TestTheManifestCheckSizesTheLargestProposal"),
+    ("quoteprovider-manifest-carriable", "protocol/pkg/quoteprovider/provider.go",
+     "if err := railwork.CheckCarriableManifest(config.ManifestCBOR, config.Transport); err != nil {",
+     "if err := railwork.CheckCarriableManifest(config.ManifestCBOR, config.Transport); false && err != nil {",
+     "TestProviderRefusesAManifestWhoseQuotesNoRailTaskCanCarry"),
+    ("buyersdk-quote-carriable", "protocol/pkg/buyersdk/service_actor_buyer.go",
+     "if err = railwork.CheckCarriablePackage(len(packageBytes), validated.TransportBinding); err != nil {",
+     "if err = railwork.CheckCarriablePackage(len(packageBytes), validated.TransportBinding); false && err != nil {",
+     "TestBuyerNeverPaysForAQuoteItsTaskCannotCarry"),
+    ("gateway-quote-carriable", "gateway/internal/nativegateway/server.go",
+     "if err = railwork.CheckCarriableQuote(proposal, validated.TransportBinding); err != nil {",
+     "if err = railwork.CheckCarriableQuote(proposal, validated.TransportBinding); false && err != nil {",
+     "TestTheGatewayNeverProposesAnUncarriableQuote"),
+    ("providersdk-manifest-carriable", "protocol/pkg/providersdk/publication.go",
+     "if err := CheckManifestCarriable(manifestJSON, *options.Transport); err != nil {",
+     "if err := CheckManifestCarriable(manifestJSON, *options.Transport); false && err != nil {",
+     "TestPrepareRefusesAManifestWhoseQuotesNoRailTaskCanCarry"),
+    # Packet fields recorded in an assembly (section 3.3).
+    ("assembly-packet-fields", "assembly.go",
+     "if packet != a.packet {",
+     "if false && packet != a.packet {",
+     "TestAnAssemblyRefusesAFrameInPacketsNamingOtherFields"),
+    ("assembly-packet-valid", "assembly.go",
+     "if !packet.valid() {",
+     "if false && !packet.valid() {",
+     "TestAnAssemblyRefusesAFrameInPacketsNamingOtherFields"),
+    # USTAR magic and version (section 7.2 item 3).
+    ("artifact-ustar-magic", "receipt.go",
+     "if !bytes.Equal(artifact[membersEnd+tarMagicOffset:membersEnd+tarMagicOffset+int64(len(tarUSTARMagic))], tarUSTARMagic) {",
+     "if false {",
+     "TestVectorNegativeArtifactsAreRefused"),
     # Frame: all-zero binding fields, bounds, chunking.
     ("frame-zero-actor", "frame.go",
      "if frame.Binding.ActorAccount == ([32]byte{}) || frame.Binding.RequestHash == ([32]byte{}) ||",
@@ -96,10 +162,6 @@ MUTANTS = [
      "if err != nil || !bytes.Equal(reencoded, raw) {",
      "if err != nil || len(reencoded) == 0 {",
      "TestVectorNegativeMessagesAreRefused"),
-    ("header-length-bound", "message.go",
-     "if length == 0 || length > MaxMessageHeaderBytes || uint64(length) > uint64(len(raw)-4) {",
-     "if length == 0 || uint64(length) > uint64(len(raw)-4) {",
-     "TestAHeaderOverItsBoundIsRefusedWhenEverythingElseIsValid"),
     ("base64-line-breaks", "message.go",
      "if err != nil || base64.StdEncoding.EncodeToString(raw) != text {",
      "if err != nil {",
@@ -125,9 +187,42 @@ MUTANTS = [
      "case len(artifact) == 0:",
      "TestAResultArtifactOverItsBoundIsRefusedWhenDecoded"),
     ("result-receipt-empty", "message.go",
-     "if !ok || len(receipt) == 0 {",
-     "if !ok {",
+     "if !ok || len(receipt) == 0 || len(receipt) > MaxReceiptBytes {",
+     "if !ok || len(receipt) > MaxReceiptBytes {",
      "TestAResultWithAnEmptyReceiptIsRefused"),
+    # Receiver bounds of the amended spec.
+    ("version-charset", "message.go",
+     "\t\tif version[index] < 0x21 || version[index] > 0x7e {",
+     "\t\tif version[index] < 0x20 || version[index] > 0x7e {",
+     "TestVectorNegativeMessagesAreRefused"),
+    ("version-charset-high", "message.go",
+     "\t\tif version[index] < 0x21 || version[index] > 0x7e {",
+     "\t\tif version[index] < 0x21 || version[index] > 0x7f {",
+     "TestReceiverBoundsAcceptTheBoundAndRefuseOnePast"),
+    ("receipt-decoded-bound", "message.go",
+     "if !ok || len(receipt) == 0 || len(receipt) > MaxReceiptBytes {",
+     "if !ok || len(receipt) == 0 {",
+     "TestVectorNegativeMessagesAreRefused"),
+    ("receipt-encode-bound", "message.go",
+     "if len(receiptBOC) == 0 || len(receiptBOC) > MaxReceiptBytes || len(artifact) == 0",
+     "if len(receiptBOC) == 0 || len(artifact) == 0",
+     "TestReceiverBoundsAcceptTheBoundAndRefuseOnePast"),
+    ("zero-response-hash", "message.go",
+     "return hex64Pattern.MatchString(value) && value != zeroHex64",
+     "return hex64Pattern.MatchString(value)",
+     "TestVectorNegativeMessagesAreRefused"),
+    ("packet-fields-capability", "admission.go",
+     "if packetCapabilityID != capabilityID || packetQuoteCommitment != quoteCommitment {",
+     "if packetQuoteCommitment != quoteCommitment {",
+     "TestPacketFieldsMustNameTheRequestsCapabilityAndQuote"),
+    ("packet-fields-quote", "admission.go",
+     "if packetCapabilityID != capabilityID || packetQuoteCommitment != quoteCommitment {",
+     "if packetCapabilityID != capabilityID {",
+     "TestPacketFieldsMustNameTheRequestsCapabilityAndQuote"),
+    ("artifact-type-flag-zero", "receipt.go",
+     "if source.Size()-int64(source.Len()) != membersEnd+tarBlock || artifact[membersEnd+tarTypeflagOffset] != tar.TypeReg {",
+     "if source.Size()-int64(source.Len()) != membersEnd+tarBlock {",
+     "TestVectorNegativeArtifactsAreRefused"),
     ("ack-body", "message.go",
      "\tcase len(rest) != 0:\n\t\treturn Ack{}, invalidMessage(\"an acknowledgement has a body\")",
      "\tcase len(rest) < 0:\n\t\treturn Ack{}, invalidMessage(\"an acknowledgement has a body\")",
@@ -239,10 +334,6 @@ MUTANTS = [
      "if membersEnd > source.Size() || !bytes.Equal(artifact[membersEnd:], make([]byte, tarEndOfArchive)) {",
      "if membersEnd > source.Size() {",
      "TestArtifactMustEndExactlyAtItsEndOfArchiveMarker"),
-    ("artifact-regular-files", "receipt.go",
-     "if err != nil || header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > MaxResultBytes {",
-     "if err != nil || header.Size < 0 || header.Size > MaxResultBytes {",
-     "TestArtifactMustHoldExactlyItsOutputAndReport"),
     ("artifact-repeated-member", "receipt.go",
      "if _, seen := members[header.Name]; seen {",
      "if _, seen := members[header.Name]; false && seen {",
@@ -264,6 +355,19 @@ MUTANTS = [
      "if message.Binding != binding {\n\t\treturn ResultRequest{}",
      "TestResultsAcksAndResultRequestsMustComeFromTheCounterpartyForTheBinding"),
 ]
+
+
+def package_of(file_name):
+    """A bare file name is in protocol/pkg/railwork; a path is from the root."""
+    if "/" not in file_name:
+        return PACKAGE
+    return "./" + str(Path(file_name).parent)
+
+
+def source_of(file_name):
+    if "/" not in file_name:
+        return SOURCE / file_name
+    return ROOT / file_name
 
 
 def go_env():
@@ -292,32 +396,36 @@ def main():
         return 2
     selected = [m for m in MUTANTS if not options.only or m[0] in options.only]
 
-    baseline = run(["go", "test", "-count=1", PACKAGE], env)
-    if baseline.returncode != 0:
-        print("script error: the unmutated package does not pass\n" + baseline.stdout + baseline.stderr, file=sys.stderr)
-        return 2
-    listing = run(["go", "test", "-list", ".", PACKAGE], env)
-    tests = set(listing.stdout.split())
+    packages = sorted({package_of(file_name) for _, file_name, _, _, _ in selected})
+    tests = {}
+    for package in packages:
+        baseline = run(["go", "test", "-count=1", package], env)
+        if baseline.returncode != 0:
+            print(f"script error: the unmutated package {package} does not pass\n" + baseline.stdout + baseline.stderr,
+                  file=sys.stderr)
+            return 2
+        tests[package] = set(run(["go", "test", "-list", ".", package], env).stdout.split())
     survivors, errors = [], []
     with tempfile.TemporaryDirectory(prefix="railwork-mutants-") as scratch:
         for name, file_name, original, mutated, test in selected:
-            if test not in tests:
-                errors.append(f"{name}: no test named {test}")
+            package = package_of(file_name)
+            if test not in tests[package]:
+                errors.append(f"{name}: no test named {test} in {package}")
                 continue
-            source = SOURCE / file_name
+            source = source_of(file_name)
             text = source.read_text()
             if text.count(original) != 1:
                 errors.append(f"{name}: the original text occurs {text.count(original)} times in {file_name}")
                 continue
-            target = Path(scratch) / f"{name}-{file_name}"
+            target = Path(scratch) / f"{name}-{Path(file_name).name}"
             target.write_text(text.replace(original, mutated))
             overlay = Path(scratch) / f"{name}.json"
             overlay.write_text(json.dumps({"Replace": {str(source): str(target)}}))
-            build = run(["go", "test", "-c", "-o", os.devnull, f"-overlay={overlay}", PACKAGE], env)
+            build = run(["go", "test", "-c", "-o", os.devnull, f"-overlay={overlay}", package], env)
             if build.returncode != 0:
                 errors.append(f"{name}: the mutant does not build:\n{build.stdout}{build.stderr}")
                 continue
-            result = run(["go", "test", "-count=1", f"-overlay={overlay}", "-run", f"^{test}$", PACKAGE], env)
+            result = run(["go", "test", "-count=1", f"-overlay={overlay}", "-run", f"^{test}$", package], env)
             caught = result.returncode != 0 and f"--- FAIL: {test} " in result.stdout
             print(f"{'caught' if caught else 'SURVIVED'}  {name}  ({test})", flush=True)
             if not caught:

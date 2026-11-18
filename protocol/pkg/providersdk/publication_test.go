@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -948,5 +950,42 @@ func TestApplyReportsTheDurablePhaseWhenATransitionFails(t *testing.T) {
 	got, err := f.provider(t).ApplyPublication(context.Background(), f.reopen(t), record.ActionHash, f.sign(t, record, "fixture"))
 	if err == nil || got.ActionHash != record.ActionHash || got.Phase != PublicationAmbiguous {
 		t.Fatalf("failed transition returned phase=%q hash=%q err=%v", got.Phase, got.ActionHash, err)
+	}
+}
+
+// A Capability version to be quoted over Agent Packets whose manifest can
+// produce a Quote package no rail task carries is refused before anything
+// is journaled; the fixture manifest is carriable.
+func TestPrepareRefusesAManifestWhoseQuotesNoRailTaskCanCarry(t *testing.T) {
+	f := newJournalFixture(t, nil)
+	agentPackets, err := nativecore.AgentPacketTransportBinding(f.ownerID, nativecore.MaxAgentPacketTransportRequestBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := servicefixture.Manifest("1.0.0", servicefixture.DefaultSettlement())
+	manifest.Description = strings.Repeat("d", 2048)
+	manifest.Invocation.Arguments = nil
+	for index := 0; index < 64; index++ {
+		manifest.Invocation.Arguments = append(manifest.Invocation.Arguments, fmt.Sprintf("%02d%s", index, strings.Repeat("a", 510)))
+	}
+	large, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = CheckManifestCarriable(f.manifestJSON, agentPackets); err != nil {
+		t.Fatalf("the fixture manifest is not carriable: %v", err)
+	}
+	if _, _, err = f.provider(t).PrepareJournaledPublication(f.reopen(t), large, f.ownerID,
+		PublicationOptions{Transport: &agentPackets}); !errors.Is(err, railwork.ErrQuoteNotCarriable) {
+		t.Fatalf("an uncarriable manifest was prepared: %v", err)
+	}
+	records, err := f.reopen(t).Records()
+	if err != nil || len(records) != 0 {
+		t.Fatalf("a refused manifest left %d journaled records (%v)", len(records), err)
+	}
+	https := nativecore.TransportBindingV1{SecurityMode: nativecore.TransportHTTPS, MaxRequestBytes: 1 << 20,
+		BaseURL: "https://provider.example"}
+	if err = CheckManifestCarriable(large, https); err != nil {
+		t.Fatalf("a non-rail transport was held to the rail bound: %v", err)
 	}
 }

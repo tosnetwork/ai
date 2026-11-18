@@ -16,6 +16,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/publicerrors"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteprovider"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 )
 
 type Backend interface {
@@ -213,8 +214,14 @@ func (s *Server) RequestQuoteProposal(ctx context.Context, request *connect.Requ
 		// remote caller is told only its fixed class.
 		return nil, discoveryError(quoteprovider.PublicError(err), publicerrors.DependencyUnavailable)
 	}
-	if _, err := quoteexchange.Validate(s.Network, request.Msg, proposal, time.Now()); err != nil {
+	validated, err := quoteexchange.Validate(s.Network, request.Msg, proposal, time.Now())
+	if err != nil {
 		return nil, publicerrors.New(publicerrors.Conflict, errors.New("Quote Proposal source returned conflicting preimages"), 0)
+	}
+	// Over Agent Packets the package travels inside the rail task; a Quote
+	// that no task can carry is never proposed.
+	if err = railwork.CheckCarriableQuote(proposal, validated.TransportBinding); err != nil {
+		return nil, publicerrors.New(publicerrors.Conflict, errors.New("Quote Proposal package is too large to be carried"), 0)
 	}
 	return connect.NewResponse(&nativev1.RequestQuoteProposalResponse{Package: proposal}), nil
 }

@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"google.golang.org/protobuf/proto"
@@ -77,6 +79,11 @@ func New(config Config) (*Provider, error) {
 	}
 	if _, _, err := nativecore.BuildTransportBindingCellV1(config.Transport); err != nil || !cellDigest(config.RegistryCodeHash) {
 		return nil, errors.New("invalid Quote provider policy preimage")
+	}
+	// Over Agent Packets every Quote's package travels inside a rail task:
+	// a manifest whose largest Quote cannot be carried is never served.
+	if err := railwork.CheckCarriableManifest(config.ManifestCBOR, config.Transport); err != nil {
+		return nil, fmt.Errorf("Quote provider manifest cannot be quoted over Agent Packets: %w", err)
 	}
 	if config.ProposalTTL == 0 {
 		config.ProposalTTL = 15 * time.Minute
@@ -186,6 +193,9 @@ func (p *Provider) RequestQuoteProposal(ctx context.Context, request *nativev1.R
 		TransportBindingBoc: transport.ToBOC()}
 	if _, err := quoteexchange.Validate(p.config.Network, request, value, now); err != nil {
 		return nil, errors.New("constructed Quote Proposal package failed validation")
+	}
+	if err := railwork.CheckCarriableQuote(value, p.config.Transport); err != nil {
+		return nil, fmt.Errorf("constructed Quote Proposal package cannot be carried: %w", err)
 	}
 	return value, nil
 }

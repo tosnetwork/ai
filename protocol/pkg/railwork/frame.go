@@ -73,8 +73,26 @@ const (
 	MaxKeyCardBytes = 16 << 10
 	// MaxKeyCardBase64 bounds the Base64 text of a key card.
 	MaxKeyCardBase64 = (MaxKeyCardBytes + 2) / 3 * 4
-	// MaxReceiptBytes bounds the Receipt BOC a buyer accepts (section 7.2).
-	MaxReceiptBytes = 4 << 10
+	// MaxReceiptBytes bounds the Receipt BOC a result carries and a buyer
+	// accepts (sections 5.2, 7.2). Every field of SoftwareWorkReceiptV1 has
+	// a fixed width, so its canonical BOC is at most 384 bytes.
+	MaxReceiptBytes = 512
+	// MaxReceiptBase64 bounds the Base64 text of a Receipt BOC.
+	MaxReceiptBase64 = (MaxReceiptBytes + 2) / 3 * 4
+	// MaxPackageBytes bounds the serialized Quote package a task carries
+	// (section 5.1): the largest package whose Base64 fits the 64 KiB
+	// header beside every other task field at its maximum. Those take
+	// maxTaskHeaderWithoutPackage bytes and leave 42,150 characters, of
+	// which 42,148 hold 31,611 bytes.
+	MaxPackageBytes = (MaxMessageHeaderBytes - maxTaskHeaderWithoutPackage) / 4 * 3
+	// maxTaskHeaderWithoutPackage is the canonical task header with an
+	// empty package_base64 value and every other field at its maximum:
+	// 770 bytes of names, punctuation and fixed-length values (request_id
+	// and call_lt at 2^64-1), a 128-byte capability_version escaped to 768
+	// characters and a 21,848-character key card.
+	maxTaskHeaderWithoutPackage = 770 + 6*MaxCapabilityVersionBytes + MaxKeyCardBase64
+	// MaxPackageBase64 bounds the Base64 text of a Quote package.
+	MaxPackageBase64 = (MaxPackageBytes + 2) / 3 * 4
 
 	MaxTaskMessageBytes          = 4 + MaxMessageHeaderBytes + MaxInlineInputBytes
 	MaxResultMessageBytes        = 4 + MaxMessageHeaderBytes + MaxResultBytes

@@ -100,6 +100,11 @@ type vectorDocument struct {
 		Rule   string           `json:"rule"`
 		Frames []vectorFrameRef `json:"frames"`
 	} `json:"negative_joins"`
+	NegativeArtifacts []struct {
+		Name   string `json:"name"`
+		Rule   string `json:"rule"`
+		Base64 string `json:"base64"`
+	} `json:"negative_artifacts"`
 }
 
 func loadVectors(t *testing.T) *vectorDocument {
@@ -479,18 +484,18 @@ func TestVectorFramesSplitJoinAndAssembleExactly(t *testing.T) {
 		if err != nil || !bytes.Equal(joined, raw) {
 			t.Fatalf("%s: join err=%v", message.Name, err)
 		}
-		assembly, err := NewAssembly(document.Binding.BuyerAgentID, reversed[0])
+		assembly, err := NewAssembly(document.Binding.BuyerAgentID, testPacketFields, reversed[0])
 		if err != nil {
 			t.Fatalf("%s: %v", message.Name, err)
 		}
 		complete := len(reversed) == 1
 		for _, frame := range reversed[1:] {
-			if complete, err = assembly.Add(frame); err != nil {
+			if complete, err = assembly.Add(testPacketFields, frame); err != nil {
 				t.Fatalf("%s: %v", message.Name, err)
 			}
 		}
 		// A duplicate delivery of the same bytes changes nothing.
-		if again, dupErr := assembly.Add(reversed[0]); dupErr != nil || !again {
+		if again, dupErr := assembly.Add(testPacketFields, reversed[0]); dupErr != nil || !again {
 			t.Fatalf("%s: duplicate err=%v", message.Name, dupErr)
 		}
 		assembled, err := assembly.Message()
@@ -534,11 +539,23 @@ func decodeAny(kind Kind, raw []byte) error {
 
 func TestVectorNegativeMessagesAreRefused(t *testing.T) {
 	document := loadVectors(t)
-	if len(document.NegativeMessages) != 24 {
+	if len(document.NegativeMessages) != 30 {
 		t.Fatalf("%d negative messages", len(document.NegativeMessages))
 	}
 	for _, item := range document.NegativeMessages {
 		if err := decodeAny(Kind(item.Kind), mustBase64(t, item.Base64)); !errors.Is(err, ErrMessageInvalid) {
+			t.Errorf("%s (%s): err=%v", item.Name, item.Rule, err)
+		}
+	}
+}
+
+func TestVectorNegativeArtifactsAreRefused(t *testing.T) {
+	document := loadVectors(t)
+	if len(document.NegativeArtifacts) != 6 {
+		t.Fatalf("%d negative artifacts", len(document.NegativeArtifacts))
+	}
+	for _, item := range document.NegativeArtifacts {
+		if _, _, err := ArtifactMembers(mustBase64(t, item.Base64)); !errors.Is(err, ErrResultNotAccepted) {
 			t.Errorf("%s (%s): err=%v", item.Name, item.Rule, err)
 		}
 	}
@@ -563,12 +580,12 @@ func TestVectorNegativeJoinsAreRefused(t *testing.T) {
 			t.Errorf("%s (%s): err=%v", item.Name, item.Rule, err)
 		}
 		assemblyErr := func() error {
-			assembly, err := NewAssembly(document.Binding.BuyerAgentID, frames[0])
+			assembly, err := NewAssembly(document.Binding.BuyerAgentID, testPacketFields, frames[0])
 			if err != nil {
 				return err
 			}
 			for _, frame := range frames[1:] {
-				if _, err = assembly.Add(frame); err != nil {
+				if _, err = assembly.Add(testPacketFields, frame); err != nil {
 					return err
 				}
 			}
