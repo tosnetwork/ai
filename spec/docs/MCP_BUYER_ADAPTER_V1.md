@@ -107,6 +107,7 @@ that cannot start local processes is not served by V1.
 The MCP server and the confirmer reach the agent through one Unix domain
 socket, created by the agent in a directory owned by the custody account
 (mode `0750`, group shared with the developer account; socket mode `0660`).
+That directory holds only the socket and is not the agent's state directory.
 The agent authorizes every request by the peer's kernel-reported credentials
 (`SO_PEERCRED`), never by anything the request says:
 
@@ -182,10 +183,15 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
 
 - **Carrier.** V1 carries frames only over the Agent Packet Relay. The
   Messenger carrier needs a Messenger installation and is not used.
-- **Buyer card.** The agent issues cards of at most 7 days and publishes a
-  successor at least 24 hours before expiry (relay 6.3); it carries its
-  current card in every task, task redelivery, ack and result-request
-  (frames 5.1, 5.3, 5.4; relay 6.4). It keeps each private key until
+- **Buyer card.** The agent carries its current card in every task, task
+  redelivery, ack and result-request (frames 5.1, 5.3, 5.4; relay 6.4). The
+  card it puts in a task covers the request's response deadline plus the
+  result's retention, up to the 30-day maximum (relay 6.4); it publishes a
+  successor at least 24 hours before the current card expires (relay 6.3), and
+  the successor reaches the provider in the next redelivery, ack or
+  result-request. Because the card is signed when the task is first sent,
+  after the call, and a response SLA is at most 30 days, a card covering the
+  response deadline can always be issued. It keeps each private key until
   `not_after_unix + 86,400 + 300` and polls every relay of every card whose key
   it holds.
 - **Provider card.** Taken from an offer file (schema
@@ -544,9 +550,9 @@ holds at the moment of the check:
    `not_after_unix` at or after the response deadline the call would get
    (`now + response_sla`), so the task can be redelivered for the whole
    response window;
-4. the buyer Agent is finalized and live, its policy holds the packet
-   controller, and the agent holds its own current card with
-   `not_after_unix` at or after that response deadline;
+4. the buyer Agent is finalized and live, its finalized policy holds the
+   packet controller, and `tosctl` can sign with that controller (the agent
+   signs a fresh key card, which it needs anyway);
 5. at least one relay of the buyer's card and at least one relay of the
    provider's card answered its relay description (relay 9.6) within the last
    10 minutes.
