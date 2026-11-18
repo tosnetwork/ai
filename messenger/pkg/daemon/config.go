@@ -107,7 +107,11 @@ const (
 	DefaultSweepInterval       = 5 * time.Second
 	DefaultMaintenanceInterval = time.Hour
 	MinSweepInterval           = time.Second
-	MinMaintenanceInterval     = time.Minute
+	// MaxSweepInterval bounds the sweep: the relay route's timers (evidence
+	// pull retries, cap retries, demand windows) are a minute or shorter and
+	// run on the sweep, so a slower sweep would stretch every one of them.
+	MaxSweepInterval       = time.Minute
+	MinMaintenanceInterval = time.Minute
 )
 
 // Config is what an operator supplies.
@@ -1215,6 +1219,9 @@ func (c Config) Validate() error {
 	}
 	if c.SweepInterval() < MinSweepInterval {
 		return errors.New("sweep interval is below its floor")
+	}
+	if c.SweepIntervalSeconds > uint64(MaxSweepInterval/time.Second) {
+		return errors.New("sweep interval is above its ceiling of one minute")
 	}
 	if c.MaintenanceInterval() < MinMaintenanceInterval {
 		return errors.New("maintenance interval is below its floor")
