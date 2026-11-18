@@ -1036,9 +1036,15 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
 16. **Renewal among non-contacts (live, 11.2).** With test-shortened card and
     descriptor lifetimes, B and C (no contacts) keep exchanging room messages
     across several expiries, in steady state renewed only by kind-3 part 0;
-    a kind-4 pull may occur only for a peer whose evidence went stale while
-    it was offline (in the record: inside an offline window of the run or
-    within one re-deposit interval after it ends).
+    a kind-4 pull may occur only (a) for a peer whose evidence went stale
+    while it was offline (in the record: inside an offline window of the run
+    or within one re-deposit interval after it ends), or (b) when the
+    requester's held copy of that peer's evidence had already expired at
+    send time because the two exchanged nothing for longer than its
+    lifetime, at most one pull exchange per peer per expiry, after which
+    kind-3 part 0 renews it in band. The record classifies every kind-4
+    pull under (a) or (b), naming the expiry case (b) relied on; any other
+    pull fails the item.
 17. **Driver bounds (unit).** The 512 KiB state bound holds, with at least
     20 % headroom, for the worst case at 32 leaves with `max_past_epochs(2)`,
     every leaf carrying a maximal (128-byte) leaf identity, never a short test
