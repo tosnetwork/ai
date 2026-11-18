@@ -186,8 +186,26 @@ func TestArchiveEndAndHeaderIntegrityAreChecked(t *testing.T) {
 	if _, err := CheckSourceArchive(big256, MaxArchiveBytes); !errors.Is(err, ErrArchiveRefused) {
 		t.Errorf("a base-256 size was accepted: %v", err)
 	}
-	overrun := patchHeader(t, archive, 0, func(header []byte) { copy(header[124:136], "00000010000\x00") })
-	if _, err := CheckSourceArchive(overrun, MaxArchiveBytes); !errors.Is(err, ErrArchiveRefused) {
-		t.Errorf("a member past the end was accepted: %v", err)
+}
+
+// A size field that claims more bytes than the archive holds is refused
+// with an error, never a panic: the content slice would run past the end.
+func TestAMemberSizePastTheEndIsRefusedWithoutAPanic(t *testing.T) {
+	archive := buildTar(t, entry{name: "a.go", body: "x"})
+	remaining := len(archive) - blockSize
+	for _, size := range []int64{int64(remaining) + 1, int64(remaining) + 2048, 0o77777777777} {
+		overrun := patchHeader(t, archive, 0, func(header []byte) {
+			copy(header[124:136], fmt.Sprintf("%011o\x00", size))
+		})
+		_, err := CheckSourceArchive(overrun, MaxArchiveBytes)
+		if !errors.Is(err, ErrArchiveRefused) || !strings.Contains(err.Error(), "runs past the end") {
+			t.Errorf("a %d-byte size over %d remaining bytes: %v", size, remaining, err)
+		}
+	}
+	for _, field := range []string{"-0000000001", "+0000000001"} {
+		signed := patchHeader(t, archive, 0, func(header []byte) { copy(header[124:136], field+"\x00") })
+		if _, err := CheckSourceArchive(signed, MaxArchiveBytes); !errors.Is(err, ErrArchiveRefused) {
+			t.Errorf("a signed size field %q was accepted: %v", field, err)
+		}
 	}
 }

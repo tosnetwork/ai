@@ -117,8 +117,11 @@ func CheckSourceArchive(raw []byte, maxBytes int) (CheckedArchive, error) {
 			regular++
 		}
 		offset += blockSize
+		// This check is what keeps the content slice below in bounds: a
+		// size field can claim more bytes than the archive holds, and a
+		// slice past the end would panic the agent.
 		padded := (member.SizeBytes + blockSize - 1) / blockSize * blockSize
-		if padded > int64(len(raw)-offset) {
+		if member.SizeBytes < 0 || padded > int64(len(raw)-offset) {
 			return CheckedArchive{}, archiveError("member %q runs past the end of the archive", member.Name)
 		}
 		files = append(files, SourceFile{Name: member.Name, Directory: member.Directory,

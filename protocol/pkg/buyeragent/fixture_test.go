@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,10 +52,16 @@ type fakeBuyer struct {
 	queryID  uint64
 	callErr  error
 	callNext buyersdk.CallPhase
+	// panics makes Prepare panic, standing in for any defect a request
+	// reaches.
+	panics atomic.Bool
 }
 
 func (f *fakeBuyer) Prepare(_ context.Context, request *nativev1.RequestQuoteProposalRequest, value *nativev1.QuoteProposalPackageV1,
 	executionID, inputDigest [32]byte) (buyersdk.CallRecord, error) {
+	if f.panics.Load() {
+		panic("a defect reached by a client request")
+	}
 	validated, err := quoteexchange.Validate(f.network, request, value, f.now())
 	if err != nil {
 		return buyersdk.CallRecord{}, err

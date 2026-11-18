@@ -7,44 +7,22 @@ confirmation code and its lifetime, the peer-credential role table, the
 deployment checks and the prepared-call cap. A mutant is applied through
 `go test -overlay`, so the working tree is never modified.
 
-A mutant is caught only when its named test reports `--- FAIL: <test>`.
-A mutant whose text does not occur exactly once, or that does not build, is
-a script error, not a catch. The unmutated packages must pass first.
+A mutant is caught only when its named test fails. That is when the run
+reports `--- FAIL: <test>`, or when the run, restricted to that one test,
+panics: a panic in a server goroutine ends the test binary without a
+per-test line. A mutant whose text does not occur exactly once, or that does
+not build, is a script error, not a catch. The unmutated packages must pass
+first.
+
+A check with no mutant must be redundant, and the script proves it rather
+than asserting it. Each entry of REDUNDANT deletes one such check, and the
+whole package's tests must still pass without a panic. A deletion that
+breaks a test is a script error: the check is not redundant and needs a
+mutant and a test.
 
 Usage (from the repository root):
 
     python3 -I protocol/scripts/buyeragent-mutants.py [--only NAME]
-
-Checks with no mutant here are redundant with another check, so removing
-one alone changes no outcome:
-
-- the parse-time header checks the canonical comparison also enforces. A
-  header or archive that breaks one of them can never equal the canonical
-  encoding of its parsed members, so it is refused by the comparison as
-  well; the parse checks stay for their specific errors. They are:
-  - the USTAR magic and version;
-  - the checksum;
-  - bytes after a field's terminator;
-  - the link name;
-  - the type flag;
-  - a directory's size;
-  - a repeated name (the packer refuses it too);
-  - non-zero bytes after the end marker;
-  - the second end-marker block;
-- the member-count bound of CheckSourceArchive: every member takes at least
-  one 512-byte block, so the 1 MiB size bound already allows at most 2,046
-  members, below the 4,096 bound;
-- the octal digit check: a non-octal size or checksum field also fails
-  strconv.ParseInt;
-- the member-overrun check: a member that runs past the end leaves no room
-  for the end-of-archive marker, which the next loop step refuses;
-- the no-presentation check in Decide: a purchase never presented has a
-  presentation time of zero, which the code-lifetime check refuses with the
-  same conflict;
-- the 2 MiB request-line check of the socket: every field a request can
-  carry is bounded below it, so an over-long line is refused by those
-  bounds, or as a line without a newline once the bounded reader stops; the
-  check only bounds the memory a read takes.
 """
 
 import argparse
@@ -79,6 +57,14 @@ MUTANTS = [
      'if strings.HasSuffix(name, "/") && !directory {',
      "if false {",
      "TestArchiveMemberNamesOutsideTheSafeCharsetAreRefused"),
+    ("member-overrun", AGENT + "archive.go",
+     "if member.SizeBytes < 0 || padded > int64(len(raw)-offset) {",
+     "if member.SizeBytes < 0 {",
+     "TestAMemberSizePastTheEndIsRefusedWithoutAPanic"),
+    ("handler-recover", AGENT + "server.go",
+     "\t\tif recovered := recover(); recovered != nil {\n",
+     "\t\tif recovered := any(nil); recovered != nil {\n",
+     "TestAPanicInARequestFailsOnlyThatConnection"),
     ("no-regular-file", AGENT + "archive.go",
      "if regular == 0 {",
      "if false {",
@@ -163,8 +149,8 @@ MUTANTS = [
      'if false && !now.Before(time.Unix(purchase.PresentedUnix, 0).Add(ConfirmationLifetime)) {\n\t\tpurchase.ConfirmationNonce',
      "TestAnExpiredCodeAndAMissingPresentationConfirmNothing"),
     ("code-spent-before-send", AGENT + "agent.go",
-     '\tpurchase.ConfirmationNonce, purchase.PresentedUnix = "", 0\n\tif err := a.store.writePurchase(purchase); err != nil {\n\t\ta.mutex.Unlock()',
-     '\tif err := a.store.writePurchase(purchase); err != nil {\n\t\ta.mutex.Unlock()',
+     '\tpurchase.ConfirmationNonce, purchase.PresentedUnix = "", 0\n\tif err := a.store.writePurchase(purchase); err != nil {\n\t\treturn record, purchase, PurchaseView{}, false, err\n\t}\n\treturn record, purchase, PurchaseView{}, true, nil',
+     '\tif err := a.store.writePurchase(purchase); err != nil {\n\t\treturn record, purchase, PurchaseView{}, false, err\n\t}\n\treturn record, purchase, PurchaseView{}, true, nil',
      "TestASpentCodeCannotConfirmARetry"),
     ("present-needs-request", AGENT + "agent.go",
      "if record.Phase != buyersdk.PhasePrepared || purchase.RequestedUnix == 0 {\n\t\treturn Presentation{}",
@@ -286,6 +272,93 @@ MUTANTS = [
      "TestLimitsRefuseAPreparedCapAboveTheCallCap"),
 ]
 
+# (name, file, original text, text after deleting the check, why it is
+# redundant). Deleting the check must leave every test of its package
+# passing; the script runs the whole package to prove it.
+REDUNDANT = [
+    # Parse-time header checks that the canonical comparison also enforces:
+    # a header or archive that breaks one can never equal the canonical
+    # encoding of its parsed members. They stay for their specific errors.
+    ("ustar-magic", AGENT + "archive.go",
+     '\tif !bytes.Equal(header[257:263], []byte("ustar\\x00")) || !bytes.Equal(header[263:265], []byte("00")) {\n'
+     '\t\treturn Member{}, archiveError("a member header is not a USTAR header")\n\t}\n',
+     "",
+     "canonical comparison"),
+    ("header-checksum", AGENT + "archive.go",
+     "\tif err := checkChecksum(header); err != nil {\n\t\treturn Member{}, err\n\t}\n",
+     "",
+     "canonical comparison"),
+    ("field-terminator", AGENT + "archive.go",
+     '\tif !isZeroBlock(value[end:]) {\n\t\treturn "", archiveError("a header field has bytes after its terminator")\n\t}\n',
+     "",
+     "canonical comparison"),
+    ("link-name", AGENT + "archive.go",
+     '\tif linkName != "" {\n\t\treturn Member{}, archiveError("member %s names a link target", printable(name))\n\t}\n',
+     "\t_ = linkName\n",
+     "canonical comparison"),
+    ("type-flag", AGENT + "archive.go",
+     '\tdefault:\n\t\treturn Member{}, archiveError("member %s is not a regular file or a directory", printable(name))\n',
+     "",
+     "canonical comparison"),
+    ("directory-size", AGENT + "archive.go",
+     '\t\tif size != 0 {\n\t\t\treturn Member{}, archiveError("directory %s has a size", printable(name))\n\t\t}\n',
+     "",
+     "canonical comparison; the packer refuses a directory with content"),
+    ("repeated-name", AGENT + "archive.go",
+     '\t\tif seen[key] {\n\t\t\treturn CheckedArchive{}, archiveError("member %q appears twice", key)\n\t\t}\n',
+     "",
+     "the packer refuses a repeated name"),
+    ("bytes-after-end-marker", AGENT + "archive.go",
+     '\t\t\tif !isZeroBlock(raw[offset+2*blockSize:]) {\n'
+     '\t\t\t\treturn CheckedArchive{}, archiveError("it has bytes after the end-of-archive marker")\n\t\t\t}\n',
+     "",
+     "canonical comparison"),
+    ("second-end-block", AGENT + "archive.go",
+     "if offset+2*blockSize > len(raw) || !isZeroBlock(raw[offset+blockSize:offset+2*blockSize]) {",
+     "if offset+2*blockSize > len(raw) {",
+     "canonical comparison"),
+    ("member-count", AGENT + "archive.go",
+     '\t\tif len(members) == MaxArchiveEntries {\n'
+     '\t\t\treturn CheckedArchive{}, archiveError("it has more than %d members", MaxArchiveEntries)\n\t\t}\n',
+     "",
+     "each member takes a 512-byte block, so the 1 MiB bound allows at most 2,046"),
+    ("octal-digits", AGENT + "archive.go",
+     "\tfor _, c := range text {\n\t\tif c < '0' || c > '7' {\n\t\t\treturn 0, errors.New(\"invalid octal field\")\n\t\t}\n\t}\n",
+     "",
+     "strconv.ParseInt refuses other digits, the overrun check refuses a negative size, and "
+     "the canonical comparison refuses a sign"),
+    ("decide-no-presentation", AGENT + "agent.go",
+     'purchase.RequestedUnix == 0 || purchase.ConfirmationNonce == "" {\n\t\treturn record, purchase, a.viewOf',
+     "purchase.RequestedUnix == 0 {\n\t\treturn record, purchase, a.viewOf",
+     "a purchase never presented has presentation time zero, which the lifetime check refuses alike"),
+    ("request-line-bound", AGENT + "server.go",
+     '\tcase len(line) > MaxRequestBytes:\n\t\treturn failure(refusal(CodeBadInput, "the request exceeds the 2 MiB bound", nil))\n',
+     "",
+     "every request field is bounded below 2 MiB, and the bounded reader ends an over-long line "
+     "without a newline; the check only bounds memory"),
+]
+
+
+def prove_redundant(selected, env, scratch, errors):
+    """Delete each redundant check and require its whole package to pass."""
+    for name, file_name, original, deleted, reason in selected:
+        package = package_of(file_name)
+        source = ROOT / file_name
+        text = source.read_text()
+        if text.count(original) != 1:
+            errors.append(f"redundant {name}: the original text occurs {text.count(original)} times in {file_name}")
+            continue
+        target = Path(scratch) / f"redundant-{name}-{source.name}"
+        target.write_text(text.replace(original, deleted))
+        overlay = Path(scratch) / f"redundant-{name}.json"
+        overlay.write_text(json.dumps({"Replace": {str(source): str(target)}}))
+        result = run(["go", "test", "-count=1", f"-overlay={overlay}", package], env)
+        if result.returncode != 0:
+            errors.append(f"redundant {name}: deleting it breaks the tests, so it is not redundant ({reason}):\n"
+                          f"{result.stdout[-2000:]}{result.stderr[-2000:]}")
+            continue
+        print(f"redundant  {name}  ({reason})", flush=True)
+
 
 def go_env():
     env = dict(os.environ)
@@ -307,7 +380,7 @@ def main():
     parser.add_argument("--only", action="append", default=[], help="run only the named mutants")
     options = parser.parse_args()
     env = go_env()
-    names = [mutant[0] for mutant in MUTANTS]
+    names = [mutant[0] for mutant in MUTANTS] + [entry[0] for entry in REDUNDANT]
     if len(names) != len(set(names)):
         print("script error: duplicate mutant names", file=sys.stderr)
         return 2
@@ -316,8 +389,9 @@ def main():
         print(f"script error: unknown mutants {sorted(unknown)}", file=sys.stderr)
         return 2
     selected = [m for m in MUTANTS if not options.only or m[0] in options.only]
+    redundant = [r for r in REDUNDANT if not options.only or r[0] in options.only]
 
-    packages = sorted({package_of(file_name) for _, file_name, _, _, _ in selected})
+    packages = sorted({package_of(m[1]) for m in selected} | {package_of(r[1]) for r in redundant})
     tests = {}
     for package in packages:
         baseline = run(["go", "test", "-count=1", package], env)
@@ -347,10 +421,12 @@ def main():
                 errors.append(f"{name}: the mutant does not build:\n{build.stdout}{build.stderr}")
                 continue
             result = run(["go", "test", "-count=1", f"-overlay={overlay}", "-run", f"^{test}$", package], env)
-            caught = result.returncode != 0 and f"--- FAIL: {test} " in result.stdout
+            output = result.stdout + result.stderr
+            caught = result.returncode != 0 and (f"--- FAIL: {test} " in result.stdout or "panic: " in output)
             print(f"{'caught' if caught else 'SURVIVED'}  {name}  ({test})", flush=True)
             if not caught:
                 survivors.append(name)
+        prove_redundant(redundant, env, scratch, errors)
     for error in errors:
         print(f"script error: {error}", file=sys.stderr)
     if errors:
@@ -358,7 +434,7 @@ def main():
     if survivors:
         print(f"{len(survivors)} of {len(selected)} mutants survived: {', '.join(survivors)}", file=sys.stderr)
         return 1
-    print(f"buyeragent mutants: all {len(selected)} caught")
+    print(f"buyeragent mutants: all {len(selected)} caught; {len(redundant)} redundant checks proven by deletion")
     return 0
 
 
