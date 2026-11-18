@@ -106,7 +106,15 @@ const (
 	// ProviderWrapWidth is the most display columns of provider text in
 	// one row, the gutter not counted.
 	ProviderWrapWidth = 64
-	ProviderGutter    = "| "
+	// ProviderGutter begins with "p", a strong left-to-right letter. A
+	// terminal that lays out each line as its own bidirectional paragraph
+	// takes the line's direction from its first strong character, so every
+	// provider row, the first and every continuation alike, stays
+	// left-to-right with the gutter at column 0. Hebrew or Arabic text in
+	// it stays readable but cannot reorder the row so that provider text
+	// starts it. A row ends with its last shown character: every control is
+	// escaped, so no direction state carries over to the next row.
+	ProviderGutter = "p| "
 )
 
 // displayWidth is the number of columns r is counted as taking. Printable

@@ -611,9 +611,19 @@ The confirmer also:
 - bounds each provider string at 256 characters and the provider block at
   4,096, marking truncation, and every other string at 512;
 - hard-wraps provider text at 64 counted columns, the gutter not counted;
-- starts every provider row with the gutter `| `.
+- starts every provider row, the first and every continuation alike, with
+  the gutter `p| `.
+  - Its first character is a strong left-to-right ASCII letter. A terminal
+    that lays out each line as its own bidirectional paragraph (Konsole,
+    mlterm, VTE with bidi on) takes the line's direction from its first
+    strong character. So the row stays left-to-right, with the gutter at
+    column 0, even when the provider text in it begins with Hebrew or
+    Arabic.
+  - That text is not escaped and stays readable.
+  - A row ends with its last shown character. Every control is escaped,
+    so nothing at the end of a row can carry a direction over to the next.
 
-Non-ASCII text, such as a CJK manifest, stays readable. A terminal's soft
+Non-ASCII text, such as a CJK, Hebrew or Arabic manifest, stays readable. A terminal's soft
 wrap of a long line can then never put provider text at the start of a
 row, where it could pass for the end marker or a protocol field.
 
