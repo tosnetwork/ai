@@ -863,8 +863,15 @@ and stops sending tasks once the request is responded or overdue. Packet
 expiry follows frames 2.3.
 
 `Carrier.DeliverTask` implements it. The duty round of section 11 runs it
-for every pending request, with or without an MCP session. Each round
-works on the latest task generation:
+for every pending request, with or without an MCP session.
+
+The round's clock is the chain time of the finalized checkpoint at which
+the duty round resolved the request (`RequestReport.chain_time`), never the
+host clock. That time decides the deadline check and the 600-second resend
+interval, and it is every packet's signing time (`created_at_unix`) and
+the base of its expiry. A round without that chain time is refused.
+
+Each round works on the latest task generation:
 
 - **A new generation.** When there is none, or the latest is 600 seconds
   old, the round builds one:
@@ -872,18 +879,38 @@ works on the latest task generation:
     and execution nonce, and the buyer card of 3.3;
   - split into frames, each signed by the packet controller into its own
     packet;
-  - each packet expires at the response deadline, or 86,100 seconds after
-    signing if that is earlier;
-  - each packet is sealed to the provider card that 7.1 selects.
+  - each packet is sealed to a provider card, chosen as follows:
+    - by preference, a card that 7.1 accepts and whose `not_after` covers
+      the response deadline;
+    - only when no such card is held, the best card valid now.
+  - each envelope's expiry is the earliest of three times:
+    - the response deadline;
+    - 86,100 seconds after signing;
+    - the chosen card's `not_after` plus the key-retention window
+      (86,400 + 300 seconds, relay 6.3).
 
-  The generation is journaled before its first deposit, and at most the 4
+    So no relay holds an envelope that the provider can no longer open.
+
+  The generation is journaled before its first deposit, with each
+  envelope's packet JSON and the card's encryption key. At most the 4
   newest generations are kept.
 - **Deposits.** The round deposits every envelope of the generation at
   every relay of that card, unless the relay has already settled it:
   - `200`, `201` or `410` accepts the envelope;
-  - `409` or another refusal abandons that relay for that envelope;
+  - `409` marks that relay as unusable for that envelope (relay 8.6);
+  - another refusal abandons that relay for that envelope;
   - a retryable answer waits for the next round, which deposits the same
     journaled bytes.
+- **Re-seal on conflict.** Relay 8.6 applies to any envelope that no relay
+  accepted but at least one answered `409`. The round re-seals the same
+  packet JSON at once, to the journaled key, under a fresh acknowledgement
+  secret, so the envelope gets a fresh ID and keeps its expiry. It
+  journals the new envelope in place of the old one, before its first
+  deposit, and deposits it at every relay of the card in the same round,
+  without waiting 600 seconds. A round re-seals at most once; a further
+  `409` is handled in the next round. A journaled key that does not match
+  its key ID refuses the re-seal. An envelope that another relay accepted
+  is never re-sealed.
 
   The round reports `MCP_BUYER_DEPENDENCY_UNAVAILABLE` until each envelope
   is held by at least one relay.

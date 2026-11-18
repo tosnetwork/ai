@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +37,13 @@ func deliveryFixture(t *testing.T) (*carrierFixture, TaskDelivery) {
 	record.Actor = "0:" + strings.Repeat("77", 32)
 	record.QuoteCommitment = "tvm-cell-sha256:" + strings.Repeat("3c", 32)
 	return f, TaskDelivery{Record: record, Archive: f.archive, ExecutionNonce: strings.Repeat("5e", 32),
-		ProviderAgentID: fxProvider, ResponseDeadline: fxNow.Add(time.Hour), RetentionSeconds: 86400}
+		ProviderAgentID: fxProvider, ResponseDeadline: fxNow.Add(time.Hour), RetentionSeconds: 86400, ChainTime: fxNow}
+}
+
+// later moves the checkpoint chain time of the next round on; the host
+// clock stays, since delivery never reads it.
+func later(task *TaskDelivery, d time.Duration) {
+	task.ChainTime = task.ChainTime.Add(d)
 }
 
 func providerKey(t *testing.T) agentpacketseal.PrivateKey {
@@ -128,12 +136,12 @@ func TestATaskIsResentAsAFreshGenerationEveryTenMinutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := openDeposits(t, f, providerRelay)
-	f.clock.advance(TaskResendInterval - time.Second)
+	later(&task, TaskResendInterval-time.Second)
 	view, err := f.carrier.DeliverTask(context.Background(), task)
 	if err != nil || view.Sealed || view.Generation != 1 || f.relays.attempts[providerRelay] != 1 {
 		t.Fatalf("inside the interval: %+v %v, %d deposits", view, err, f.relays.attempts[providerRelay])
 	}
-	f.clock.advance(time.Second)
+	later(&task, time.Second)
 	view, err = f.carrier.DeliverTask(context.Background(), task)
 	if err != nil || !view.Sealed || view.Generation != 2 {
 		t.Fatalf("after the interval: %+v %v", view, err)
@@ -163,7 +171,7 @@ func TestARetryableDepositIsRetriedWithTheSameBytes(t *testing.T) {
 	}
 	journaled := generations[0].Envelopes[0].EnvelopeBase64
 	delete(f.relays.answer, providerRelay)
-	f.clock.advance(time.Minute)
+	later(&task, time.Minute)
 	view, err = f.carrier.DeliverTask(context.Background(), task)
 	if err != nil || view.Sealed || view.Delivered != 1 {
 		t.Fatalf("the retry: %+v %v", view, err)
@@ -171,17 +179,237 @@ func TestARetryableDepositIsRetriedWithTheSameBytes(t *testing.T) {
 	if got := base64.StdEncoding.EncodeToString(f.relays.deposits[providerRelay][0]); got != journaled {
 		t.Fatal("the retry deposited other bytes than the journaled envelope")
 	}
-	for _, refused := range []agentpacketrelay.DepositResult{agentpacketrelay.DepositConflict, agentpacketrelay.DepositRejected} {
-		g, gtask := deliveryFixture(t)
-		g.relays.answer = map[string]agentpacketrelay.DepositResult{providerRelay: refused}
-		if _, err := g.carrier.DeliverTask(context.Background(), gtask); !errors.Is(err, ErrNoRelayAccepted) {
-			t.Fatalf("%v: %v", refused, err)
+	g, gtask := deliveryFixture(t)
+	g.relays.answer = map[string]agentpacketrelay.DepositResult{providerRelay: agentpacketrelay.DepositRejected}
+	if _, err := g.carrier.DeliverTask(context.Background(), gtask); !errors.Is(err, ErrNoRelayAccepted) {
+		t.Fatalf("a rejection: %v", err)
+	}
+	later(&gtask, time.Minute)
+	if _, err := g.carrier.DeliverTask(context.Background(), gtask); !errors.Is(err, ErrNoRelayAccepted) ||
+		g.relays.attempts[providerRelay] != 1 {
+		t.Fatalf("a rejecting relay was tried again (%d attempts): %v", g.relays.attempts[providerRelay], err)
+	}
+}
+
+// A 409 means another copy holds the envelope ID at that relay (relay
+// 8.6): when no relay accepted the envelope, the same packet is re-sealed
+// at once under a fresh envelope ID, journaled, and deposited again in the
+// same round, not 600 seconds later.
+func TestAConflictedEnvelopeIsResealedUnderAFreshIDInTheSameRound(t *testing.T) {
+	f, task := deliveryFixture(t)
+	f.relays.conflicts = map[string]int{providerRelay: 1}
+	view, err := f.carrier.DeliverTask(context.Background(), task)
+	if err != nil || view.Delivered != 1 || view.Generation != 1 || f.relays.attempts[providerRelay] != 2 {
+		t.Fatalf("a conflicted envelope was not re-sealed in the round: %+v %v, %d deposits", view, err,
+			f.relays.attempts[providerRelay])
+	}
+	conflicted, err := agentpacketseal.ParseEnvelope(f.relays.conflicted[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := agentpacketseal.ParseEnvelope(f.relays.deposits[providerRelay][0])
+	if err != nil || accepted.EnvelopeID == conflicted.EnvelopeID || accepted.ExpiresAtUnix != conflicted.ExpiresAtUnix {
+		t.Fatalf("the re-seal did not carry a fresh envelope ID: %v", err)
+	}
+	// The packet inside is the same signed packet.
+	key := providerKey(t)
+	before, err := agentpacketseal.Open(key, f.relays.conflicted[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := agentpacketseal.Open(key, f.relays.deposits[providerRelay][0])
+	if err != nil || !bytes.Equal(before.PacketJSON, after.PacketJSON) {
+		t.Fatalf("the re-seal changed the packet: %v", err)
+	}
+	generations, err := f.carrier.generations(task.Record.RequestHash)
+	if err != nil || generations[0].Envelopes[0].EnvelopeBase64 != base64.StdEncoding.EncodeToString(f.relays.deposits[providerRelay][0]) ||
+		generations[0].Envelopes[0].Relays[providerRelay] != relayAccepted {
+		t.Fatalf("the fresh envelope was not journaled: %v", err)
+	}
+	// One re-seal per round: a second 409 waits for the next round, which
+	// re-seals again.
+	g, gtask := deliveryFixture(t)
+	g.relays.conflicts = map[string]int{providerRelay: 2}
+	if _, err := g.carrier.DeliverTask(context.Background(), gtask); !errors.Is(err, ErrNoRelayAccepted) ||
+		g.relays.attempts[providerRelay] != 2 {
+		t.Fatalf("two conflicts: %v, %d deposits", err, g.relays.attempts[providerRelay])
+	}
+	later(&gtask, time.Minute)
+	view, err = g.carrier.DeliverTask(context.Background(), gtask)
+	if err != nil || view.Sealed || view.Delivered != 1 || g.relays.attempts[providerRelay] != 3 {
+		t.Fatalf("the next round did not re-seal: %+v %v, %d deposits", view, err, g.relays.attempts[providerRelay])
+	}
+}
+
+// An envelope another relay accepted is not re-sealed for a 409 elsewhere:
+// that relay is only unusable for this envelope.
+func TestAConflictIsNotResealedOnceAnotherRelayAccepted(t *testing.T) {
+	f, task := deliveryFixture(t)
+	f.learn(t, keycardtest.JSON(t, keycardtest.Spec{AgentID: fxProvider, Controller: providerController,
+		Seed: providerCardSeed, NotBeforeUnix: uint64(fxNow.Add(-30 * time.Minute).Unix()),
+		NotAfterUnix: uint64(fxNow.Add(7 * 24 * time.Hour).Unix()), Relays: []string{providerRelay, secondRelay}}))
+	f.relays.conflicts = map[string]int{secondRelay: 1}
+	view, err := f.carrier.DeliverTask(context.Background(), task)
+	if err != nil || view.Delivered != 1 || f.relays.attempts[providerRelay] != 1 || f.relays.attempts[secondRelay] != 1 {
+		t.Fatalf("an accepted envelope was re-sealed: %+v %v, deposits %v", view, err, f.relays.attempts)
+	}
+	generations, err := f.carrier.generations(task.Record.RequestHash)
+	if err != nil || generations[0].Envelopes[0].Relays[secondRelay] != relayConflict {
+		t.Fatalf("the conflicting relay was not marked: %v", err)
+	}
+}
+
+const secondRelay = "https://second-relay.example"
+
+// The round's clock is the checkpoint's chain time, never the host clock:
+// it decides the deadline and is the packets' signing time.
+func TestDeliveryRunsOnTheCheckpointsChainTime(t *testing.T) {
+	f, task := deliveryFixture(t)
+	// The host clock is past the deadline; the chain is not.
+	f.clock.advance(time.Hour + time.Minute)
+	task.ChainTime = fxNow.Add(10 * time.Minute)
+	if _, err := f.carrier.DeliverTask(context.Background(), task); err != nil {
+		t.Fatalf("a task inside its deadline by chain time: %v", err)
+	}
+	for _, packet := range openDeposits(t, f, providerRelay) {
+		if packet.CreatedAtUnix != uint64(task.ChainTime.Unix()) {
+			t.Fatalf("a packet signed at %d, not the chain time", packet.CreatedAtUnix)
 		}
-		g.clock.advance(time.Minute)
-		if _, err := g.carrier.DeliverTask(context.Background(), gtask); !errors.Is(err, ErrNoRelayAccepted) ||
-			g.relays.attempts[providerRelay] != 1 {
-			t.Fatalf("%v: an abandoned relay was tried again (%d attempts): %v", refused, g.relays.attempts[providerRelay], err)
+	}
+	generations, err := f.carrier.generations(task.Record.RequestHash)
+	if err != nil || generations[0].CreatedUnix != task.ChainTime.Unix() {
+		t.Fatalf("the generation is not stamped with the chain time: %v", err)
+	}
+	// The chain is at the deadline while the host clock is before it.
+	g, gtask := deliveryFixture(t)
+	gtask.ChainTime = gtask.ResponseDeadline
+	if _, err := g.carrier.DeliverTask(context.Background(), gtask); !errors.Is(err, ErrTaskDeadlinePassed) {
+		t.Fatalf("a task at its deadline by chain time: %v", err)
+	}
+	// A round without the chain time is refused.
+	for _, missing := range []time.Time{{}, time.Unix(0, 0)} {
+		h, htask := deliveryFixture(t)
+		htask.ChainTime = missing
+		if _, err := h.carrier.DeliverTask(context.Background(), htask); err == nil ||
+			!strings.Contains(err.Error(), "chain time") || len(h.relays.deposits[providerRelay]) != 0 {
+			t.Fatalf("a round without the chain time: %v", err)
 		}
+	}
+}
+
+// The fresh envelope is journaled before its first deposit: a round that
+// stops during that deposit leaves the journal holding the bytes it was
+// depositing.
+func TestAResealedEnvelopeIsJournaledBeforeItsDeposit(t *testing.T) {
+	f, task := deliveryFixture(t)
+	f.relays.conflicts = map[string]int{providerRelay: 1}
+	f.relays.crashOn = 2
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("the planted crash did not happen")
+			}
+		}()
+		_, _ = f.carrier.DeliverTask(context.Background(), task)
+	}()
+	generations, err := f.carrier.generations(task.Record.RequestHash)
+	if err != nil || generations[0].Envelopes[0].EnvelopeBase64 != base64.StdEncoding.EncodeToString(f.relays.crashed) {
+		t.Fatalf("the re-sealed envelope was not journaled before its deposit: %v", err)
+	}
+}
+
+// A re-seal uses only the journaled packet and provider key, and refuses
+// a journal whose key does not match its key ID or whose packet is not
+// Base64.
+func TestAResealRefusesATamperedJournal(t *testing.T) {
+	other, err := agentpacketseal.NewPrivateKey(fxProvider, bytes.Repeat([]byte{9}, agentpacketseal.PrivateKeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPublic, err := other.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tamper := range map[string]func(*generationRecord){
+		"another key":    func(g *generationRecord) { g.ProviderPublicKey = base64.StdEncoding.EncodeToString(otherPublic) },
+		"packet not b64": func(g *generationRecord) { g.Envelopes[0].PacketBase64 = "e30=!" },
+	} {
+		f, task := deliveryFixture(t)
+		f.relays.answer = map[string]agentpacketrelay.DepositResult{providerRelay: agentpacketrelay.DepositRetryable}
+		if _, err := f.carrier.DeliverTask(context.Background(), task); !errors.Is(err, ErrNoRelayAccepted) {
+			t.Fatal(err)
+		}
+		path := f.carrier.generationPath(task.Record.RequestHash, 1)
+		var record generationRecord
+		if err := readJSON(path, &record); err != nil {
+			t.Fatal(err)
+		}
+		tamper(&record)
+		if err := writeJSON(path, record, false); err != nil {
+			t.Fatal(err)
+		}
+		delete(f.relays.answer, providerRelay)
+		f.relays.conflicts = map[string]int{providerRelay: 1}
+		later(&task, time.Minute)
+		if _, err := f.carrier.DeliverTask(context.Background(), task); err == nil || errors.Is(err, ErrNoRelayAccepted) ||
+			len(f.relays.deposits[providerRelay]) != 0 {
+			t.Errorf("%s: a tampered journal was re-sealed: %v", name, err)
+		}
+	}
+}
+
+// The task is sealed to a card whose not_after covers the response
+// deadline, even when a newer card does not; only without such a card is
+// the best card valid now used.
+func TestATaskIsSealedToACardCoveringTheDeadline(t *testing.T) {
+	const shortSeed = 2
+	f, task := deliveryFixture(t)
+	f.learn(t, providerCardFor(t, fxProvider, shortSeed, fxNow.Add(-30*time.Minute), time.Hour))
+	if _, err := f.carrier.DeliverTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	covering := providerKey(t)
+	generations, err := f.carrier.generations(task.Record.RequestHash)
+	if err != nil || generations[0].ProviderKeyID != hex.EncodeToString(covering.KeyID[:]) {
+		t.Fatalf("the task was not sealed to the card covering the deadline: %v", err)
+	}
+	// Only the short card is held: it is used.
+	g := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
+	g.learn(t, providerCardFor(t, fxProvider, shortSeed, fxNow.Add(-30*time.Minute), time.Hour))
+	gtask := task
+	gtask.Record.RequestHash = g.record.RequestHash
+	if _, err := g.carrier.DeliverTask(context.Background(), gtask); err != nil {
+		t.Fatalf("no fallback to the card valid now: %v", err)
+	}
+	short, err := agentpacketseal.NewPrivateKey(fxProvider, bytes.Repeat([]byte{shortSeed}, agentpacketseal.PrivateKeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentpacketseal.Open(short, g.relays.deposits[providerRelay][0]); err != nil {
+		t.Fatalf("the fallback envelope does not open with the short card's key: %v", err)
+	}
+}
+
+// An envelope never outlives its card's key retention (not_after + 86,400
+// + 300 s), nor the response deadline, nor 86,100 s after signing.
+func TestAnEnvelopeExpiryIsCappedByTheCardsKeyRetention(t *testing.T) {
+	deadline := fxNow.Add(5 * 24 * time.Hour)
+	notAfter := uint64(fxNow.Add(-2 * time.Hour).Unix())
+	if got := envelopeExpiry(deadline, fxNow, notAfter); got != notAfter+86400+300 {
+		t.Fatalf("expiry %d not capped at the key retention", got)
+	}
+	if got := envelopeExpiry(deadline, fxNow, uint64(fxNow.Unix())); got != uint64(fxNow.Add(MaxPacketLifetime).Unix()) {
+		t.Fatalf("expiry %d not capped at the packet lifetime", got)
+	}
+	near := fxNow.Add(time.Hour)
+	if got := envelopeExpiry(near, fxNow, notAfter); got != uint64(near.Unix()) {
+		t.Fatalf("expiry %d past the response deadline", got)
+	}
+	if got := envelopeExpiry(deadline, fxNow, math.MaxUint64); got != uint64(fxNow.Add(MaxPacketLifetime).Unix()) {
+		t.Fatalf("an overflowing retention bound changed the expiry to %d", got)
+	}
+	if keyRetentionWindow != 86700*time.Second {
+		t.Fatal("keys are retained 86,400 + 300 seconds past not_after")
 	}
 }
 
@@ -238,7 +466,7 @@ func TestOnlyFourGenerationsAreKept(t *testing.T) {
 		if _, err := f.carrier.DeliverTask(context.Background(), task); err != nil {
 			t.Fatal(err)
 		}
-		f.clock.advance(TaskResendInterval)
+		later(&task, TaskResendInterval)
 	}
 	entries, err := os.ReadDir(f.carrier.outboxDir(task.Record.RequestHash))
 	if err != nil || len(entries) != maxGenerations {
@@ -312,6 +540,7 @@ func TestTheDutyRoundDeliversThePendingTask(t *testing.T) {
 	f.agent.config.Delivery = deliverer
 	view := f.paid(t, keyA)
 	f.buyer.responseDeadline = uint64(fxNow.Add(time.Hour).Unix())
+	f.buyer.chainTime = fxNow.Add(-3 * time.Minute).Unix()
 	f.setStatus(serviceactor.StatusPending)
 	out, err := f.agent.RefundNow(context.Background(), view.RequestHash)
 	if err != nil || out.Delivery == nil || out.Delivery.Generation != 1 || out.Sent {
@@ -319,7 +548,8 @@ func TestTheDutyRoundDeliversThePendingTask(t *testing.T) {
 	}
 	task := deliverer.tasks[0]
 	if task.ProviderAgentID != fxProvider || task.Record.RequestHash != view.RequestHash || len(task.Archive) == 0 ||
-		task.ExecutionNonce == "" || !task.ResponseDeadline.Equal(fxNow.Add(time.Hour)) || task.RetentionSeconds != 86400 {
+		task.ExecutionNonce == "" || !task.ResponseDeadline.Equal(fxNow.Add(time.Hour)) || task.RetentionSeconds != 86400 ||
+		!task.ChainTime.Equal(fxNow.Add(-3*time.Minute)) {
 		t.Fatalf("delivery request %+v", task)
 	}
 	deliverer.err = ErrNoRelayAccepted
