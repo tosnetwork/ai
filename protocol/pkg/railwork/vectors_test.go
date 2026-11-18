@@ -484,18 +484,18 @@ func TestVectorFramesSplitJoinAndAssembleExactly(t *testing.T) {
 		if err != nil || !bytes.Equal(joined, raw) {
 			t.Fatalf("%s: join err=%v", message.Name, err)
 		}
-		assembly, err := NewAssembly(document.Binding.BuyerAgentID, reversed[0])
+		assembly, err := NewAssembly(document.Binding.BuyerAgentID, testPacketFields, reversed[0])
 		if err != nil {
 			t.Fatalf("%s: %v", message.Name, err)
 		}
 		complete := len(reversed) == 1
 		for _, frame := range reversed[1:] {
-			if complete, err = assembly.Add(frame); err != nil {
+			if complete, err = assembly.Add(testPacketFields, frame); err != nil {
 				t.Fatalf("%s: %v", message.Name, err)
 			}
 		}
 		// A duplicate delivery of the same bytes changes nothing.
-		if again, dupErr := assembly.Add(reversed[0]); dupErr != nil || !again {
+		if again, dupErr := assembly.Add(testPacketFields, reversed[0]); dupErr != nil || !again {
 			t.Fatalf("%s: duplicate err=%v", message.Name, dupErr)
 		}
 		assembled, err := assembly.Message()
@@ -580,12 +580,12 @@ func TestVectorNegativeJoinsAreRefused(t *testing.T) {
 			t.Errorf("%s (%s): err=%v", item.Name, item.Rule, err)
 		}
 		assemblyErr := func() error {
-			assembly, err := NewAssembly(document.Binding.BuyerAgentID, frames[0])
+			assembly, err := NewAssembly(document.Binding.BuyerAgentID, testPacketFields, frames[0])
 			if err != nil {
 				return err
 			}
 			for _, frame := range frames[1:] {
-				if _, err = assembly.Add(frame); err != nil {
+				if _, err = assembly.Add(testPacketFields, frame); err != nil {
 					return err
 				}
 			}

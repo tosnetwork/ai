@@ -1219,33 +1219,72 @@ func TestAssemblyRefusesAConflictingFrame(t *testing.T) {
 	if err != nil || len(frames) != 1 {
 		t.Fatalf("%d frames err=%v", len(frames), err)
 	}
-	assembly, err := NewAssembly(testBuyer, frames[0])
+	assembly, err := NewAssembly(testBuyer, testPacketFields, frames[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	conflicting := frames[0]
 	conflicting.Data = bytes.Clone(conflicting.Data)
 	conflicting.Data[0] ^= 1
-	if _, err = assembly.Add(conflicting); !errors.Is(err, ErrFrameConflict) {
+	if _, err = assembly.Add(testPacketFields, conflicting); !errors.Is(err, ErrFrameConflict) {
 		t.Fatalf("conflict err=%v", err)
 	}
 	other := frames[0]
 	other.Binding.RequestID++
-	if _, err = assembly.Add(other); !errors.Is(err, ErrJoinInvalid) {
+	if _, err = assembly.Add(testPacketFields, other); !errors.Is(err, ErrJoinInvalid) {
 		t.Fatalf("other message err=%v", err)
 	}
-	corrupt, err := NewAssembly(testBuyer, conflicting)
+	corrupt, err := NewAssembly(testBuyer, testPacketFields, conflicting)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = corrupt.Message(); !errors.Is(err, ErrJoinInvalid) {
 		t.Fatalf("digest mismatch err=%v", err)
 	}
-	if _, err = NewAssembly("not-an-agent", frames[0]); !errors.Is(err, ErrPacketInvalid) {
+	if _, err = NewAssembly("not-an-agent", testPacketFields, frames[0]); !errors.Is(err, ErrPacketInvalid) {
 		t.Fatalf("bad sender err=%v", err)
 	}
 	if _, err = (&Assembly{}).Message(); !errors.Is(err, ErrJoinInvalid) {
 		t.Fatalf("empty assembly err=%v", err)
+	}
+}
+
+// testPacketFields are packet fields naming the test Capability and an
+// Accepted Quote commitment.
+var testPacketFields = PacketFields{CapabilityID: testCap, QuoteCommitment: "tvm-cell-sha256:" + strings.Repeat("0c", 32)}
+
+// An assembly records the packet fields of its first frame: a later frame
+// in packets naming other fields is refused, and the joined message carries
+// the recorded fields.
+func TestAnAssemblyRefusesAFrameInPacketsNamingOtherFields(t *testing.T) {
+	frames, err := SplitMessage(KindResult, Binding{ActorAccount: [32]byte{1}, RequestHash: [32]byte{1}},
+		make([]byte, MaxChunkData+5))
+	if err != nil || len(frames) != 2 {
+		t.Fatalf("%d frames err=%v", len(frames), err)
+	}
+	assembly, err := NewAssembly(testProvider, testPacketFields, frames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, packet := range map[string]PacketFields{
+		"another Capability": {CapabilityID: "cap_" + strings.Repeat("47", 32), QuoteCommitment: testPacketFields.QuoteCommitment},
+		"another Quote":      {CapabilityID: testCap, QuoteCommitment: "tvm-cell-sha256:" + strings.Repeat("0d", 32)},
+		"no fields":          {},
+	} {
+		if _, err = assembly.Add(packet, frames[1]); !errors.Is(err, ErrFrameConflict) {
+			t.Errorf("%s: err=%v", name, err)
+		}
+	}
+	complete, err := assembly.Add(testPacketFields, frames[1])
+	if err != nil || !complete {
+		t.Fatalf("the matching frame: complete %v err=%v", complete, err)
+	}
+	message, err := assembly.Message()
+	if err != nil || message.Packet != testPacketFields || assembly.Packet() != testPacketFields {
+		t.Fatalf("message packet %+v err=%v", message.Packet, err)
+	}
+	if _, err = NewAssembly(testProvider, PacketFields{CapabilityID: testCap}, frames[0]); !errors.Is(err, ErrPacketInvalid) {
+		t.Fatalf("an assembly without a Quote commitment: %v", err)
 	}
 }
 
