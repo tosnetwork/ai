@@ -124,6 +124,29 @@ Requests are single strict JSON objects (unknown fields and trailing data
 refused) of at most 2 MiB, schema `tos.service.mcp-buyer.agent-api.v1`; the
 API is local between binaries of one release and is not a protocol surface.
 
+**The agent trusts nothing the MCP server checked.** The MCP server runs in
+the developer account, which the model controls, so its checks are a
+convenience that gives early, readable errors and nothing more. A process in
+that account can call the socket directly. The agent therefore re-validates
+every client request itself before it acts:
+
+- every identifier, version, bound and enum of the tool inputs (4.1);
+- the source archive: it re-parses the bytes it received under the archive
+  rules of 4.5, including the member-name charset, the entry types, the
+  entry count and the size bound, and computes the source digest itself;
+- the offer-file bytes: strict decoding and the bounds of the offer schema;
+  every fact in them is re-verified against finalized state anyway (4.4);
+- idempotency keys: their syntax and their binding to `quote_id` and source
+  digest (4.5);
+- the `max_unconfirmed` limit and every budget limit (section 6);
+- that a named `request_hash` is a purchase in its own journal and is in a
+  phase the request may act on.
+
+The workspace roots are not among these: the agent receives bytes, not paths,
+and cannot tell which directory they came from. A root confines only what the
+MCP server packs for an honest client; it is no boundary against the model,
+which can pack any file the developer account can read (section 13).
+
 Custody and the peer-credential check are Linux interfaces (`tosctl` is
 built for Linux), so V1 of the adapter runs on Linux.
 
@@ -305,28 +328,39 @@ timestamps zeroed, modes normalized; a symlink, hard link, device or FIFO
 refuses the request (the provider refuses them anyway,
 [`SOFTWARE_WORK_EXECUTION_V1.md`](SOFTWARE_WORK_EXECUTION_V1.md)). A supplied
 tar is checked against the same rules. The archive is at most
-`min(max_request_bytes, 1,048,576)` bytes.
+`min(max_request_bytes, 1,048,576)` bytes and has at most 4,096 entries.
 
-The MCP server sends the archive to the agent. The agent:
+**Member names.** Every member name is 1 to 255 bytes of the safe charset
+`[A-Za-z0-9._+-]` and `/`, with no empty, `.` or `..` segment, no leading
+`/` and no trailing `/` except on a directory entry. A name outside that
+charset (spaces, non-ASCII text, control or bidirectional characters, shell
+or terminal metacharacters) refuses the whole request; it is never renamed or
+escaped into the archive. This keeps every name the confirmer prints (5.2)
+plain text that cannot imitate or hide other output.
 
-1. returns the existing purchase if `idempotency_key` was already used with
+These are the MCP server's checks, made for an honest client. The agent
+makes all of them again on the bytes it receives (2.3). The agent:
+
+1. re-parses the archive under the rules above and the bound of the Quote,
+   and refuses it (`MCP_BUYER_BAD_INPUT`) on any failure;
+2. returns the existing purchase if `idempotency_key` was already used with
    the same `quote_id` and source digest, and refuses it with any other
    (`MCP_BUYER_CONFLICT`);
-2. refuses when the configured number of unconfirmed purchases (default 4) is
+3. refuses when the configured number of unconfirmed purchases (default 4) is
    already open;
-3. draws a fresh non-zero `execution_nonce` and derives `execution_id`
+4. draws a fresh non-zero `execution_nonce` and derives `execution_id`
    (frames 6.2) and `input_digest` (frames 6.1);
-4. runs `ServiceActorBuyer.Prepare`, which re-validates the Quote, re-reads
+5. runs `ServiceActorBuyer.Prepare`, which re-validates the Quote, re-reads
    the offer, builds the Accepted Quote and `request_hash`, and journals the
    call as `prepared` under the budget limits (section 6);
-5. runs the full carriability check of 7.1, now including the task message
+6. runs the full carriability check of 7.1, now including the task message
    for this source; on failure it withdraws the journal record and refuses
    (`MCP_BUYER_NOT_CARRIABLE`);
-6. stores the purchase record (nonce, archive copy, package, cards) durably.
+7. stores the purchase record (nonce, archive copy, package, cards) durably.
 
-Output, the **preview**: every field 5.2 lists for the confirmer, including
-the confirmation code, and `state = awaiting_confirmation`. Prepare pays
-nothing.
+Output, the **preview**: every field 5.2 lists for the confirmer except the
+confirmation code, which only the confirmer shows (5.3), plus the purchase
+reference (5.3) and `state = awaiting_confirmation`. Prepare pays nothing.
 
 ### 4.6 `tos_buyer_request_payment`
 
@@ -335,9 +369,10 @@ Input: `request_hash`, `wait_seconds` (0 to 300, default 120).
 It marks the purchase as presented to the confirmer and then waits up to
 `wait_seconds` for the human's decision, sending MCP progress notifications
 while it waits. When the client declares the elicitation capability, the
-server also sends one elicitation that tells the human the confirmation code
+server also sends one elicitation that tells the human the purchase reference
 and that the purchase must be confirmed in the confirmer; **the elicitation's
-answer is ignored for authority** (5.4).
+answer is ignored for authority** (5.4). It never carries the confirmation
+code.
 
 Output: one of `awaiting_confirmation` (still undecided; call again),
 `declined`, `expired` (the Quote expired or the offer changed before the
@@ -430,28 +465,67 @@ account boundary:
 - the developer account, and so the model, can propose, inspect and withdraw,
   never confirm.
 
+A separate account is not enough on its own. The confirmer is the one place
+where a human's keystrokes become a payment, so a model that can type into
+the confirmer, or read its screen, can pay. The model can do that whenever the
+confirmer's input or display passes through a process of the developer
+account. Examples:
+- `su`, `sudo -u` or `ssh localhost` started from a developer-account shell;
+- a terminal inside the IDE or MCP client;
+- a terminal multiplexer session of the developer (`tmux send-keys`,
+  `capture-pane`);
+- synthetic input on the developer's X11 display (XTEST, `xdotool`);
+- `ptrace` of the terminal emulator.
+
 Deployment requirements, stated in the user guide and checked where possible:
 
 - the developer account MUST NOT be able to act as the custody account (no
   passwordless `sudo`, `su` or shared login to it); the agent cannot check
   this, and the guide says so plainly;
+- the confirmer's terminal input and display MUST NOT pass through any process
+  of the developer account. Acceptable channels:
+  - a separate virtual-console login as the custody account;
+  - a separate seat or graphical session of the custody account;
+  - SSH to the custody account from another device.
+
+  A terminal opened from the developer's desktop session, IDE, multiplexer or
+  shell is not acceptable, whatever account it then switches to;
+- the confirmer refuses to run unless its standard input is a terminal, and
+  unless its controlling terminal is owned by the custody account. A
+  pseudo-terminal that a developer-account terminal emulator, multiplexer or
+  `script` allocated is owned by the developer account, so this refuses the
+  common mistakes. It reads the decision from that terminal only, never from a
+  pipe or file;
 - the agent checks at start that its files are private (2.3);
 - the MCP server refuses to start when `VAULT_URL` is set in its environment,
   when it can read the agent's state directory, or when its effective uid is
   the custody account.
+
+**Residual risk.** The terminal-owner check cannot tell `ssh localhost`, or
+any SSH login to the custody account started from a developer-account
+session, from SSH from another device: in both cases `sshd` allocates a
+terminal owned by the custody account. Only the guide's instruction, never to open the
+confirmer from the developer's own session, covers that case. Section 13
+records it.
 
 A single-account setup is not offered: it would claim a safety it cannot
 deliver (owner decision O1, section 17).
 
 ### 5.2 What the confirmer shows
 
-The human runs `tos-service-buyer confirm` in a terminal logged in as the
-custody account. For each purchase awaiting confirmation it shows, from the
-agent's own re-verified record and never from text the MCP server supplied:
+The human runs `tos-service-buyer confirm` on a channel 5.1 accepts. For each
+purchase awaiting confirmation it shows, from the agent's own re-verified
+record and never from text the MCP server supplied, in two blocks.
+
+The first block is the **provider-supplied text**: the manifest's
+human-readable fields, under a fixed heading saying that this is text from
+the provider, not from TOS or the buyer agent.
+
+The second block holds the **protocol fields**. It comes after the first, and
+a fixed rule line separates the two:
 
 - Capability ID and version, provider Agent, actor address, attestor key ID,
-  manifest digest, and the manifest's human-readable fields marked as
-  provider text;
+  manifest digest;
 - price, storage fee, the 0.2 TOS execution allowance and the total attached,
   in TOS and nanoTOS;
 - the economics of section 8 in words: what is paid on success, what comes
@@ -465,31 +539,89 @@ agent's own re-verified record and never from text the MCP server supplied:
   archive goes to the provider;
 - the budget: this payment against the per-call limit, and the window's
   reserved amount and count before and after;
-- `request_hash`, `terms_hash`, `quote_commitment` and the confirmation code.
+- `request_hash`, `terms_hash`, `quote_commitment`, the purchase reference
+  and, last, the confirmation code.
+
+The destination of every payment is fixed by the contract and the
+configuration: the `call` goes to the actor shown, and refunds go to the buyer
+wallet shown. The confirmer prints both in this block.
+
+**Rendering.** The confirmer treats every string it prints as hostile, even
+protocol fields:
+- it escapes C0 controls (`0x00` to `0x1f`, including newline and tab,
+  except the line breaks it emits itself), `0x7f`, C1 controls (`U+0080` to
+  `U+009F`) and the bidirectional formatting characters (`U+061C`,
+  `U+200E`, `U+200F`, `U+202A` to `U+202E`, `U+2066` to `U+2069`) as
+  visible `\u{...}` escapes;
+- it replaces invalid UTF-8 with `U+FFFD`;
+- it bounds each provider string at 256 characters and the provider block at
+  4,096, marking truncation.
+
+Archive member names are already restricted to the safe charset of 4.5, and
+the agent refuses any other, so none of them needs escaping. The rendering
+rule still applies to them.
 
 ### 5.3 Confirmation code and decision
 
+When a purchase is first presented to the confirmer, the agent draws a fresh
+128-bit random `confirmation_nonce`, stores it in the custody-owned purchase
+record, and derives
+
 ```text
-confirmation_digest = SHA-256("tos.service.mcp-buyer.confirmation.v1" || 0x00 ||
-    network_id || 0x00 || buyer_wallet || 0x00 || actor || 0x00 ||
-    request_hash || 0x00 || terms_hash || 0x00 ||
+confirmation_digest = SHA-256("tos.service.mcp-buyer.confirmation.v2" || 0x00 ||
+    confirmation_nonce || network_id || 0x00 || buyer_wallet || 0x00 ||
+    actor || 0x00 || request_hash || 0x00 || terms_hash || 0x00 ||
     quote_commitment || 0x00 || payment_nanotos || 0x00 || source_digest)
 confirmation_code   = the first 8 bytes of confirmation_digest as 16 lowercase
                       hex digits, in four groups of four joined by "-"
 ```
 
-Each field is its text form as the journal and purchase record store it. The
-preview of 4.5 shows the same code, so the human can tell that the purchase
-discussed in the MCP client is the one in front of them. The human confirms by
-typing the code; any other input neither confirms nor declines. The confirmer
-can also decline a purchase, which withdraws it (4.7).
+`confirmation_nonce` is its 16 raw bytes; every other field is its text form
+as the journal and purchase record store it.
 
-The code is not a secret: it binds the decision to exact terms and prevents a
-reflexive keypress. Authority comes from the uid of the confirmer's
-connection, not from knowing the code.
+**The developer account never sees the code.** The code is shown only on the
+confirmer's terminal. No tool result, elicitation, log the MCP server can read
+or agent-socket answer to the client uid contains the code or the nonce. The
+nonce makes the code unpredictable from the public fields.
 
-On `decide confirm` the agent recomputes the code from its records, repeats
-the carriability check (7.1), and runs `ServiceActorBuyer.Call`, which
+Hiding the code costs nothing: the human needs it only where they type it,
+which is the confirmer. To match the purchase discussed in the MCP client with
+the one in front of them, the human uses the **purchase reference** instead.
+It is the first 16 hex digits of `request_hash` in four groups of four, shown
+in the preview, the elicitation and the confirmer. It identifies the purchase
+and authorizes nothing.
+
+Keeping the code out of the developer account defeats an attacker who can
+inject keystrokes into the confirmer but cannot read its screen. Such an
+attacker cannot know what to type, and a wrong code confirms nothing. The
+code does not protect against an attacker who can also read the confirmer's
+display; the channel requirement of 5.1 does.
+
+**Decision.** The confirmer sends `decide` with:
+- `request_hash`;
+- `decision`, either `confirm` or `decline`;
+- for `confirm`, the `code` exactly as the human typed it, normalized only by
+  removing the `-` separators and lowercasing.
+
+The agent accepts `decide` only from the custody uid (2.3), and only for a
+purchase in `prepared` that has been presented to the confirmer. It then:
+
+1. recomputes `confirmation_code` from the stored nonce and the fields of its
+   own journal and purchase records, never from anything in the request;
+2. compares it with the typed code in constant time;
+3. on a mismatch, confirms nothing, counts the failure, and after 3 failures
+   for one purchase withdraws the purchase (4.7). A fresh `prepare` is then
+   needed.
+
+A `decline` withdraws the purchase (4.7). Any other input to the confirmer
+neither confirms nor declines.
+
+If the human does not decide within 10 minutes, the agent discards the nonce.
+The next presentation draws a new nonce and so shows a new code, which keeps
+an observed code from staying valid.
+
+On a matching code the agent repeats the carriability check (7.1) and runs
+`ServiceActorBuyer.Call`, which
 re-reads the offer at a fresh checkpoint, re-checks Quote expiry and the
 budget under the journal lock (`BeginSend`), preflights custody, and hands the
 call to `tosctl` with the quoted `--expected-terms-hash`. Any change since the
@@ -503,7 +635,7 @@ Its answer reaches the server through the client process, which runs in the
 developer account; the agent cannot tell an answer the human gave from one a
 process in that account wrote to the agent socket. An elicitation answer is
 therefore never a payment authorization. V1 uses elicitation only to show the
-human the confirmation code and point to the confirmer. If a later version
+human the purchase reference and point to the confirmer. If a later version
 accepts an in-client confirmation, it needs an authenticator the developer
 account cannot reach, for example a hardware key verified by the agent, and a
 new version of this section.
@@ -599,11 +731,26 @@ From `SERVICE_ACTOR_SETTLEMENT_DESIGN.md` section 5.2 and
 | `call` refused (terms changed, inactive, capacity, rate limit) | network fees | the attached value less fees |
 | responded | price + storage fee + fees | the unused allowance |
 | no response, refunded in the window | storage fee + fees of `call`, `expire` and `claim_refund` | price |
-| no response, not refunded in the window, then swept | storage fee + fees | price, from whoever sweeps; the cleanup bounty goes to the sweeper (the buyer, when its agent sweeps) |
+| no response, not refunded in the window, swept by a third party | storage fee + fees of `call` | price; the cleanup bounty goes to the sweeper |
+| no response, not refunded in the window, swept by the buyer's agent | storage fee − cleanup bounty + fees of `call` and the sweep | price + cleanup bounty |
+
+The cleanup bounty is part of the request's own storage fee: the sweep
+credits `storage_fee - cleanup_bounty` to the owner and pays
+`cleanup_bounty` to the sweeper (`SERVICE_ACTOR_TVM_V1.md` 7.5). A buyer
+that sweeps its own lapsed request therefore recovers the bounty, which
+`claim_refund` never returns. For the buyer, letting the refund lapse and
+sweeping it afterwards pays at least as well as `expire` plus `claim_refund`:
+one transaction instead of two, and the bounty back. The cost is that the
+price comes back up to `refund_claim_window` later, and the request holds
+provider capacity until then. The agent still claims promptly by default
+(11.2): that frees capacity sooner, and the price is never lost either way.
+The incentive is recorded as a Service Actor follow-up in
+`SERVICE_ACTOR_SETTLEMENT_DESIGN.md` section 5.2.
 
 The preview also states:
 
-- the storage fee is never refunded, even when the provider never answers;
+- the storage fee is not refunded, even when the provider never answers,
+  except the cleanup bounty when the buyer sweeps its own lapsed request;
 - a refund takes two transactions inside the refund window, and the agent
   must be online during it (section 11);
 - `claim_refund` attaches at least 0.2 TOS whose unused part returns;
@@ -757,14 +904,17 @@ returned by tools that were asked to act. The frames' refusal labels (frames
 | Threat | Mitigation | Residual |
 |---|---|---|
 | The model spends on its own (misaligned, or steered by injected text in the repository, a web page or provider output) | no custody in the developer account; payment only on a custody-uid `decide` (5.1) | a human who confirms without reading |
-| The model exfiltrates secrets by packing them into a purchase for a provider it controls | workspace roots; the full member listing and sensitive-name highlighting in the confirmer; optional provider allow-list | the human approves a bad listing |
+| The model types into the confirmer or reads its screen (`su`/`sudo -u`/`ssh localhost` from its shell, an IDE terminal, `tmux send-keys`, XTEST or `xdotool`, `ptrace` of the terminal emulator) | channel MUST of 5.1; the confirmer refuses non-terminal input and a controlling terminal not owned by the custody account; the confirmation code is random per presentation and never reaches the developer account (5.3) | `ssh localhost`, or any SSH login to the custody account started from the developer's session, gets a custody-owned terminal and passes the check; only the guide's instruction covers it |
+| The model exfiltrates secrets by packing them into a purchase for a provider it controls | the full member listing and sensitive-name highlighting in the confirmer; optional provider allow-list. Workspace roots are no mitigation here: the model can pack any readable file itself (2.3) | the human approves a bad listing |
+| Provider text or member names forge or hide confirmer output (terminal escapes, bidirectional reordering, fake protocol lines) | safe member-name charset enforced by the agent (4.5); C0, C1 and bidi controls escaped; strings bounded; protocol fields printed after the provider block behind a fixed separator (5.2) | a human misled by plain but deceptive provider prose |
+| The model calls the agent socket directly, bypassing the MCP server's checks | the agent re-validates every client request (2.3); `decide` only from the custody uid | none beyond those checks |
 | The model exhausts the budget or the human's attention by preparing | `max_unconfirmed`; prepared records expire with their Quote; `withdraw` | nuisance only |
 | Other code in the developer account (malware) | same position as the model: it cannot reach custody | it can read the source before it is packed |
 | The custody account is compromised | out of scope; equivalent to losing the wallet | loss bounded by the wallet balance |
 | A fake listing, manifest or Quote from a gateway or offer file | discovery and Quote re-verified at a finalized checkpoint; manifest bytes checked against the finalized digest; Quote built locally | a wasted search |
 | A provider changes terms between preview and send | `expected_terms_hash` pins the quoted terms; the call fails with 1926 and costs only fees | fees |
 | A provider takes payment with a useless but attested result | the Receipt binds digests and `exit_code`; the human is told what a Receipt does not prove | inherent to the rail: no on-chain remedy (settlement design section 4) |
-| A provider never answers or silently refuses the task | timeout refund by the agent (section 11) | storage fee and fees lost; no prompt refusal signal (frames Q7) |
+| A provider never answers or silently refuses the task | timeout refund by the agent (section 11) | storage fee and fees lost (less the bounty if the buyer sweeps, section 8); no prompt refusal signal (frames Q7) |
 | A provider sends a result that fails acceptance | discarded; redeliveries still accepted (frames 7.2) | delay |
 | Injection through result text | section 9 | the model may still be misled; no authority follows |
 | A relay drops, delays, replays or reorders envelopes | at-least-once delivery, redelivery, several relays, durable inbox, packet and frame checks | delay; mailbox IDs, sizes and timing visible to the relay |
@@ -817,9 +967,11 @@ refusals, crash recovery and the confirmation boundary:
   buyer wallet) and sweep senders over the pinned `tosctl`;
 - a buyer agent package in `protocol/` (purchase records, relay carrier, the
   buyer state machine of frames 11.1, the socket API with peer-credential
-  checks, the confirmation code);
+  checks, full re-validation of client requests, the random confirmation code
+  and `decide`);
 - an MCP package and `protocol/cmd/tos-service-buyer-mcp` on go-sdk v1.7.0;
-- `tos-service-buyer` subcommands `init`, `agent`, `confirm` and `evidence`;
+- `tos-service-buyer` subcommands `init`, `agent`, `confirm` (with the
+  terminal checks of 5.1 and the rendering rules of 5.2) and `evidence`;
 - the user guide, written as the Service Actor rewrite of
   [`GATE_E_BUYER_ONBOARDING.md`](GATE_E_BUYER_ONBOARDING.md).
 
@@ -851,11 +1003,18 @@ Decided by the owner on 2026-11-18:
 - **O7. Pilot discovery: offer file.** Until a public HTTPS gateway exists,
   the pilot buyer discovers the provider through an offer file the provider
   hands over (4.4); gateway search (4.3) stays optional.
-
-Open:
-
-- **O4. Self-sweep economics.** A buyer whose request lapses gets the price
-  and the cleanup bounty by sweeping it itself, which is more than
-  `claim_refund` returns. A rational buyer may therefore let refunds lapse and
-  hold provider capacity longer. The agent claims promptly by default. Whether
-  this is a Service Actor economic issue is under investigation.
+- **O4. Self-sweep economics: documented, unchanged in V1.**
+  - **Finding.** The cleanup bounty comes out of the buyer's own storage fee.
+    For a request that is not answered, sweeping it after it lapses
+    therefore pays the buyer at least as well as `expire` plus
+    `claim_refund`. This is not a safety defect: the price is never lost. It
+    is an incentive that runs against the intent of D4 and settlement design
+    section 5.2.
+  - **Decision.**
+    - Section 8 and the preview say accurately that the storage fee is not
+      refunded, except the cleanup bounty when the buyer sweeps its own
+      lapsed request.
+    - The agent keeps claiming promptly, which frees provider capacity.
+    - A Service Actor V2 follow-up is recorded in
+      `SERVICE_ACTOR_SETTLEMENT_DESIGN.md` section 5.2: `claim_refund` also
+      pays `cleanup_bounty` to the claimer.

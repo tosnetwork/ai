@@ -396,9 +396,26 @@ Terminal states are only distinguishable from the transaction history.
 - After `refund_claim_deadline` a sweep pays the price to the **caller** and
   the bounty to the sweeper, and credits `storage_fee - cleanup_bounty` to the
   owner (D3, SAP:868-878). A buyer offline for the whole window still gets the
-  price back, from whoever sweeps; the storage fee is not refunded.
+  price back, from whoever sweeps; the storage fee is not refunded, except
+  the cleanup bounty when the buyer sweeps its own lapsed request.
 - `claim_refund` sends to any destination (SA:669); a failed delivery is not
   restored (SA:743-747, SBX:1307).
+
+**Incentive note (follow-up for Service Actor V2).** The cleanup bounty is
+part of the request's own storage fee. Take a request the provider did not
+answer. If the caller sweeps it itself after `refund_claim_deadline`, it gets
+`price + cleanup_bounty` from one transaction. `expire` plus `claim_refund`
+returns only `price`, from two transactions.
+
+So, for the buyer, letting the refund lapse and sweeping it weakly dominates
+claiming in the window. This is not a safety defect: the price is never lost
+either way. It does run against the intent of D4 and of this section. A
+rational buyer is paid to hold provider capacity until the deadline.
+
+Proposed V2 change: `claim_refund` also pays `cleanup_bounty` to the claimer,
+so that claiming promptly is never worse than sweeping. The V1 contract is
+unchanged. Buyer tooling documents the incentive and claims promptly anyway
+([`MCP_BUYER_ADAPTER_V1.md`](MCP_BUYER_ADAPTER_V1.md) section 8).
 
 ### 5.3 Failure cases
 
