@@ -126,6 +126,9 @@ type Carrier struct {
 	poll    map[string]*relayPoll
 	settled *envelopeMemory
 	refused *envelopeMemory
+	// deferred remembers envelopes a full inbox could not take, so each
+	// poll does not download and open them again until InboxFullRetry.
+	deferred *envelopeMemory
 }
 
 // relayKeyRecord is one relay key: its seed and the buyer card for it.
@@ -195,7 +198,8 @@ func NewCarrier(config CarrierConfig) (*Carrier, error) {
 	}
 	return &Carrier{config: config, verified: map[string]map[string]buyersdk.VerifiedProviderCard{},
 		answered: map[string]time.Time{}, poll: map[string]*relayPoll{},
-		settled: newEnvelopeMemory(MaxEnvelopeMemory), refused: newEnvelopeMemory(MaxEnvelopeMemory)}, nil
+		settled: newEnvelopeMemory(MaxEnvelopeMemory), refused: newEnvelopeMemory(MaxEnvelopeMemory),
+		deferred: newEnvelopeMemory(MaxEnvelopeMemory)}, nil
 }
 
 func (c *Carrier) keyDir() string  { return filepath.Join(c.config.StateDir, "relay-keys") }

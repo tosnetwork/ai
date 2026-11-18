@@ -186,11 +186,12 @@ func TestTheAgentConfigurationIsReadStrictly(t *testing.T) {
 		"a wallet name with a space": func(c map[string]any) {
 			c["tosctl"].(map[string]any)["wallet"] = "buyer wallet"
 		},
-		"no controller key id":    func(c map[string]any) { delete(c, "packet_controller_key_id") },
-		"no budget window":        func(c map[string]any) { c["budget"].(map[string]any)["window_seconds"] = 0 },
-		"a duty interval over 1m": func(c map[string]any) { c["budget"].(map[string]any)["duty_interval_seconds"] = 61 },
-		"no network":              func(c map[string]any) { delete(c, "network") },
-		"no buyer agent":          func(c map[string]any) { delete(c, "buyer_agent_id") },
+		"no controller key id":               func(c map[string]any) { delete(c, "packet_controller_key_id") },
+		"no budget window":                   func(c map[string]any) { c["budget"].(map[string]any)["window_seconds"] = 0 },
+		"a duty interval over 1m":            func(c map[string]any) { c["budget"].(map[string]any)["duty_interval_seconds"] = 61 },
+		"no network":                         func(c map[string]any) { delete(c, "network") },
+		"no buyer agent":                     func(c map[string]any) { delete(c, "buyer_agent_id") },
+		"an https relay without a pinned CA": func(c map[string]any) { delete(c, "relay_ca_file") },
 	} {
 		value := validAgentConfig()
 		edit(value)

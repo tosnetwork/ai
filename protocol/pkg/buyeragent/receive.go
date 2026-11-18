@@ -47,6 +47,9 @@ const (
 	// unacknowledged at the relay, and taken on a later pass once the inbox
 	// has room.
 	MaxOpenMessages = 8
+	// InboxFullRetry is how long an envelope a full inbox refused waits
+	// before it is downloaded and opened again.
+	InboxFullRetry = 5 * time.Minute
 )
 
 // InboundPurchase is what admits a frame to a purchase's inbox: the
@@ -267,6 +270,11 @@ func (c *Carrier) receiveEnvelope(ctx context.Context, client RelayClient, relay
 	if _, refused := c.refused.get(servedHere, now); refused {
 		return nil
 	}
+	if _, deferred := c.deferred.get(servedHere, now); deferred {
+		// A full inbox could not take it on a recent pass; it waits at the
+		// relay, unopened, until InboxFullRetry has passed.
+		return nil
+	}
 	key, ok := held[entry.RecipientKeyID]
 	if !ok {
 		// A key never issued or already destroyed (relay 6.5).
@@ -289,6 +297,13 @@ func (c *Carrier) receiveEnvelope(ctx context.Context, client RelayClient, relay
 		return nil
 	}
 	if err := c.admitPacket(ctx, opened, lookup); err != nil {
+		if errors.Is(err, errInboxFull) {
+			retry := now.Add(InboxFullRetry)
+			if retry.After(forget) {
+				retry = forget
+			}
+			c.deferred.put(servedHere, [agentpacketseal.AckSecretSize]byte{}, retry, now)
+		}
 		if !isPermanent(err) {
 			return err
 		}
