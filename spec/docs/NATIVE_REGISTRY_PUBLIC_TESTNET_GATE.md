@@ -124,16 +124,20 @@ outputs are under
   a new controller after a 120 s policy timelock. A Capability was registered,
   version v2 was added and v1 revoked. The Capability was transferred to B
   with B's acceptance. Then the Capability and Agent A were revoked.
-- Five refusal controls were each refused with their exact exit code and left
+- Four refusal controls were each refused with their exact exit code and left
   canonical state unchanged: 2209 (threshold), 2212 (completion before the
-  timelock), 2211 (duplicate version), 2210 (mutation by the former owner) and
-  2203 (a Capability action in the wrong envelope, recorded as a runner
-  defect and resent correctly).
+  timelock), 2211 (duplicate version) and 2210 (mutation by the former owner).
+- One runner defect is recorded separately. The first send of the v2 addition
+  carried the Capability action in the `op::submit` envelope instead of the
+  owner Agent's `op::authorize_capability` envelope. Its aborted transaction
+  (2203) and the bounce of its value show that state did not change. The same
+  signed action was then resent in the correct envelope.
 - Every step was resolved by `native-gate-c-check` against three
   validator-backed endpoints with quorum two.
 
-**Verdict: lifecycle passed under the initial public-testnet profile; owner
-designation pending.** All validators are run by one project operator. The
+**Verdict: the lifecycle passed under the initial public-testnet profile. It
+does not qualify as Gate C acceptance until the owner designates the network,
+and the record states `qualifies_as_public_testnet_gate_c: false`.** All validators are run by one project operator. The
 endpoints are validator loopback JSON-RPC listeners reached through SSH
 forwards. The independent security review of release `d3bb66d0` remains open.
 Independent operators, public HTTPS and Internet reachability remain Gate F/G

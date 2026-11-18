@@ -4,7 +4,8 @@
   "owner_designation": "pending",
   "protocol": "tos_service_v1",
   "acceptance_profile": "operator-designated-initial-public-testnet",
-  "qualifies_as_public_testnet_gate_c": true,
+  "qualifies_as_public_testnet_gate_c": false,
+  "qualification_note": "conditional on owner designation: the lifecycle passed, but the epoch-7 network has not yet been designated as the initial public test network for Gate C; a designation is recorded in its own later change",
   "operator_independence": false,
   "public_internet_reachability": false,
   "known_limitations": [
@@ -60,7 +61,13 @@
     "tos_service_wallet_sha256": "c191a00e52fca256465fe6e25221f11b1cdd21b31493d56ebe50384275a4d8e0",
     "native_gate_c_check_sha256": "68747eaf6e0b9f0b0cd31e164518808a2e23c09039bdf94a210d9554fa76378c",
     "body_helper_sha256": "1f18cfd94293ebc2b9133c632effc4d18cc9c9f54b844abbf82a47c75960ca57",
-    "body_helper_source": "tools/gatec-body/main.go (built against the pinned ai commit; nativecore.BuildAction with MessageBody for Agent actions and AgentAuthorizationBody for Capability actions)",
+    "body_helper_source": "tools/gatec-body/main.go (sha256 6471a88a2353665bc5e202e8963c02361ab6d121664e01d1317371579cd2b3d1); nativecore.BuildAction with MessageBody for Agent actions and AgentAuthorizationBody for Capability actions",
+    "body_helper_build": {
+      "module_files": "tools/go.mod (sha256 77fe93421a0d5dc51da772ec7ed8fa781dafa4478adda6e2dcde4849221fd098) and tools/go.sum (sha256 8d857ce2a8bda1fa8fe015b651dd1a9e72adf007bb47c4ff628bb7cf331e7c20)",
+      "ai_checkout": "a detached ai checkout of the pinned ai commit at /tos/gatec-e7/ai-df3e033f; go.mod replaces github.com/tosnetwork/ai with that path, and the path is part of the binary's embedded build info, so the same path is needed for the same digest",
+      "command": "GOWORK=off GOTOOLCHAIN=go1.26.11 GOFLAGS=-p=8 GOPROXY=off CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -o gatec-body ./gatec-body (run in the directory holding tools/go.mod)",
+      "reproduced": "rebuilt from these three files in a fresh directory: same sha256 1f18cfd9\u2026"
+    },
     "body_helper_first_build_sha256": "4328307c793f311eb375c9d88456ccb59a18266e8815825c8bcfe9fbb4c523dc",
     "lifecycle_runner": "operator script over tos-ops testnet/scripts/service-public-cases.py (sha256 0b48b5dce0b1c6da883a8643f7db274cf6e7c7ab007c9ae38a38c9f2732b1daa)"
   },
@@ -591,7 +598,7 @@
       "wallet_seqno": 9,
       "refund": null,
       "forward_message_hash": null,
-      "note": "first send of the v2 addition: the helper wrapped the Capability action in the op::submit envelope (0x4e560001); the owner Agent refused it with 2203 (bad_action) and bounced the value, with Agent and Capability state unchanged. Fixed by using the owner Agent's op::authorize_capability envelope (0x4e560002), the one tosctl uses; the same signed action then settled as add-version-r2"
+      "note": "runner defect, not a refusal control. First send of the v2 addition: the helper wrapped the Capability action in the op::submit envelope (0x4e560001); the owner Agent refused it with 2203 (bad_action) and bounced the value, with Agent and Capability state unchanged. Fixed by using the owner Agent's op::authorize_capability envelope (0x4e560002), the one tosctl uses; the same signed action then settled as add-version-r2"
     },
     {
       "name": "add-version-r2",
@@ -1025,6 +1032,7 @@
     "envelope_opcode": "0x4e560002",
     "equal": true
   },
+  "deployed_code_serialization": "the deployed code BOC that the endpoints return (sha256 a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a, 4,139 bytes) and the release BOC (sha256 dcf41afa\u2026, 4,143 bytes) are two serializations of the same cell tree: both decode to TVM code hash d3bb66d0\u2026, which is what the contract and the resolver bind",
   "code_verification": {
     "first-agent": "sha256:fdab11c14b26abd82f088f7243da48ed4ee8eb018ebde7a47028348b047552a6",
     "final": "sha256:c4b3d256aab634e7320912da6423eb04e7b10c9f5558f7e2901f4a0a9c92f442"
