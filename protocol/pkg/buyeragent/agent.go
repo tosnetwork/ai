@@ -30,6 +30,8 @@ type Buyer interface {
 		executionID, inputDigest [32]byte) (buyersdk.CallRecord, error)
 	Call(ctx context.Context, requestHash string) (buyersdk.CallRecord, error)
 	Withdraw(requestHash string) (buyersdk.CallRecord, error)
+	Resolve(ctx context.Context, requestHash string) (*buyersdk.RequestReport, error)
+	SendLifecycle(ctx context.Context, requestHash, operation string) (buyersdk.CallRecord, error)
 	Journal() *buyersdk.ServiceActorJournal
 	Limits() buyersdk.ServiceActorLimits
 }
@@ -53,8 +55,11 @@ type Config struct {
 	Network      *nativev1.NetworkDomain
 	Buyer        Buyer
 	Carriage     CarriageChecker
-	Now          func() time.Time
-	Random       func([]byte) error
+	// MaxLifecycleSends bounds the expire, claim_refund and sweep sends in
+	// one budget window. Zero means 2 * MaxCalls + 8 (section 6).
+	MaxLifecycleSends int
+	Now               func() time.Time
+	Random            func([]byte) error
 }
 
 // Agent is the custody-side core. Its methods are what the socket server
@@ -65,6 +70,9 @@ type Agent struct {
 	release func()
 	mutex   sync.Mutex
 	changed chan struct{}
+	// duties serializes the refund duties, so the background loop and a
+	// client's refund request never send the same operation twice.
+	duties sync.Mutex
 }
 
 // Open checks the state directory, takes the single-instance lock and
@@ -84,6 +92,12 @@ func Open(config Config) (*Agent, error) {
 	limits := config.Buyer.Limits()
 	if !limits.Valid() || limits.MaxPrepared == 0 {
 		return nil, errors.New("the buyer limits must be valid and bound the prepared calls")
+	}
+	if config.MaxLifecycleSends == 0 {
+		config.MaxLifecycleSends = 2*limits.MaxCalls + 8
+	}
+	if config.MaxLifecycleSends < 0 {
+		return nil, errors.New("the lifecycle send bound must not be negative")
 	}
 	if config.Now == nil {
 		config.Now = time.Now

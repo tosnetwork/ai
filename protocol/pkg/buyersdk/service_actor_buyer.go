@@ -67,10 +67,13 @@ type ServiceActorBuyerConfig struct {
 	ActorCodeHash string
 	BuyerWallet   string
 	Sender        ServiceActorSender
-	Journal       *ServiceActorJournal
-	Limits        ServiceActorLimits
-	Now           func() time.Time
-	Random        func([]byte) error
+	// Lifecycle sends expire, claim_refund and sweep; nil leaves the buyer
+	// without refund duties.
+	Lifecycle ServiceActorLifecycleSender
+	Journal   *ServiceActorJournal
+	Limits    ServiceActorLimits
+	Now       func() time.Time
+	Random    func([]byte) error
 }
 
 // ServiceActorBuyer runs discover -> verify -> call -> resolve.

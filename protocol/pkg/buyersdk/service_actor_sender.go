@@ -143,21 +143,8 @@ func (s *TOSCTLServiceActorSender) Preflight(ctx context.Context, intent Service
 	if err != nil {
 		return err
 	}
-	endpoints, err := effectiveChainEndpoints(s.runner.config)
-	if err != nil {
+	if err := s.checkSubmissionEndpoints(ctx); err != nil {
 		return err
-	}
-	allowed := map[string]bool{}
-	for _, endpoint := range s.endpoints.Endpoints() {
-		allowed[endpoint] = true
-	}
-	for _, endpoint := range endpoints {
-		if !allowed[endpoint] {
-			return fmt.Errorf("tosctl would submit through %s, which is not a verified endpoint", endpoint)
-		}
-		if err := s.endpoints.CheckEndpointGenesis(ctx, endpoint); err != nil {
-			return fmt.Errorf("tosctl endpoint %s is not on the verified network: %w", endpoint, err)
-		}
 	}
 	body := nativecore.BuildServiceActorCallBody(intent.QueryID, intent.RequestHash, intent.ExpectedTermsHash)
 	bodyBOC := base64.StdEncoding.EncodeToString(body.ToBOCWithOptions(cell.BOCSerializeOptions{}))
