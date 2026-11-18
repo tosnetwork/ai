@@ -20,16 +20,20 @@ type Agent interface {
 
 // Config wires the tools.
 type Config struct {
-	Agent  Agent
-	Roots  Roots
-	Random func([]byte) error
+	Agent Agent
+	Roots Roots
+	// ResultsDir is where tos_buyer_result writes result files, resolved
+	// by NewResultsDir; empty refuses that tool.
+	ResultsDir string
+	Random     func([]byte) error
 }
 
 // Tools are the MCP buyer tools this server registers.
 type Tools struct {
-	agent  Agent
-	roots  Roots
-	random func([]byte) error
+	agent   Agent
+	roots   Roots
+	results string
+	random  func([]byte) error
 }
 
 // NewTools refuses an incomplete configuration.
@@ -40,7 +44,7 @@ func NewTools(config Config) (*Tools, error) {
 	if config.Random == nil {
 		config.Random = func(value []byte) error { _, err := rand.Read(value); return err }
 	}
-	return &Tools{agent: config.Agent, roots: config.Roots, random: config.Random}, nil
+	return &Tools{agent: config.Agent, roots: config.Roots, results: config.ResultsDir, random: config.Random}, nil
 }
 
 // untrustedNote ends every description of a tool whose result can carry
@@ -94,6 +98,13 @@ func (t *Tools) Register(server *mcp.Server) {
 			"the step spends only network fees." + untrustedNote,
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: true, DestructiveHint: boolPointer(false)},
 	}, t.refund)
+	mcp.AddTool(server, &mcp.Tool{Name: ToolResult, Title: "Get a TOS purchase's accepted result",
+		Description: "Returns the result the buyer agent accepted after checking its Receipt against the finalized " +
+			"response hash and the purchase. It writes receipt.boc, artifact.tar, output.log and report.json under the " +
+			"results directory and shows the start of output.log and report.json. Before a result is accepted it " +
+			"returns MCP_BUYER_RESULT_NOT_READY with the purchase's status." + untrustedNote,
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+	}, t.result)
 }
 
 // RefundResult is the structured content of tos_buyer_refund.
