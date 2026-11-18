@@ -631,6 +631,10 @@ func TestConfigurationMustBeStated(t *testing.T) {
 		},
 		"fast sweep":      func(c *Config) { c.SweepIntervalSeconds = 0; c.SweepIntervalSeconds = 0 },
 		"short retention": func(c *Config) { c.RetentionSeconds = 60 },
+		"slow sweep":      func(c *Config) { c.SweepIntervalSeconds = uint64(MaxSweepInterval/time.Second) + 1 },
+		"overflowing sweep": func(c *Config) {
+			c.SweepIntervalSeconds = ^uint64(0)
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -653,6 +657,11 @@ func TestConfigurationMustBeStated(t *testing.T) {
 	}
 	if err := base.Validate(); err != nil {
 		t.Fatalf("a complete configuration was refused: %v", err)
+	}
+	ceiling := base
+	ceiling.SweepIntervalSeconds = uint64(MaxSweepInterval / time.Second)
+	if err := ceiling.Validate(); err != nil {
+		t.Fatalf("a sweep interval at its ceiling was refused: %v", err)
 	}
 	https := testConfig(t)
 	enableDiscovery(&https)
