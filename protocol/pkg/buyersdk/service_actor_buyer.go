@@ -333,6 +333,20 @@ func (b *ServiceActorBuyer) Call(ctx context.Context, requestHash string) (CallR
 	// is cancelled and recorded as ambiguous.
 	sendContext, cancel := context.WithDeadline(ctx, time.Unix(int64(record.ExpiresAtUnix), 0))
 	defer cancel()
+	// A panic while custody holds the call leaves it possibly submitted. A
+	// process that recovers the panic keeps running, so the record is
+	// marked ambiguous here, exactly as a restart would, and the panic goes
+	// on. Without this the record would stay in sending: never resolved,
+	// its budget held, until a restart.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			_, _ = b.config.Journal.Transition(requestHash, []CallPhase{PhaseSending}, func(r *CallRecord) error {
+				r.Phase, r.UpdatedUnix = PhaseAmbiguous, b.config.Now().Unix()
+				return nil
+			})
+			panic(recovered)
+		}
+	}()
 	sendErr := b.config.Sender.SendCall(sendContext, intent)
 	next := PhaseSubmitted
 	switch {

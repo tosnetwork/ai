@@ -7,12 +7,16 @@ confirmation code and its lifetime, the peer-credential role table, the
 deployment checks and the prepared-call cap. A mutant is applied through
 `go test -overlay`, so the working tree is never modified.
 
-A mutant is caught only when its named test fails. That is when the run
-reports `--- FAIL: <test>`, or when the run, restricted to that one test,
-panics: a panic in a server goroutine ends the test binary without a
-per-test line. A mutant whose text does not occur exactly once, or that does
-not build, is a script error, not a catch. The unmutated packages must pass
-first.
+A mutant is caught only when its named test reports `--- FAIL: <test>`.
+These are script errors, not catches:
+- a failed run without that line (a panic outside the test's goroutine, a
+  timeout, an init failure);
+- a mutant whose text does not occur exactly once;
+- a mutant that does not build.
+
+A test whose check guards a panic therefore runs the guarded code on its own
+goroutine, where a panic is reported as the test's failure. The unmutated
+packages must pass first.
 
 A check with no mutant must be redundant, and the script proves it rather
 than asserting it. Each entry of REDUNDANT deletes one such check, and the
@@ -64,7 +68,12 @@ MUTANTS = [
     ("handler-recover", AGENT + "server.go",
      "\t\tif recovered := recover(); recovered != nil {\n",
      "\t\tif recovered := any(nil); recovered != nil {\n",
-     "TestAPanicInARequestFailsOnlyThatConnection"),
+     "TestTheHandlerTurnsAPanicIntoAnInternalError"),
+    ("send-panic-marks-ambiguous", SDK + "service_actor_buyer.go",
+     "\t\t\t_, _ = b.config.Journal.Transition(requestHash, []CallPhase{PhaseSending}, func(r *CallRecord) error {\n"
+     "\t\t\t\tr.Phase, r.UpdatedUnix = PhaseAmbiguous, b.config.Now().Unix()\n\t\t\t\treturn nil\n\t\t\t})\n",
+     "",
+     "TestAPanicDuringTheSendLeavesTheCallAmbiguousAndResolvable"),
     ("no-regular-file", AGENT + "archive.go",
      "if regular == 0 {",
      "if false {",
@@ -421,8 +430,14 @@ def main():
                 errors.append(f"{name}: the mutant does not build:\n{build.stdout}{build.stderr}")
                 continue
             result = run(["go", "test", "-count=1", f"-overlay={overlay}", "-run", f"^{test}$", package], env)
-            output = result.stdout + result.stderr
-            caught = result.returncode != 0 and (f"--- FAIL: {test} " in result.stdout or "panic: " in output)
+            if result.returncode != 0 and f"--- FAIL: {test} " not in result.stdout:
+                # A failure that is not the named test failing (a panic
+                # elsewhere, a timeout, a build or init failure) proves
+                # nothing about the mutant.
+                errors.append(f"{name}: the run failed without --- FAIL: {test}:\n"
+                              f"{result.stdout[-2000:]}{result.stderr[-2000:]}")
+                continue
+            caught = result.returncode != 0
             print(f"{'caught' if caught else 'SURVIVED'}  {name}  ({test})", flush=True)
             if not caught:
                 survivors.append(name)
