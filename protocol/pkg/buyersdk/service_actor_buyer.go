@@ -378,7 +378,10 @@ func (b *ServiceActorBuyer) Call(ctx context.Context, requestHash string) (CallR
 
 // RequestReport is a verified view of a call's request at one checkpoint.
 type RequestReport struct {
-	Checkpoint          uint64                     `json:"checkpoint"`
+	Checkpoint uint64 `json:"checkpoint"`
+	// ChainTime is the checkpoint's chain time (Unix seconds), the clock
+	// of every deadline the report is judged against.
+	ChainTime           int64                      `json:"chain_time,omitempty"`
 	Phase               CallPhase                  `json:"phase"`
 	Found               bool                       `json:"found"`
 	ExitCode            int32                      `json:"exit_code,omitempty"`
@@ -437,7 +440,7 @@ func (b *ServiceActorBuyer) Resolve(ctx context.Context, requestHash string) (*R
 			matches = append(matches, transaction)
 		}
 	}
-	report := &RequestReport{Checkpoint: session.Checkpoint(), Phase: record.Phase}
+	report := &RequestReport{Checkpoint: session.Checkpoint(), ChainTime: session.ChainTime().Unix(), Phase: record.Phase}
 	switch len(matches) {
 	case 0:
 		return report, nil

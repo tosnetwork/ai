@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -54,6 +55,10 @@ type TaskDelivery struct {
 	ProviderAgentID  string
 	ResponseDeadline time.Time
 	RetentionSeconds uint64
+	// ChainTime is the chain time of the finalized checkpoint the duty
+	// round resolved the request at. It is the clock of the deadline check
+	// and the packets' signing time; the host clock is never used for them.
+	ChainTime time.Time
 }
 
 // DeliveryView is the outcome of one delivery round.
@@ -73,28 +78,39 @@ type DeliveryView struct {
 // before the first deposit so a deposit is always retried with the same
 // bytes.
 type generationRecord struct {
-	Schema        string             `json:"schema"`
-	RequestHash   string             `json:"request_hash"`
-	Generation    int                `json:"generation"`
-	CreatedUnix   int64              `json:"created_unix"`
-	ExpiresAtUnix uint64             `json:"expires_at_unix"`
-	ProviderKeyID string             `json:"provider_key_id"`
-	Relays        []string           `json:"relays"`
-	Envelopes     []envelopeDelivery `json:"envelopes"`
+	Schema          string `json:"schema"`
+	RequestHash     string `json:"request_hash"`
+	Generation      int    `json:"generation"`
+	CreatedUnix     int64  `json:"created_unix"`
+	ExpiresAtUnix   uint64 `json:"expires_at_unix"`
+	ProviderKeyID   string `json:"provider_key_id"`
+	ProviderAgentID string `json:"provider_agent_id"`
+	// ProviderPublicKey is the provider card's encryption key, kept to
+	// re-seal a packet under a fresh envelope ID.
+	ProviderPublicKey string             `json:"provider_public_key_base64"`
+	Relays            []string           `json:"relays"`
+	Envelopes         []envelopeDelivery `json:"envelopes"`
 }
 
-// envelopeDelivery is one sealed envelope and where it stands at each
-// relay.
+// envelopeDelivery is one sealed envelope, the signed packet it carries,
+// and where it stands at each relay.
 type envelopeDelivery struct {
 	EnvelopeBase64 string `json:"envelope_base64"`
-	// Relays maps each relay to "accepted", "abandoned" or nothing yet.
+	PacketBase64   string `json:"packet_base64"`
+	// Relays maps each relay to "accepted", "conflict", "abandoned" or
+	// nothing yet.
 	Relays map[string]string `json:"relays"`
 }
 
 const (
 	generationSchema = "tos.service.mcp-buyer.task-generation.v1"
 	relayAccepted    = "accepted"
+	relayConflict    = "conflict"
 	relayAbandoned   = "abandoned"
+	// keyRetentionWindow is how long past a card's not_after the card's
+	// Agent keeps the private key (relay 6.3): an envelope expiring later
+	// could reach a provider that can no longer open it.
+	keyRetentionWindow = 86400*time.Second + 300*time.Second
 )
 
 func (c *Carrier) outboxDir(requestHash string) string {
@@ -114,12 +130,22 @@ func (c *Carrier) outboxDir(requestHash string) string {
 // deposits every envelope not yet accepted or abandoned at every relay of
 // the card: 200, 201 and 410 accept it, 409 and other refusals abandon that
 // relay for that envelope, and anything retryable waits for the next round.
+// An envelope no relay accepted and some relay answered 409 to is re-sealed
+// at once under a fresh envelope ID, journaled, and deposited again in the
+// same round (relay 8.6).
+//
+// The round's clock is the finalized checkpoint's chain time
+// (task.ChainTime), never the host clock: it decides the deadline, the
+// resend interval and the packets' signing time.
 func (c *Carrier) DeliverTask(ctx context.Context, task TaskDelivery) (DeliveryView, error) {
 	record := task.Record
 	if err := checkRequestHash(record.RequestHash); err != nil {
 		return DeliveryView{}, err
 	}
-	now := c.config.Now()
+	if task.ChainTime.Unix() <= 0 {
+		return DeliveryView{}, errors.New("a delivery round needs the checkpoint's chain time")
+	}
+	now := task.ChainTime
 	if !now.Before(task.ResponseDeadline) {
 		return DeliveryView{}, ErrTaskDeadlinePassed
 	}
@@ -160,6 +186,20 @@ func (c *Carrier) DeliverTask(ctx context.Context, task TaskDelivery) (DeliveryV
 		c.depositGeneration(ctx, &current)
 		if err := writeJSON(c.generationPath(record.RequestHash, current.Generation), current, false); err != nil {
 			return view, err
+		}
+		resealed, err := c.resealConflicts(&current)
+		if err != nil {
+			return view, err
+		}
+		if resealed {
+			// The fresh envelopes are journaled before their first deposit.
+			if err := writeJSON(c.generationPath(record.RequestHash, current.Generation), current, false); err != nil {
+				return view, err
+			}
+			c.depositGeneration(ctx, &current)
+			if err := writeJSON(c.generationPath(record.RequestHash, current.Generation), current, false); err != nil {
+				return view, err
+			}
 		}
 	}
 	for _, envelope := range current.Envelopes {
@@ -233,7 +273,13 @@ func (c *Carrier) sealGeneration(ctx context.Context, task TaskDelivery, number 
 	if err != nil {
 		return generationRecord{}, err
 	}
-	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, task.ProviderAgentID, now)
+	// A card covering the response deadline is preferred; only when none
+	// does is the best card valid now used, with the envelope expiry capped
+	// by its key retention.
+	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, task.ProviderAgentID, task.ResponseDeadline)
+	if errors.Is(err, ErrNoProviderCard) {
+		providerCard, err = c.ProviderCard(ctx, record.CapabilityID, task.ProviderAgentID, now)
+	}
 	if err != nil {
 		return generationRecord{}, err
 	}
@@ -257,13 +303,12 @@ func (c *Carrier) sealGeneration(ctx context.Context, task TaskDelivery, number 
 	if err != nil {
 		return generationRecord{}, err
 	}
-	expires := uint64(task.ResponseDeadline.Unix())
-	if limit := uint64(now.Add(MaxPacketLifetime).Unix()); expires > limit {
-		expires = limit
-	}
+	expires := envelopeExpiry(task.ResponseDeadline, now, providerCard.Card.NotAfterUnix)
 	generation := generationRecord{Schema: generationSchema, RequestHash: record.RequestHash, Generation: number,
 		CreatedUnix: now.Unix(), ExpiresAtUnix: expires, ProviderKeyID: hex.EncodeToString(providerCard.Key.KeyID[:]),
-		Relays: append([]string(nil), providerCard.Card.Relays...)}
+		ProviderAgentID:   providerCard.Key.AgentID,
+		ProviderPublicKey: base64.StdEncoding.EncodeToString(providerCard.Key.PublicKey),
+		Relays:            append([]string(nil), providerCard.Card.Relays...)}
 	for index, frame := range frames {
 		var nonce [32]byte
 		if err := c.config.Random(nonce[:]); err != nil {
@@ -289,9 +334,92 @@ func (c *Carrier) sealGeneration(ctx context.Context, task TaskDelivery, number 
 			return generationRecord{}, err
 		}
 		generation.Envelopes = append(generation.Envelopes, envelopeDelivery{
-			EnvelopeBase64: base64.StdEncoding.EncodeToString(envelope), Relays: map[string]string{}})
+			EnvelopeBase64: base64.StdEncoding.EncodeToString(envelope),
+			PacketBase64:   base64.StdEncoding.EncodeToString(raw), Relays: map[string]string{}})
 	}
 	return generation, nil
+}
+
+// envelopeExpiry is a task envelope's expiry: the response deadline, at
+// most MaxPacketLifetime after signing, and never past the provider card's
+// not_after plus the key-retention window, so no relay holds an envelope
+// the provider can no longer open.
+func envelopeExpiry(deadline, now time.Time, cardNotAfterUnix uint64) uint64 {
+	expires := uint64(deadline.Unix())
+	if limit := uint64(now.Add(MaxPacketLifetime).Unix()); expires > limit {
+		expires = limit
+	}
+	// An overflowing sum is a bound past every representable expiry.
+	if limit, ok := checkedAddUnix(cardNotAfterUnix, keyRetentionWindow); ok && expires > limit {
+		expires = limit
+	}
+	return expires
+}
+
+// checkedAddUnix adds a duration to a Unix time, reporting overflow.
+func checkedAddUnix(unix uint64, add time.Duration) (uint64, bool) {
+	seconds := uint64(add / time.Second)
+	if unix > math.MaxUint64-seconds {
+		return 0, false
+	}
+	return unix + seconds, true
+}
+
+// resealConflicts re-seals, under a fresh acknowledgement secret and so a
+// fresh envelope ID, every envelope that no relay accepted and at least one
+// relay answered 409 to (relay 8.6). The packet JSON is unchanged; the
+// recipient's inbox deduplicates the packet whichever envelope delivers it.
+// It reports whether any envelope was replaced.
+func (c *Carrier) resealConflicts(generation *generationRecord) (bool, error) {
+	var key agentpacketseal.RecipientKey
+	resealed := false
+	for index := range generation.Envelopes {
+		envelope := &generation.Envelopes[index]
+		accepted, conflict := false, false
+		for _, state := range envelope.Relays {
+			accepted = accepted || state == relayAccepted
+			conflict = conflict || state == relayConflict
+		}
+		if accepted || !conflict {
+			continue
+		}
+		if key.PublicKey == nil {
+			var err error
+			if key, err = generation.recipientKey(); err != nil {
+				return resealed, err
+			}
+		}
+		raw, err := base64.StdEncoding.Strict().DecodeString(envelope.PacketBase64)
+		if err != nil {
+			return resealed, errors.New("a journaled task envelope has no packet to re-seal")
+		}
+		var secret [agentpacketseal.AckSecretSize]byte
+		if err := c.config.Random(secret[:]); err != nil {
+			return resealed, err
+		}
+		sealed, err := agentpacketseal.Seal(key, secret, raw, generation.ExpiresAtUnix)
+		if err != nil {
+			return resealed, err
+		}
+		envelope.EnvelopeBase64 = base64.StdEncoding.EncodeToString(sealed)
+		envelope.Relays = map[string]string{}
+		resealed = true
+	}
+	return resealed, nil
+}
+
+// recipientKey is the journaled provider key of a generation, checked
+// against its key ID.
+func (g generationRecord) recipientKey() (agentpacketseal.RecipientKey, error) {
+	public, err := base64.StdEncoding.Strict().DecodeString(g.ProviderPublicKey)
+	if err != nil {
+		return agentpacketseal.RecipientKey{}, errors.New("a journaled task generation's provider key is not Base64")
+	}
+	derived, err := agentpacketseal.KeyID(public)
+	if err != nil || hex.EncodeToString(derived[:]) != g.ProviderKeyID {
+		return agentpacketseal.RecipientKey{}, errors.New("a journaled task generation's provider key does not match its key ID")
+	}
+	return agentpacketseal.RecipientKey{AgentID: g.ProviderAgentID, KeyID: derived, PublicKey: public}, nil
 }
 
 // taskBinding is the frame binding of the purchase's request.
@@ -339,7 +467,9 @@ func (c *Carrier) depositGeneration(ctx context.Context, generation *generationR
 				envelope.Relays[relay] = relayAbandoned
 			case outcome.Accepted():
 				envelope.Relays[relay] = relayAccepted
-			case outcome.Result == agentpacketrelay.DepositConflict || outcome.Result == agentpacketrelay.DepositRejected:
+			case outcome.Result == agentpacketrelay.DepositConflict:
+				envelope.Relays[relay] = relayConflict
+			case outcome.Result == agentpacketrelay.DepositRejected:
 				envelope.Relays[relay] = relayAbandoned
 			}
 		}

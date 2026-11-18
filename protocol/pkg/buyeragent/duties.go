@@ -80,7 +80,8 @@ func (a *Agent) deliver(ctx context.Context, view DutyView, requestHash string, 
 	}
 	delivered, err := a.config.Delivery.DeliverTask(ctx, TaskDelivery{Record: record, Archive: archive,
 		ExecutionNonce: purchase.ExecutionNonce, ProviderAgentID: purchase.ProviderAgentID,
-		ResponseDeadline: time.Unix(int64(report.ResponseDeadline), 0), RetentionSeconds: purchase.RetentionSeconds})
+		ResponseDeadline: time.Unix(int64(report.ResponseDeadline), 0), RetentionSeconds: purchase.RetentionSeconds,
+		ChainTime: time.Unix(report.ChainTime, 0)})
 	view.Delivery = &delivered
 	switch {
 	case err == nil:

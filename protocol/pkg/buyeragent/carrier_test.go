@@ -92,9 +92,17 @@ type fakeRelay struct {
 	deposits map[string][][]byte
 	answer   map[string]agentpacketrelay.DepositResult
 	attempts map[string]int
+	// conflicts is how many next deposits at a relay answer 409, as a junk
+	// copy deposited under the same envelope ID would; conflicted holds
+	// those envelopes.
+	conflicts  map[string]int
+	conflicted [][]byte
 	// crash makes a deposit panic, as a process dying mid-deposit would
-	// stop the round.
-	crash bool
+	// stop the round; crashOn does so only at that attempt number, and
+	// crashed is the envelope of the panicking deposit.
+	crash   bool
+	crashOn int
+	crashed []byte
 }
 
 func (r *fakeRelay) client(base string) (RelayClient, error) {
@@ -108,11 +116,17 @@ func (c relayClient) Deposit(_ context.Context, envelope []byte) (agentpacketrel
 		c.relay.attempts = map[string]int{}
 	}
 	c.relay.attempts[c.base]++
-	if c.relay.crash {
+	if c.relay.crash || (c.relay.crashOn > 0 && c.relay.attempts[c.base] == c.relay.crashOn) {
+		c.relay.crashed = append([]byte(nil), envelope...)
 		panic("the agent stopped during a deposit")
 	}
 	if _, err := agentpacketseal.ParseEnvelope(envelope); err != nil {
 		return agentpacketrelay.DepositOutcome{}, agentpacketrelay.ErrInvalidArgument
+	}
+	if c.relay.conflicts[c.base] > 0 {
+		c.relay.conflicts[c.base]--
+		c.relay.conflicted = append(c.relay.conflicted, append([]byte(nil), envelope...))
+		return agentpacketrelay.DepositOutcome{Result: agentpacketrelay.DepositConflict, StatusCode: 409}, nil
 	}
 	if result, set := c.relay.answer[c.base]; set {
 		return agentpacketrelay.DepositOutcome{Result: result}, nil

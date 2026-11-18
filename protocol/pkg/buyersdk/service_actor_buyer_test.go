@@ -527,6 +527,11 @@ func TestBuyerNeverResendsAnAmbiguousCall(t *testing.T) {
 	if err != nil || report.Phase != PhaseAdmitted {
 		t.Fatalf("resolved ambiguous call: %+v %v", report, err)
 	}
+	// The report carries the checkpoint's chain time, the clock its
+	// deadlines are judged on.
+	if report.ChainTime != saNow.Unix() {
+		t.Fatalf("the report's chain time is %d", report.ChainTime)
+	}
 
 	// A call custody never started returns to prepared and may be retried.
 	g := newBuyerFixture(t, defaultLimits())
