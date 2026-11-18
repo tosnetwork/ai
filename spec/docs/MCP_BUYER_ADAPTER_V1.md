@@ -12,12 +12,12 @@ decision) is implemented in `protocol/pkg/buyeragent` and
 
 The stdio MCP server (`protocol/pkg/mcpbuyer`, `tos-service-buyer-mcp`) is
 implemented with `tos_buyer_search`, `tos_buyer_quote`, `tos_buyer_prepare`,
-`tos_buyer_request_payment`, `tos_buyer_withdraw`, `tos_buyer_status` and
-`tos_buyer_purchases`. Search and quote (4.3, 4.4) run in the agent
+`tos_buyer_request_payment`, `tos_buyer_withdraw`, `tos_buyer_status`,
+`tos_buyer_purchases`, `tos_buyer_refund` and `tos_buyer_result` (4.9, with
+the agent's `result` method). Search and quote (4.3, 4.4) run in the agent
 (`buyeragent.Offers`): every offer is verified at one finalized checkpoint,
 the Quote is built there or a gateway's Quote is cross-checked against it,
-and the agent keeps the Quote and its manifest for prepare. Its result tool
-comes with the agent method behind it. The gateway's
+and the agent keeps the Quote and its manifest for prepare. The gateway's
 Quote-carried provider key card and the buyer's
 verification of a provider card from any source
 (`buyersdk.ServiceActorBuyer.VerifyProviderCard`, 3.3) are implemented.
@@ -30,12 +30,13 @@ keys and cards and the learned provider cards) is implemented.
 
 Task delivery (7.2, `Carrier.DeliverTask`, run by the duty round) is
 implemented. So are relay polling (`Carrier.Poll` and `Carrier.RunPoll`) and
-result acceptance (7.3, `Carrier.ReceiveResult`, run by the duty round). The
-agent binary does not run the poller yet; that wiring is part of the agent
-subcommand.
+result acceptance (7.3, `Carrier.ReceiveResult`, run by the duty round).
+`tos-service-buyer agent` (2.4) serves the socket and runs the duty round and
+the relay poller over pinned-CA HTTPS relay clients.
 
-Not yet implemented are the finalized-state reads behind result, the agent
-subcommand's wiring (including the search and quote sources), and `init`;
+The agent subcommand serves search and quote by `capability_id` and offer
+file with local Quotes. Not yet implemented are the agent configuration of
+gateway and catalog sources for search and gateway Quotes, and `init`;
 section 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
@@ -188,6 +189,40 @@ which can pack any file the developer account can read (section 13).
 
 Custody and the peer-credential check are Linux interfaces (`tosctl` is
 built for Linux), so V1 of the adapter runs on Linux.
+
+### 2.4 `tos-service-buyer agent`
+
+`tos-service-buyer agent --config <file>` runs the agent in the custody
+account. The configuration (schema `tos.service.mcp-buyer.agent-config.v1`)
+must be a regular file owned by that account, mode `0600` or stricter. It is
+decoded strictly: unknown fields, duplicate keys and trailing data are
+refused. It names:
+
+- the state and socket directories, and the client uid;
+- the network tuple, 3 to 8 RPC endpoints and a strict-majority quorum;
+- the Native Registry code and hash, and the pinned Service Actor code hash;
+- the manifest directory, the buyer wallet and the buyer Agent;
+- the pinned `tosctl` (path and SHA-256), its configuration, the wallet name,
+  and the packet controller's name and key ID;
+- the buyer's relays and the relay CA file;
+- the budget of section 6, plus the duty interval, at most 60 seconds.
+
+The vault credential is read only from `VAULT_URL`. The agent refuses to
+start without it, and when the `tosctl` configuration is readable by group
+or others.
+
+It keeps the chain checkpoints, the call journal, the carrier's keys and
+inbox, and the purchase records in owner-private subdirectories of the state
+directory. It serves the socket (2.3), and until it stops it also runs:
+
+- the duty round (sections 7.2, 7.3 and 11);
+- the relay poller (`Carrier.RunPoll`, 7.3), with the agent's own purchase
+  lookup.
+
+A socket failure stops both loops. Every relay client uses one HTTPS
+transport: TLS 1.2 or later, verified against the certificates of the
+relay CA file only, never the system pool. The carriage check's liveness
+read and every deposit, listing, download and acknowledgement go through it.
 
 ## 3. Buyer identity and setup without OpenFox
 
@@ -554,6 +589,33 @@ and returns:
 
 Before acceptance it returns `MCP_BUYER_RESULT_NOT_READY` with the status of
 4.8.
+
+**As implemented.**
+
+- **The agent's `result` method** returns the accepted Receipt and artifact
+  only after reading them back:
+  - the stored Receipt must still hash to the accepted response hash, the
+    artifact to the Receipt's `artifact_digest`, and its members to the
+    Receipt's member digests;
+  - the Receipt must still bind the purchase's Accepted Quote, provider,
+    source, manifest and price, with `exit_code` 0.
+
+  A damaged store is an error, never a result. Both the client and custody
+  roles may call it.
+- **The MCP server's checks before writing.**
+  - It refuses a `request_hash` that is not 64 lowercase hex, and a
+    `max_inline_bytes` outside 0 to 65,536, before it calls the agent.
+  - It repeats the hash checks on the bytes it received.
+- **Writing the files.**
+  - The results directory is given as `--results-dir`. It is resolved to
+    its real path once, and must not be writable by group or others.
+  - `<request_hash>/` is created `0700`. An existing entry is used only if
+    `lstat` shows a private directory, so a link is refused.
+  - Each file is written to a fresh temporary file and hard-linked into
+    place, so no name is replaced and no link is followed.
+  - An existing file is read with `O_NOFOLLOW`. It is kept when its bytes
+    are the same, and the call is refused when they differ.
+- **Refusals.** A path never appears in a refusal.
 
 ### 4.10 `tos_buyer_refund`
 
@@ -1028,8 +1090,9 @@ listed envelope follows relay 8.5:
   (`railwork.CheckPacketFields`).
 - The frame is stored durably under its message digest. The same bytes again
   are a duplicate. Other bytes for a held index are a frame conflict. A
-  purchase holds at most 8 messages; a frame of a ninth is dropped and the
-  provider's redelivery brings it again.
+  purchase holds at most 8 messages. A frame of a ninth is a transient
+  failure: it is not acknowledged, stays at the relay, and is taken on a
+  later pass once a result round has emptied the inbox.
 - A stored frame is acknowledged after the durable write. A packet refused
   for good after a successful open is acknowledged without storing, so junk
   cannot hold the mailbox. A transient failure is neither stored nor

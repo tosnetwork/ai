@@ -61,6 +61,9 @@ type Config struct {
 	// Results accepts the result of each responded purchase; nil accepts
 	// none.
 	Results ResultReceiver
+	// Accepted reads accepted results for the result method; nil reports
+	// none.
+	Accepted AcceptedResults
 	// Offers serves search and quote; nil refuses both.
 	Offers *Offers
 	// MaxLifecycleSends bounds the expire, claim_refund and sweep sends in

@@ -43,8 +43,9 @@ const (
 	// MaxInboundPacketJSON bounds an opened packet's JSON.
 	MaxInboundPacketJSON = 128 << 10
 	// MaxOpenMessages bounds the messages a purchase's inbox holds at once;
-	// a frame of a further message is dropped as inbox-full and the
-	// provider's redelivery brings it again.
+	// a frame of a further message is refused as inbox-full, left
+	// unacknowledged at the relay, and taken on a later pass once the inbox
+	// has room.
 	MaxOpenMessages = 8
 )
 
@@ -369,7 +370,9 @@ func (c *Carrier) admitPacket(ctx context.Context, opened agentpacketseal.Opened
 		return permanent(err)
 	}
 	if err := c.storeFrame(requestHash, frame, packet.Payload); err != nil {
-		if errors.Is(err, errInboxFull) || errors.Is(err, railwork.ErrFrameConflict) {
+		// A full inbox is transient: the envelope stays unacknowledged at
+		// the relay and is taken on a later pass once the inbox has room.
+		if errors.Is(err, railwork.ErrFrameConflict) {
 			return permanent(err)
 		}
 		return err

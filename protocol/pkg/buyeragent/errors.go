@@ -14,6 +14,7 @@ const (
 	CodeQuoteExpired          = "MCP_BUYER_QUOTE_EXPIRED"
 	CodeConflict              = "MCP_BUYER_CONFLICT"
 	CodeDeclined              = "MCP_BUYER_DECLINED"
+	CodeResultNotReady        = "MCP_BUYER_RESULT_NOT_READY"
 	CodeDependencyUnavailable = "MCP_BUYER_DEPENDENCY_UNAVAILABLE"
 	CodeAgentUnavailable      = "MCP_BUYER_AGENT_UNAVAILABLE"
 	CodeAmbiguous             = "MCP_BUYER_AMBIGUOUS"
@@ -43,7 +44,7 @@ func (e *Error) Unwrap() error { return e.cause }
 func refusal(code, message string, cause error) *Error {
 	disposition := DispositionNever
 	switch code {
-	case CodeDependencyUnavailable, CodeAgentUnavailable:
+	case CodeDependencyUnavailable, CodeAgentUnavailable, CodeResultNotReady:
 		disposition = DispositionSameAfterBackoff
 	case CodeAmbiguous:
 		disposition = DispositionResolveBeforeRetry
