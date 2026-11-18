@@ -18,7 +18,10 @@ them. The gateway's Quote-carried provider key card and the buyer's
 verification of a provider card from any source
 (`buyersdk.ServiceActorBuyer.VerifyProviderCard`, 3.3) are implemented.
 
-Not yet implemented are the relay carriage, the lifecycle duties, the
+The refund duties (section 11) run in the agent without an MCP session, and
+`tos_buyer_refund` advances them.
+
+Not yet implemented are the relay carriage, the
 finalized-state reads behind search, quote and result, and `init`; section
 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
@@ -963,9 +966,33 @@ They are journaled before custody starts and treated as ambiguous until
 finalized history shows them, like the call. An operation that has been
 handed to custody is not sent again for 10 minutes, so finalized history can
 show its effect first. A send that custody never started does not count.
-After that the agent sends it again while the status still requires it, so a
-`claim_refund` that fails with 1921 (under-backed actor) is retried until the
-deadline. Every send counts against the lifecycle bound of section 6. Each
+
+After that the agent sends the operation again while the status still
+requires it, but only once every earlier send of it is **settled** at a fresh
+finalized checkpoint, whose chain time is the clock. Before each send the
+agent records the buyer wallet's finalized seqno and a bound on the wallet
+message's `valid_until`. The bound is the send's start plus custody's
+3-minute deadline, the wallet message's 2-minute lifetime and 5 minutes of
+clock skew. An earlier send is settled when one of these holds:
+
+1. the actor's finalized history since the call holds a transaction from the
+   buyer wallet carrying the send's `query_id`. The message executed,
+   whatever its outcome, so a `claim_refund` that failed with 1921
+   (under-backed actor) is retried until the deadline;
+2. the checkpoint is past the bound and the wallet's seqno is still the one
+   recorded before the send. The wallet accepted no message since, and the
+   send's message has expired, so it never executes;
+3. the checkpoint is past the bound plus a 10-minute delivery allowance, the
+   wallet's seqno has moved, and the history since the call holds no
+   transaction from the wallet that could be the send's. A failed
+   transaction whose body shows no `query_id` could be.
+
+Otherwise the earlier message may still be in flight, and the duty waits.
+The contract would refuse a second claim or sweep in any case. The rule
+keeps the agent from sending one that finalized state has not proven
+necessary. The call itself is never sent twice (section 10, "At most one
+call"). Every send counts
+against the lifecycle bound of section 6. Each
 duty round looks at every purchase whose call was handed to custody, at
 least every 60 seconds, whether or not an MCP client is connected.
 
@@ -1033,7 +1060,7 @@ returned by tools that were asked to act. The frames' refusal labels (frames
 | A relay drops, delays, replays or reorders envelopes | at-least-once delivery, redelivery, several relays, durable inbox, packet and frame checks | delay; mailbox IDs, sizes and timing visible to the relay |
 | A lying RPC endpoint | strict-majority quorum of 3 to 8 endpoints at one checkpoint | a colluding majority |
 | A substituted `tosctl` binary | pinned SHA-256 and pinned configuration bytes | none at the pin |
-| A crash or power loss during a send | journal phases; `ambiguous` is never re-sent | delay until finalized history resolves it |
+| A crash or power loss during a send | journal phases; an `ambiguous` call is never re-sent, and an `ambiguous` lifecycle send is repeated only once settled (11.2) | delay until finalized history resolves it |
 | A single-account deployment | start-time checks (2.3, 5.1) | a `sudo` path the agent cannot see |
 
 ## 14. Out of scope
