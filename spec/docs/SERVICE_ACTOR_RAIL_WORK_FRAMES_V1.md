@@ -633,7 +633,7 @@ decoders:
   SHA-256 of the result;
 - `negative_messages`: 30 messages each breaking one rule of section 4 or 5;
 - `negative_joins`: 4 frame sets that must not join;
-- `negative_artifacts`: 6 artifacts that 7.2 item 3 refuses. The tar shape
+- `negative_artifacts`: 7 artifacts that 7.2 item 3 refuses. The tar shape
   alone refuses them; they need no Receipt.
 
 The receiver-bound negatives were added after the OpenFox-generated set. They
