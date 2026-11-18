@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // socketDir returns a directory a socket server accepts: the test
@@ -176,6 +178,44 @@ func TestSocketRolesComeFromPeerCredentials(t *testing.T) {
 
 // A panic while serving one request becomes a fixed internal error on that
 // connection; the agent keeps serving, and its lock is free afterwards.
+// The handler itself turns a panic into the fixed internal error. The test
+// calls it on its own goroutine, so a handler without the recover fails
+// this test by name instead of ending the test binary.
+func TestTheHandlerTurnsAPanicIntoAnInternalError(t *testing.T) {
+	f := newFixture(t)
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ends := make([]*net.UnixConn, 2)
+	for index, fd := range pair {
+		file := os.NewFile(uintptr(fd), "socketpair")
+		connection, err := net.FileConn(file)
+		file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ends[index] = connection.(*net.UnixConn)
+		defer ends[index].Close()
+	}
+	request, err := json.Marshal(Request{Schema: APISchema, Method: "prepare", Params: json.RawMessage(
+		`{"quote_id":"` + f.quoteID + `","idempotency_key":"` + keyA + `","archive_base64":"` +
+			base64.StdEncoding.EncodeToString(sourceTar(t)) + `"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ends[0].Write(append(request, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	f.buyer.panics.Store(true)
+	server := &Server{agent: f.agent}
+	response := server.answer(context.Background(), RoleClient, ends[1])
+	if response.OK || response.Error == nil || response.Error.Code != CodeInternal ||
+		response.Error.Message != "the agent failed while handling the request" {
+		t.Fatalf("a panicking request was answered with %+v", response)
+	}
+}
+
 func TestAPanicInARequestFailsOnlyThatConnection(t *testing.T) {
 	f := newFixture(t)
 	server := serve(t, f, RoleClient)
