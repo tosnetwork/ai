@@ -41,6 +41,8 @@ one alone changes no outcome:
   bounds the JSON a decoder reads;
 - the TypeReg check on the header the tar reader returns: the raw type-flag
   check refuses every other flag first;
+- the check of each proposal quoteprovider builds against the rail bound:
+  New already refused every manifest one of whose Quotes could exceed it;
 - the one-root count in DecodeReceipt: a BOC with a second root is never
   the canonical encoding of its first root, so the canonical-encoding check
   refuses it as well.
@@ -58,8 +60,57 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "./protocol/pkg/railwork"
 SOURCE = ROOT / "protocol/pkg/railwork"
 
-# (name, file, original text, mutated text, test that must fail)
+# (name, file, original text, mutated text, test that must fail). A bare
+# file name is in protocol/pkg/railwork; a path names a file from the
+# repository root, tested in its own package.
 MUTANTS = [
+    # Package bound and carriable Quotes (section 5.1).
+    ("package-bound-derivation", "frame.go",
+     "maxTaskHeaderWithoutPackage = 770 + 6*MaxCapabilityVersionBytes + MaxKeyCardBase64",
+     "maxTaskHeaderWithoutPackage = 766 + 6*MaxCapabilityVersionBytes + MaxKeyCardBase64",
+     "TestThePackageBoundIsTheLargestAMaximalTaskHeaderCarries"),
+    ("carriable-package-bound", "carriage.go",
+     "if packageBytes > MaxPackageBytes {",
+     "if packageBytes > MaxPackageBytes+1 {",
+     "TestValidQuotesAreCarriedAndUncarriableOnesAreRefusedBeforePayment"),
+    ("carriable-manifest-proposal-id", "carriage.go",
+     "ProposalId: strings.Repeat(\"p\", maxProposalIDBytes)",
+     "ProposalId: strings.Repeat(\"p\", 1)",
+     "TestTheManifestCheckSizesTheLargestProposal"),
+    ("carriable-manifest-price", "carriage.go",
+     "PriceNanotos: largestAmount,",
+     "PriceNanotos: \"1\",",
+     "TestTheManifestCheckSizesTheLargestProposal"),
+    ("quoteprovider-manifest-carriable", "protocol/pkg/quoteprovider/provider.go",
+     "if err := railwork.CheckCarriableManifest(config.ManifestCBOR, config.Transport); err != nil {",
+     "if err := railwork.CheckCarriableManifest(config.ManifestCBOR, config.Transport); false && err != nil {",
+     "TestProviderRefusesAManifestWhoseQuotesNoRailTaskCanCarry"),
+    ("buyersdk-quote-carriable", "protocol/pkg/buyersdk/service_actor_buyer.go",
+     "if err = railwork.CheckCarriablePackage(len(packageBytes), validated.TransportBinding); err != nil {",
+     "if err = railwork.CheckCarriablePackage(len(packageBytes), validated.TransportBinding); false && err != nil {",
+     "TestBuyerNeverPaysForAQuoteItsTaskCannotCarry"),
+    ("gateway-quote-carriable", "gateway/internal/nativegateway/server.go",
+     "if err = railwork.CheckCarriableQuote(proposal, validated.TransportBinding); err != nil {",
+     "if err = railwork.CheckCarriableQuote(proposal, validated.TransportBinding); false && err != nil {",
+     "TestTheGatewayNeverProposesAnUncarriableQuote"),
+    ("providersdk-manifest-carriable", "protocol/pkg/providersdk/publication.go",
+     "if err := CheckManifestCarriable(manifestJSON, *options.Transport); err != nil {",
+     "if err := CheckManifestCarriable(manifestJSON, *options.Transport); false && err != nil {",
+     "TestPrepareRefusesAManifestWhoseQuotesNoRailTaskCanCarry"),
+    # Packet fields recorded in an assembly (section 3.3).
+    ("assembly-packet-fields", "assembly.go",
+     "if packet != a.packet {",
+     "if false && packet != a.packet {",
+     "TestAnAssemblyRefusesAFrameInPacketsNamingOtherFields"),
+    ("assembly-packet-valid", "assembly.go",
+     "if !packet.valid() {",
+     "if false && !packet.valid() {",
+     "TestAnAssemblyRefusesAFrameInPacketsNamingOtherFields"),
+    # USTAR magic and version (section 7.2 item 3).
+    ("artifact-ustar-magic", "receipt.go",
+     "if !bytes.Equal(artifact[membersEnd+tarMagicOffset:membersEnd+tarMagicOffset+int64(len(tarUSTARMagic))], tarUSTARMagic) {",
+     "if false {",
+     "TestVectorNegativeArtifactsAreRefused"),
     # Frame: all-zero binding fields, bounds, chunking.
     ("frame-zero-actor", "frame.go",
      "if frame.Binding.ActorAccount == ([32]byte{}) || frame.Binding.RequestHash == ([32]byte{}) ||",
@@ -310,6 +361,19 @@ MUTANTS = [
 ]
 
 
+def package_of(file_name):
+    """A bare file name is in protocol/pkg/railwork; a path is from the root."""
+    if "/" not in file_name:
+        return PACKAGE
+    return "./" + str(Path(file_name).parent)
+
+
+def source_of(file_name):
+    if "/" not in file_name:
+        return SOURCE / file_name
+    return ROOT / file_name
+
+
 def go_env():
     env = dict(os.environ)
     env.setdefault("GOWORK", "off")
@@ -336,32 +400,36 @@ def main():
         return 2
     selected = [m for m in MUTANTS if not options.only or m[0] in options.only]
 
-    baseline = run(["go", "test", "-count=1", PACKAGE], env)
-    if baseline.returncode != 0:
-        print("script error: the unmutated package does not pass\n" + baseline.stdout + baseline.stderr, file=sys.stderr)
-        return 2
-    listing = run(["go", "test", "-list", ".", PACKAGE], env)
-    tests = set(listing.stdout.split())
+    packages = sorted({package_of(file_name) for _, file_name, _, _, _ in selected})
+    tests = {}
+    for package in packages:
+        baseline = run(["go", "test", "-count=1", package], env)
+        if baseline.returncode != 0:
+            print(f"script error: the unmutated package {package} does not pass\n" + baseline.stdout + baseline.stderr,
+                  file=sys.stderr)
+            return 2
+        tests[package] = set(run(["go", "test", "-list", ".", package], env).stdout.split())
     survivors, errors = [], []
     with tempfile.TemporaryDirectory(prefix="railwork-mutants-") as scratch:
         for name, file_name, original, mutated, test in selected:
-            if test not in tests:
-                errors.append(f"{name}: no test named {test}")
+            package = package_of(file_name)
+            if test not in tests[package]:
+                errors.append(f"{name}: no test named {test} in {package}")
                 continue
-            source = SOURCE / file_name
+            source = source_of(file_name)
             text = source.read_text()
             if text.count(original) != 1:
                 errors.append(f"{name}: the original text occurs {text.count(original)} times in {file_name}")
                 continue
-            target = Path(scratch) / f"{name}-{file_name}"
+            target = Path(scratch) / f"{name}-{Path(file_name).name}"
             target.write_text(text.replace(original, mutated))
             overlay = Path(scratch) / f"{name}.json"
             overlay.write_text(json.dumps({"Replace": {str(source): str(target)}}))
-            build = run(["go", "test", "-c", "-o", os.devnull, f"-overlay={overlay}", PACKAGE], env)
+            build = run(["go", "test", "-c", "-o", os.devnull, f"-overlay={overlay}", package], env)
             if build.returncode != 0:
                 errors.append(f"{name}: the mutant does not build:\n{build.stdout}{build.stderr}")
                 continue
-            result = run(["go", "test", "-count=1", f"-overlay={overlay}", "-run", f"^{test}$", PACKAGE], env)
+            result = run(["go", "test", "-count=1", f"-overlay={overlay}", "-run", f"^{test}$", package], env)
             caught = result.returncode != 0 and f"--- FAIL: {test} " in result.stdout
             print(f"{'caught' if caught else 'SURVIVED'}  {name}  ({test})", flush=True)
             if not caught:
