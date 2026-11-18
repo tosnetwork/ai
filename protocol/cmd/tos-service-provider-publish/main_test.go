@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -8,6 +11,9 @@ import (
 	"testing"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/servicefixture"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -144,5 +150,70 @@ func TestCommandFlagsFailClosed(t *testing.T) {
 	var out strings.Builder
 	if err := run([]string{"status", "--state-dir", state}, &out, io.Discard); err != nil || out.Len() != 0 {
 		t.Fatalf("status of an empty journal: %q %v", out.String(), err)
+	}
+}
+
+// A Capability version quoted over Agent Packets is held to the rail task's
+// package bound at publication: prepare refuses a manifest whose Quotes no
+// task could carry before anything is journaled, and prepares the fixture
+// manifest (SERVICE_ACTOR_RAIL_WORK_FRAMES_V1 section 5.1).
+func TestPrepareRefusesAnUncarriableManifestForAgentPackets(t *testing.T) {
+	tosctl, digest := os.Getenv("TOS_SERVICE_TOSCTL"), os.Getenv("TOS_SERVICE_TOSCTL_SHA256")
+	if tosctl == "" || digest == "" {
+		t.Fatal("TOS_SERVICE_TOSCTL and TOS_SERVICE_TOSCTL_SHA256 must name the tosctl helper and its SHA-256")
+	}
+	directory := t.TempDir()
+	token := filepath.Join(directory, "token")
+	if err := os.WriteFile(token, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	owner := "agent_" + strings.Repeat("ab", 32)
+	writeManifest := func(name string, edit func(*nativecore.SoftwareWorkManifestV1)) string {
+		manifest := servicefixture.Manifest("1.0.0", servicefixture.DefaultSettlement())
+		edit(&manifest)
+		raw, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(directory, name)
+		if err = os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	fixture := writeManifest("fixture.json", func(*nativecore.SoftwareWorkManifestV1) {})
+	large := writeManifest("large.json", func(m *nativecore.SoftwareWorkManifestV1) {
+		m.Description = strings.Repeat("d", 2048)
+		m.Invocation.Arguments = nil
+		for index := 0; index < 64; index++ {
+			m.Invocation.Arguments = append(m.Invocation.Arguments, fmt.Sprintf("%02d%s", index, strings.Repeat("a", 510)))
+		}
+	})
+	prepare := func(state, manifest string, extra ...string) error {
+		arguments := []string{"prepare", "--state-dir", state, "--gateway", "http://127.0.0.1:9", "--insecure",
+			"--token-file", token, "--caller-id", "caller", "--tosctl", tosctl, "--tosctl-sha256", digest,
+			"--network-id", "test", "--genesis-root", "sha256:" + strings.Repeat("11", 32),
+			"--genesis-file", "sha256:" + strings.Repeat("22", 32),
+			"--registry-code-hash", "tvm-cell-sha256:" + strings.Repeat("33", 32),
+			"--owner-agent-id", owner, "--manifest-json", manifest}
+		return run(append(arguments, extra...), io.Discard, io.Discard)
+	}
+	agentPackets := []string{"--agent-packet-max-request-bytes", "1048576"}
+	refused := filepath.Join(directory, "refused")
+	if err := prepare(refused, large, agentPackets...); !errors.Is(err, railwork.ErrQuoteNotCarriable) {
+		t.Fatalf("an uncarriable manifest was prepared for Agent Packets: %v", err)
+	}
+	var out strings.Builder
+	if err := run([]string{"status", "--state-dir", refused}, &out, io.Discard); err != nil || out.Len() != 0 {
+		t.Fatalf("a refused manifest left a journaled publication: %q %v", out.String(), err)
+	}
+	if err := prepare(filepath.Join(directory, "fixture"), fixture, agentPackets...); err != nil {
+		t.Fatalf("a carriable manifest was refused: %v", err)
+	}
+	if err := prepare(filepath.Join(directory, "https"), large); err != nil {
+		t.Fatalf("a manifest not quoted over Agent Packets was held to the rail bound: %v", err)
+	}
+	if err := prepare(filepath.Join(directory, "over"), fixture, "--agent-packet-max-request-bytes", "1048577"); err == nil {
+		t.Fatal("an Agent Packet inline bound over 1 MiB was accepted")
 	}
 }

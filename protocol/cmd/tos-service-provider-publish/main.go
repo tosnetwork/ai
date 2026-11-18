@@ -46,6 +46,10 @@ type options struct {
 	rpc, registryCodeBOC, actorCodeHash                    string
 	quorum, registryWorkchain                              int
 	insecure                                               bool
+	// agentPacketMaxRequest, when non-zero, says the Capability version is
+	// quoted over Agent Packets (transport mode 2) with this inline input
+	// bound, so its manifest is held to the rail task's package bound.
+	agentPacketMaxRequest uint64
 }
 
 func main() {
@@ -128,6 +132,8 @@ func parse(mode string, arguments []string) (options, error) {
 		set.StringVar(&value.actionNonce, "action-nonce", "", "optional nonzero 32-byte hex action nonce (given with --object-nonce)")
 		set.StringVar(&value.capabilityRetry, "capability-idempotency-key", "", "optional Capability relay retry key (generated when omitted)")
 		set.StringVar(&value.manifestRetry, "manifest-idempotency-key", "", "optional manifest catalog retry key (generated when omitted)")
+		set.Uint64Var(&value.agentPacketMaxRequest, "agent-packet-max-request-bytes", 0,
+			"the inline input bound of the Agent Packet transport (mode 2) the version will be quoted with; when given, a manifest whose Quotes no rail task could carry is refused before anything is journaled")
 	} else {
 		set.StringVar(&value.actionHash, "action-hash", "", "sha256:<hex> action hash naming the journaled publication")
 	}
@@ -213,17 +219,39 @@ func newProvider(value options, network *nativev1.NetworkDomain, registryHash st
 	return provider, func() { client.Close() }, nil
 }
 
+// publicationTransport is the Agent Packet transport (mode 2) a prepared
+// publication is quoted with, or nil when --agent-packet-max-request-bytes
+// is not given. The binding names the owner Agent, as every mode-2 Quote
+// of the version must.
+func publicationTransport(value options) (*nativecore.TransportBindingV1, error) {
+	if value.agentPacketMaxRequest == 0 {
+		return nil, nil
+	}
+	if value.agentPacketMaxRequest > nativecore.MaxAgentPacketTransportRequestBytes {
+		return nil, fmt.Errorf("--agent-packet-max-request-bytes is at most %d", nativecore.MaxAgentPacketTransportRequestBytes)
+	}
+	binding, err := nativecore.AgentPacketTransportBinding(value.owner, uint32(value.agentPacketMaxRequest))
+	if err != nil {
+		return nil, fmt.Errorf("--agent-packet-max-request-bytes: %w", err)
+	}
+	return &binding, nil
+}
+
 func prepare(value options, provider *providersdk.Provider, journal *providersdk.PublicationJournal, network *nativev1.NetworkDomain,
 	stdout, stderr io.Writer) error {
 	// The pin is checked before anything is journaled, so a manifest that
 	// names another Service Actor release never leaves an applicable record.
 	publication := providersdk.PublicationOptions{CapabilityIdempotencyKey: value.capabilityRetry, ManifestIdempotencyKey: value.manifestRetry,
 		PinnedActorCodeHash: value.actorCodeHash}
+	transport, err := publicationTransport(value)
+	if err != nil {
+		return err
+	}
+	publication.Transport = transport
 	if (value.objectNonce == "") != (value.actionNonce == "") {
 		return errors.New("give both --object-nonce and --action-nonce, or neither")
 	}
 	if value.objectNonce != "" {
-		var err error
 		if publication.ObjectNonce, err = nonce(value.objectNonce); err != nil {
 			return err
 		}
