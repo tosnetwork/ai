@@ -1,0 +1,83 @@
+{
+  "all_match": true,
+  "deployed": [
+    {
+      "address": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V1",
+      "state": "active"
+    },
+    {
+      "address": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V2",
+      "state": "active"
+    },
+    {
+      "address": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V3",
+      "state": "active"
+    },
+    {
+      "address": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V1",
+      "state": "active"
+    },
+    {
+      "address": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V2",
+      "state": "active"
+    },
+    {
+      "address": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V3",
+      "state": "active"
+    },
+    {
+      "address": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V1",
+      "state": "active"
+    },
+    {
+      "address": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V2",
+      "state": "active"
+    },
+    {
+      "address": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "code_boc_bytes": 4139,
+      "code_boc_sha256": "a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a",
+      "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+      "source": "V3",
+      "state": "active"
+    }
+  ],
+  "release": {
+    "boc_bytes": 4143,
+    "boc_sha256": "dcf41afaa7da7761839f3d26955ebab8dcd8adfe1d428b89229780c6647cdb9b",
+    "code_hash": "d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a"
+  },
+  "utc": "2026-11-18T01:54:50Z"
+}

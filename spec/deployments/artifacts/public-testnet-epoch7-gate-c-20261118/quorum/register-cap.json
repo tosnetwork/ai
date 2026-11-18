@@ -1,0 +1,51 @@
+{
+  "acceptance_profile": "operator-designated-initial-public-testnet",
+  "endpoints": [
+    "V1",
+    "V2",
+    "V3"
+  ],
+  "expected_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+  "generated_at": "2026-11-18T01:40:39Z",
+  "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+  "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+  "network": "tos:global-id:2",
+  "objects": [
+    {
+      "found": true,
+      "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+      "state": {
+        "capability": {
+          "capability_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "generation": "1",
+          "last_action_hash": "sha256:0fb93cfc4d8bdc2c7446b3a685dfdd29de87c863aa7ecb850034539e44c11f89",
+          "owner_agent_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "sequence": "1",
+          "versions": [
+            {
+              "manifest_digest": "sha256:185de37af8264a7f6397fae1ef20125dd833325bc1410761f331433aea82750b",
+              "version": "v1"
+            }
+          ]
+        },
+        "finalized_at": "2026-11-18T01:40:39Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "1595",
+          "logical_time": "1595000005",
+          "transaction_hash": "sha256:1e23e8fd9eacaf294ec4e6f2d53314d0ffe0cf3b31fe14463f6f24f0999adf57"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:8f5a9a24b1b49c4616f74303264fa5c55aa9200ce93c096be1c7075e0c798b36"
+      }
+    }
+  ],
+  "quorum": 2,
+  "registry_workchain": 0,
+  "schema": "tos.service.gate-c.quorum-check.v1"
+}

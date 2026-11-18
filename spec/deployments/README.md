@@ -23,7 +23,10 @@ endpoint quorum, manifests, artifacts, and receipts. They must state explicitly
 that they are test infrastructure and make no production reserve, issuer, or
 operator-independence claim.
 
-The directory currently contains no accepted `tos_service_v1` deployment.
+The first `tos_service_v1` deployment record is
+`public-testnet-epoch7-gate-c-20261118.json` (Gate C lifecycle on the epoch-7
+public testnet; owner designation pending), with its labeled quorum outputs in
+`artifacts/public-testnet-epoch7-gate-c-20261118/`.
 Evidence produced under the pre-release protocol domain is preserved unchanged
 under `archive/pre-tos-service-v1/` for audit history. Because protocol-domain
 strings participate in cryptographic commitments, those files cannot satisfy a

@@ -1,0 +1,1046 @@
+{
+  "schema": "tos.service.registry.deployment.v1",
+  "status": "passed-initial-public-testnet",
+  "owner_designation": "pending",
+  "protocol": "tos_service_v1",
+  "acceptance_profile": "operator-designated-initial-public-testnet",
+  "qualifies_as_public_testnet_gate_c": false,
+  "qualification_note": "conditional on owner designation: the lifecycle passed, but the epoch-7 network has not yet been designated as the initial public test network for Gate C; a designation is recorded in its own later change",
+  "operator_independence": false,
+  "public_internet_reachability": false,
+  "known_limitations": [
+    "all validators and the bootstrap tooling are run by one project operator",
+    "the three endpoints are validator loopback JSON-RPC listeners reached through SSH port forwards, not publicly reachable HTTPS",
+    "operator and Internet diversity remain required for Gates F and G"
+  ],
+  "network": {
+    "network_id": "tos:global-id:2",
+    "label": "epoch-7 public testnet",
+    "global_id": 2,
+    "config_param_8_version": 16,
+    "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+    "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+    "global_config_sha256": "sha256:ee1cd3d72002ea3acd85ba6b34f5a8d2cc6c74b39f8dba1173602e2e254b38ba"
+  },
+  "registry_workchain": 0,
+  "release": {
+    "source_commit": "ed8e0a80bdafede324d97b041fa4174e0a5dce33",
+    "manifest": "crypto/smartcont/tos-service-native-registry-v1.release.json",
+    "build_command": "scripts/build-tos-service-native-registry-v1.sh",
+    "code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+    "boc_sha256": "sha256:dcf41afaa7da7761839f3d26955ebab8dcd8adfe1d428b89229780c6647cdb9b",
+    "boc_bytes": 4143
+  },
+  "endpoints": [
+    {
+      "url": "V1",
+      "operator": "project operator",
+      "validator": "node-1"
+    },
+    {
+      "url": "V2",
+      "operator": "project operator",
+      "validator": "node-3"
+    },
+    {
+      "url": "V3",
+      "operator": "project operator",
+      "validator": "node-6"
+    }
+  ],
+  "quorum": 2,
+  "finality_policy": "a result counts only when the production quorum resolver reads the same finalized typed state from at least two of the three endpoints; every transaction is also confirmed on all three",
+  "source_commits": {
+    "tos": "ed8e0a80bdafede324d97b041fa4174e0a5dce33",
+    "ai": "df3e033f5d0bc15022bef89ecedc9dc0a28986ae",
+    "tos_ops": "48d5a73099058641710dfb68d355f1b6a094ddf8"
+  },
+  "tools": {
+    "tosctl_sha256": "858a429f9e962adf8fe009b3ad33d197ae9467b069f7976ea3d7d0eade727d9c",
+    "tosctl_note": "built locally at the tos commit with rustc 1.100.0 --locked; the validator-host build of the same commit (node-6) has sha256 30a013ab2f2fdec8d84c4dac6c7218656b9e3808e5bdc55e7c5da09e074eb49c (builds are not byte-reproducible across hosts)",
+    "tos_service_wallet_sha256": "c191a00e52fca256465fe6e25221f11b1cdd21b31493d56ebe50384275a4d8e0",
+    "native_gate_c_check_sha256": "68747eaf6e0b9f0b0cd31e164518808a2e23c09039bdf94a210d9554fa76378c",
+    "body_helper_sha256": "1f18cfd94293ebc2b9133c632effc4d18cc9c9f54b844abbf82a47c75960ca57",
+    "body_helper_source": "tools/gatec-body/main.go (sha256 6471a88a2353665bc5e202e8963c02361ab6d121664e01d1317371579cd2b3d1); nativecore.BuildAction with MessageBody for Agent actions and AgentAuthorizationBody for Capability actions",
+    "body_helper_build": {
+      "module_files": "tools/go.mod (sha256 77fe93421a0d5dc51da772ec7ed8fa781dafa4478adda6e2dcde4849221fd098) and tools/go.sum (sha256 8d857ce2a8bda1fa8fe015b651dd1a9e72adf007bb47c4ff628bb7cf331e7c20)",
+      "ai_checkout": "a detached ai checkout of the pinned ai commit at /tos/gatec-e7/ai-df3e033f; go.mod replaces github.com/tosnetwork/ai with that path, and the path is part of the binary's embedded build info, so the same path is needed for the same digest",
+      "command": "GOWORK=off GOTOOLCHAIN=go1.26.11 GOFLAGS=-p=8 GOPROXY=off CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -o gatec-body ./gatec-body (run in the directory holding tools/go.mod)",
+      "reproduced": "rebuilt from these three files in a fresh directory: same sha256 1f18cfd9\u2026"
+    },
+    "body_helper_first_build_sha256": "4328307c793f311eb375c9d88456ccb59a18266e8815825c8bcfe9fbb4c523dc",
+    "lifecycle_runner": "operator script over tos-ops testnet/scripts/service-public-cases.py (sha256 0b48b5dce0b1c6da883a8643f7db274cf6e7c7ab007c9ae38a38c9f2732b1daa)"
+  },
+  "designation_basis": "owner rulings recorded in the public-testnet decision log, entries 13.561 (no registry purpose-bit change before Gate C; new genesis) and 13.562 (epoch-7 host layout)",
+  "recovery_timelock": {
+    "policy_timelock_s": 120,
+    "submission_margin_s": 300,
+    "early_completion_refused_with": 2212
+  },
+  "deployed_at": "2026-11-18T01:40:28Z",
+  "first_agent": {
+    "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+    "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+    "registration_action_hash": "sha256:5690076d905e59e8fa16aafdd0046c150c1b318e4b85729a74b693dd894f153b",
+    "state_hash": "tvm-cell-sha256:937f885dd703309632857f6ff82367fe4d6dd4345eebb9bf6bc13735e5ea3b64",
+    "transaction_hash": "sha256:084eccd63771d16a54a99c5c0c4a5457bfd75b39ed44d1a7d0da5b3ce216d3c0",
+    "logical_time": 1568000003,
+    "finalized_checkpoint": 1568
+  },
+  "objects": {
+    "agent_a": [
+      "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+      "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3"
+    ],
+    "agent_b": [
+      "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+      "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470"
+    ],
+    "capability": [
+      "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+      "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0"
+    ]
+  },
+  "steps": [
+    {
+      "name": "register-a",
+      "verdict": "settled",
+      "action_hash": "sha256:5690076d905e59e8fa16aafdd0046c150c1b318e4b85729a74b693dd894f153b",
+      "generation": 1,
+      "sequence": 1,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "XyaExgKp6fkEH9ywth8UXeQN9AfoMov49TXCZzQmt9M=",
+        "lt": "1568000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "CE7M1jdx0WpUqZxcDEpUV7/XWzntRNGn0NpbPOIW08A=",
+        "lt": "1568000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "CE7M1jdx0WpUqZxcDEpUV7/XWzntRNGn0NpbPOIW08A=",
+        "lt": "1568000003"
+      },
+      "compute": {
+        "account_activated": true,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 981
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "external_message_hash": "Z1fjVCdiA0XjJWH+jZwvcfakka5YthOfH6+jo2DFL1k=",
+      "wallet_seqno": 1,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/register-a.json",
+      "quorum_evidence_sha256": "sha256:81d1a30792ee0b11c88a9e411ec7517682725242457e555464ef59507f85c083",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:937f885dd703309632857f6ff82367fe4d6dd4345eebb9bf6bc13735e5ea3b64",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1568",
+            "logical_time": "1568000003",
+            "transaction_hash": "sha256:084eccd63771d16a54a99c5c0c4a5457bfd75b39ed44d1a7d0da5b3ce216d3c0"
+          },
+          "finalized_at": "2026-11-18T01:40:28Z"
+        }
+      ]
+    },
+    {
+      "name": "register-b",
+      "verdict": "settled",
+      "action_hash": "sha256:72a53ca18f1f4b024dcb9ed45c90801cd75e93c4a431c349c30d69f3007a9ebf",
+      "generation": 1,
+      "sequence": 1,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "bxmPeadd+87EzdXyIKD4b1tVin/P0AzYbo6OUR7pUoE=",
+        "lt": "1582000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "+pBuk8RrOeuNO25LLdX6gTS3QtXd8riCFUnDTinz2xI=",
+        "lt": "1582000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "+pBuk8RrOeuNO25LLdX6gTS3QtXd8riCFUnDTinz2xI=",
+        "lt": "1582000003"
+      },
+      "compute": {
+        "account_activated": true,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 768
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+      "final_target": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+      "external_message_hash": "3iwXw0kmrLPxfDbZTpyGCjLOxAsjSBSlgqDY4uUVIfI=",
+      "wallet_seqno": 2,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/register-b.json",
+      "quorum_evidence_sha256": "sha256:1d2b8ba975f4ceed673c86fdb183fa53ce37d45be7fb69922df86d0a3c310c44",
+      "resolved": [
+        {
+          "object_id": "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+          "tvm_state_hash": "tvm-cell-sha256:9502f84cd344d0aa4330f5cf76083219d0b5eba8d82533fd5f70009b12da3e98",
+          "reference": {
+            "account": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1581",
+            "logical_time": "1582000003",
+            "transaction_hash": "sha256:fa906e93c46b39eb8d3b6e4b2dd5fa8134b742d5ddf2b8821549c34e29f3db12"
+          },
+          "finalized_at": "2026-11-18T01:40:33Z"
+        }
+      ]
+    },
+    {
+      "name": "register-cap",
+      "verdict": "settled",
+      "action_hash": "sha256:0fb93cfc4d8bdc2c7446b3a685dfdd29de87c863aa7ecb850034539e44c11f89",
+      "generation": 1,
+      "sequence": 1,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "ohA+guDiOlNJlc61TH1UM3fI3u1JngA4BCTAtzEOSJI=",
+        "lt": "1595000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "UsA+eQI1pYvkJa0KUhhPxEY3KG05e1ioDUbn5mE7f+Y=",
+        "lt": "1595000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "UsA+eQI1pYvkJa0KUhhPxEY3KG05e1ioDUbn5mE7f+Y=",
+        "lt": "1595000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 628
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "hb9a55FVRqLDUrWrJVIuDCWkvh7TxmjeONwK1ZaEhV0=",
+      "wallet_seqno": 3,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/register-cap.json",
+      "quorum_evidence_sha256": "sha256:e60df0fcb44d6cdcbe8f777bd56ae33c0cbe727175d177130f83170ace79987f",
+      "resolved": [
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:8f5a9a24b1b49c4616f74303264fa5c55aa9200ce93c096be1c7075e0c798b36",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1595",
+            "logical_time": "1595000005",
+            "transaction_hash": "sha256:1e23e8fd9eacaf294ec4e6f2d53314d0ffe0cf3b31fe14463f6f24f0999adf57"
+          },
+          "finalized_at": "2026-11-18T01:40:39Z"
+        }
+      ]
+    },
+    {
+      "name": "update-policy",
+      "verdict": "settled",
+      "action_hash": "sha256:7ae966b384e024820ef6b9be3376ba179d1db3f6fa54c9f24d308c807ff50ab9",
+      "generation": 1,
+      "sequence": 2,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "E0VSOKFoNO6d1oNmnrQDElA6W192wt6NpXbpms87fiY=",
+        "lt": "1611000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "ZC+9wxxoph2uGp6JH/AvIUXQE+IeG97lL5vK/td96IY=",
+        "lt": "1611000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "ZC+9wxxoph2uGp6JH/AvIUXQE+IeG97lL5vK/td96IY=",
+        "lt": "1611000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 1133
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "external_message_hash": "yFXi77iKJudOHSP8Ri3gFUe8arr90jA+FYC9xyXzcus=",
+      "wallet_seqno": 4,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/update-policy.json",
+      "quorum_evidence_sha256": "sha256:c58e23771f8cd44cfb2289b7e7972b08f4c3302779e436667fe469b44611d344",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:c6c61f9520f7af204f6c4fe06a877e6cf084e9b5197265d193689ef67138538d",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1612",
+            "logical_time": "1611000003",
+            "transaction_hash": "sha256:642fbdc31c68a61dae1a9e891ff02f2145d013e21e1bdee52f9bcafed77de886"
+          },
+          "finalized_at": "2026-11-18T01:40:45Z"
+        }
+      ]
+    },
+    {
+      "name": "refuse-threshold",
+      "verdict": "refused-as-intended",
+      "action_hash": "sha256:fd7b160409e9b3dea63f4bb1314f011b9a8027dd530804f40a73299b8c8cb4a0",
+      "generation": 1,
+      "sequence": 2,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "lMuaNTy+JFfQubwWQinItSiZEHYuLaIdBNQgpdo3tig=",
+        "lt": "1624000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "ZSKoxSyYWoFm9o3AqVnbGwKvIozfQJ/KvvKaQsXffaM=",
+        "lt": "1624000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "ZSKoxSyYWoFm9o3AqVnbGwKvIozfQJ/KvvKaQsXffaM=",
+        "lt": "1624000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2209,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 507
+      },
+      "aborted": true,
+      "expected_exit_code": 2209,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "/3fk5Yrmp5xRxNE1/BDECS7Na9i6jlGXIGe6YYV217s=",
+      "wallet_seqno": 5,
+      "refund": {
+        "bound": true,
+        "pending": false,
+        "per_source": {
+          "V1": "u7Y0nuvI4UAeDfkEW/CGpLWq21V0HAlmxhkQdLWvCVs=",
+          "V2": "u7Y0nuvI4UAeDfkEW/CGpLWq21V0HAlmxhkQdLWvCVs=",
+          "V3": "u7Y0nuvI4UAeDfkEW/CGpLWq21V0HAlmxhkQdLWvCVs="
+        }
+      },
+      "forward_message_hash": null,
+      "note": "action signed by one controller under the one-of-two policy, sent after the policy update to two-of-two: refused by the owner Agent with 2209",
+      "quorum_evidence": "quorum/refuse-threshold.json",
+      "quorum_evidence_sha256": "sha256:c17a0e5b41b396d12ce1c967f11d39839a9df02be787945d247b423fc68db78c",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:c6c61f9520f7af204f6c4fe06a877e6cf084e9b5197265d193689ef67138538d",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1624",
+            "logical_time": "1624000003",
+            "transaction_hash": "sha256:6522a8c52c985a8166f68dc0a959db1b02af228cdf409fcabef29a42c5df7da3"
+          },
+          "finalized_at": "2026-11-18T01:40:52Z"
+        },
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:8f5a9a24b1b49c4616f74303264fa5c55aa9200ce93c096be1c7075e0c798b36",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1624",
+            "logical_time": "1595000005",
+            "transaction_hash": "sha256:1e23e8fd9eacaf294ec4e6f2d53314d0ffe0cf3b31fe14463f6f24f0999adf57"
+          },
+          "finalized_at": "2026-11-18T01:40:52Z"
+        }
+      ]
+    },
+    {
+      "name": "initiate-recovery",
+      "verdict": "settled",
+      "action_hash": "sha256:1364ae51518e14a7df4d87f1d55ca0335738d33d2578af8d1eb7bb814ee06b4d",
+      "generation": 1,
+      "sequence": 3,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "B80U6lb89qk9cRzIck8NDEid4aEvA6JAJRIH9/81BAo=",
+        "lt": "1641000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "EBYFMKctZWsjOIplqTXIzjgmSVVU7GmYMuR3bRzdw8w=",
+        "lt": "1641000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "EBYFMKctZWsjOIplqTXIzjgmSVVU7GmYMuR3bRzdw8w=",
+        "lt": "1641000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 1006
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "external_message_hash": "TPHTxxDY9W5sZJj0QAahnwTbD8YVmMeMdTtjWKrsckY=",
+      "wallet_seqno": 6,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/initiate-recovery.json",
+      "quorum_evidence_sha256": "sha256:c2eb534df8e374bfb7fa1e3627e87d0f3c4ca8cbd03e0e9e5ba0e23712796366",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:1eb922923b3fa301bf43146f85a18f4bd253fd882095d975085821247efd16fc",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1641",
+            "logical_time": "1641000003",
+            "transaction_hash": "sha256:10160530a72d656b23388a65a935c8ce3826495554ec699832e4776d1cddc3cc"
+          },
+          "finalized_at": "2026-11-18T01:40:59Z"
+        }
+      ]
+    },
+    {
+      "name": "refuse-early-complete",
+      "verdict": "refused-as-intended",
+      "action_hash": "sha256:0cf642827d9dd2f99aae0ca8d94af0319c607c23acfd7fee370415bf093adbe4",
+      "generation": 2,
+      "sequence": 1,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "2rzBYwfu0Ehv1tbOsOeg1iiULh853/O6WOESLX1ZM24=",
+        "lt": "1662000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "6cIEq6Av60YC9H4J4l+W2OoAHMc93OZQaXXWw8u7/QI=",
+        "lt": "1662000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "6cIEq6Av60YC9H4J4l+W2OoAHMc93OZQaXXWw8u7/QI=",
+        "lt": "1662000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2212,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 667
+      },
+      "aborted": true,
+      "expected_exit_code": 2212,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "external_message_hash": "azcXPhEL/bNt/coIloneuaF+OP+nu1K9fiSI91RkSis=",
+      "wallet_seqno": 7,
+      "refund": {
+        "bound": true,
+        "pending": false,
+        "per_source": {
+          "V1": "0EfecTqxsNNLrZgGC9S82qVxWJkWVbWzz7oeICOk9js=",
+          "V2": "0EfecTqxsNNLrZgGC9S82qVxWJkWVbWzz7oeICOk9js=",
+          "V3": "0EfecTqxsNNLrZgGC9S82qVxWJkWVbWzz7oeICOk9js="
+        }
+      },
+      "forward_message_hash": null,
+      "note": "recovery completion sent before execute_after: refused with 2212 (timelock); built by the ai encoder because tosctl declines to sign it",
+      "quorum_evidence": "quorum/refuse-early-complete.json",
+      "quorum_evidence_sha256": "sha256:f0c70f4653297164d6201edec4e3227cb9e404d0d22e8807cb89c1f31918e299",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:1eb922923b3fa301bf43146f85a18f4bd253fd882095d975085821247efd16fc",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "1663",
+            "logical_time": "1662000003",
+            "transaction_hash": "sha256:e9c204aba02feb4602f47e09e25f96d8ea001cc73ddce6506975d6c3cbbbfd02"
+          },
+          "finalized_at": "2026-11-18T01:41:07Z"
+        }
+      ]
+    },
+    {
+      "name": "complete-recovery",
+      "verdict": "settled",
+      "action_hash": "sha256:e42bbbcf65fd63d01884c5ef471a4f788d76d62b6960764d5cd5c45185a0cf64",
+      "generation": 2,
+      "sequence": 1,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "M0Sd9AzFQDnkKnBj3yrP0wBGbRDM32GGkjsKrSt6C08=",
+        "lt": "2826000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "vhC51JNWqTYdPTLNxkas2Hl3Efe8UzN7dk8ZOvDMMq8=",
+        "lt": "2826000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "vhC51JNWqTYdPTLNxkas2Hl3Efe8UzN7dk8ZOvDMMq8=",
+        "lt": "2826000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 737
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "external_message_hash": "X7UXXVqeuYeAOBhFWgGYxwf+I9ab+z0lMQYtDRmCEvw=",
+      "wallet_seqno": 8,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/complete-recovery.json",
+      "quorum_evidence_sha256": "sha256:319b85b87b23497d6ecf63dbe3dacf09a9677254f4fc91106fd4d96486c9a8ff",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:0cfc7988ab6bbe8d9d0cf97f8af039f2a282f87d135d2222521d452621a00a41",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "2819",
+            "logical_time": "2826000003",
+            "transaction_hash": "sha256:be10b9d49356a9361d3d32cdc646acd8797711f7bc53337b764f193af0cc32af"
+          },
+          "finalized_at": "2026-11-18T01:48:54Z"
+        }
+      ]
+    },
+    {
+      "name": "add-version",
+      "verdict": "unexpected-abort",
+      "action_hash": "sha256:ca32ab54a6800c1b8ad080a2ccc4f6421d4fd96ba49930fe3eba656ba9e231df",
+      "generation": 1,
+      "sequence": 2,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "fSKFWcUzNQdGMEENMayJfHulQTma8BBORxs6wlgcWHQ=",
+        "lt": "2844000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "lL4Gke2+zAYTQtAWsgRuFxDwSwTacShEOD3hcR5648s=",
+        "lt": "2844000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "lL4Gke2+zAYTQtAWsgRuFxDwSwTacShEOD3hcR5648s=",
+        "lt": "2844000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2203,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 221
+      },
+      "aborted": true,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "F9SbQHownYkr2w/lYLZIERHhnXqliq1dWTSzr2ZiIeg=",
+      "wallet_seqno": 9,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": "runner defect, not a refusal control. First send of the v2 addition: the helper wrapped the Capability action in the op::submit envelope (0x4e560001); the owner Agent refused it with 2203 (bad_action) and bounced the value, with Agent and Capability state unchanged. Fixed by using the owner Agent's op::authorize_capability envelope (0x4e560002), the one tosctl uses; the same signed action then settled as add-version-r2"
+    },
+    {
+      "name": "add-version-r2",
+      "verdict": "settled",
+      "action_hash": "sha256:ca32ab54a6800c1b8ad080a2ccc4f6421d4fd96ba49930fe3eba656ba9e231df",
+      "generation": 1,
+      "sequence": 2,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "2zqiD0UMdwVkDHKoZSR5CGfCvtf1EqGgXU/6WgJwPp0=",
+        "lt": "3484000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "QPLg1i/+4Gzp05EUuOTwH9rgPaxawbLdvBk7xpbo0RI=",
+        "lt": "3484000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "QPLg1i/+4Gzp05EUuOTwH9rgPaxawbLdvBk7xpbo0RI=",
+        "lt": "3484000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 603
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "PFpnpCj3EIR7es7SeCIlyI5Nmy4P3TqQXIFsXGtc21A=",
+      "wallet_seqno": 10,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": "body encoded by the ai nativecore encoder; its action hash equals the tosctl build of the same inputs and both bodies carry envelope 0x4e560002",
+      "quorum_evidence": "quorum/add-version-r2.json",
+      "quorum_evidence_sha256": "sha256:6217420d8b2f1dbe8a1b5117a46348533f33362be864122b6981c9b9771f14db",
+      "resolved": [
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:5c5f03e07ae66b719727bb92d56c33082825e540909ee8d38ce9ffb068984fd0",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3475",
+            "logical_time": "3484000005",
+            "transaction_hash": "sha256:c5f8a3c6cd17aa825ea8a8e7a736aabf40d77bb50d20cfe0666cfa76d8b19808"
+          },
+          "finalized_at": "2026-11-18T01:53:17Z"
+        }
+      ]
+    },
+    {
+      "name": "refuse-duplicate-version",
+      "verdict": "refused-as-intended",
+      "action_hash": "sha256:55be66dc22f98d0373cc13fd3ba31a4b03e59951689a2eb10f7b81799ab75f7f",
+      "generation": 1,
+      "sequence": 3,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "98iL5mqqAQXPKP4YPI1v0Xwh8AM4aoEfB7mFWWR6wGs=",
+        "lt": "3504000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "Gu+3wGK/vLMJnM3paUNNge23miqdOySsgGnzhZp8X9M=",
+        "lt": "3504000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "jeke4s6vB6NTxopoYRYDqUPYciXg1twrSUhfBxQLzr8=",
+        "lt": "3504000005"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2211,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 584
+      },
+      "aborted": true,
+      "expected_exit_code": 2211,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "uXNaw375Y4TYxD8Ixx9kMwTATMq4/1JoYrQzdc/cavA=",
+      "wallet_seqno": 11,
+      "refund": null,
+      "forward_message_hash": "TCqQB/P0SY9g5feVTTOT0IY7KOOPkf1DLijvuBOtoA0=",
+      "note": "version v2 added again at the current position: refused by the Capability with 2211 after the owner Agent authorized and forwarded it",
+      "quorum_evidence": "quorum/refuse-duplicate-version.json",
+      "quorum_evidence_sha256": "sha256:349f8e086d8ec4559a0a60a265216ec3cd6cd87b02ce050145e29bb033aef433",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:0cfc7988ab6bbe8d9d0cf97f8af039f2a282f87d135d2222521d452621a00a41",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3497",
+            "logical_time": "3504000003",
+            "transaction_hash": "sha256:1aefb7c062bfbcb3099ccde969434d81edb79a2a9d3b24ac8069f3859a7c5fd3"
+          },
+          "finalized_at": "2026-11-18T01:53:25Z"
+        },
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:5c5f03e07ae66b719727bb92d56c33082825e540909ee8d38ce9ffb068984fd0",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3497",
+            "logical_time": "3504000005",
+            "transaction_hash": "sha256:8de91ee2ceaf07a353c68a68611603a943d87225e0d6dc2b49485f07140bcebf"
+          },
+          "finalized_at": "2026-11-18T01:53:25Z"
+        }
+      ]
+    },
+    {
+      "name": "revoke-version",
+      "verdict": "settled",
+      "action_hash": "sha256:b848b83e0d520a7a74e533cd55cb0d2031cfe995cde8888a35c328d2d4619e32",
+      "generation": 1,
+      "sequence": 3,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "QCQAIdf444lbYinq4NmqQVJIxbzQw1pCXFPKO32nl1E=",
+        "lt": "3522000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "SrZYTCM0tNyG7i0IsbRGV72KtMuKBKmaDwCrzqbfPCY=",
+        "lt": "3522000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "SrZYTCM0tNyG7i0IsbRGV72KtMuKBKmaDwCrzqbfPCY=",
+        "lt": "3522000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 612
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "Hts0JcUFgKQRvtd6nUheRt3U9Op6Wd8xiGicj6YVCEc=",
+      "wallet_seqno": 12,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/revoke-version.json",
+      "quorum_evidence_sha256": "sha256:1758e61d6ae4466f42e5febdf698642ee1b3acb0f67c755cdeb415e0085040b2",
+      "resolved": [
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:dc7b9048103241268b41e41f82bc47c3ed16dbaff28061b14a563e16c8f174e6",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3513",
+            "logical_time": "3522000005",
+            "transaction_hash": "sha256:88c4389e3f7eb12a89caadbd93e1533f521d7860cb8e7085b4665964b66f6674"
+          },
+          "finalized_at": "2026-11-18T01:53:32Z"
+        }
+      ]
+    },
+    {
+      "name": "transfer",
+      "verdict": "settled",
+      "action_hash": "sha256:54e60617835cb2a970a692bdad028fba06053140ce0821bc1263db2fcb99bf11",
+      "generation": 2,
+      "sequence": 1,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "FXdoo1IEdonfp4+sf58WaWybzYBGK1FMGzGEjJY2XUY=",
+        "lt": "3538000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "GEJ9tYBDDQtCJ+2YZ8mb+RKNuNNAgk/8KtdOvOHh/P4=",
+        "lt": "3538000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "GEJ9tYBDDQtCJ+2YZ8mb+RKNuNNAgk/8KtdOvOHh/P4=",
+        "lt": "3538000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 583
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "VErQMITlEnqVqdQmUUpRiVocYf1TJ0IOxtsEC4dO1dw=",
+      "wallet_seqno": 13,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/transfer.json",
+      "quorum_evidence_sha256": "sha256:59f58550938444abd6fc7ba100f9628deeceadf3c369ebc980c1476600332fd3",
+      "resolved": [
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:80bdef550f957a34f84b371c6a30b2ae39c05eed0108fc0999afe62e59b086bb",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3529",
+            "logical_time": "3538000007",
+            "transaction_hash": "sha256:a77741c2d5d64540af209cd76b5d692e84fac052f72eb6df3ece950237bed0f4"
+          },
+          "finalized_at": "2026-11-18T01:53:38Z"
+        }
+      ]
+    },
+    {
+      "name": "refuse-former-owner",
+      "verdict": "refused-as-intended",
+      "action_hash": "sha256:d41677e0165a57fa8c9bd813090bd62bb09bbed9d8cca667a2a1cb75645be797",
+      "generation": 2,
+      "sequence": 2,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "Ftrd3N2B5IsomQ71OvFcnhhtsL5gMfxGxGIlg7UENa8=",
+        "lt": "3558000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "W9i6XuhIXq66GZy0dtKxiZbmJvZbDiCDUTA1PY8QUKo=",
+        "lt": "3558000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "XQV77RBPWdWFtfrh+SXdmbHsQmSNF51uB8hBAAMSapg=",
+        "lt": "3558000005"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2210,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 396
+      },
+      "aborted": true,
+      "expected_exit_code": 2210,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "OwPRlDACE+e9g0faT6cbIkpmIlQH32Gjv+IiOsvBNRc=",
+      "wallet_seqno": 14,
+      "refund": null,
+      "forward_message_hash": "kcK27immZfbVbsdLRO+XpQWAsVeu3o78sS9o6p1gD8o=",
+      "note": "after the transfer, a version addition signed only by the former owner A: refused by the Capability with 2210 after A forwarded it",
+      "quorum_evidence": "quorum/refuse-former-owner.json",
+      "quorum_evidence_sha256": "sha256:1b53825fe91a6e8c64a3c1137eabd4c171a7871c7b43b24b5a008c3470c48c2c",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:0cfc7988ab6bbe8d9d0cf97f8af039f2a282f87d135d2222521d452621a00a41",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3551",
+            "logical_time": "3558000003",
+            "transaction_hash": "sha256:5bd8ba5ee8485eaeba199cb476d2b18996e626f65b0e20835130353d8f1050aa"
+          },
+          "finalized_at": "2026-11-18T01:53:47Z"
+        },
+        {
+          "object_id": "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+          "tvm_state_hash": "tvm-cell-sha256:9502f84cd344d0aa4330f5cf76083219d0b5eba8d82533fd5f70009b12da3e98",
+          "reference": {
+            "account": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3552",
+            "logical_time": "3538000005",
+            "transaction_hash": "sha256:924b2d82f0454c0e06ddd5b0dbc24b4bd8da790b0bc29b3744157196b0c3370b"
+          },
+          "finalized_at": "2026-11-18T01:53:47Z"
+        },
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:80bdef550f957a34f84b371c6a30b2ae39c05eed0108fc0999afe62e59b086bb",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3552",
+            "logical_time": "3558000005",
+            "transaction_hash": "sha256:5d057bed104f59d585b5fae1f925dd99b1ec42648d179d6e07c8410003126a98"
+          },
+          "finalized_at": "2026-11-18T01:53:47Z"
+        }
+      ]
+    },
+    {
+      "name": "revoke-cap",
+      "verdict": "settled",
+      "action_hash": "sha256:4b6137e62d2265bf3c5aef75ac87e50f490aa004364f8ea270124b0aed4b9a90",
+      "generation": 2,
+      "sequence": 2,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "Hy7XS5obwuD1mBV96YGaqTlom4/LhoqAnBTKls8q7z0=",
+        "lt": "3577000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "VpXnfvE1iX3XXABlIG92XmaEt3jOCN8DbZo1um5VaO4=",
+        "lt": "3577000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "VpXnfvE1iX3XXABlIG92XmaEt3jOCN8DbZo1um5VaO4=",
+        "lt": "3577000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 607
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+      "final_target": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+      "external_message_hash": "351UROVOTu6PRu7K3mvJ7gx8c1x1cHZyYnlR7x1R+oM=",
+      "wallet_seqno": 15,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/revoke-cap.json",
+      "quorum_evidence_sha256": "sha256:bed93809099ff683e23d2cf895570656087782db4af3fabd446fbbc40d6d664e",
+      "resolved": [
+        {
+          "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "tvm_state_hash": "tvm-cell-sha256:8f1328670fcbbf6b73f1d490c5142c922ba14ba53dbf480fc7b0274d94a82209",
+          "reference": {
+            "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3568",
+            "logical_time": "3577000005",
+            "transaction_hash": "sha256:132b0a768a1842fc75d13cb6be1c7f808aa47c43b234d288e5b16993ba1a4059"
+          },
+          "finalized_at": "2026-11-18T01:53:54Z"
+        }
+      ]
+    },
+    {
+      "name": "revoke-a",
+      "verdict": "settled",
+      "action_hash": "sha256:e0bba400f9ff1c4571e846c9b47eab4600a6eabfb7687bd3a8a3e63ff0d900d6",
+      "generation": 2,
+      "sequence": 2,
+      "payer_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "4FiH0oV74uhjkw0Z2jqVcSvYbWRlVEn0KxC4Dj7XEDo=",
+        "lt": "3592000001"
+      },
+      "first_receiver_transaction": {
+        "@type": "internal.transactionId",
+        "hash": "VGCG+S6i/SNvr3I0zIT2WS8gCJtLMzB267slCGGUIHw=",
+        "lt": "3592000003"
+      },
+      "transaction": {
+        "@type": "internal.transactionId",
+        "hash": "VGCG+S6i/SNvr3I0zIT2WS8gCJtLMzB267slCGGUIHw=",
+        "lt": "3592000003"
+      },
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 673
+      },
+      "aborted": false,
+      "expected_exit_code": null,
+      "destination": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "final_target": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+      "external_message_hash": "qr5fIUdioek6MaLlxUb2a7OTVQ6IKZlAZBvR72eFRbY=",
+      "wallet_seqno": 16,
+      "refund": null,
+      "forward_message_hash": null,
+      "note": null,
+      "quorum_evidence": "quorum/revoke-a.json",
+      "quorum_evidence_sha256": "sha256:98c60497287fa3f3a4c264a86461a505ed6a2069da6ddb3006af870854d98e75",
+      "resolved": [
+        {
+          "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "tvm_state_hash": "tvm-cell-sha256:6d77322f770822f69d193b6e1503ea133055c0022d4a59747f2cbeaa6c92af50",
+          "reference": {
+            "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+            "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+            "finalized_checkpoint": "3583",
+            "logical_time": "3592000003",
+            "transaction_hash": "sha256:546086f92ea2fd236faf7234cc84f6592f20089b4b333076ebbb25086194207c"
+          },
+          "finalized_at": "2026-11-18T01:54:00Z"
+        }
+      ]
+    }
+  ],
+  "funding": {
+    "operation_id": "gatec-fund-payer-20261118",
+    "source": "epoch-7 bootstrap wallet, sent by the testnet operator from its own operations journal",
+    "amount_nanotos": 2400000000,
+    "payer": "0:d0986a2fa841e85665e80ac5f12ea3314c0b457dd4b23aec82affe4c7315607d",
+    "wallet_transaction": "9285c90f79eb6c7330c8a13dcc33e2ade4d2c5b90c7e90644b89de2734674e3b",
+    "destination_transaction": "a0529e5cd5b24a640a9466b6258ecf5dea5cc466b59338eafa7d5e6ab2727584",
+    "value_per_registry_message_nanotos": 150000000,
+    "payer_balance_after_nanotos": 357766895,
+    "leftover_policy": "stays in the payer; not returned to the bootstrap wallet"
+  },
+  "codec_parity": {
+    "action_hash": "ca32ab54a6800c1b8ad080a2ccc4f6421d4fd96ba49930fe3eba656ba9e231df",
+    "envelope_equal": true,
+    "envelope_opcode": "0x4e560002",
+    "equal": true
+  },
+  "deployed_code_serialization": "the deployed code BOC that the endpoints return (sha256 a86228fcb41791e90702ec3110e337b9cf28e5f50be7c56ffb4c9b59b1019d4a, 4,139 bytes) and the release BOC (sha256 dcf41afa\u2026, 4,143 bytes) are two serializations of the same cell tree: both decode to TVM code hash d3bb66d0\u2026, which is what the contract and the resolver bind",
+  "code_verification": {
+    "first-agent": "sha256:fdab11c14b26abd82f088f7243da48ed4ee8eb018ebde7a47028348b047552a6",
+    "final": "sha256:c4b3d256aab634e7320912da6423eb04e7b10c9f5558f7e2901f4a0a9c92f442"
+  },
+  "result_summary_sha256": "sha256:6c1e9fa54e7b36e38d309e501830131cb1b9cf9c25f0e9da1a2951212e438144",
+  "explorer_url": null,
+  "typed_state_checker_url": "native-gate-c-check (ai protocol/cmd/native-gate-c-check)",
+  "independent_audit": "OPEN: the independent security review of release d3bb66d0 is still open (docs/NATIVE_REGISTRY_SECURITY_REVIEW.md); this record is lifecycle evidence, not that review",
+  "lifecycle_evidence": "embedded steps; labeled quorum outputs, code verification and the runner summary under artifacts/public-testnet-epoch7-gate-c-20261118/",
+  "verdict": "PASS_GATE_C_LIFECYCLE_INITIAL_PUBLIC_TESTNET"
+}

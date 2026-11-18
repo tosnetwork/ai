@@ -1,0 +1,98 @@
+{
+  "acceptance_profile": "operator-designated-initial-public-testnet",
+  "endpoints": [
+    "V1",
+    "V2",
+    "V3"
+  ],
+  "expected_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+  "generated_at": "2026-11-18T01:40:52Z",
+  "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+  "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+  "network": "tos:global-id:2",
+  "objects": [
+    {
+      "found": true,
+      "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+      "state": {
+        "agent": {
+          "agent_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "generation": "1",
+          "last_action_hash": "sha256:7ae966b384e024820ef6b9be3376ba179d1db3f6fa54c9f24d308c807ff50ab9",
+          "policy": {
+            "controllers": [
+              {
+                "key_id": "mldsa44:12a3a8057bcb91e08d30f8e8bb6fdc5c24f991b69f8a52dd8fb4e42ac2eb5983",
+                "mldsa44_public_key": "WJOA1tniU85kEQ7H2J5Rewx9p9rkMSzdLl0zNFZVDowR26ZQvcwIxL43jdETp/zXPI8kZNWfMv2dyfMyBPtS5T1INJCsMCfl/rg27QYOaHP2uXO8n7eYUH7Oxa0a27uQDDJMOLAnWf2slA/TDxIjdMAeXUs0lYL14ml2Vi57reTajP28UqW0qWKEPimAGpnm8s+H930Hzy5oikrABV00nRl+YJvyCix8jPF7XxK/eRMlt9K9LRQy32pmtvAOVkp8O5rRtv/mQwxu3n+IGKdpFkVZ55HPbhcovz7Te+ds4pOmwfUbJc9OX9KcL9c6pME6qAlmg0bK08+CCS7N4z3mvA+uTHUtLS+8cfqyglXq1ciqZTRD9fpFiFanP/EW/k3RETRCs3P3vq2nXTNORTUc/5wvcdr0PB+kOrAXpcnD44FBxpmWMI2y+w0of/2SV3pf79tjlUgyg2Hka2WDxscmps3OnKRT3jG+sgGEuzGx/67ErCQJwPNZx7xqqqxwkJ/9pU/zk8JcjxkQj2u43tKHY6YGMmEIf4Z+EzRqskV2r47hojkPa7zONro04Q3mhnq+KlERpxmYeCzeTo4FQsU9DNAm1dvoHqpCHBHgeWGVB35Nu6tR/RLvSRA60h35zMv67RWpIKDPQxFv9pPsi1SX/Uq8ZB0SHcyYMaLxKBiYqfDSn2TbTR2MvoSfnyaqn7dkfvBYhX9ASeBETIOZxEE1iYXykNxAOYscV9A3+2GfQkzt9d8lqlrhbARuu/zsO++1GDxhymrM9pifzqKRfnb2Ljc6cJ4u1dm2o8RUr3WpMtbyyPrWAYV8gIdEYmmC+Cym2/bL4KfSKI6Ckwn4FswDbUzmBCIeKsyv+5ZxpowydLbRvWhT0jePhPWJbY8WoELzzEv+dS7J2113gLcvriQmUISUlKZ4OyjHBrzpXvXnKuB2OKkB4fOVc6nXUZOYhma4+250MFjl7Neg2dv1RMS32yGH84yYncmu3pZHc0cpg0iM+a7dVBvB4zBQY7X3jr/LrMV0jQEivdQ16O/iCZpE/IFuZ8TMPNNrqK/NSi7KD9/vOdMw0MTWOlsipcKR5nQzu8RsWX62Ptj3oUCl3Di3iWspk9VQIbOwPj+QmgDigQ2vTTUmWPAmPFKjETEpSLVhZTRyKviya36hVXEtEPc8e8lFJyYBAZ4kvLxnr9qa7sWQJoTlu4ycUEVi1ogRKBM2RJd2FnW+L+1Hzi6Xxu8wNc4Z4AHrboZXXqjuG9khQYufLCpA3lSDUfxqdSN13VkqOdJb1zZAFE545ogadbWW5/RCj4KN4RdW8dJ6WIjXE49caUhYUv9MsTcYTD7/5mvUNaO6WeP5ZZ3QG1HjMOsE5WlnqAUmzJOr1SW8Xa1Yc9FWl4IN0zkkW9j2u5lIrQKojNSChl+pEjs1ePuHXHJixMkJhvoXkRQ+D76WyfLAboa6Ov1ewNq3zyYtzi9kzaDyP3O+8LK1nN9LManCyM38VZIzvKXhFk0BAnq9UXaLumIkOvZnOv5ACIFzLdc2kEWFCnV2LEy8D1xNeOnWNAjl/dntZ5fW3s0GlwHoYpu4K1vaAXFrSrEC1Wg21q/27GiUDwT1p6xN9o7zOluZcU63KsPGiwsYqtttvQCSlLZd7rCBhUxa08EPNqjC/jj0pJRDlWBQhtdsCC0WR74qxkxASA82kQe7mDTlyHtO0wAQTN5/5tPsVxBD9YLD0T+zVYkOG8sEFVy8M0B4KOQtUw+PWA==",
+                "purpose_mask": 15,
+                "recovery": true,
+                "weight": 1
+              },
+              {
+                "key_id": "mldsa44:9c54c1386b8e519e6e555d2ea40f1e39bc372d6e38355c58f38d505df0fdc92e",
+                "mldsa44_public_key": "iEF2X78/C4U6LVMrzG2z1qHAjIQ+7VTC3w0smjePrTLVbIE4T8PwvqGz3pvAmwTzx4UpAJkAzS7qcwWhcfRWG61kAYCYAUkSNxEPPJut29Et+u9hnQR0/czONPouJ24+MV6JJvLTxsEJr4x/eMhMLfQ3Yy0ob+mwlrOAtDdRcu+0PFMkspyLAGJA3xx5+N4s9OLrvTd/pa25HRT3kztWpZG67WonHOB8iVQ5BMRkZnweiSAjigLfbLAGmFBRJWOAKYH95vHGdT8TmO6uX9k2NSdakVG1OK7Ie5oN/3xaqJedhuMNjeNAxc3t9zA6j0VuTNUAuaYzffbJMOO9yjSq7qUDQ791+ILoS1A9vlH4ia77FSBzHcOB1T40rM4RrpHibL3eUt0D1et1fTRTGo5qgzcXl6ttgpf7SmEo5X9w0UcB3x3B4aMmyTw8oQPiaIflg6bkrIW0hN6+uTVS5Tk+R7OruReosApwr/2894QEQ+QhhHv1dKM9jS1xqIkYJiuQkLfGjdDSGcj3HR3D7sYVmORoP1Rl21Ot7wsV4ZXQKz5/o1SSNFwEPyDBXVWxVBglBFFAfNEE5q+C1LOF5begh1pyvLuHhOMQKVECjFHnzb4B2bJVPtGZKWZR/cbKAFuuE3szpXq+298DbKJKU4wIn8HPZ/xPGV+gqY3AQGb/drvLwmRD8BFcKtHfk0bmGzA5O5a2pQpbnCRp3nQdG00RpR36jWrQy+Ss+ax77yzC7lxnv77t1sPzFGYTq2I54xd6+Cyg8GNWLa0Ov8clS3JvAsDwzTacJeYH5DlofKxbqy3JGt2JkDhyiOH1uLDOOadOSWCHSILhH3IgLfkjNjRcX5VM0Zg9A3cl1toM+jMbnCUwZBNgmHdis07+1iYwIhWiWsanWqIytttuwceIe5A6CWChGET7VK728P7uEsxuee99rqO30J2kDTo0EnvykkwU1s1iANeSZdUTXRKCu+AAWF09o8lvxvpJYPsIPpFOzB+3H+j8mDaDpqy5f26M8MTNu29AqkDhDPI9bhufPKsghItKSvk/MAXM4TrRkggQxZk59AhR/VFypo1ZnawIE9Uq5PQ0ixNR0QWHQBoFsT6Ll/GcYE7LC1WL0avZu9zttwzDRdPtzBr1zdPFazYZb6AmcA7cGXLJhf04CsEcjpg4B3/aP7eR+RfkYUyUBcHC6qPgW1CTYUFVIoY8nEEd8WJdK3jB1ZUZz7MCtWIsAtrrXIYf6aYpejnlbhtAh9c3ShzM7CPvfoth4IokQGj7RWDcyx4oeYxwD4ICyVdpUzVLQEt+hvtYql5sMu8CJx5Rodv6a/ooBunxbljETji/80aNYduY7LGFI8mFaEtvR/eaga5ASpfw08VoUPIkvrE4WdVZAJfVehJF0E4ZMRVIscW/ssKa/p0/kX7MDtTRd3cn/+bQu+5o2616Y2qqcmPGffohkntsOPH0sbD9R2S+allHr2VKsf5LPmN7S0G9s0CLvBnGLhCutjGosjopkor8/PSCONuEB4gDZ7supfeOd1U+YAQbYFD+vhDWzC0OptmqLadTKrfxI3HylqbF0pmiYy2F4UEaSmxFkHZcwfFH5BhP8Huv0vR8qhJCc5lkpvuyJO3B4BkFtTcanit56yKb+LTujQgGTwHQRiBBgWLnYbzCex99d0L7n7LUbb39PXXXTKv6CElUcISoAdLqSMjDzFZKMSFG6jdQE3RmU+3kXc5bbe4A5UQe5HRFIjL9R6V9eg==",
+                "purpose_mask": 15,
+                "recovery": true,
+                "weight": 1
+              }
+            ],
+            "recovery_threshold": 1,
+            "recovery_timelock_seconds": "120",
+            "threshold": 2
+          },
+          "sequence": "2"
+        },
+        "finalized_at": "2026-11-18T01:40:52Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "1624",
+          "logical_time": "1624000003",
+          "transaction_hash": "sha256:6522a8c52c985a8166f68dc0a959db1b02af228cdf409fcabef29a42c5df7da3"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:c6c61f9520f7af204f6c4fe06a877e6cf084e9b5197265d193689ef67138538d"
+      }
+    },
+    {
+      "found": true,
+      "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+      "state": {
+        "capability": {
+          "capability_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "generation": "1",
+          "last_action_hash": "sha256:0fb93cfc4d8bdc2c7446b3a685dfdd29de87c863aa7ecb850034539e44c11f89",
+          "owner_agent_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "sequence": "1",
+          "versions": [
+            {
+              "manifest_digest": "sha256:185de37af8264a7f6397fae1ef20125dd833325bc1410761f331433aea82750b",
+              "version": "v1"
+            }
+          ]
+        },
+        "finalized_at": "2026-11-18T01:40:52Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "1624",
+          "logical_time": "1595000005",
+          "transaction_hash": "sha256:1e23e8fd9eacaf294ec4e6f2d53314d0ffe0cf3b31fe14463f6f24f0999adf57"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:8f5a9a24b1b49c4616f74303264fa5c55aa9200ce93c096be1c7075e0c798b36"
+      }
+    }
+  ],
+  "quorum": 2,
+  "registry_workchain": 0,
+  "schema": "tos.service.gate-c.quorum-check.v1"
+}

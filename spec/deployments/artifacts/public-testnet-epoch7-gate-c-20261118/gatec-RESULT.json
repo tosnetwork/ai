@@ -1,0 +1,430 @@
+{
+  "final_quorum": "quorum/final.json",
+  "final_tombstones": {
+    "agent_a": true,
+    "agent_b_live": true,
+    "capability": true
+  },
+  "objects": {
+    "agent_a": [
+      "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+      "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3"
+    ],
+    "agent_b": [
+      "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+      "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470"
+    ],
+    "capability": [
+      "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+      "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0"
+    ]
+  },
+  "pass": true,
+  "steps": {
+    "add-version": {
+      "action_hash": "ca32ab54a6800c1b8ad080a2ccc4f6421d4fd96ba49930fe3eba656ba9e231df",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2203,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 221
+      },
+      "note": "op::submit envelope refused by the owner Agent (2203); bounced",
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "fSKFWcUzNQdGMEENMayJfHulQTma8BBORxs6wlgcWHQ=",
+        "lt": "2844000001"
+      },
+      "quorum": null,
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "lL4Gke2+zAYTQtAWsgRuFxDwSwTacShEOD3hcR5648s=",
+        "lt": "2844000003"
+      },
+      "verdict": "unexpected-abort"
+    },
+    "add-version-r2": {
+      "action_hash": "ca32ab54a6800c1b8ad080a2ccc4f6421d4fd96ba49930fe3eba656ba9e231df",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 603
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "2zqiD0UMdwVkDHKoZSR5CGfCvtf1EqGgXU/6WgJwPp0=",
+        "lt": "3484000001"
+      },
+      "quorum": "quorum/add-version-r2.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "QPLg1i/+4Gzp05EUuOTwH9rgPaxawbLdvBk7xpbo0RI=",
+        "lt": "3484000003"
+      },
+      "verdict": "settled"
+    },
+    "codec-parity": {
+      "action_hash": "ca32ab54a6800c1b8ad080a2ccc4f6421d4fd96ba49930fe3eba656ba9e231df",
+      "envelope_equal": true,
+      "envelope_opcode": "0x4e560002",
+      "equal": true
+    },
+    "complete-recovery": {
+      "action_hash": "e42bbbcf65fd63d01884c5ef471a4f788d76d62b6960764d5cd5c45185a0cf64",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 737
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "M0Sd9AzFQDnkKnBj3yrP0wBGbRDM32GGkjsKrSt6C08=",
+        "lt": "2826000001"
+      },
+      "quorum": "quorum/complete-recovery.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "vhC51JNWqTYdPTLNxkas2Hl3Efe8UzN7dk8ZOvDMMq8=",
+        "lt": "2826000003"
+      },
+      "verdict": "settled"
+    },
+    "initiate-recovery": {
+      "action_hash": "1364ae51518e14a7df4d87f1d55ca0335738d33d2578af8d1eb7bb814ee06b4d",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 1006
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "B80U6lb89qk9cRzIck8NDEid4aEvA6JAJRIH9/81BAo=",
+        "lt": "1641000001"
+      },
+      "quorum": "quorum/initiate-recovery.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "EBYFMKctZWsjOIplqTXIzjgmSVVU7GmYMuR3bRzdw8w=",
+        "lt": "1641000003"
+      },
+      "verdict": "settled"
+    },
+    "recovery-timelock": {
+      "extra_s": 45,
+      "policy_timelock_s": 120,
+      "tosctl_submission_margin_s": 300
+    },
+    "refuse-duplicate-version": {
+      "action_hash": "55be66dc22f98d0373cc13fd3ba31a4b03e59951689a2eb10f7b81799ab75f7f",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2211,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 584
+      },
+      "expect_exit": 2211,
+      "first_tx": {
+        "@type": "internal.transactionId",
+        "hash": "Gu+3wGK/vLMJnM3paUNNge23miqdOySsgGnzhZp8X9M=",
+        "lt": "3504000003"
+      },
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "98iL5mqqAQXPKP4YPI1v0Xwh8AM4aoEfB7mFWWR6wGs=",
+        "lt": "3504000001"
+      },
+      "quorum": "quorum/refuse-duplicate-version.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "jeke4s6vB6NTxopoYRYDqUPYciXg1twrSUhfBxQLzr8=",
+        "lt": "3504000005"
+      },
+      "verdict": "refused-as-intended"
+    },
+    "refuse-early-complete": {
+      "action_hash": "0cf642827d9dd2f99aae0ca8d94af0319c607c23acfd7fee370415bf093adbe4",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2212,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 667
+      },
+      "expect_exit": 2212,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "2rzBYwfu0Ehv1tbOsOeg1iiULh853/O6WOESLX1ZM24=",
+        "lt": "1662000001"
+      },
+      "quorum": "quorum/refuse-early-complete.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "6cIEq6Av60YC9H4J4l+W2OoAHMc93OZQaXXWw8u7/QI=",
+        "lt": "1662000003"
+      },
+      "verdict": "refused-as-intended"
+    },
+    "refuse-former-owner": {
+      "action_hash": "d41677e0165a57fa8c9bd813090bd62bb09bbed9d8cca667a2a1cb75645be797",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2210,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 396
+      },
+      "expect_exit": 2210,
+      "first_tx": {
+        "@type": "internal.transactionId",
+        "hash": "W9i6XuhIXq66GZy0dtKxiZbmJvZbDiCDUTA1PY8QUKo=",
+        "lt": "3558000003"
+      },
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "Ftrd3N2B5IsomQ71OvFcnhhtsL5gMfxGxGIlg7UENa8=",
+        "lt": "3558000001"
+      },
+      "quorum": "quorum/refuse-former-owner.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "XQV77RBPWdWFtfrh+SXdmbHsQmSNF51uB8hBAAMSapg=",
+        "lt": "3558000005"
+      },
+      "verdict": "refused-as-intended"
+    },
+    "refuse-threshold": {
+      "action_hash": "fd7b160409e9b3dea63f4bb1314f011b9a8027dd530804f40a73299b8c8cb4a0",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 2209,
+        "skipped": false,
+        "success": false,
+        "vm_steps": 507
+      },
+      "expect_exit": 2209,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "lMuaNTy+JFfQubwWQinItSiZEHYuLaIdBNQgpdo3tig=",
+        "lt": "1624000001"
+      },
+      "quorum": "quorum/refuse-threshold.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "ZSKoxSyYWoFm9o3AqVnbGwKvIozfQJ/KvvKaQsXffaM=",
+        "lt": "1624000003"
+      },
+      "verdict": "refused-as-intended"
+    },
+    "register-a": {
+      "action_hash": "5690076d905e59e8fa16aafdd0046c150c1b318e4b85729a74b693dd894f153b",
+      "compute": {
+        "account_activated": true,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 981
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "XyaExgKp6fkEH9ywth8UXeQN9AfoMov49TXCZzQmt9M=",
+        "lt": "1568000001"
+      },
+      "quorum": "quorum/register-a.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "CE7M1jdx0WpUqZxcDEpUV7/XWzntRNGn0NpbPOIW08A=",
+        "lt": "1568000003"
+      },
+      "verdict": "settled"
+    },
+    "register-b": {
+      "action_hash": "72a53ca18f1f4b024dcb9ed45c90801cd75e93c4a431c349c30d69f3007a9ebf",
+      "compute": {
+        "account_activated": true,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 768
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "bxmPeadd+87EzdXyIKD4b1tVin/P0AzYbo6OUR7pUoE=",
+        "lt": "1582000001"
+      },
+      "quorum": "quorum/register-b.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "+pBuk8RrOeuNO25LLdX6gTS3QtXd8riCFUnDTinz2xI=",
+        "lt": "1582000003"
+      },
+      "verdict": "settled"
+    },
+    "register-cap": {
+      "action_hash": "0fb93cfc4d8bdc2c7446b3a685dfdd29de87c863aa7ecb850034539e44c11f89",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 628
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "ohA+guDiOlNJlc61TH1UM3fI3u1JngA4BCTAtzEOSJI=",
+        "lt": "1595000001"
+      },
+      "quorum": "quorum/register-cap.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "UsA+eQI1pYvkJa0KUhhPxEY3KG05e1ioDUbn5mE7f+Y=",
+        "lt": "1595000003"
+      },
+      "verdict": "settled"
+    },
+    "revoke-a": {
+      "action_hash": "e0bba400f9ff1c4571e846c9b47eab4600a6eabfb7687bd3a8a3e63ff0d900d6",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 673
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "4FiH0oV74uhjkw0Z2jqVcSvYbWRlVEn0KxC4Dj7XEDo=",
+        "lt": "3592000001"
+      },
+      "quorum": "quorum/revoke-a.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "VGCG+S6i/SNvr3I0zIT2WS8gCJtLMzB267slCGGUIHw=",
+        "lt": "3592000003"
+      },
+      "verdict": "settled"
+    },
+    "revoke-cap": {
+      "action_hash": "4b6137e62d2265bf3c5aef75ac87e50f490aa004364f8ea270124b0aed4b9a90",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 607
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "Hy7XS5obwuD1mBV96YGaqTlom4/LhoqAnBTKls8q7z0=",
+        "lt": "3577000001"
+      },
+      "quorum": "quorum/revoke-cap.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "VpXnfvE1iX3XXABlIG92XmaEt3jOCN8DbZo1um5VaO4=",
+        "lt": "3577000003"
+      },
+      "verdict": "settled"
+    },
+    "revoke-version": {
+      "action_hash": "b848b83e0d520a7a74e533cd55cb0d2031cfe995cde8888a35c328d2d4619e32",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 612
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "QCQAIdf444lbYinq4NmqQVJIxbzQw1pCXFPKO32nl1E=",
+        "lt": "3522000001"
+      },
+      "quorum": "quorum/revoke-version.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "SrZYTCM0tNyG7i0IsbRGV72KtMuKBKmaDwCrzqbfPCY=",
+        "lt": "3522000003"
+      },
+      "verdict": "settled"
+    },
+    "transfer": {
+      "action_hash": "54e60617835cb2a970a692bdad028fba06053140ce0821bc1263db2fcb99bf11",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 583
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "FXdoo1IEdonfp4+sf58WaWybzYBGK1FMGzGEjJY2XUY=",
+        "lt": "3538000001"
+      },
+      "quorum": "quorum/transfer.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "GEJ9tYBDDQtCJ+2YZ8mb+RKNuNNAgk/8KtdOvOHh/P4=",
+        "lt": "3538000003"
+      },
+      "verdict": "settled"
+    },
+    "update-policy": {
+      "action_hash": "7ae966b384e024820ef6b9be3376ba179d1db3f6fa54c9f24d308c807ff50ab9",
+      "compute": {
+        "account_activated": false,
+        "exit_code": 0,
+        "skipped": false,
+        "success": true,
+        "vm_steps": 1133
+      },
+      "expect_exit": 0,
+      "first_tx": null,
+      "payer_tx": {
+        "@type": "internal.transactionId",
+        "hash": "E0VSOKFoNO6d1oNmnrQDElA6W192wt6NpXbpms87fiY=",
+        "lt": "1611000001"
+      },
+      "quorum": "quorum/update-policy.json",
+      "tx": {
+        "@type": "internal.transactionId",
+        "hash": "ZC+9wxxoph2uGp6JH/AvIUXQE+IeG97lL5vK/td96IY=",
+        "lt": "1611000003"
+      },
+      "verdict": "settled"
+    }
+  },
+  "superseded": {
+    "add-version": "add-version-r2"
+  }
+}

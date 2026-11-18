@@ -86,8 +86,10 @@ independently reproduced the complete Native Registry TVM lifecycle matrix.
 Gate C deployment evidence must continue to bind exact reviewed commits and
 release hashes.
 
-The initial Gate C deployment record is published by `spec/` commit
-`7a6cc02360e4cc8c2d95f80d433704cd72b0dc32`. Persistent validator JSON-RPC
+The current-domain Gate C deployment record is
+`deployments/public-testnet-epoch7-gate-c-20261118.json` (epoch-7 public
+testnet, 2026-11-18). The archived pre-migration record was published by
+`spec/` commit `7a6cc02360e4cc8c2d95f80d433704cd72b0dc32`. Persistent validator JSON-RPC
 configuration is in `tos` commit
 `145bf7de195ac6105c630510ab51912f4b9e92ca`; the production quorum checker,
 live-node transaction response compatibility, and diagnostic-only quorum error
@@ -263,9 +265,10 @@ Deliver:
 - ✅ designated initial public-testnet ConfigParam 8 at global version 16 or
   later, which provides `PQCHECKSIG_MLDSA44` for ML-DSA-44 controller
   signatures (`NATIVE_REGISTRY_PUBLIC_TESTNET_GATE.md`, initial profile);
-- ⬜ current-domain public-testnet deployment record binding network domain, contract
-  address, deployed code BOC, code hash, transaction, and exact source commit;
-- ⬜ current-domain three-validator strict-majority finalized
+- ✅ current-domain public-testnet deployment record binding network domain, contract
+  address, deployed code BOC, code hash, transaction, and exact source commit
+  (`deployments/public-testnet-epoch7-gate-c-20261118.json`);
+- ✅ current-domain three-validator strict-majority finalized
   resolution through the production typed-state resolver;
 - ✅ wallet action signing and semantic confirmation, including exact action-hash
   confirmation and fee-payer destination, amount, body, and StateInit binding;
@@ -279,11 +282,14 @@ transfer, revoke, and resolve objects through validator-backed quorum without
 trusting the reference gateway. Independent operators and public HTTPS are
 required by Gates F and G.
 
-**Gate status: ⬜ Current-domain deployment pending.** The reproducible contract,
-wallet, resolver, and lifecycle tooling pass locally. The 2026-08-14 deployment
+**Gate status: lifecycle evidence published; owner designation and the
+independent review of release `d3bb66d0` pending.** The epoch-7 record of
+2026-11-18 deploys fresh objects and completes the quorum lifecycle under
+`tos_service_v1`
+(`deployments/public-testnet-epoch7-gate-c-20261118.json`). The drills item
+stays open until the owner designates that network. The 2026-08-14 deployment
 is archived pre-migration evidence and cannot establish authority for
-`tos_service_v1`. Gate C must deploy fresh objects and repeat the complete
-quorum lifecycle under the current protocol domain. The public SC-01/SC-02
+`tos_service_v1`. The public SC-01/SC-02
 Native Registry runs of 2026-11-07 (team memo STATUS 13.338) were
 same-operator rehearsals on a public testnet that has since been halted
 (STATUS 13.559); they are not deployment records and do not close any Gate C
