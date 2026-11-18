@@ -14,12 +14,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
 	"github.com/tosnetwork/ai/protocol/internal/osguard"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
@@ -99,7 +99,7 @@ func readAgentConfig(path string) (agentConfig, error) {
 	if err != nil {
 		return config, err
 	}
-	if err := jsonstrict.Decode(raw, &config); err != nil {
+	if err := decodeStrict(raw, &config); err != nil {
 		return config, fmt.Errorf("the agent configuration does not decode strictly: %w", err)
 	}
 	if config.Schema != AgentConfigSchema {
@@ -129,6 +129,14 @@ func readAgentConfig(path string) (agentConfig, error) {
 	}
 	if config.Budget.DutyIntervalSecond < 0 || config.Budget.DutyIntervalSecond > int(buyeragent.MaxDutyInterval/time.Second) {
 		return config, errors.New("duty_interval_seconds must be 0 to 60")
+	}
+	// An HTTPS relay is verified against the pinned CA only; without one
+	// pinned, no HTTPS relay could ever be reached, so the agent refuses to
+	// start rather than poll nothing.
+	for _, relay := range config.Relays {
+		if strings.HasPrefix(relay, "https://") && config.RelayCAFile == "" {
+			return config, errors.New("an https relay is configured but relay_ca_file pins no CA")
+		}
 	}
 	return config, nil
 }
