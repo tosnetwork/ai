@@ -154,7 +154,8 @@ func newCarrierFixture(t *testing.T, binding nativecore.TransportBindingV1) *car
 	}
 	record := buyersdk.CallRecord{RequestHash: strings.Repeat("ab", 32), BuyerWallet: fxBuyer, CapabilityID: fxCapability,
 		CapabilityVersion: "1.0.0", PackageBase64: base64.StdEncoding.EncodeToString(raw), BuyerAddressInReq: request.BuyerAddress,
-		ExecutionID: strings.Repeat("cd", 32), ResponseSLASeconds: fxResponseSLA}
+		ExecutionID: strings.Repeat("cd", 32), ResponseSLASeconds: fxResponseSLA,
+		ExpiresAtUnix: value.Proposal.ExpiresAtUnixSeconds}
 	return &carrierFixture{carrier: carrier, chain: chain, relays: relays, clock: now, dir: dir, record: record,
 		archive: sourceTar(t)}
 }
@@ -198,12 +199,139 @@ func TestTheCarriageCheckPassesWithEveryItemHeld(t *testing.T) {
 	if err != nil || len(keys) != 1 || len(cards) != 1 {
 		t.Fatalf("the fresh buyer card's key is not held: %d %v", len(keys), err)
 	}
-	// The buyer card covers the response deadline plus the retention.
-	cover := fxNow.Add(fxResponseSLA*time.Second + 86400*time.Second + cardCoverSlack)
+	// The buyer card covers the latest response deadline (the Quote's
+	// expiry plus the SLA) plus the retention plus 300 seconds.
+	cover := time.Unix(int64(f.record.ExpiresAtUnix), 0).Add(fxResponseSLA*time.Second + 86400*time.Second + cardCoverSlack)
 	if cards[0].NotBeforeUnix != uint64(fxNow.Unix()) || cards[0].NotAfterUnix != uint64(cover.Unix()) ||
 		len(cards[0].Relays) != 1 || cards[0].Relays[0] != buyerRelay {
 		t.Fatalf("buyer card %+v", cards[0])
 	}
+	if f.record.ExpiresAtUnix != uint64(fxNow.Add(30*time.Minute).Unix()) {
+		t.Fatal("the fixture's Quote expires 30 minutes after now")
+	}
+}
+
+// A held card that covers the window is reused: repeated checks of one
+// purchase, or of purchases with the same window, draw no new key and sign
+// nothing. A purchase needing a longer window gets a new card.
+func TestAHeldBuyerCardThatCoversTheWindowIsReused(t *testing.T) {
+	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
+	f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+	signer := &countingSigner{}
+	f.carrier.config.Signer = signer
+	for round := 0; round < 3; round++ {
+		if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys, _, err := f.carrier.HeldKeys()
+	if err != nil || len(keys) != 1 || signer.calls != 1 {
+		t.Fatalf("three checks held %d keys and signed %d times: %v", len(keys), signer.calls, err)
+	}
+	longer := f.record
+	longer.ExpiresAtUnix += 3600
+	if err := f.carrier.CheckCarriage(context.Background(), longer, f.archive); err != nil {
+		t.Fatal(err)
+	}
+	if keys, _, _ := f.carrier.HeldKeys(); len(keys) != 2 || signer.calls != 2 {
+		t.Fatalf("a longer window reused a card that does not cover it: %d keys, %d signatures", len(keys), signer.calls)
+	}
+	// A shorter window reuses the card ending last.
+	shorter := f.record
+	shorter.ExpiresAtUnix -= 600
+	if err := f.carrier.CheckCarriage(context.Background(), shorter, f.archive); err != nil || signer.calls != 2 {
+		t.Fatalf("a shorter window signed again: %d %v", signer.calls, err)
+	}
+	// A reused card is still verified against finalized state.
+	f.chain.agents[fxBuyerAgent].Tombstoned = true
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); !errors.Is(err, buyersdk.ErrAgentCard) {
+		t.Fatalf("a reused card of a tombstoned Agent: %v", err)
+	}
+	// A held card that has not started yet is not reused.
+	f.chain.agents[fxBuyerAgent].Tombstoned = false
+	f.clock.advance(-time.Hour)
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil || signer.calls != 3 {
+		t.Fatalf("a card that starts in the future was reused: %d %v", signer.calls, err)
+	}
+}
+
+// Every cheap item runs before the buyer card: a purchase that fails one
+// signs nothing and draws no key.
+func TestNoBuyerCardIsSignedForAPurchaseThatFailsACheapItem(t *testing.T) {
+	for name, setup := range map[string]func(f *carrierFixture) (buyersdk.CallRecord, []byte){
+		"no provider card": func(f *carrierFixture) (buyersdk.CallRecord, []byte) { return f.record, f.archive },
+		"no relay": func(f *carrierFixture) (buyersdk.CallRecord, []byte) {
+			f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+			f.relays.down[buyerRelay] = true
+			return f.record, f.archive
+		},
+		"archive over the bound": func(f *carrierFixture) (buyersdk.CallRecord, []byte) {
+			f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+			return f.record, make([]byte, nativecore.MaxAgentPacketTransportRequestBytes+1)
+		},
+		"window too long": func(f *carrierFixture) (buyersdk.CallRecord, []byte) {
+			f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+			r := f.record
+			r.ResponseSLASeconds = 30 * 24 * 3600
+			return r, f.archive
+		},
+	} {
+		f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
+		signer := &countingSigner{}
+		f.carrier.config.Signer = signer
+		record, archive := setup(f)
+		if err := f.carrier.CheckCarriage(context.Background(), record, archive); err == nil {
+			t.Fatalf("%s: the check passed", name)
+		}
+		if keys, _, _ := f.carrier.HeldKeys(); len(keys) != 0 || signer.calls != 0 {
+			t.Errorf("%s: %d keys and %d signatures for a failing purchase", name, len(keys), signer.calls)
+		}
+	}
+}
+
+// The buyer card window is the Quote's expiry plus the SLA plus the
+// retention plus 300 seconds; one beyond 30 days from now is refused with
+// its own error, before anything is read.
+func TestAPurchaseWhoseCardWindowExceedsThirtyDaysIsRefused(t *testing.T) {
+	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
+	f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+	retention := uint64(86400)
+	limit := fxNow.Add(agentpacketseal.MaxKeyCardLifetime)
+	// The SLA that puts the window exactly at the 30-day limit.
+	atLimit := f.record
+	atLimit.ResponseSLASeconds = uint32(limit.Unix() - int64(atLimit.ExpiresAtUnix) - int64(retention) - 300)
+	calls := f.chain.verifyCalls
+	over := atLimit
+	over.ResponseSLASeconds++
+	if err := f.carrier.CheckCarriage(context.Background(), over, f.archive); !errors.Is(err, ErrCardWindowTooLong) {
+		t.Fatalf("a window one second over 30 days: %v", err)
+	}
+	if f.chain.verifyCalls != calls {
+		t.Fatal("a window over 30 days was refused only after reading finalized state")
+	}
+	window, err := buyerCardWindow(atLimit, retention)
+	if err != nil || !window.Equal(limit) {
+		t.Fatalf("window %v %v", window, err)
+	}
+	if _, err := buyerCardWindow(buyersdk.CallRecord{ExpiresAtUnix: ^uint64(0) - 10, ResponseSLASeconds: 100}, retention); !errors.Is(err, ErrCardWindowTooLong) {
+		t.Fatalf("an overflowing window: %v", err)
+	}
+	if _, err := buyerCardWindow(buyersdk.CallRecord{}, retention); err == nil {
+		t.Fatal("a call without a Quote expiry got a window")
+	}
+}
+
+// countingSigner signs as keycardtest.Keys does and counts the signatures.
+type countingSigner struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (s *countingSigner) Sign(ctx context.Context, controller string, use mldsa44.Use, payload []byte) (mldsa44.Signature, error) {
+	s.mu.Lock()
+	s.calls++
+	s.mu.Unlock()
+	return keycardtest.Keys.Sign(ctx, controller, use, payload)
 }
 
 func TestTheCarriageCheckRefusesAQuoteNotDeliveredOverAgentPackets(t *testing.T) {
@@ -465,6 +593,9 @@ func TestATamperedRelayKeyIsRefused(t *testing.T) {
 	if _, _, err := f.carrier.HeldKeys(); err == nil {
 		t.Fatal("a key file that does not name its key ID was listed")
 	}
+	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err == nil {
+		t.Fatal("a card whose file does not name its key ID was reused")
+	}
 	var record relayKeyRecord
 	if err := readJSON(renamed, &record); err != nil {
 		t.Fatal(err)
@@ -478,6 +609,9 @@ func TestATamperedRelayKeyIsRefused(t *testing.T) {
 	}
 	if _, _, err := f.carrier.HeldKeys(); err == nil {
 		t.Fatal("a key of another Agent was listed")
+	}
+	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err == nil {
+		t.Fatal("a card of another Agent was reused")
 	}
 }
 
@@ -581,4 +715,31 @@ func TestTheAgentPaysOnlyWithAUsableVerifiedProviderCard(t *testing.T) {
 			t.Fatal("a purchase with an invalid card was sent")
 		}
 	})
+}
+
+// A purchase whose buyer card would outlive 30 days is refused at prepare
+// with its own code, and again with the same code when prepared again.
+func TestAPurchaseNeedingACardBeyondThirtyDaysIsRefusedAtPrepareWithItsOwnCode(t *testing.T) {
+	f := newFixture(t)
+	carrier, _ := withCarrier(t, f)
+	learnAt(t, carrier, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+	f.buyer.responseSLA = 30 * 24 * 3600
+	prepare := func() error {
+		_, err := f.agent.Prepare(context.Background(), PrepareParams{QuoteID: f.quoteID, IdempotencyKey: keyA,
+			ArchiveBase64: base64.StdEncoding.EncodeToString(sourceTar(t))})
+		return err
+	}
+	for round := 0; round < 2; round++ {
+		err := prepare()
+		if err == nil || codeOf(t, err) != CodeCardWindowTooLong {
+			t.Fatalf("round %d: a purchase needing a card beyond 30 days: %v", round, err)
+		}
+		var known *Error
+		if !errors.As(err, &known) || known.Disposition != DispositionNever {
+			t.Fatalf("round %d: disposition %+v", round, known)
+		}
+	}
+	if keys, _, _ := carrier.HeldKeys(); len(keys) != 0 || len(f.buyer.sent()) != 0 {
+		t.Fatal("a refused purchase drew a key or was sent")
+	}
 }

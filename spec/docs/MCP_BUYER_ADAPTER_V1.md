@@ -238,15 +238,23 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
   Messenger carrier needs a Messenger installation and is not used.
 - **Buyer card.** The agent carries its current card in every task, task
   redelivery, ack and result-request (frames 5.1, 5.3, 5.4; relay 6.4). The
-  card it puts in a task covers the request's response deadline plus the
-  result's retention, up to the 30-day maximum (relay 6.4); it publishes a
-  successor at least 24 hours before the current card expires (relay 6.3), and
-  the successor reaches the provider in the next redelivery, ack or
-  result-request. Because the card is signed when the task is first sent,
-  after the call, and a response SLA is at most 30 days, a card covering the
-  response deadline can always be issued. It keeps each private key until
-  `not_after_unix + 86,400 + 300` and polls every relay of every card whose key
-  it holds.
+  card covers the whole purchase from the start:
+  - **Window.** It runs to the latest response deadline the call can get
+    (the Quote's expiry plus the response SLA), plus the result's
+    retention, plus 300 seconds.
+  - **Over 30 days.** A purchase whose window exceeds the 30-day card
+    maximum is refused at prepare, before payment, with
+    `MCP_BUYER_CARD_WINDOW_TOO_LONG`. V1 issues no successor card, so a
+    window the card cannot cover could not be carried.
+  - **Reuse.** A held card that already covers the window is used again;
+    a new key and card are made only when none does.
+  - **Keys.** The agent keeps each private key until
+    `not_after_unix + 86,400 + 300` and polls every relay of every card
+    whose key it holds.
+
+  Successor cards (relay 6.3: a successor at least 24 hours before expiry,
+  reaching the provider in the next redelivery, ack or result-request) are
+  future work. They would lift the 30-day limit on the window.
 - **Provider card.** Taken from one of three sources, all untrusted:
   an offer file (schema `tos.openfox.rail-offer.v2`, which the user or a
   catalog supplies), a gateway Quote response (the card served next to the
@@ -814,13 +822,23 @@ storage fee.
 `buyeragent.Carrier` implements the check, at prepare and again before the
 call:
 
-- **Order.** Item 4 runs before item 2, because the task is encoded with
-  the fresh buyer card that item 4 signs.
-- **Buyer card (item 4).** Each check signs a fresh card for a newly drawn
-  relay key. The card covers the response deadline plus the result's
-  retention plus 300 seconds, capped at 30 days. The key is stored before the
-  card can reach anyone. The card is then verified with `VerifyAgentCard`
-  against finalized state.
+- **Order.** The checks that cannot sign anything run first:
+  1. the card window (3.3); a window over 30 days is refused before
+     anything is read;
+  2. item 1;
+  3. the archive and package bounds of item 2;
+  4. item 3;
+  5. item 5.
+
+  Only then does item 4 obtain a buyer card, and item 2 finishes by
+  encoding the task with it. A purchase that fails an earlier check draws
+  no key and asks custody for no signature.
+- **Buyer card (item 4).** A held card valid now and through the window is
+  reused, the one ending last; it is still verified with `VerifyAgentCard`
+  against finalized state. Only when no held card covers the window is a
+  new relay key drawn and a card signed and verified. The key is stored
+  before the card can reach anyone. Repeated checks of one purchase, or
+  purchases with the same window, therefore add no keys and no signatures.
 - **Provider card (item 3).** Provider cards are learned from any source with
   `LearnProviderCard`, at most 8 per Capability; the card expiring first is
   dropped. The check uses only a card of the Quote's provider that is usable
@@ -1048,6 +1066,7 @@ request the SDK rejects against the input schema is a JSON-RPC error
 | `MCP_BUYER_OFFER_INVALID` | finalized state does not verify the offer, Quote or manifest | `NEVER` |
 | `MCP_BUYER_PROVIDER_NOT_ALLOWED` | the provider is not on the allow-list | `NEVER` |
 | `MCP_BUYER_NOT_CARRIABLE` | an item of 7.1 fails; the item is named | `NEVER` |
+| `MCP_BUYER_CARD_WINDOW_TOO_LONG` | the Quote's expiry, response SLA and result retention together need a buyer key card beyond 30 days (3.3) | `NEVER` |
 | `MCP_BUYER_OVER_BUDGET` | a per-call, window, count, unconfirmed or lifecycle bound | `NEVER` |
 | `MCP_BUYER_QUOTE_EXPIRED` | the Quote expired or the terms changed before the send | `NEVER` |
 | `MCP_BUYER_CONFLICT` | an idempotency key reused with other inputs; a purchase in another phase | `NEVER` |

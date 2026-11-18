@@ -53,6 +53,10 @@ var (
 	// ErrRelaysUnavailable reports that no relay of a card answered its
 	// description recently (section 7.1 item 5).
 	ErrRelaysUnavailable = errors.New("no relay of the card answered its description in the last 10 minutes")
+	// ErrCardWindowTooLong reports a purchase whose buyer card would have to
+	// outlive the 30-day card lifetime: the Quote's expiry plus the response
+	// SLA plus the result's retention lies too far ahead.
+	ErrCardWindowTooLong = errors.New("the purchase needs a buyer key card beyond the 30-day card lifetime")
 )
 
 // CardVerifier verifies key cards against finalized state; buyersdk's
@@ -499,23 +503,19 @@ func (c *Carrier) CheckCarriage(ctx context.Context, record buyersdk.CallRecord,
 		return errors.New("the Quote is not delivered over Agent Packets")
 	}
 	now := c.config.Now()
-	responseDeadline := now.Add(time.Duration(record.ResponseSLASeconds) * time.Second)
-	// Item 3: a verified provider card usable now and valid through the
-	// response deadline the call would get.
-	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, provider, responseDeadline)
+	// The buyer card covers the latest response deadline the call can get
+	// (the Quote's expiry plus the response SLA) plus the result's retention.
+	// A window over the 30-day card lifetime is refused before any read: no
+	// successor card would reach the provider in time.
+	cover, err := buyerCardWindow(record, validated.Manifest.RetentionSeconds)
 	if err != nil {
 		return err
 	}
-	// Item 4: a fresh buyer card, covering the response deadline plus the
-	// result's retention (at most 30 days), signed and verified against
-	// finalized state.
-	cover := responseDeadline.Add(time.Duration(validated.Manifest.RetentionSeconds) * time.Second).Add(cardCoverSlack)
-	buyerCard, _, err := c.IssueBuyerCard(ctx, cover)
-	if err != nil {
-		return err
+	if cover.Sub(now) > agentpacketseal.MaxKeyCardLifetime {
+		return ErrCardWindowTooLong
 	}
-	// Item 2: the task for this purchase encodes, with the call fields at
-	// their widest, and its archive fits the binding's bound.
+	// Item 2, without the card: the archive fits the binding's bound and
+	// the package can be carried.
 	limit := int(validated.TransportBinding.MaxRequestBytes)
 	if limit > railwork.MaxInlineInputBytes {
 		limit = railwork.MaxInlineInputBytes
@@ -526,12 +526,12 @@ func (c *Carrier) CheckCarriage(ctx context.Context, record buyersdk.CallRecord,
 	if err := railwork.CheckCarriablePackage(len(packageBytes), validated.TransportBinding); err != nil {
 		return err
 	}
-	widest := ^uint64(0)
-	if _, err := railwork.EncodeTask(railwork.Task{Header: railwork.TaskHeader{BuyerAgentID: c.config.BuyerAgentID,
-		BuyerWallet: record.BuyerWallet, CapabilityID: record.CapabilityID, CapabilityVersion: record.CapabilityVersion,
-		ExecutionID: record.ExecutionID, ExecutionNonce: strings.Repeat("0", 64), RequestID: widest, CallLT: widest,
-		CallHash: strings.Repeat("0", 64)}, Package: packageBytes, Archive: archive, BuyerKeyCard: buyerCard}); err != nil {
-		return fmt.Errorf("the task for this purchase does not encode: %w", err)
+	// Item 3: a verified provider card usable now and valid through the
+	// response deadline the call would get.
+	responseDeadline := now.Add(time.Duration(record.ResponseSLASeconds) * time.Second)
+	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, provider, responseDeadline)
+	if err != nil {
+		return err
 	}
 	// Item 5: a relay of each side answered recently.
 	if err := c.relaysAnswered(ctx, c.config.Relays); err != nil {
@@ -540,5 +540,111 @@ func (c *Carrier) CheckCarriage(ctx context.Context, record buyersdk.CallRecord,
 	if err := c.relaysAnswered(ctx, providerCard.Card.Relays); err != nil {
 		return fmt.Errorf("provider relays: %w", err)
 	}
+	// Item 4, last because it may sign: a buyer card covering the window,
+	// verified against finalized state. A held card that already covers it
+	// is reused; only otherwise is a new key drawn and a card signed.
+	buyerCard, err := c.BuyerCard(ctx, cover)
+	if err != nil {
+		return err
+	}
+	// Item 2 with the card: the task for this purchase encodes, with the
+	// call fields at their widest.
+	widest := ^uint64(0)
+	if _, err := railwork.EncodeTask(railwork.Task{Header: railwork.TaskHeader{BuyerAgentID: c.config.BuyerAgentID,
+		BuyerWallet: record.BuyerWallet, CapabilityID: record.CapabilityID, CapabilityVersion: record.CapabilityVersion,
+		ExecutionID: record.ExecutionID, ExecutionNonce: strings.Repeat("0", 64), RequestID: widest, CallLT: widest,
+		CallHash: strings.Repeat("0", 64)}, Package: packageBytes, Archive: archive, BuyerKeyCard: buyerCard}); err != nil {
+		return fmt.Errorf("the task for this purchase does not encode: %w", err)
+	}
 	return nil
+}
+
+// buyerCardWindow is the end of the window a buyer card for this purchase
+// must cover: the Quote's expiry (the latest time the call can be sent),
+// plus the response SLA, plus the result's retention, plus 300 seconds.
+func buyerCardWindow(record buyersdk.CallRecord, retentionSeconds uint64) (time.Time, error) {
+	if record.ExpiresAtUnix == 0 {
+		return time.Time{}, errors.New("the journaled call has no Quote expiry")
+	}
+	end := record.ExpiresAtUnix
+	for _, add := range []uint64{uint64(record.ResponseSLASeconds), retentionSeconds, uint64(cardCoverSlack / time.Second)} {
+		next := end + add
+		if next < end || next > uint64(1)<<62 {
+			return time.Time{}, ErrCardWindowTooLong
+		}
+		end = next
+	}
+	return time.Unix(int64(end), 0), nil
+}
+
+// BuyerCard returns a buyer card valid now and through notAfter, verified
+// against finalized state. A held card that covers the window is reused,
+// the one ending last; only when none does is a new key drawn and a card
+// signed. A prepare loop therefore adds keys and signatures only when the
+// window it needs grows past every held card.
+func (c *Carrier) BuyerCard(ctx context.Context, notAfter time.Time) ([]byte, error) {
+	held, err := c.heldBuyerCards()
+	if err != nil {
+		return nil, err
+	}
+	now := uint64(c.config.Now().Unix())
+	var best *heldBuyerCard
+	for index := range held {
+		card := held[index].card
+		if card.NotBeforeUnix > now || card.NotAfterUnix < uint64(notAfter.Unix()) {
+			continue
+		}
+		if best == nil || card.NotAfterUnix > best.card.NotAfterUnix {
+			best = &held[index]
+		}
+	}
+	if best != nil {
+		if _, _, err := c.config.Cards.VerifyAgentCard(ctx, c.config.Verifier, c.config.BuyerAgentID, best.raw); err != nil {
+			return nil, err
+		}
+		return best.raw, nil
+	}
+	raw, _, err := c.IssueBuyerCard(ctx, notAfter)
+	return raw, err
+}
+
+type heldBuyerCard struct {
+	raw  []byte
+	card agentpacketseal.KeyCard
+}
+
+// heldBuyerCards lists the buyer cards of the stored relay keys, with their
+// packet JSON.
+func (c *Carrier) heldBuyerCards() ([]heldBuyerCard, error) {
+	entries, err := os.ReadDir(c.keyDir())
+	if err != nil {
+		return nil, err
+	}
+	var cards []heldBuyerCard
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		var record relayKeyRecord
+		if err := readJSON(filepath.Join(c.keyDir(), entry.Name()), &record); err != nil {
+			return nil, err
+		}
+		if record.Schema != relayKeySchema || record.AgentID != c.config.BuyerAgentID {
+			return nil, errors.New("a stored relay key is not the buyer Agent's")
+		}
+		raw, err := base64.StdEncoding.Strict().DecodeString(record.CardBase64)
+		if err != nil {
+			return nil, errors.New("a stored buyer card is not Base64")
+		}
+		packet, err := agentpacket.DecodeJSON(raw)
+		if err != nil {
+			return nil, err
+		}
+		card, err := agentpacketseal.DecodeKeyCard(packet.Payload)
+		if err != nil || hex.EncodeToString(card.KeyID[:])+".json" != entry.Name() {
+			return nil, errors.New("a stored buyer card is not for its key")
+		}
+		cards = append(cards, heldBuyerCard{raw: raw, card: card})
+	}
+	return cards, nil
 }
