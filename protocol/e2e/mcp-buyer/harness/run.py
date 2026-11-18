@@ -138,6 +138,12 @@ def rpc(method: str, **params):
 
 
 def private_dir(path: Path, account: str | None, mode: int = 0o700, group: int | None = None) -> Path:
+    """An owned directory. Container root holds no DAC_OVERRIDE, so a
+    directory inside an account's home is made by that account itself."""
+    if account is not None and HOME[account] in path.parents:
+        as_account(account, ["/bin/mkdir", "-p", "-m", oct(mode)[2:], str(path)])
+        as_account(account, ["/bin/chmod", oct(mode)[2:], str(path)])
+        return path
     path.mkdir(parents=True, exist_ok=True)
     uid, gid = ACCOUNTS[account] if account else (0, 0)
     os.chown(path, uid, gid if group is None else group)
@@ -371,7 +377,10 @@ def setup_buyer(wallet: str, tosctl_sha256: str) -> dict:
     as_account("custody", ["/usr/bin/tee", str(AGENT_CONFIG)], input_text=json.dumps(config, indent=2))
     as_account("custody", ["/bin/chmod", "0600", str(AGENT_CONFIG)])
     start("custody", [str(BIN / "tos-service-buyer"), "agent", "--config", str(AGENT_CONFIG)], "agent.log")
-    ready = poll(lambda: (SOCKET_DIR / "agent.sock").is_socket(), 120, 1)
+    # Root cannot search the 0750 socket directory; the developer account,
+    # in its group, checks for the socket.
+    ready = poll(lambda: as_account("developer", ["/usr/bin/test", "-S", str(SOCKET_DIR / "agent.sock")],
+                                    check=False).returncode == 0, 120, 1)
     record("the buyer agent serves its socket as custody", bool(ready), {"agent_id": agent_id})
     return {"agent_id": agent_id, "packet_key_id": key_id}
 
@@ -484,7 +493,9 @@ async def main() -> int:
                    "tos_buyer_result" in listed.get("tools", []), listed.get("tools"))
             peer_negatives()
     except Exception as error:  # noqa: BLE001 - the evidence records the failure
-        record("run completed without an exception", False, repr(error))
+        import traceback
+        record("run completed without an exception", False, {"error": repr(error),
+                                                              "traceback": traceback.format_exc()[-4000:]})
     finally:
         for process in processes:
             if process.poll() is None:
@@ -498,7 +509,9 @@ async def main() -> int:
     (WORK / "evidence.json").write_text(json.dumps(redact_value(evidence), indent=2) + "\n")
     # Everything the host reads back belongs to the host account.
     host_uid, host_gid = int(os.environ["HOST_UID"]), int(os.environ["HOST_GID"])
-    for path in [WORK, *WORK.rglob("*")]:
+    # The work directory itself last: once it is the host's again, root can
+    # no longer enter it.
+    for path in [*sorted(WORK.rglob("*"), key=lambda p: len(p.parts), reverse=True), WORK]:
         if path.is_symlink():
             continue
         os.chown(path, host_uid, host_gid)
