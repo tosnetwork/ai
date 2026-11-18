@@ -441,7 +441,7 @@ Deployment requirements, stated in the user guide and checked where possible:
   the custody account.
 
 A single-account setup is not offered: it would claim a safety it cannot
-deliver (question O1).
+deliver (owner decision O1, section 17).
 
 ### 5.2 What the confirmer shows
 
@@ -826,29 +826,36 @@ refusals, crash recovery and the confirmation boundary:
 `protocol/` keeps its import boundary: it imports none of `gateway/`,
 `execution/` or `messenger/`.
 
-## 17. Questions for the owner
+## 17. Owner decisions and open questions
 
-- **O1. Single-account mode.** This design refuses to run where the model's
-  account can reach custody (5.1). Should the pilot accept a weaker "assisted"
-  mode, with an explicit warning, for a buyer who cannot create a second OS
-  account? Recommended: no.
-- **O2. Buyer funding.** Who funds an external pilot buyer's testnet wallet
-  for the payment, the storage fee, the Agent registration and the lifecycle
-  fees: a faucet, the team, or the buyer?
-- **O3. Default relays.** The agent needs relay URLs for its card. Should it
-  default to the two official packet relays, and does the pilot record treat a
-  team-operated relay as a carrier only (it holds no authority), so that it
-  does not affect role independence?
+Decided by the owner on 2026-11-18:
+
+- **O1. Single-account mode: not offered.** The adapter refuses to run where
+  the model's account can reach custody (5.1). There is no weaker "assisted"
+  mode, for the pilot or otherwise.
+- **O2. Pilot buyer funding: the team.** The external pilot buyer's wallet is
+  funded with testnet TOS by the team for the payment, the storage fee, the
+  Agent registration and the lifecycle fees. No real money is involved.
+- **O3. Relays: the official packet relays by default.** `init` names the two
+  official packet relays in the buyer's key card unless the user names
+  others. A relay holds no authority (relay section 1): it cannot create,
+  change or authorize any protocol fact, and every packet it carries is
+  verified against finalized state. A team-operated relay is therefore a
+  carrier only and does not affect the independence of the Gate D roles.
+- **O5. Shared buyer runtime: the direction.** The buyer agent package is
+  meant to become the shared buyer runtime that OpenFox may adopt later, as
+  it adopted `railwork`. V1 does not do that switch.
+- **O6. Refusal signal: acceptable for V1.** A refused task is visible to the
+  buyer only by timeout, followed by the refund path of section 11 (frames
+  Q7). A signed refusal frame is left to a later version.
+- **O7. Pilot discovery: offer file.** Until a public HTTPS gateway exists,
+  the pilot buyer discovers the provider through an offer file the provider
+  hands over (4.4); gateway search (4.3) stays optional.
+
+Open:
+
 - **O4. Self-sweep economics.** A buyer whose request lapses gets the price
   and the cleanup bounty by sweeping it itself, which is more than
   `claim_refund` returns. A rational buyer may therefore let refunds lapse and
-  hold provider capacity longer. The agent claims promptly by default. Is the
-  incentive intended, or a contract follow-up?
-- **O5. Shared buyer runtime.** Should the buyer agent package become the
-  shared buyer implementation that OpenFox later adopts, as it adopted
-  `railwork`, or stay specific to this adapter?
-- **O6. Refusal signal.** A refused task is visible to the buyer only by
-  timeout, after which the storage fee is lost (frames Q7). Is that acceptable
-  for the pilot, or should a signed refusal frame be specified first?
-- **O7. Pilot discovery source.** Will the pilot provider be listed by a
-  public gateway, or will the buyer receive an offer file directly?
+  hold provider capacity longer. The agent claims promptly by default. Whether
+  this is a Service Actor economic issue is under investigation.
