@@ -41,6 +41,7 @@ ROOT = Path(__file__).resolve().parents[2]
 AGENT = "protocol/pkg/buyeragent/"
 SDK = "protocol/pkg/buyersdk/"
 CONFIRM = "protocol/pkg/buyerconfirm/"
+MCP = "protocol/pkg/mcpbuyer/"
 
 # (name, file from the repository root, original text, mutated text, test
 # that must fail). The test runs in the mutated file's package.
@@ -416,9 +417,17 @@ MUTANTS = [
      'CleanupBountyNanoTOS: "1"}',
      "TestBuyerDiscoversVerifiesCallsAndResolves"),
     ("presented-terms-from-record", AGENT + "agent.go",
-     "ResponseSLASeconds: record.ResponseSLASeconds, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,",
-     "ResponseSLASeconds: 3_600, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,",
+     "ResponseSLASeconds: record.ResponseSLASeconds, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,\n"
+     "\t\tRetentionSeconds: validated.Manifest.RetentionSeconds,",
+     "ResponseSLASeconds: 3_600, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,\n"
+     "\t\tRetentionSeconds: validated.Manifest.RetentionSeconds,",
      "TestTheShownTermsComeOnlyFromTheJournalRecord"),
+    ("preview-terms-from-record", AGENT + "agent.go",
+     "ResponseSLASeconds: record.ResponseSLASeconds, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,\n"
+     "\t\tCleanupBountyNanoTOS: record.CleanupBountyNanoTOS, RetentionSeconds: purchase.RetentionSeconds}",
+     "ResponseSLASeconds: 3_601, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,\n"
+     "\t\tCleanupBountyNanoTOS: record.CleanupBountyNanoTOS, RetentionSeconds: purchase.RetentionSeconds}",
+     "TestThePreviewCarriesTheProviderAndTheAdmittedTerms"),
     ("presented-terms-required", AGENT + "agent.go",
      'if record.ResponseSLASeconds == 0 || record.RefundClaimWindowSeconds == 0 || record.CleanupBountyNanoTOS == "" {',
      "if false {",
@@ -435,6 +444,64 @@ MUTANTS = [
      '\tcase typed == "":',
      "\tcase false:",
      "TestATypedCodeConfirmsAndOtherInputDoesNot"),
+    ("pack-size-bound", AGENT + "canonical.go",
+     "\t\tif size > MaxArchiveBytes {",
+     "\t\tif size > MaxArchiveBytes && false {",
+     "TestPackSourceArchiveIsDeterministicAndReadable"),
+
+    # The MCP server (sections 2, 4 and 9).
+    ("mcp-root-containment", MCP + "source.go",
+     'if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {',
+     'if err == nil && (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) || true) {',
+     "TestASourceOutsideEveryRootIsRefused"),
+    ("mcp-real-path", MCP + "source.go",
+     "real, err := filepath.EvalSymlinks(source)",
+     "real, err := filepath.Clean(source), error(nil)",
+     "TestASourceOutsideEveryRootIsRefused"),
+    ("mcp-walk-refuses-links", MCP + "source.go",
+     '\t\tdefault:\n\t\t\treturn sourceError("the source holds a symlink, device, FIFO or socket")',
+     "\t\tdefault:\n\t\t\treturn nil",
+     "TestLinksAndSpecialFilesInADirectoryAreRefused"),
+    ("mcp-tar-refuses-other-entries", MCP + "source.go",
+     '\t\tdefault:\n\t\t\treturn nil, sourceError("the source tar holds an entry',
+     '\t\tdefault:\n\t\t\tcontinue\n\t\t\treturn nil, sourceError("the source tar holds an entry',
+     "TestASuppliedTarIsRepackedCanonically"),
+    ("mcp-untrusted-escaped", MCP + "untrusted.go",
+     "Text: buyerconfirm.Escape(value, MaxUntrustedChars)",
+     "Text: value + buyerconfirm.Escape(\"\", MaxUntrustedChars)",
+     "TestProviderTextIsDelimitedWithAFreshID"),
+    ("mcp-fresh-delimiter", MCP + "untrusted.go",
+     "if err := random(raw[:]); err != nil {",
+     "if err := error(nil); err != nil {",
+     "TestProviderTextIsDelimitedWithAFreshID"),
+    ("mcp-internal-error-fixed", MCP + "tools.go",
+     'Message: "the MCP buyer server could not complete the request"}',
+     "Message: err.Error()}",
+     "TestAgentRefusalsKeepTheirCodeAndDisposition"),
+    ("mcp-refusal-keeps-code", MCP + "tools.go",
+     "toolErr = &ToolError{Code: known.Code, Disposition: known.Disposition, Message: known.Message}",
+     "toolErr = &ToolError{Code: buyeragent.CodeInternal, Disposition: known.Disposition, Message: known.Message}",
+     "TestAgentRefusalsKeepTheirCodeAndDisposition"),
+    ("mcp-deploy-vault", MCP + "deployment.go",
+     'if strings.HasPrefix(entry, "VAULT_URL=") {',
+     'if strings.HasPrefix(entry, "VAULT_URL=") && false {',
+     "TestDeploymentChecksRefuseAReachableCustody"),
+    ("mcp-deploy-state-readable", MCP + "deployment.go",
+     "\tcase err == nil:\n\t\tdirectory.Close()\n\t\treturn ErrStateReadable",
+     "\tcase err == nil:\n\t\tdirectory.Close()\n\t\treturn nil",
+     "TestDeploymentChecksRefuseAReachableCustody"),
+    ("mcp-deploy-state-unchecked", MCP + "deployment.go",
+     "\tcase !errors.Is(err, fs.ErrPermission):\n\t\treturn ErrStateUnchecked",
+     "\tcase !errors.Is(err, fs.ErrPermission):\n\t\treturn nil",
+     "TestDeploymentChecksRefuseAReachableCustody"),
+    ("mcp-deploy-custody-owner", MCP + "deployment.go",
+     "if osguard.CurrentUserOwns(info) {",
+     "if osguard.CurrentUserOwns(info) && false {",
+     "TestDeploymentChecksRefuseAReachableCustody"),
+    ("mcp-deploy-socket-kind", MCP + "deployment.go",
+     "if err != nil || info.Mode()&os.ModeSocket == 0 {",
+     "if err != nil {",
+     "TestDeploymentChecksRefuseAReachableCustody"),
 ]
 
 # (name, file, original text, text after deleting the check, why it is
@@ -508,6 +575,20 @@ REDUNDANT = [
      "",
      "every request field is bounded below 2 MiB, and the bounded reader ends an over-long line "
      "without a newline; the check only bounds memory"),
+    ("mcp-absolute-path", MCP + "source.go",
+     '\tif !filepath.IsAbs(source) {\n\t\treturn "", sourceError("source_path must be absolute")\n\t}\n',
+     "",
+     "a relative path stays relative after EvalSymlinks, and filepath.Rel refuses to relate it to an "
+     "absolute root"),
+    ("mcp-read-bound", MCP + "source.go",
+     "if err != nil || len(content) > limit {",
+     "if err != nil {",
+     "a read past the remaining bound means the archive exceeds 1 MiB, which the packer refuses; the "
+     "check only bounds memory"),
+    ("mcp-packed-bound", MCP + "source.go",
+     "\tif len(archive) > maxBytes {\n\t\treturn nil, sourceError(\"the packed source archive exceeds its bound\")\n\t}\n",
+     "",
+     "every caller passes the 1 MiB archive bound, which the packer enforces itself"),
 ]
 
 

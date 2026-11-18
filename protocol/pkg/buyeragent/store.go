@@ -52,6 +52,14 @@ type PurchaseRecord struct {
 	// declined, withdrawn, or code-failures.
 	Outcome     string `json:"outcome,omitempty"`
 	CreatedUnix int64  `json:"created_unix"`
+	// From the validated Quote at prepare: the provider, the manifest and
+	// its human-readable text, which is the provider's own and untrusted,
+	// and the result retention.
+	ProviderAgentID     string `json:"provider_agent_id"`
+	ManifestDigest      string `json:"manifest_digest"`
+	ProviderName        string `json:"untrusted_provider_name"`
+	ProviderDescription string `json:"untrusted_provider_description"`
+	RetentionSeconds    uint64 `json:"retention_seconds"`
 }
 
 // keyRecord binds an idempotency key to one purchase intent. It is written
