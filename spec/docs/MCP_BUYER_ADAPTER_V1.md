@@ -212,8 +212,10 @@ start without it, and when the `tosctl` configuration is readable by group
 or others.
 
 It keeps the chain checkpoints, the call journal, the carrier's keys and
-inbox, and the purchase records in owner-private subdirectories of the state
-directory. It serves the socket (2.3), and until it stops it also runs:
+inbox, the purchase records and the manifests of the Quotes it accepted
+(4.4) in owner-private subdirectories of the state directory. Admission at
+prepare reads a manifest from the configured manifest directory, then from
+that store. It serves the socket (2.3), and until it stops it also runs:
 
 - the duty round (sections 7.2, 7.3 and 11);
 - the relay poller (`Carrier.RunPoll`, 7.3), with the agent's own purchase
