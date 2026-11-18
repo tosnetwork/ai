@@ -312,7 +312,7 @@ func DecodeTask(raw []byte) (Task, error) {
 	}
 	pkg, ok := strictBase64(header.PackageBase64)
 	if !ok || len(pkg) == 0 || len(pkg) > MaxPackageBytes {
-		return Task{}, invalidMessage("package_base64 is not canonical Base64 of a 1 to 8192-byte package")
+		return Task{}, invalidMessage("package_base64 is not canonical Base64 of a package of 1 to MaxPackageBytes bytes")
 	}
 	return Task{Header: header, Package: pkg, Archive: bytes.Clone(archive), BuyerKeyCard: card}, nil
 }
