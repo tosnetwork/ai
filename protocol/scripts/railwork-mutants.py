@@ -27,6 +27,9 @@ one alone changes no outcome:
   by the header check, and canonical non-empty Base64 never decodes empty;
 - the Receipt rebuild in DecodeReceipt: the nativecore decoder is exact,
   and a non-canonical cell could not hash to the finalized response hash.
+- the offset guard before the end-of-archive comparison: the tar reader
+  fails on a last member whose padding is missing, so the offset never
+  passes the end; the guard only keeps the slice in range;
 - the one-root count in DecodeReceipt: a BOC with a second root is never
   the canonical encoding of its first root, so the canonical-encoding check
   refuses it as well.
@@ -232,6 +235,10 @@ MUTANTS = [
      "\t\treceipt.ReportDigest != sha256Text(sha256.Sum256(report)) {",
      "\t\tlen(report) < 0 {",
      "TestBuyerRefusesAReceiptWhoseMemberDigestsDifferFromTheArtifact"),
+    ("artifact-end-of-archive-zero", "receipt.go",
+     "if membersEnd > source.Size() || !bytes.Equal(artifact[membersEnd:], make([]byte, tarEndOfArchive)) {",
+     "if membersEnd > source.Size() {",
+     "TestArtifactMustEndExactlyAtItsEndOfArchiveMarker"),
     ("artifact-regular-files", "receipt.go",
      "if err != nil || header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > MaxResultBytes {",
      "if err != nil || header.Size < 0 || header.Size > MaxResultBytes {",

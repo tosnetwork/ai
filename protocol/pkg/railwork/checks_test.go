@@ -326,9 +326,32 @@ func TestBuyerRefusesAResultThatDoesNotBindItsPurchase(t *testing.T) {
 			r.Header.ResponseHash = strings.Repeat("0", 63) + "1"
 		},
 		"artifact byte": func(r *Result, _ *[32]byte) { r.Artifact[len(r.Artifact)-1] ^= 1 },
-		// Bytes after the end-of-archive blocks leave both members as they
-		// were: only the artifact digest refuses them.
-		"artifact trailer":   func(r *Result, _ *[32]byte) { r.Artifact = append(r.Artifact, make([]byte, 512)...) },
+		// Another well-formed tar of the same members: only the artifact
+		// digest refuses it.
+		"artifact re-encoded": func(r *Result, _ *[32]byte) {
+			output, report, err := ArtifactMembers(r.Artifact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var buffer bytes.Buffer
+			writer := tar.NewWriter(&buffer)
+			for _, member := range [][2]string{{"output.log", string(output)}, {"report.json", string(report)}} {
+				if err = writer.WriteHeader(&tar.Header{Name: member[0], Mode: 0o600, Size: int64(len(member[1])),
+					Typeflag: tar.TypeReg}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = writer.Write([]byte(member[1])); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Equal(buffer.Bytes(), r.Artifact) {
+				t.Fatal("the re-encoded artifact has the same bytes")
+			}
+			r.Artifact = buffer.Bytes()
+		},
 		"receipt byte":       func(r *Result, _ *[32]byte) { r.Receipt[len(r.Receipt)-1] ^= 1 },
 		"receipt over bound": func(r *Result, _ *[32]byte) { r.Receipt = make([]byte, MaxReceiptBytes+1) },
 	}
@@ -450,6 +473,57 @@ func TestBuyerRefusesAReceiptWhoseMemberDigestsDifferFromTheArtifact(t *testing.
 		if err = ValidateResult(result, binding, responseHash); !errors.Is(err, ErrResultNotAccepted) {
 			t.Errorf("%s digest differs: err=%v", name, err)
 		}
+	}
+}
+
+// The artifact must end with the end-of-archive marker and nothing after
+// it, as archive/tar's Writer.Close leaves it. Anything else is refused,
+// even when the Receipt's artifact digest covers the extra bytes.
+func TestArtifactMustEndExactlyAtItsEndOfArchiveMarker(t *testing.T) {
+	document := loadVectors(t)
+	canonical := mustBase64(t, document.Receipt.ArtifactBase64)
+	if len(canonical)%tarBlock != 0 || !bytes.Equal(canonical[len(canonical)-tarEndOfArchive:], make([]byte, tarEndOfArchive)) {
+		t.Fatal("the vector artifact does not end with the end-of-archive marker")
+	}
+	written := tarOf(t, [2]string{"output.log", "ok\n"}, [2]string{"report.json", "{}\n"})
+	if _, _, err := ArtifactMembers(written); err != nil {
+		t.Fatalf("archive/tar Writer output refused: %v", err)
+	}
+	nonZero := func(size int) []byte { return bytes.Repeat([]byte{0x41}, size) }
+	variants := map[string][]byte{
+		"one non-zero byte after the marker":  append(bytes.Clone(canonical), 0x41),
+		"a non-zero block after the marker":   append(bytes.Clone(canonical), nonZero(tarBlock)...),
+		"one zero byte after the marker":      append(bytes.Clone(canonical), 0),
+		"a zero block after the marker":       append(bytes.Clone(canonical), make([]byte, tarBlock)...),
+		"zero padding to a 10240-byte record": append(bytes.Clone(canonical), make([]byte, 10240-len(canonical)%10240)...),
+		"no end-of-archive marker":            bytes.Clone(canonical[:len(canonical)-tarEndOfArchive]),
+		"only one zero block of the marker":   bytes.Clone(canonical[:len(canonical)-tarBlock]),
+		"marker cut short by one byte":        bytes.Clone(canonical[:len(canonical)-1]),
+	}
+	for name, artifact := range variants {
+		if _, _, err := ArtifactMembers(artifact); !errors.Is(err, ErrResultNotAccepted) {
+			t.Errorf("%s: err=%v", name, err)
+		}
+	}
+	// The attack: a Receipt whose artifact digest covers an addendum after
+	// the marker, with the members' digests unchanged.
+	binding := vectorReceiptBinding(t, document)
+	receipt, _, err := DecodeReceipt(mustBase64(t, document.Receipt.ReceiptBOCBase64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	extended := append(bytes.Clone(canonical), nonZero(tarBlock)...)
+	root, responseHash, err := BuildReceipt(binding, Outcome{ResultDigest: receipt.ResultDigest,
+		ArtifactDigest: sha256Text(sha256.Sum256(extended)), ReportDigest: receipt.ReportDigest,
+		CompletedAtUnix: receipt.CompletedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := vectorResult(t, document)
+	result.Artifact, result.Receipt = extended, root.ToBOC()
+	result.Header.ResponseHash = hex.EncodeToString(responseHash[:])
+	if err = ValidateResult(result, binding, responseHash); !errors.Is(err, ErrResultNotAccepted) {
+		t.Fatalf("an addendum covered by the artifact digest was accepted: %v", err)
 	}
 }
 

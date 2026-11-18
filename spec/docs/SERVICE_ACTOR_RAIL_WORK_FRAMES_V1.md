@@ -353,7 +353,13 @@ purchase's frame binding, and only after its respond is finalized:
 3. SHA-256 of the artifact is the Receipt's `artifact_digest`; the artifact is
    a tar of exactly two regular files, `output.log` and `report.json`, each
    once, whose SHA-256 values are the Receipt's `result_digest` and
-   `report_digest`.
+   `report_digest`. The archive ends with the end-of-archive marker (two
+   512-byte zero blocks) directly after the last member's padded data, and
+   no byte follows it. This is what Go `archive/tar` `Writer.Close` emits and
+   what the software-work runner (`execution/pkg/softwarework`) writes. A
+   buyer MUST refuse an artifact that has bytes after the marker (zero
+   padding to a record boundary included) or no marker: such bytes are
+   covered by `artifact_digest` but by no member digest.
 
 A buyer MAY store a result that arrives before the respond is finalized and
 validate it later; OpenFox does. OpenFox keeps the first result message it

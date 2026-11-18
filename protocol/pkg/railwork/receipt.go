@@ -206,14 +206,30 @@ func ValidateResult(result Result, binding ReceiptBinding, finalizedResponseHash
 	return nil
 }
 
+// tarBlock is the tar block size; tarEndOfArchive is the end-of-archive
+// marker, two zero blocks.
+const (
+	tarBlock        = 512
+	tarEndOfArchive = 2 * tarBlock
+)
+
 // ArtifactMembers reads exactly output.log and report.json, each once and
-// each a regular file, from a software-work artifact tar.
+// each a regular file, from a software-work artifact tar. The archive must
+// end with the end-of-archive marker right after the last member's padded
+// data, with no byte after it: exactly what Go's archive/tar Writer.Close
+// emits and the software-work runner writes. Bytes after the marker are
+// covered by the artifact digest but by no member digest, so they are
+// refused, as is an archive without the marker.
 func ArtifactMembers(artifact []byte) ([]byte, []byte, error) {
 	if len(artifact) == 0 || len(artifact) > MaxResultBytes {
 		return nil, nil, notAccepted("the artifact is outside its bounds")
 	}
-	reader := tar.NewReader(bytes.NewReader(artifact))
+	source := bytes.NewReader(artifact)
+	reader := tar.NewReader(source)
 	members := map[string][]byte{}
+	// membersEnd is the offset just past the last member's data, rounded up
+	// to its block: where the end-of-archive marker must start.
+	membersEnd := int64(0)
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -235,6 +251,15 @@ func ArtifactMembers(artifact []byte) ([]byte, []byte, error) {
 			return nil, nil, notAccepted("an artifact member does not read")
 		}
 		members[header.Name] = body
+		// The reader has consumed the header blocks and exactly the data;
+		// both are within MaxResultBytes, so the rounding cannot overflow.
+		consumed := source.Size() - int64(source.Len())
+		membersEnd = (consumed + tarBlock - 1) / tarBlock * tarBlock
+	}
+	// Everything from membersEnd to the end must be the two zero blocks;
+	// the reader stopped at the first of them without checking what follows.
+	if membersEnd > source.Size() || !bytes.Equal(artifact[membersEnd:], make([]byte, tarEndOfArchive)) {
+		return nil, nil, notAccepted("the artifact does not end with exactly the end-of-archive marker")
 	}
 	output, okOutput := members["output.log"]
 	report, okReport := members["report.json"]
