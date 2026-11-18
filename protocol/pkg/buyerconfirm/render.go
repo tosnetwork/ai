@@ -14,9 +14,11 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
+	"golang.org/x/text/width"
 )
 
 // Rendering bounds (section 5.2).
@@ -85,31 +87,56 @@ func Escape(s string, limit int) string {
 // field escapes a protocol field.
 func field(s string) string { return Escape(s, MaxProtocolString) }
 
-// Provider text layout. Every provider row is hard-wrapped at a fixed width
-// and starts with a gutter. A terminal's own soft wrap of a long line can
-// therefore never put provider text at the start of a row, where it could
-// pass for the block's end marker or a protocol field.
+// Provider text layout. Every provider row is hard-wrapped at a fixed
+// display width and starts with a gutter. A terminal's own soft wrap of a
+// long line can therefore never put provider text at the start of a row,
+// where it could pass for the block's end marker or a protocol field.
 const (
+	// ProviderWrapWidth is the most display columns of provider text in
+	// one row, the gutter not counted.
 	ProviderWrapWidth = 64
 	ProviderGutter    = "| "
 )
 
-// collapseSpaces turns every run of spaces into one space and trims the
-// ends, so padding cannot push text to a chosen column.
+// displayWidth is the number of terminal columns r takes, counted so that a
+// row is never wider than counted. A combining mark takes none. A wide or
+// fullwidth character takes two. So does an ambiguous one, which some
+// terminals draw two columns wide.
+func displayWidth(r rune) int {
+	if unicode.In(r, unicode.Mn, unicode.Me) {
+		return 0
+	}
+	switch width.LookupRune(r).Kind() {
+	case width.EastAsianWide, width.EastAsianFullwidth, width.EastAsianAmbiguous:
+		return 2
+	}
+	return 1
+}
+
+// collapseSpaces turns every run of Unicode space separators (category Zs:
+// the space, U+00A0, U+2000 to U+200A, U+202F, U+205F, U+3000) into one
+// space and trims the ends, so padding cannot push text to a chosen column.
 func collapseSpaces(s string) string {
-	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return r == ' ' }), " ")
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.Is(unicode.Zs, r) }), " ")
 }
 
 // providerRows hard-wraps already escaped text into rows of at most
-// ProviderWrapWidth characters, each behind the gutter.
+// ProviderWrapWidth display columns, each behind the gutter.
 func providerRows(text string) []string {
-	runes := []rune(text)
 	var rows []string
-	for len(runes) > ProviderWrapWidth {
-		rows = append(rows, ProviderGutter+string(runes[:ProviderWrapWidth]))
-		runes = runes[ProviderWrapWidth:]
+	var row strings.Builder
+	columns := 0
+	for _, r := range text {
+		w := displayWidth(r)
+		if columns+w > ProviderWrapWidth {
+			rows = append(rows, ProviderGutter+row.String())
+			row.Reset()
+			columns = 0
+		}
+		row.WriteRune(r)
+		columns += w
 	}
-	return append(rows, ProviderGutter+string(runes))
+	return append(rows, ProviderGutter+row.String())
 }
 
 // DefaultSensitive are the member-name patterns highlighted by default: a
