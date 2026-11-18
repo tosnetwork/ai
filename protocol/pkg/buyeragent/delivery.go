@@ -304,7 +304,20 @@ func (c *Carrier) sealGeneration(ctx context.Context, task TaskDelivery, number 
 		return generationRecord{}, err
 	}
 	expires := envelopeExpiry(task.ResponseDeadline, now, providerCard.Card.NotAfterUnix)
-	generation := generationRecord{Schema: generationSchema, RequestHash: record.RequestHash, Generation: number,
+	generation, err := c.sealFrames(ctx, record, providerCard, frames, now, expires)
+	if err != nil {
+		return generationRecord{}, err
+	}
+	generation.Generation = number
+	return generation, nil
+}
+
+// sealFrames signs each frame of one message into its own packet from the
+// buyer to the card's Agent and seals it to the card, every envelope
+// expiring at expires.
+func (c *Carrier) sealFrames(ctx context.Context, record buyersdk.CallRecord, providerCard buyersdk.VerifiedProviderCard,
+	frames [][]byte, now time.Time, expires uint64) (generationRecord, error) {
+	generation := generationRecord{Schema: generationSchema, RequestHash: record.RequestHash,
 		CreatedUnix: now.Unix(), ExpiresAtUnix: expires, ProviderKeyID: hex.EncodeToString(providerCard.Key.KeyID[:]),
 		ProviderAgentID:   providerCard.Key.AgentID,
 		ProviderPublicKey: base64.StdEncoding.EncodeToString(providerCard.Key.PublicKey),
@@ -315,11 +328,11 @@ func (c *Carrier) sealGeneration(ctx context.Context, task TaskDelivery, number 
 			return generationRecord{}, err
 		}
 		packet, err := agentpacket.Sign(ctx, c.config.Signer, c.config.Controller, agentpacket.Packet{
-			SenderAgentID: c.config.BuyerAgentID, RecipientAgentID: task.ProviderAgentID, CapabilityID: record.CapabilityID,
+			SenderAgentID: c.config.BuyerAgentID, RecipientAgentID: providerCard.Key.AgentID, CapabilityID: record.CapabilityID,
 			QuoteCommitment: record.QuoteCommitment, Sequence: uint64(now.UnixNano()) + uint64(index), Nonce: nonce,
 			Payload: frame, CreatedAtUnix: uint64(now.Unix()), SenderKeyID: c.config.ControllerKeyID})
 		if err != nil {
-			return generationRecord{}, fmt.Errorf("the packet controller cannot sign a task packet: %w", err)
+			return generationRecord{}, fmt.Errorf("the packet controller cannot sign a packet: %w", err)
 		}
 		raw, err := agentpacket.EncodeJSON(packet)
 		if err != nil {

@@ -65,6 +65,9 @@ type saChain struct {
 	others map[string]*nativev1.NativeStateV1
 	// wallet is the buyer wallet's seqno getter and the checkpoint clock.
 	wallet saWallet
+	// registryErr makes every Registry read fail, as an unavailable
+	// finalized reader would.
+	registryErr error
 }
 
 // saWallet is the buyer wallet and clock of the fake chain. A zero
@@ -133,7 +136,7 @@ func (c *saChain) BeginBuyerSession(context.Context) (ServiceActorSession, error
 	}
 	return &saSession{checkpoint: c.checkpoint, capability: proto.Clone(c.capability).(*nativev1.NativeStateV1),
 		agent: proto.Clone(c.agent).(*nativev1.NativeStateV1), data: c.data, history: append([]toschain.ActorTransaction(nil), c.history...),
-		getterLie: c.getterLie, transitions: transitions, others: others, wallet: c.wallet}, nil
+		getterLie: c.getterLie, transitions: transitions, others: others, wallet: c.wallet, registryErr: c.registryErr}, nil
 }
 
 type saSession struct {
@@ -145,6 +148,7 @@ type saSession struct {
 	transitions       map[nativecore.RegistryTransitionKind]toschain.RegistryTransitionTx
 	others            map[string]*nativev1.NativeStateV1
 	wallet            saWallet
+	registryErr       error
 }
 
 func (s *saSession) WalletSeqno(_ context.Context, wallet string) (uint32, error) {
@@ -184,6 +188,9 @@ func (s *saSession) ChainTime() time.Time {
 	return s.wallet.chainTime
 }
 func (s *saSession) ResolveRegistry(_ context.Context, id string) (*nativev1.NativeStateV1, bool, error) {
+	if s.registryErr != nil {
+		return nil, false, s.registryErr
+	}
 	var state *nativev1.NativeStateV1
 	switch id {
 	case saCapability:
