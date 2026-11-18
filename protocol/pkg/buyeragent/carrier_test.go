@@ -480,3 +480,105 @@ func TestATamperedRelayKeyIsRefused(t *testing.T) {
 		t.Fatal("a key of another Agent was listed")
 	}
 }
+
+// withCarrier makes the agent's carriage check the real Carrier, on the
+// fixture's clock.
+func withCarrier(t *testing.T, f *fixture) (*Carrier, *fakeChain) {
+	t.Helper()
+	chain := &fakeChain{owner: fxProvider, clock: f.clock, agents: map[string]*nativev1.AgentStateV1{
+		fxProvider:   keycardtest.Agent(fxProvider, providerController),
+		fxBuyerAgent: keycardtest.Agent(fxBuyerAgent, buyerController)}}
+	relays := &fakeRelay{down: map[string]bool{}, asked: map[string]int{}}
+	carrier, err := NewCarrier(CarrierConfig{StateDir: privateDir(t), BuyerAgentID: fxBuyerAgent, Network: fxNetwork(),
+		Controller: buyerController, ControllerKeyID: controllerID(t, buyerController), Signer: keycardtest.Keys,
+		Verifier: keycardtest.Keys, Cards: chain, Relays: []string{buyerRelay}, RelayClient: relays.client, Now: f.clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.carriage.mu.Lock()
+	f.carriage.carrier = carrier
+	f.carriage.mu.Unlock()
+	return carrier, chain
+}
+
+func learnAt(t *testing.T, carrier *Carrier, raw []byte) {
+	t.Helper()
+	if _, err := carrier.LearnProviderCard(context.Background(), buyersdk.ProviderCardFromQuote, fxCapability, raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// confirm presents a requested purchase and confirms it with its code.
+func confirm(t *testing.T, f *fixture, view PurchaseView) error {
+	t.Helper()
+	presentation, err := f.agent.Present(view.RequestHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.agent.Decide(context.Background(), DecideParams{RequestHash: view.RequestHash, Decision: DecisionConfirm,
+		Code: presentation.Code})
+	return err
+}
+
+// Section 7.1 item 3 through the agent: a purchase is paid only with a
+// verified provider card that is usable when the call is sent.
+func TestTheAgentPaysOnlyWithAUsableVerifiedProviderCard(t *testing.T) {
+	t.Run("usable", func(t *testing.T) {
+		f := newFixture(t)
+		carrier, _ := withCarrier(t, f)
+		learnAt(t, carrier, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+		if err := confirm(t, f, f.requested(t, keyA)); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.buyer.sent()) != 1 {
+			t.Fatal("a carriable purchase was not sent")
+		}
+	})
+	t.Run("missing", func(t *testing.T) {
+		f := newFixture(t)
+		withCarrier(t, f)
+		_, err := f.agent.Prepare(context.Background(), PrepareParams{QuoteID: f.quoteID, IdempotencyKey: keyA,
+			ArchiveBase64: base64.StdEncoding.EncodeToString(sourceTar(t))})
+		if err == nil || codeOf(t, err) != CodeNotCarriable {
+			t.Fatalf("a purchase without a provider card was kept: %v", err)
+		}
+		if len(f.buyer.sent()) != 0 {
+			t.Fatal("a purchase without a provider card was sent")
+		}
+	})
+	t.Run("expired", func(t *testing.T) {
+		f := newFixture(t)
+		carrier, _ := withCarrier(t, f)
+		// The card covers the response deadline at prepare, and no longer a
+		// minute later, when the human confirms.
+		learnAt(t, carrier, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), time.Hour+fxResponseSLA*time.Second+30*time.Second))
+		view := f.requested(t, keyA)
+		f.clock.advance(time.Minute)
+		if err := confirm(t, f, view); err == nil || codeOf(t, err) != CodeNotCarriable {
+			t.Fatalf("a purchase whose card no longer covers the window was confirmed: %v", err)
+		}
+		if len(f.buyer.sent()) != 0 {
+			t.Fatal("a purchase with an expiring card was sent")
+		}
+	})
+	t.Run("invalid", func(t *testing.T) {
+		f := newFixture(t)
+		carrier, chain := withCarrier(t, f)
+		f.clock.advance(-6 * time.Minute)
+		learnAt(t, carrier, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+		f.clock.advance(6 * time.Minute)
+		view := f.requested(t, keyA)
+		// The card's Agent stops being the Capability's owner; the next
+		// verification, due before the send, refuses the card.
+		chain.mu.Lock()
+		chain.owner = "agent_" + strings.Repeat("66", 32)
+		chain.mu.Unlock()
+		f.clock.advance(5 * time.Minute)
+		if err := confirm(t, f, view); err == nil || codeOf(t, err) != CodeNotCarriable {
+			t.Fatalf("a purchase whose card no longer verifies was confirmed: %v", err)
+		}
+		if len(f.buyer.sent()) != 0 {
+			t.Fatal("a purchase with an invalid card was sent")
+		}
+	})
+}

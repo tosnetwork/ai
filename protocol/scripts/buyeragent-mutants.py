@@ -304,6 +304,12 @@ MUTANTS = [
      "if err := a.config.Carriage.CheckCarriage(ctx, record, archive); err != nil {",
      "if err := error(nil); err != nil {",
      "TestCarriageIsRecheckedBeforeTheSend"),
+    # The same recheck with the real carrier: an expired or no longer
+    # verifying provider card refuses the payment (section 7.1 item 3).
+    ("send-carriage-real-card", AGENT + "agent.go",
+     "if err := a.config.Carriage.CheckCarriage(ctx, record, archive); err != nil {",
+     "if err := error(nil); err != nil {",
+     "TestTheAgentPaysOnlyWithAUsableVerifiedProviderCard"),
     ("send-archive-digest", AGENT + "agent.go",
      'if sum := sha256.Sum256(archive); "sha256:"+hex.EncodeToString(sum[:]) != purchase.SourceDigest {',
      "if false {",

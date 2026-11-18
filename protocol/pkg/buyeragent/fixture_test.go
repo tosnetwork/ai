@@ -24,6 +24,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -162,7 +163,15 @@ func (f *fakeBuyer) Prepare(_ context.Context, request *nativev1.RequestQuotePro
 		StorageFeeNanoTOS: validated.Proposal.StorageFeeNanotos, AttestorKeyID: validated.Proposal.AttestorKeyId,
 		PaymentNanoTOS: "700000000", ExpiresAtUnix: validated.Proposal.ExpiresAtUnixSeconds,
 		Phase: buyersdk.PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix(),
-		ResponseSLASeconds: fxResponseSLA, RefundClaimWindowSeconds: fxRefundWindow, CleanupBountyNanoTOS: fxCleanupBounty}
+		ResponseSLASeconds: fxResponseSLA, RefundClaimWindowSeconds: fxRefundWindow, CleanupBountyNanoTOS: fxCleanupBounty,
+		BuyerAddressInReq: request.BuyerAddress}
+	// The package is journaled as buyersdk journals it, so a real carriage
+	// check can read it.
+	packageBytes, err := proto.Marshal(value)
+	if err != nil {
+		return buyersdk.CallRecord{}, err
+	}
+	record.PackageBase64 = base64.StdEncoding.EncodeToString(packageBytes)
 	if err := f.journal.Create(record, f.limits, now); err != nil {
 		return buyersdk.CallRecord{}, err
 	}
@@ -218,13 +227,19 @@ type fakeCarriage struct {
 	mu    sync.Mutex
 	err   error
 	calls int
+	// carrier, when set, decides instead of err: the real carriage check.
+	carrier *Carrier
 }
 
-func (c *fakeCarriage) CheckCarriage(context.Context, buyersdk.CallRecord, []byte) error {
+func (c *fakeCarriage) CheckCarriage(ctx context.Context, record buyersdk.CallRecord, archive []byte) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.calls++
-	return c.err
+	carrier, err := c.carrier, c.err
+	c.mu.Unlock()
+	if carrier != nil {
+		return carrier.CheckCarriage(ctx, record, archive)
+	}
+	return err
 }
 
 func (c *fakeCarriage) set(err error) {
