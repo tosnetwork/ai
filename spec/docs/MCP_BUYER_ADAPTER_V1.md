@@ -24,9 +24,11 @@ The refund duties (section 11) run in the agent without an MCP session, and
 The carriage check of 7.1 (`buyeragent.Carrier`, with the buyer's relay
 keys and cards and the learned provider cards) is implemented.
 
-Not yet implemented are task delivery, relay polling and result acceptance
-(7.2, 7.3), the finalized-state reads behind search, quote and result, and
-`init`; section
+Task delivery (7.2, `Carrier.DeliverTask`, run by the duty round) is
+implemented.
+
+Not yet implemented are relay polling and result acceptance (7.3), the
+finalized-state reads behind search, quote and result, and `init`; section
 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
@@ -246,8 +248,10 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
     maximum is refused at prepare, before payment, with
     `MCP_BUYER_CARD_WINDOW_TOO_LONG`. V1 issues no successor card, so a
     window the card cannot cover could not be carried.
-  - **Reuse.** A held card that already covers the window is used again;
-    a new key and card are made only when none does.
+  - **Reuse.** A held card that already covers the window, and names
+    exactly the configured relays, is used again. A new key and card are
+    made only when none does, so a reconfigured relay list never sends
+    results to relays the agent no longer polls.
   - **Keys.** The agent keeps each private key until
     `not_after_unix + 86,400 + 300` and polls every relay of every card
     whose key it holds.
@@ -857,6 +861,38 @@ state machine of frames 11.1: it sends the task (frames 5.1) sealed to the
 provider's card, resends it every 600 seconds while the request is pending,
 and stops sending tasks once the request is responded or overdue. Packet
 expiry follows frames 2.3.
+
+`Carrier.DeliverTask` implements it. The duty round of section 11 runs it
+for every pending request, with or without an MCP session. Each round
+works on the latest task generation:
+
+- **A new generation.** When there is none, or the latest is 600 seconds
+  old, the round builds one:
+  - the task message, with the call's `request_id`, `call_lt`, `call_hash`
+    and execution nonce, and the buyer card of 3.3;
+  - split into frames, each signed by the packet controller into its own
+    packet;
+  - each packet expires at the response deadline, or 86,100 seconds after
+    signing if that is earlier;
+  - each packet is sealed to the provider card that 7.1 selects.
+
+  The generation is journaled before its first deposit, and at most the 4
+  newest generations are kept.
+- **Deposits.** The round deposits every envelope of the generation at
+  every relay of that card, unless the relay has already settled it:
+  - `200`, `201` or `410` accepts the envelope;
+  - `409` or another refusal abandons that relay for that envelope;
+  - a retryable answer waits for the next round, which deposits the same
+    journaled bytes.
+
+  The round reports `MCP_BUYER_DEPENDENCY_UNAVAILABLE` until each envelope
+  is held by at least one relay.
+- **Re-deposit.** A fresh generation every 600 seconds also covers the
+  relay re-deposit rule (relay section 10: 80 % of the smallest relay TTL,
+  never more often than every 10 minutes). So a task needs no separate
+  re-deposit.
+- **After the deadline.** No packet is signed or sent once the response
+  deadline has passed.
 
 ### 7.3 Acceptance
 

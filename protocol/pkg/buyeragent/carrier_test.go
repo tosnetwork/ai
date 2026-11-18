@@ -81,15 +81,47 @@ func (c *fakeChain) VerifyAgentCard(ctx context.Context, verifier mldsa44.Verifi
 	return key, card, nil
 }
 
-// fakeRelay answers its description unless down.
+// fakeRelay answers its description unless down, and stores deposits
+// unless told to answer a deposit otherwise.
 type fakeRelay struct {
 	mu    sync.Mutex
 	down  map[string]bool
 	asked map[string]int
+	// deposits are the envelopes each relay accepted, in order; answer
+	// overrides the outcome of a deposit at a relay.
+	deposits map[string][][]byte
+	answer   map[string]agentpacketrelay.DepositResult
+	attempts map[string]int
+	// crash makes a deposit panic, as a process dying mid-deposit would
+	// stop the round.
+	crash bool
 }
 
-func (r *fakeRelay) client(base string) (RelayDescriber, error) {
+func (r *fakeRelay) client(base string) (RelayClient, error) {
 	return relayClient{relay: r, base: base}, nil
+}
+
+func (c relayClient) Deposit(_ context.Context, envelope []byte) (agentpacketrelay.DepositOutcome, error) {
+	c.relay.mu.Lock()
+	defer c.relay.mu.Unlock()
+	if c.relay.attempts == nil {
+		c.relay.attempts = map[string]int{}
+	}
+	c.relay.attempts[c.base]++
+	if c.relay.crash {
+		panic("the agent stopped during a deposit")
+	}
+	if _, err := agentpacketseal.ParseEnvelope(envelope); err != nil {
+		return agentpacketrelay.DepositOutcome{}, agentpacketrelay.ErrInvalidArgument
+	}
+	if result, set := c.relay.answer[c.base]; set {
+		return agentpacketrelay.DepositOutcome{Result: result}, nil
+	}
+	if c.relay.deposits == nil {
+		c.relay.deposits = map[string][][]byte{}
+	}
+	c.relay.deposits[c.base] = append(c.relay.deposits[c.base], append([]byte(nil), envelope...))
+	return agentpacketrelay.DepositOutcome{Result: agentpacketrelay.DepositStored, StatusCode: 201}, nil
 }
 
 type relayClient struct {
@@ -252,6 +284,37 @@ func TestAHeldBuyerCardThatCoversTheWindowIsReused(t *testing.T) {
 	f.clock.advance(-time.Hour)
 	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil || signer.calls != 3 {
 		t.Fatalf("a card that starts in the future was reused: %d %v", signer.calls, err)
+	}
+}
+
+// A held card naming other relays than the configured ones is not reused:
+// a reconfigured buyer gets a card for the relays it now polls.
+func TestAHeldBuyerCardForOtherRelaysIsNotReused(t *testing.T) {
+	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
+	f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+	signer := &countingSigner{}
+	f.carrier.config.Signer = signer
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil {
+		t.Fatal(err)
+	}
+	// Sorted, as NewCarrier stores them.
+	f.carrier.config.Relays = []string{"https://buyer-relay-two.example", buyerRelay}
+	raw, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour))
+	if err != nil || signer.calls != 2 {
+		t.Fatalf("a card for other relays was reused: %d signatures, %v", signer.calls, err)
+	}
+	packet, err := agentpacket.DecodeJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := agentpacketseal.DecodeKeyCard(packet.Payload)
+	if err != nil || len(card.Relays) != 2 {
+		t.Fatalf("the new card names %v: %v", card.Relays, err)
+	}
+	// With the configuration back, the first card is reused again.
+	f.carrier.config.Relays = []string{buyerRelay}
+	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err != nil || signer.calls != 2 {
+		t.Fatalf("the card for the configured relays was not reused: %d %v", signer.calls, err)
 	}
 }
 

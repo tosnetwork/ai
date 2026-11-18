@@ -55,6 +55,9 @@ type Config struct {
 	Network      *nativev1.NetworkDomain
 	Buyer        Buyer
 	Carriage     CarriageChecker
+	// Delivery carries the task of each admitted, pending purchase; nil
+	// delivers nothing (an agent wired without a carrier).
+	Delivery TaskDeliverer
 	// MaxLifecycleSends bounds the expire, claim_refund and sweep sends in
 	// one budget window. Zero means 2 * MaxCalls + 8 (section 6).
 	MaxLifecycleSends int
