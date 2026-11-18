@@ -28,6 +28,14 @@ The first `tos_service_v1` deployment record is
 public testnet, designated by the owner on 2026-11-18 as the initial
 public test network for Gate C), with its labeled quorum outputs in
 `artifacts/public-testnet-epoch7-gate-c-20261118/`.
+
+`public-testnet-epoch7-gate-d-rehearsal-20261118.json` records a
+same-operator public rehearsal of the paid software-work loop on the Service
+Actor rail on the same network: OpenFox provider and buyer nodes on two hosts,
+Quotes from the gateway, every packet carried by the installed relays, and
+sales that ended responded, refunded and swept. It is not Gate D evidence
+(`qualifies_as_gate_d: false`); Gate D needs an external buyer pilot.
+
 Evidence produced under the pre-release protocol domain is preserved unchanged
 under `archive/pre-tos-service-v1/` for audit history. Because protocol-domain
 strings participate in cryptographic commitments, those files cannot satisfy a

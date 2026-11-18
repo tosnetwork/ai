@@ -1,0 +1,388 @@
+{
+  "schema": "tos.openfox.service-relay-public.rehearsal-record.v1",
+  "status": "rehearsal-passed",
+  "protocol": "tos_service_v1",
+  "qualifies_as_gate_d": false,
+  "qualifies_as_public_acceptance": false,
+  "qualification_note": "a same-operator public rehearsal of the paid software-work loop on the Service Actor rail; Gate D acceptance needs an external pilot with a buyer outside the core team, an independent provider and an independently operated resolver or endpoint set",
+  "proves": "OpenFox nodes on two machines sell software work through a fresh Service Actor on a public TOS test network, with Quotes from the gateway and every packet carried by the installed relays; the sales end responded, refunded and swept",
+  "operator_independence": false,
+  "public_internet_reachability": false,
+  "network": {
+    "network_id": "tos:global-id:2",
+    "label": "epoch-7 public testnet",
+    "global_id": 2,
+    "config_param_8_version": 16,
+    "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+    "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+    "global_config_sha256": "sha256:ee1cd3d72002ea3acd85ba6b34f5a8d2cc6c74b39f8dba1173602e2e254b38ba",
+    "endpoints": "three validator loopback JSON-RPC listeners of distinct epoch-7 validators, run by the project operator and reached through SSH port forwards; the network, funding and actor code checks read all three",
+    "gate_c_record": "public-testnet-epoch7-gate-c-20261118.json"
+  },
+  "releases": {
+    "service_actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+    "native_registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+    "actor_code_hash_on_every_endpoint": true
+  },
+  "source_commits": {
+    "openfox_run": "f1c781880a16bd3cf06d6428435c87333f48acc7",
+    "openfox_pr_head": "33d937ab7d8594f7b6b7b15db93d849216f6b654",
+    "openfox_pr": "tosnetwork/openfox#65",
+    "openfox_pr_head_note": "the run's commit plus a test-only commit (gateway Quote deadline red control); the runner and the fix are unchanged",
+    "ai_gateway_and_protocol_rpc": "9543ecc7ece848ac709538c6879597d87110a12a",
+    "tos": "ed8e0a80bdafede324d97b041fa4174e0a5dce33"
+  },
+  "binaries": {
+    "openfox_sha256": "8c61febd92295021aa7cd2a5e7e9a6d4c6d376fc0bbd00964c8ed2e4bb5058f3",
+    "tosctl_sha256": "858a429f9e962adf8fe009b3ad33d197ae9467b069f7976ea3d7d0eade727d9c",
+    "gateway_api_sha256": "45729589c1536b3ff3097c6127b942e0dbe571c4f59f44bc2bbcf65814d7eae4",
+    "tos_service_rpc_sha256": "3e8ee3b6e28cf2a72f2a875cd9c8bb658564ea52c7fcd275f8975e437cdbe0f5",
+    "same_binaries_on_both_hosts": true
+  },
+  "topology": {
+    "provider_host": "provider node, gateway, protocol RPC and the TLS terminator on loopback; reaches the validators through SSH port forwards",
+    "buyer_host": "a separate public VPS running the buyer node; reaches the chain and the gateway only through a reverse SSH tunnel bound to its 127.0.0.1",
+    "relays": "relay-1 and relay-2, the installed Agent Packet Relay daemons, reached over HTTPS with their private CA pinned; never stopped, started or logged in to by the run",
+    "direct_peers": "none; every task and result packet travelled through the relays"
+  },
+  "terms": {
+    "price": "0.1",
+    "storage_fee": "0.2",
+    "cleanup_bounty": "0.1",
+    "response_sla_s": 3600,
+    "refund_claim_window_s": 3600
+  },
+  "funding": {
+    "source": "epoch-7 bootstrap wallet, sent by the testnet operator from its operations journal",
+    "settled_utc": "2026-11-18T02:25Z",
+    "operations": [
+      {
+        "id": "gated-fund-provider-20261118",
+        "to": "0:f0e5bed34d3ca04f4e8d1ab79f1a7ecc1b4cd38e75c4d78e6fb879e1fa5201ec",
+        "amount_nanotos": 5600000000,
+        "wallet_transaction": "3523f5c5fad22b49c3e67acddb8a8a8287193951c807369ca9243506199bdfae",
+        "wallet_lt": 8265000001,
+        "destination_transaction": "cb6991d1285ccfc1e2a8b3f7f8ff6637bc1c920d1730f8ef1384b2c17494d4e7",
+        "destination_lt": 8266000001
+      },
+      {
+        "id": "gated-fund-buyer-20261118",
+        "to": "0:21fd4b8fb47d25b92e031ec69120169c53445049b18a93c6e2f969097fb50a5a",
+        "amount_nanotos": 3800000000,
+        "wallet_transaction": "91de881932240f1aff47c5083307547796f97b2bb45c7de2a0afff8fbca50686",
+        "wallet_lt": 8296000001,
+        "destination_transaction": "636692868b3bc2039e602239d7c009807a7db172ab032ef2cdbcad1af87b2e54",
+        "destination_lt": 8297000001
+      },
+      {
+        "id": "gated-fund-sweeper-20261118",
+        "to": "0:4cb3806be3fe52a2a374b229dc096d0f098d349627cdef2fd5fc9bfd01325a70",
+        "amount_nanotos": 300000000,
+        "wallet_transaction": "9fc5846f834bedf2083cc9c6da39ce117bb4a534c371aa74ff95b624e31c2b29",
+        "wallet_lt": 8315000001,
+        "destination_transaction": "e1eeac075bf45a8e5cfb2f90762db35a7d4acdfa13fc1a9c4758fb9893fe0d04",
+        "destination_lt": 8316000001
+      }
+    ],
+    "funding_operations_sha256": "sha256:0f401df08f91d6f47b8f5dd41cb3acf4f7cc1dec714606d0403798248cdccf85"
+  },
+  "wallets": {
+    "provider": "0:f0e5bed34d3ca04f4e8d1ab79f1a7ecc1b4cd38e75c4d78e6fb879e1fa5201ec",
+    "buyer": "0:21fd4b8fb47d25b92e031ec69120169c53445049b18a93c6e2f969097fb50a5a",
+    "sweeper": "0:4cb3806be3fe52a2a374b229dc096d0f098d349627cdef2fd5fc9bfd01325a70"
+  },
+  "objects": {
+    "provider_agent_id": "agent_a572fdc2cc7ce1112ba0f6493a8971112d4468c827e3680de73b20bff7933855",
+    "provider_agent_address": "0:973a2f8c28b53e85ce9745e2f696915b174612119763a2a5e897c30da98128f2",
+    "buyer_agent_id": "agent_eb13ae9c6da95c1506c43b5e3bfc8a52b21cf6193ab3c53ad689c97c7acdd54e",
+    "buyer_agent_address": "0:c73199ac3a03f676fa1e3fd7b9d11ae6e8789da6b535defa765d32ca160bc278",
+    "service_actor": "0:48f9262de84cfb8407dc4af874072bf008ebe267c25fbe52f202683611f8e892",
+    "capability_id": "cap_bee33e575317cdc4559fe464db6c46f58f0269dbcafb543dd2f32865b83796f3",
+    "capability_address": "0:73ceaf32b71daa7ba69f285233e7463670f4dddd400be0f581f259d5b73bf3b3",
+    "capability_version": "1.0.0",
+    "manifest_digest": "sha256:8723849360cb52563a3c0ccf52cd5a4b8ebf797b5d2fc955cfdab915ee4b13e4",
+    "metadata_hash": "63877e58151c08971cc0b50f314a2c30db4a2bbe948daa011d615c35a17c1ca1",
+    "attestor_key_id": "mldsa44:2910bb54bb08849ee675061102b4ca67da728c2136fc03492760aa86cd411ff6",
+    "terms_hash": "279ca99c1ed26979f19231a47fcfdf3f17bcde143fcf3cea1cf68898a09427ee"
+  },
+  "sales": [
+    {
+      "label": "R0",
+      "quote_source": "offer file (the buyer learns the provider's relay key card from it)",
+      "attempt": 5,
+      "request_id": 0,
+      "request_hash": "573961faef1c3814d9667342573f8c79672f37ba13f098de02d118832eda0b2f",
+      "quote_commitment": "tvm-cell-sha256:498fcdc5d9a5822d73502b0564f3d6894fcad7bf6bfad43554489386c3ba0536",
+      "outcome": "responded",
+      "call": {
+        "lt": 21757000003,
+        "hash": "bf821344f8efc24a80b35fb806f29f48f43dc9adb917ee6306cd6eec5d9dce9a"
+      },
+      "respond": {
+        "lt": 21904000003,
+        "hash": "537933c57dfda6fad260e76e9a934560dc4f8f99c6d7e7c11bf7932fd5b4379f",
+        "from": "0:f0e5bed34d3ca04f4e8d1ab79f1a7ecc1b4cd38e75c4d78e6fb879e1fa5201ec"
+      },
+      "response_hash": "f47270c889a60ae73c3c8b9a5e67670f4424e70d54ad8671c94e0226d8749341",
+      "withdraw_revenue": {
+        "lt": 21991000003,
+        "hash": "1f8d2cb43d0d9ddcbb04d3418f6ae2718626c4bcedfe7f44f9fe3a5efbc5fc87",
+        "query_id": "1812551784064811891",
+        "amount_nanotos": 300000000
+      },
+      "post_sale_checks_passed": 12
+    },
+    {
+      "label": "R1",
+      "quote_source": "gateway Quote",
+      "attempt": 9,
+      "request_id": 1,
+      "request_hash": "4627af5a66681a274034ca59d187e1e92d5353c252138f2ec16ab0183367cf3c",
+      "quote_commitment": "tvm-cell-sha256:15b3b79ef25d442b17b1f6a97ba2c7410a36e5af1e929ff7c1d3c39af844c46b",
+      "outcome": "responded",
+      "buyer_phase": "completed",
+      "provider_state": "acked",
+      "call": {
+        "lt": 28411000003,
+        "hash": "23bb8fc4817e29af2ac9f1c594a06272fdf911af99a29b86888892abd78be0e8"
+      },
+      "respond": {
+        "lt": 28562000003,
+        "hash": "93a4af6c183613e97b4f410dcdbb925fbab62390c0e6b4dc84d2e648d2063ef3",
+        "from": "0:f0e5bed34d3ca04f4e8d1ab79f1a7ecc1b4cd38e75c4d78e6fb879e1fa5201ec"
+      },
+      "response_hash": "3bd0bdf6004ba9b2e3507c5c8d27daa98b21fc6542499754bb3807c93a618ce1",
+      "artifact_digest": "sha256:ec7986e25713b0a2d1dbfcc8ab79ecc206bebf60d5999672ae019aa18f145ab0",
+      "earlier_refused_purchase": "attempt 5's R1 was refused by the gateway before any value was sent (next_request_id unchanged)"
+    },
+    {
+      "label": "S",
+      "quote_source": "gateway Quote",
+      "attempt": 9,
+      "request_id": 2,
+      "request_hash": "dfadef46204631310dab2a3a9bb19f15f3331f068af08dae1e9e98456c3304c9",
+      "quote_commitment": "tvm-cell-sha256:f5932e9dccbf8808d9f8094327aa26c696f67cae52f5ada0892428390a9efb4a",
+      "scenario": "provider paused and buyer node stopped; the response deadline and the refund window lapsed",
+      "outcome": "swept",
+      "buyer_phase": "lapsed",
+      "call": {
+        "lt": 28651000003,
+        "hash": "3495a554743a5ca29caf75521f3aac85018e7bc4119792a82a79ebf6c430902b"
+      },
+      "response_deadline_unix": 1794980542,
+      "refund_claim_deadline_unix": 1794984142,
+      "sweep_expired_request": {
+        "lt": 47045000003,
+        "hash": "cdc12b3e9aacc06ad53c043c4e61d33807d4ccf853007382682e9d874d2d30f5",
+        "from": "0:4cb3806be3fe52a2a374b229dc096d0f098d349627cdef2fd5fc9bfd01325a70",
+        "outs": [
+          {
+            "destination": "0:21fd4b8fb47d25b92e031ec69120169c53445049b18a93c6e2f969097fb50a5a",
+            "value": 100000000
+          },
+          {
+            "destination": "0:4cb3806be3fe52a2a374b229dc096d0f098d349627cdef2fd5fc9bfd01325a70",
+            "value": 100000000
+          },
+          {
+            "destination": "0:4cb3806be3fe52a2a374b229dc096d0f098d349627cdef2fd5fc9bfd01325a70",
+            "value": 199652565
+          }
+        ],
+        "aborted": false,
+        "note": "the sweeper is paid the cleanup bounty; the price returns to the caller (buyer wallet)"
+      }
+    },
+    {
+      "label": "F",
+      "quote_source": "gateway Quote",
+      "attempt": 9,
+      "request_id": 3,
+      "request_hash": "3f819483d638347541eb124ff0ee5a9d8701852fd9bfea0e17d7e1b53820d5c7",
+      "quote_commitment": "tvm-cell-sha256:f27c6c2211dc0a17c018c0add04dae0dd06a18d598f32438a61872c421fdf2f0",
+      "scenario": "provider paused, buyer node running; the buyer's refund duty refunds after the response deadline",
+      "outcome": "refunded",
+      "buyer_phase": "refunded",
+      "call": {
+        "lt": 37788000003,
+        "hash": "d8724ba02f345d490f1829d5e6c69935069bf9d305115d0cf5ec08e2cf525631"
+      },
+      "response_deadline_unix": 1794984216,
+      "expire": {
+        "lt": 46981000003,
+        "hash": "3cc479e862e70f51ad7251982037e55ee006bcb1ec607ce5a2dc7c91799f0eef",
+        "in_value_nanotos": 10000000
+      },
+      "claim_refund": {
+        "lt": 47007000003,
+        "hash": "e9ce9f1ecbe0423785eea4d1f53e5e8705e13418fa11508c7e482d1fc61abec2",
+        "in_value_nanotos": 200000000
+      },
+      "refund_transactions_source": "the actor's transaction list read by the run (rpc-transcript.jsonl, last getTransactions): the two buyer-wallet messages after F's response deadline, in order"
+    }
+  ],
+  "final_withdrawal": {
+    "query_id": "2922934154661203535",
+    "amount_nanotos": "600000000",
+    "transaction_hash": "e3f148cd6777d4d6ac6fb0a35fc0cc41633469bfb1f3eadd8068b2eb125792d3",
+    "finalized_checkpoint": 46757,
+    "credited_after_nanotos": "0",
+    "actor_after": {
+      "active": 1,
+      "policy_version": 1,
+      "price": 100000000,
+      "storage_fee": 200000000,
+      "metadata_hash": "63877e58151c08971cc0b50f314a2c30db4a2bbe948daa011d615c35a17c1ca1",
+      "next_request_id": 4,
+      "pending_count": 0,
+      "live_count": 0,
+      "withdrawable_revenue": 0,
+      "locked_storage_fees": 0,
+      "pending_liability": 0,
+      "refundable_liability": 0
+    }
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "openfox_commit": "0c9b6919a17f85e74eae064b642e01fb13dd9cee",
+      "started_utc": "2026-11-18T02:26:53.263477+00:00",
+      "finished_utc": "2026-11-18T02:27:28.240043+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:c4ceefc73350b0af090d7b08812ae0504b067931b0a9015821b0f6d4d2714520",
+      "failure": "the sale storage fee was below 0.1 TOS plus the cleanup bounty, so the offer was refused",
+      "fix": "the runner's storage fee covers the bounty; a rerun resumes the staged run",
+      "runner_bug": true
+    },
+    {
+      "attempt": 2,
+      "openfox_commit": "ba7cdcc4f16b40ee0de2b8c8a3c7d6f9d1e3d5c1",
+      "started_utc": "2026-11-18T02:28:07.832786+00:00",
+      "finished_utc": "2026-11-18T02:29:30.299360+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:5c274685140420c97abb31e324bd3c14ee1a334640ed64f26486b7c49f17ed46",
+      "failure": "protocol RPC refuses a tosctl that is not root-owned",
+      "fix": "the owner installed a root-owned copy of the pinned tosctl for the gateway host; the runner uses it",
+      "runner_bug": true
+    },
+    {
+      "attempt": 3,
+      "openfox_commit": "650070a697002e6b1ae5d12979cd4e3711d7f156",
+      "started_utc": "2026-11-18T03:07:44.605284+00:00",
+      "finished_utc": "2026-11-18T03:08:09.891679+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:0af366546c45c291fc6ce93aa39f18f57bdeb254fac3ea8495c5487e9fb7d13b",
+      "failure": "the offer file was not handed to the buyer host, so the offer-file purchase found no file",
+      "fix": "the runner copies the offer file to the buyer host",
+      "runner_bug": true
+    },
+    {
+      "attempt": 4,
+      "openfox_commit": "cbe6198155603a15a671338541aaea5f292d738d",
+      "started_utc": "2026-11-18T03:52:54.212102+00:00",
+      "finished_utc": "2026-11-18T03:53:17.521808+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:7bf0886b46a159db107ed4daa4be812ca44c6b3debb65338f2fe42b83029c442",
+      "failure": "a stale buyer serve pid/exit file from the earlier attempt made the resumed buyer serve look stopped",
+      "fix": "a resumed run clears the stale buyer serve pid and exit files",
+      "runner_bug": true
+    },
+    {
+      "attempt": 5,
+      "openfox_commit": "8752605d7489c6d199fa134e3b899b745db8db67",
+      "started_utc": "2026-11-18T03:55:30.702748+00:00",
+      "finished_utc": "2026-11-18T03:57:41.000118+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:e2da9783e442b969bf453c4549f24ee4cd22d3b8349be730f2b62609efdcf836",
+      "failure": "OpenFox bug: gateway Quote requests carried no deadline (DeadlineUnixMillis 0), so the gateway refused every gateway-quoted purchase with 'discovery request deadline expired'; sale R0 (offer file) had already passed all 12 post-sale checks in this attempt",
+      "fix": "pkg/servicebridge/quotes.go stamps a bounded future deadline (the caller's sooner deadline or one minute)",
+      "runner_bug": false
+    },
+    {
+      "attempt": 6,
+      "openfox_commit": "50c473fbaf827334015c28c7ec695e278b279b22",
+      "started_utc": "2026-11-18T03:59:34.689245+00:00",
+      "finished_utc": "2026-11-18T03:59:39.581077+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:3377ca516a88522d553c2a635b751e0893cfeeff446b58392aad3df95e8802fa",
+      "failure": "binaries rebuilt between attempts were not restaged on the hosts",
+      "fix": "the runner restages binaries whose pinned digest changed",
+      "runner_bug": true
+    },
+    {
+      "attempt": 7,
+      "openfox_commit": "e4f67e7b3abdbbe2d20d9dfbbd935288c3be6aab",
+      "started_utc": "2026-11-18T04:37:48.699739+00:00",
+      "finished_utc": "2026-11-18T04:38:14.834011+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:34ce95f442e3511efc5b56dc5e77a88b6178cadce5c12f46a505fc00c03ca689",
+      "failure": "the resumed offer check expected next_request_id 0 although sale R0 had completed",
+      "fix": "a resumed offer must return the earlier actor with its completed purchases",
+      "runner_bug": true
+    },
+    {
+      "attempt": 8,
+      "openfox_commit": "45ea157ff69ab3b8b3e0df276ca5c02c0c7ec645",
+      "started_utc": "2026-11-18T04:38:51.956333+00:00",
+      "finished_utc": "2026-11-18T04:39:18.522258+00:00",
+      "result": "FAIL",
+      "evidence_sha256": "sha256:bc952a1c93e9f05d1883ee9f38002167d3d934e49ba150093e7dc81d5ad7c761",
+      "failure": "the resumed run repeated sale R0's post-sale checks, which cannot pass twice",
+      "fix": "a resumed run does not repeat sale R0's post-sale checks once passed (marker written from attempt 5's evidence)",
+      "runner_bug": true
+    },
+    {
+      "attempt": 9,
+      "openfox_commit": "f1c781880a16bd3cf06d6428435c87333f48acc7",
+      "started_utc": "2026-11-18T04:40:14.847644+00:00",
+      "finished_utc": "2026-11-18T06:46:00.737975+00:00",
+      "result": "ALL PASS",
+      "evidence_sha256": "sha256:8c1e2f08cf8ce2d0f622f7323c3f5dcdab172b116a322d0bbb007081df062f5f",
+      "steps_passed": 34,
+      "steps_total": 34,
+      "note": "resumed the staged run and ran sales R1, S and F, the final withdrawal, the relay check and teardown; sale R0 was not repeated"
+    }
+  ],
+  "no_value_sent_twice": "once-only send markers guarded every value transfer across the nine attempts; a refused purchase left next_request_id unchanged",
+  "findings": [
+    {
+      "id": "relay-key-card-not-in-gateway-quote",
+      "summary": "a buyer seals each task to the provider's relay key card; a gateway Quote carries no card, so a gateway-quoted first purchase cannot reach a relay-only provider",
+      "workaround_in_this_run": "sale R0 was an offer-file purchase, from which the buyer learned the card; R1, S and F then used gateway Quotes",
+      "fix": "being built as ai PR 4b (not yet merged): the provider publishes its card, the gateway returns it next to the Quote and the buyer verifies it"
+    },
+    {
+      "id": "gateway-quote-deadline",
+      "summary": "OpenFox sent gateway Quote requests without a deadline and every gateway-quoted purchase was refused",
+      "fix": "openfox commit 50c473fbaf827334015c28c7ec695e278b279b22 (pkg/servicebridge/quotes.go), with a red-control test that drives the real Quote path against an in-process discovery service"
+    }
+  ],
+  "known_limitations": [
+    "the gateway ran on loopback behind a TLS terminator with a private CA, not as public HTTPS (Gate F)",
+    "one project operator runs all validators, both relays, the gateway, the provider and the buyer",
+    "the relay TTL is 1 h in test, so the deposited task packets of sales S and F expired unread at the relays, as intended",
+    "no third-party Service Actor resolve/verify tool exists yet; reconstruction by a second resolver is not recorded",
+    "gateway discovery (List/Search) and catalog publication were not exercised",
+    "node crash windows were not exercised"
+  ],
+  "preflight_not_passing": [
+    {
+      "id": "rpc.independence",
+      "status": "unknown",
+      "message": "endpoints have distinct authorities, but whether distinct operators run them is not verified; a quorum of one operator's endpoints is one point of trust"
+    },
+    {
+      "id": "signer.wallet",
+      "status": "unknown",
+      "message": "tosctl offers no way to resolve wallet \"provider\" without signing, so the respond wallet is not checked; preflight never signs"
+    }
+  ],
+  "evidence_files": {
+    "attempt_9_evidence_sha256": "sha256:8c1e2f08cf8ce2d0f622f7323c3f5dcdab172b116a322d0bbb007081df062f5f",
+    "attempt_9_result": "ALL PASS",
+    "attempt_5_evidence_sha256": "sha256:e2da9783e442b969bf453c4549f24ee4cd22d3b8349be730f2b62609efdcf836",
+    "attempt_5_note": "sale R0 passed all post-sale checks including the withdrawal in attempt 5; attempt 5 as a whole failed at R1 (the deadline bug)",
+    "location": "kept by the operator with the run's transcripts; not published"
+  },
+  "verdict": "REHEARSAL_PASSED_NOT_GATE_D"
+}

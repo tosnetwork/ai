@@ -798,7 +798,11 @@ gate item.
     `deployments/archive/pre-tos-service-v1/initial-public-testnet-paid-software-work-2026-08-14.json`. *(superseded by the Service Actor rail; the escrow rail is retired)*
 
 The escrow-rail implementation items above were complete; on the Service Actor
-rail the Gate D items listed in section 4 are open. The next Gate D acceptance
+rail the Gate D items listed in section 4 are open. A same-operator public
+rehearsal of the paid loop on the epoch-7 testnet (gateway Quotes, relay-only
+packets, responded/refunded/swept sales) is recorded in
+`deployments/public-testnet-epoch7-gate-d-rehearsal-20261118.json`; it is not
+Gate D evidence. The next Gate D acceptance
 task is an external pilot with a buyer outside the core team, an independent
 provider, and an independently operated resolver or endpoint set. The
 same-host transaction is reproducible deployment evidence, not grounds to mark
