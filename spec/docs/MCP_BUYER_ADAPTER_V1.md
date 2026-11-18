@@ -205,7 +205,9 @@ refused. It names:
 
 The vault credential is read only from `VAULT_URL`. The agent refuses to
 start without it, and when the `tosctl` configuration is readable by group
-or others.
+or others. It also refuses an `https` relay when no relay CA file is pinned.
+Such a relay could never be reached, so the agent would otherwise poll
+nothing.
 
 It keeps the chain checkpoints, the call journal, the carrier's keys and
 inbox, and the purchase records in owner-private subdirectories of the state
@@ -1031,7 +1033,10 @@ listed envelope follows relay 8.5:
   are a duplicate. Other bytes for a held index are a frame conflict. A
   purchase holds at most 8 messages. A frame of a ninth is a transient
   failure: it is not acknowledged, stays at the relay, and is taken on a
-  later pass once a result round has emptied the inbox.
+  later pass once a result round has emptied the inbox. The agent remembers
+  such an envelope per relay for 5 minutes, at most until its listed expiry.
+  Until then it does not download and open the envelope again on every
+  15-second pass.
 - A stored frame is acknowledged after the durable write. A packet refused
   for good after a successful open is acknowledged without storing, so junk
   cannot hold the mailbox. A transient failure is neither stored nor

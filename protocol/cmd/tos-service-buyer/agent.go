@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -126,6 +127,14 @@ func readAgentConfig(path string) (agentConfig, error) {
 	}
 	if config.Budget.DutyIntervalSecond < 0 || config.Budget.DutyIntervalSecond > int(buyeragent.MaxDutyInterval/time.Second) {
 		return config, errors.New("duty_interval_seconds must be 0 to 60")
+	}
+	// An HTTPS relay is verified against the pinned CA only; without one
+	// pinned, no HTTPS relay could ever be reached, so the agent refuses to
+	// start rather than poll nothing.
+	for _, relay := range config.Relays {
+		if strings.HasPrefix(relay, "https://") && config.RelayCAFile == "" {
+			return config, errors.New("an https relay is configured but relay_ca_file pins no CA")
+		}
 	}
 	return config, nil
 }
