@@ -18,6 +18,19 @@ Usage (from the repository root):
 Checks with no mutant here are redundant with another check, so removing
 one alone changes no outcome:
 
+- the parse-time header checks the canonical comparison also enforces. A
+  header or archive that breaks one of them can never equal the canonical
+  encoding of its parsed members, so it is refused by the comparison as
+  well; the parse checks stay for their specific errors. They are:
+  - the USTAR magic and version;
+  - the checksum;
+  - bytes after a field's terminator;
+  - the link name;
+  - the type flag;
+  - a directory's size;
+  - a repeated name (the packer refuses it too);
+  - non-zero bytes after the end marker;
+  - the second end-marker block;
 - the member-count bound of CheckSourceArchive: every member takes at least
   one 512-byte block, so the 1 MiB size bound already allows at most 2,046
   members, below the 4,096 bound;
@@ -66,34 +79,6 @@ MUTANTS = [
      'if strings.HasSuffix(name, "/") && !directory {',
      "if false {",
      "TestArchiveMemberNamesOutsideTheSafeCharsetAreRefused"),
-    ("member-hidden-field-text", AGENT + "archive.go",
-     "if !isZeroBlock(value[end:]) {",
-     "if false {",
-     "TestArchiveMemberNamesOutsideTheSafeCharsetAreRefused"),
-    ("member-type-flags", AGENT + "archive.go",
-     "\tcase '0':\n",
-     "\tcase '0', '1', '2', '3', '4', '6', '7', 'x', 'g', 'L', 'K', 0:\n",
-     "TestArchiveEntryTypesOtherThanFilesAndDirectoriesAreRefused"),
-    ("member-link-name", AGENT + "archive.go",
-     'if linkName != "" {',
-     'if linkName != "" && false {',
-     "TestArchiveEntryTypesOtherThanFilesAndDirectoriesAreRefused"),
-    ("ustar-magic", AGENT + "archive.go",
-     'if !bytes.Equal(header[257:263], []byte("ustar\\x00")) || !bytes.Equal(header[263:265], []byte("00")) {',
-     "if false {",
-     "TestArchiveEntryTypesOtherThanFilesAndDirectoriesAreRefused"),
-    ("directory-size", AGENT + "archive.go",
-     "if size != 0 {",
-     "if false {",
-     "TestArchiveEntryTypesOtherThanFilesAndDirectoriesAreRefused"),
-    ("header-checksum", AGENT + "archive.go",
-     "if sum != stored {",
-     "if sum != stored && false {",
-     "TestArchiveEndAndHeaderIntegrityAreChecked"),
-    ("duplicate-members", AGENT + "archive.go",
-     "if seen[key] {",
-     "if false {",
-     "TestArchiveDuplicatesCountAndSizeAreBounded"),
     ("no-regular-file", AGENT + "archive.go",
      "if regular == 0 {",
      "if false {",
@@ -102,14 +87,33 @@ MUTANTS = [
      "if len(raw) == 0 || len(raw) > maxBytes {",
      "if len(raw) == 0 || len(raw) > maxBytes+1 {",
      "TestArchiveDuplicatesCountAndSizeAreBounded"),
-    ("bytes-after-end-marker", AGENT + "archive.go",
-     "if !isZeroBlock(raw[offset+2*blockSize:]) {",
-     "if false {",
-     "TestArchiveEndAndHeaderIntegrityAreChecked"),
-    ("second-end-block", AGENT + "archive.go",
-     "if offset+2*blockSize > len(raw) || !isZeroBlock(raw[offset+blockSize:offset+2*blockSize]) {",
-     "if offset+2*blockSize > len(raw) {",
-     "TestArchiveEndAndHeaderIntegrityAreChecked"),
+
+    # Canonical bytes: one comparison closes every hidden channel, and each
+    # channel class has its own test that the comparison's removal fails.
+    ("canonical-padding", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchivePaddingBytesAreRefused"),
+    ("canonical-owner-names", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchiveOwnerNamesAreRefused"),
+    ("canonical-modes", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchiveModesAreRefused"),
+    ("canonical-times-ids-devices", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchiveTimesIDsAndDevicesAreRefused"),
+    ("canonical-header-tail", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchiveHeaderTailIsRefused"),
+    ("canonical-trailing-blocks", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchiveTrailingZeroBlocksAreRefused"),
+    ("canonical-order-and-names", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchiveMemberOrderAndNamesMustBeCanonical"),
+    ("canonical-reproduced-case", AGENT + "archive.go",
+     "if !bytes.Equal(canonical, raw) {", "if !bytes.Equal(canonical, raw) && false {", "TestArchiveHiddenChannelsTogetherAreRefused"),
+    ("canonical-packer-sorts", AGENT + "canonical.go",
+     "sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })",
+     "_ = sort.Slice",
+     "TestPackSourceArchiveIsDeterministicAndReadable"),
+    ("canonical-packer-pads", AGENT + "canonical.go",
+     "\t\tout = append(out, make([]byte, paddedLength(len(entry.Content))-len(entry.Content))...)\n",
+     "\n",
+     "TestASafeArchiveIsAcceptedWithItsMembers"),
 
     # Re-validation of client input (section 2.3).
     ("prepare-quote-id", AGENT + "agent.go",
@@ -211,9 +215,21 @@ MUTANTS = [
      "case false:",
      "TestTheRoleTableKeepsDecisionsWithTheCustodyAccount"),
     ("role-unknown-peer", AGENT + "server.go",
-     "if role == RoleNone {\n\t\treturn\n\t}",
-     "if false {\n\t\treturn\n\t}",
+     "\tcase RoleNone:\n\t\treturn RoleNone, nil, false\n",
+     "\tcase RoleNone:\n\t\tpool = s.client\n",
      "TestAnUnknownPeerIsRefusedBeforeItsRequestIsRead"),
+    ("custody-pool-reserved", AGENT + "server.go",
+     "\tcase RoleCustody:\n\t\tpool = s.custody\n",
+     "\tcase RoleCustody:\n\t\tpool = s.client\n",
+     "TestAClientCannotTakeTheConfirmersConnections"),
+    ("code-failures-literal", AGENT + "confirm.go",
+     "MaxCodeFailures = 3",
+     "MaxCodeFailures = 4",
+     "TestThreeWrongCodesWithdrawThePurchase"),
+    ("code-lifetime-literal", AGENT + "confirm.go",
+     "ConfirmationLifetime = 10 * time.Minute",
+     "ConfirmationLifetime = 20 * time.Minute",
+     "TestAnExpiredCodeAndAMissingPresentationConfirmNothing"),
     ("role-check", AGENT + "server.go",
      "if !Allowed(role, request.Method) {",
      "if false {",

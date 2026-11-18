@@ -61,11 +61,17 @@ func archiveError(format string, args ...any) error {
 }
 
 // CheckSourceArchive parses raw as an uncompressed USTAR archive and refuses
-// it unless every member is a regular file or a directory with a safe name,
-// no name repeats, the member count and the size are within their bounds,
-// and the archive ends with the end-of-archive marker followed only by zero
-// blocks. The parse reads raw header blocks itself, so no extension header
-// (PAX, GNU long name) can rename a member behind the name shown.
+// it unless:
+//   - every member is a regular file or a directory with a safe name;
+//   - no name repeats and at least one regular file is present;
+//   - the size is within its bound;
+//   - the bytes are exactly the canonical encoding of the members
+//     (PackSourceArchive).
+//
+// The parse reads raw header blocks itself, so no extension header (PAX,
+// GNU long name) can rename a member behind the name shown. The canonical
+// comparison leaves no header field, padding byte or trailing block that
+// could carry data the member list does not show.
 func CheckSourceArchive(raw []byte, maxBytes int) (CheckedArchive, error) {
 	if maxBytes <= 0 || maxBytes > MaxArchiveBytes {
 		maxBytes = MaxArchiveBytes
@@ -77,6 +83,7 @@ func CheckSourceArchive(raw []byte, maxBytes int) (CheckedArchive, error) {
 		return CheckedArchive{}, archiveError("its size is not a whole number of 512-byte blocks")
 	}
 	var members []Member
+	var files []SourceFile
 	seen := map[string]bool{}
 	regular := 0
 	offset := 0
@@ -114,11 +121,24 @@ func CheckSourceArchive(raw []byte, maxBytes int) (CheckedArchive, error) {
 		if padded > int64(len(raw)-offset) {
 			return CheckedArchive{}, archiveError("member %q runs past the end of the archive", member.Name)
 		}
+		files = append(files, SourceFile{Name: member.Name, Directory: member.Directory,
+			Content: raw[offset : offset+int(member.SizeBytes)]})
 		offset += int(padded)
 		members = append(members, member)
 	}
 	if regular == 0 {
 		return CheckedArchive{}, archiveError("it holds no regular file")
+	}
+	// The members as parsed must re-encode to exactly these bytes, so no
+	// header field, padding byte or trailing block carries anything the
+	// member list does not show.
+	canonical, err := PackSourceArchive(files)
+	if err != nil {
+		return CheckedArchive{}, err
+	}
+	if !bytes.Equal(canonical, raw) {
+		return CheckedArchive{}, archiveError("it is not in canonical form: a header field, padding or trailing " +
+			"bytes differ from the canonical encoding of its members")
 	}
 	return CheckedArchive{Members: members, Digest: sha256.Sum256(raw)}, nil
 }

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -170,6 +171,58 @@ func TestSocketRolesComeFromPeerCredentials(t *testing.T) {
 		"decision": "confirm", "code": presentation.Code})
 	if !answered || !decided.OK || len(f.buyer.sent()) != 1 {
 		t.Fatalf("the custody decision did not pay: %+v", decided)
+	}
+}
+
+// A client that holds every connection it may open cannot keep the
+// confirmer out: the custody account has its own pool.
+func TestAClientCannotTakeTheConfirmersConnections(t *testing.T) {
+	f := newFixture(t)
+	self := uint32(os.Geteuid())
+	server, err := Listen(ServerConfig{Agent: f.agent, SocketDir: socketDir(t), CustodyUID: self, ClientUID: self + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const clients = ClientConnections + 8
+	var seen atomic.Int32
+	// The first connections are reported as the client account and every
+	// later one as the custody account.
+	server.peer = func(*net.UnixConn) (uint32, error) {
+		if seen.Add(1) <= clients {
+			return self + 1, nil
+		}
+		return self, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	var idle []net.Conn
+	for index := 0; index < clients; index++ {
+		connection, err := net.Dial("unix", server.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		idle = append(idle, connection)
+	}
+	defer func() {
+		for _, connection := range idle {
+			connection.Close()
+		}
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for len(server.client) < ClientConnections || seen.Load() < clients {
+		if time.Now().After(deadline) {
+			t.Fatalf("the clients took %d of %d slots", len(server.client), ClientConnections)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	response, answered := call(t, server, "pending", map[string]any{})
+	if !answered || !response.OK {
+		t.Fatalf("the confirmer was locked out by idle clients: %+v", response)
 	}
 }
 

@@ -44,7 +44,7 @@ func TestPrepareRevalidatesEveryClientField(t *testing.T) {
 			ArchiveBase64: strings.Repeat("A", maxArchiveBase64+4)}, CodeBadInput},
 		{"unknown quote", PrepareParams{QuoteID: strings.Repeat("0", 64), IdempotencyKey: keyA, ArchiveBase64: good}, CodeNotFound},
 		{"unsafe member", PrepareParams{QuoteID: f.quoteID, IdempotencyKey: keyA,
-			ArchiveBase64: base64.StdEncoding.EncodeToString(buildTar(t, entry{name: "../x.go", body: "x"}))}, CodeBadInput},
+			ArchiveBase64: base64.StdEncoding.EncodeToString(rawTar(t, entry{name: "../x.go", body: "x"}))}, CodeBadInput},
 	}
 	for _, c := range cases {
 		_, err := f.agent.Prepare(ctx, c.params)
@@ -306,11 +306,15 @@ func TestThreeWrongCodesWithdrawThePurchase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for attempt := 1; attempt <= MaxCodeFailures; attempt++ {
+	// The spec fixes the lockout at three wrong codes (section 5.3).
+	if MaxCodeFailures != 3 {
+		t.Fatalf("the lockout is %d wrong codes, not 3", MaxCodeFailures)
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
 		_, err := f.agent.Decide(ctx, DecideParams{RequestHash: view.RequestHash, Decision: DecisionConfirm,
 			Code: "0000-0000-0000-0000"})
 		want := CodeBadInput
-		if attempt == MaxCodeFailures {
+		if attempt == 3 {
 			want = CodeDeclined
 		}
 		if err == nil || codeOf(t, err) != want {
@@ -331,6 +335,11 @@ func TestThreeWrongCodesWithdrawThePurchase(t *testing.T) {
 }
 
 func TestAnExpiredCodeAndAMissingPresentationConfirmNothing(t *testing.T) {
+	// The spec fixes a code's lifetime at 10 minutes and its nonce at 128
+	// bits (section 5.3).
+	if ConfirmationLifetime != 10*time.Minute || ConfirmationNonceBytes != 16 {
+		t.Fatalf("lifetime %v and nonce %d bytes differ from the spec", ConfirmationLifetime, ConfirmationNonceBytes)
+	}
 	f := newFixture(t)
 	ctx := context.Background()
 	view := f.requested(t, keyA)

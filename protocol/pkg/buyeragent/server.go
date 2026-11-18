@@ -28,9 +28,17 @@ const (
 	// SocketName is the socket's file name inside the socket directory.
 	SocketName = "agent.sock"
 
-	maxConnections = 16
-	readTimeout    = 30 * time.Second
-	writeTimeout   = 30 * time.Second
+	// ClientConnections and CustodyConnections are separate pools, so a
+	// client holding every one of its connections (a payment request waits
+	// up to 300 seconds) can never lock the confirmer out.
+	ClientConnections  = 12
+	CustodyConnections = 4
+	// maxUnauthenticated bounds connections whose peer is not yet looked
+	// up; the lookup takes no input from the peer, so none is held long.
+	maxUnauthenticated = 64
+
+	readTimeout  = 30 * time.Second
+	writeTimeout = 30 * time.Second
 )
 
 // Role is what a socket peer may do, decided only from its kernel-reported
@@ -114,8 +122,15 @@ type Server struct {
 	path       string
 	custodyUID uint32
 	clientUID  uint32
-	slots      chan struct{}
-	wait       sync.WaitGroup
+	// unauthenticated bounds connections before the peer lookup; client and
+	// custody bound each role's connections after it.
+	unauthenticated chan struct{}
+	client          chan struct{}
+	custody         chan struct{}
+	// peer returns a connection's kernel-reported uid; tests replace it to
+	// play both roles from one account.
+	peer func(*net.UnixConn) (uint32, error)
+	wait sync.WaitGroup
 }
 
 // Listen checks the deployment and binds the socket. It refuses a client
@@ -160,7 +175,9 @@ func Listen(config ServerConfig) (*Server, error) {
 		return nil, err
 	}
 	return &Server{agent: config.Agent, listener: listener, path: path, custodyUID: custody,
-		clientUID: config.ClientUID, slots: make(chan struct{}, maxConnections)}, nil
+		clientUID: config.ClientUID, unauthenticated: make(chan struct{}, maxUnauthenticated),
+		client: make(chan struct{}, ClientConnections), custody: make(chan struct{}, CustodyConnections),
+		peer: peerUID}, nil
 }
 
 // checkSocketDir requires a directory of the agent's own account that
@@ -203,7 +220,7 @@ func (s *Server) Serve(ctx context.Context) error {
 			return err
 		}
 		select {
-		case s.slots <- struct{}{}:
+		case s.unauthenticated <- struct{}{}:
 		default:
 			connection.Close()
 			continue
@@ -211,26 +228,47 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.wait.Add(1)
 		go func() {
 			defer s.wait.Done()
-			defer func() { <-s.slots }()
 			defer connection.Close()
-			s.handle(ctx, connection)
+			role, release, admitted := s.admit(connection)
+			if !admitted {
+				return
+			}
+			defer release()
+			s.handle(ctx, role, connection)
 		}()
+	}
+}
+
+// admit looks up the peer and takes a connection slot of its role. It
+// admits nothing for an unknown peer or a full pool; the connection is then
+// closed without a byte being read.
+func (s *Server) admit(connection *net.UnixConn) (Role, func(), bool) {
+	defer func() { <-s.unauthenticated }()
+	uid, err := s.peer(connection)
+	if err != nil {
+		return RoleNone, nil, false
+	}
+	role := RoleFor(uid, s.custodyUID, s.clientUID)
+	pool := s.client
+	switch role {
+	case RoleCustody:
+		pool = s.custody
+	case RoleNone:
+		return RoleNone, nil, false
+	}
+	select {
+	case pool <- struct{}{}:
+		return role, func() { <-pool }, true
+	default:
+		return RoleNone, nil, false
 	}
 }
 
 // Close stops the server.
 func (s *Server) Close() error { return s.listener.Close() }
 
-// handle authorizes the peer before reading a byte of its request.
-func (s *Server) handle(ctx context.Context, connection *net.UnixConn) {
-	uid, err := peerUID(connection)
-	if err != nil {
-		return
-	}
-	role := RoleFor(uid, s.custodyUID, s.clientUID)
-	if role == RoleNone {
-		return
-	}
+// handle serves one request of an admitted peer.
+func (s *Server) handle(ctx context.Context, role Role, connection *net.UnixConn) {
 	_ = connection.SetReadDeadline(time.Now().Add(readTimeout))
 	reader := bufio.NewReaderSize(io.LimitReader(connection, MaxRequestBytes+1), 64<<10)
 	line, err := reader.ReadSlice('\n')

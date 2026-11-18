@@ -285,33 +285,36 @@ type entry struct {
 	typeflag byte
 }
 
-// buildTar writes a USTAR archive the way the MCP server's packer does.
+// buildTar packs a canonical archive with the packer the MCP server uses.
 func buildTar(t *testing.T, entries ...entry) []byte {
 	t.Helper()
-	var buffer bytes.Buffer
-	writer := tar.NewWriter(&buffer)
+	files := make([]SourceFile, 0, len(entries))
 	for _, e := range entries {
-		header := &tar.Header{Name: e.name, Mode: 0o644, Size: int64(len(e.body)), Format: tar.FormatUSTAR,
-			Typeflag: tar.TypeReg}
-		if e.typeflag != 0 {
-			header.Typeflag = e.typeflag
-		}
-		if header.Typeflag == tar.TypeDir {
-			header.Mode, header.Size = 0o755, 0
-		}
-		if err := writer.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if header.Size > 0 {
-			if _, err := writer.Write([]byte(e.body)); err != nil {
-				t.Fatal(err)
-			}
-		}
+		files = append(files, SourceFile{Name: e.name, Directory: e.typeflag == tar.TypeDir, Content: []byte(e.body)})
 	}
-	if err := writer.Close(); err != nil {
+	archive, err := PackSourceArchive(files)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return buffer.Bytes()
+	return archive
+}
+
+// rawTar writes entries in the given order with canonical headers but no
+// packer checks, for archives the packer would refuse to write.
+func rawTar(t *testing.T, entries ...entry) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	for _, e := range entries {
+		header, err := canonicalHeader(e.name, e.typeflag == tar.TypeDir, int64(len(e.body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out.Write(header)
+		out.WriteString(e.body)
+		out.Write(make([]byte, paddedLength(len(e.body))-len(e.body)))
+	}
+	out.Write(make([]byte, 2*blockSize))
+	return out.Bytes()
 }
 
 func sourceTar(t *testing.T) []byte {

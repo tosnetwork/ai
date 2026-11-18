@@ -127,6 +127,10 @@ writable by group or others, or when its configuration names no client uid.
 Requests are single strict JSON objects (unknown fields and trailing data
 refused) of at most 2 MiB, schema `tos.service.mcp-buyer.agent-api.v1`; the
 API is local between binaries of one release and is not a protocol surface.
+Connections are admitted per role, after the peer lookup: 12 for the client
+account and a separate 4 for the custody account. A client that holds all
+of its connections (a payment request can wait 300 seconds) therefore
+never locks the confirmer out.
 
 **The agent trusts nothing the MCP server checked.** The MCP server runs in
 the developer account, which the model controls, so its checks are a
@@ -325,14 +329,31 @@ Input: `quote_id`, `source_path`, `idempotency_key` (16 to 64 characters
 `[A-Za-z0-9_-]`).
 
 `source_path` names either a POSIX tar or a directory, and its real path
-(symlinks resolved) MUST lie under one of the configured workspace roots. A
-directory is packed deterministically into an uncompressed USTAR archive:
-entries sorted by name, regular files and directories only, owner and
-timestamps zeroed, modes normalized; a symlink, hard link, device or FIFO
-refuses the request (the provider refuses them anyway,
-[`SOFTWARE_WORK_EXECUTION_V1.md`](SOFTWARE_WORK_EXECUTION_V1.md)). A supplied
-tar is checked against the same rules. The archive is at most
-`min(max_request_bytes, 1,048,576)` bytes and has at most 4,096 entries.
+(symlinks resolved) MUST lie under one of the configured workspace roots.
+Either way the server sends the **canonical archive** of the members, packed
+by `buyeragent.PackSourceArchive`:
+- regular files and directories only, sorted by name; a symlink, hard link,
+  device or FIFO refuses the request (the provider refuses them anyway,
+  [`SOFTWARE_WORK_EXECUTION_V1.md`](SOFTWARE_WORK_EXECUTION_V1.md));
+- directories carry a trailing `/` and no data;
+- every header is USTAR:
+  - mode `0644` for a file, `0755` for a directory;
+  - uid, gid and mtime zero;
+  - empty link, user and group names, and zero device numbers;
+  - the name split into prefix and name only when it exceeds 100 bytes,
+    at the last `/` that fits;
+  - header bytes 500 to 511 zero;
+- member data is padded to its block with zero bytes;
+- the archive ends with exactly two zero blocks.
+
+A supplied tar is unpacked under the same rules and repacked. The agent
+accepts only these exact bytes: it parses the archive, re-encodes the parsed
+members, and refuses any input that differs from the re-encoding by a single
+byte. A header field, a padding byte or a trailing block can therefore carry
+nothing that the confirmer's member list does not show.
+
+The archive is at most `min(max_request_bytes, 1,048,576)` bytes and has at
+most 4,096 entries (the size bound already implies fewer).
 
 **Member names.** Every member name is 1 to 255 bytes of the safe charset
 `[A-Za-z0-9._+-]` and `/`, with no empty, `.` or `..` segment, no leading
