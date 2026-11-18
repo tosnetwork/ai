@@ -36,6 +36,11 @@ one alone changes no outcome:
 - the one-block header position in ArtifactMembers: any extension block
   (PAX, GNU long name) sits where the member header should be and carries
   a type flag other than '0', which the type-flag check refuses;
+- the 64 KiB header length bound: with the package, Receipt and key card
+  bounded, no header that passes the field checks reaches it, so it only
+  bounds the JSON a decoder reads;
+- the TypeReg check on the header the tar reader returns: the raw type-flag
+  check refuses every other flag first;
 - the one-root count in DecodeReceipt: a BOC with a second root is never
   the canonical encoding of its first root, so the canonical-encoding check
   refuses it as well.
@@ -102,10 +107,6 @@ MUTANTS = [
      "if err != nil || !bytes.Equal(reencoded, raw) {",
      "if err != nil || len(reencoded) == 0 {",
      "TestVectorNegativeMessagesAreRefused"),
-    ("header-length-bound", "message.go",
-     "if length == 0 || length > MaxMessageHeaderBytes || uint64(length) > uint64(len(raw)-4) {",
-     "if length == 0 || uint64(length) > uint64(len(raw)-4) {",
-     "TestAHeaderOverItsBoundIsRefusedWhenEverythingElseIsValid"),
     ("base64-line-breaks", "message.go",
      "if err != nil || base64.StdEncoding.EncodeToString(raw) != text {",
      "if err != nil {",
@@ -278,10 +279,6 @@ MUTANTS = [
      "if membersEnd > source.Size() || !bytes.Equal(artifact[membersEnd:], make([]byte, tarEndOfArchive)) {",
      "if membersEnd > source.Size() {",
      "TestArtifactMustEndExactlyAtItsEndOfArchiveMarker"),
-    ("artifact-regular-files", "receipt.go",
-     "if err != nil || header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > MaxResultBytes {",
-     "if err != nil || header.Size < 0 || header.Size > MaxResultBytes {",
-     "TestArtifactMustHoldExactlyItsOutputAndReport"),
     ("artifact-repeated-member", "receipt.go",
      "if _, seen := members[header.Name]; seen {",
      "if _, seen := members[header.Name]; false && seen {",
