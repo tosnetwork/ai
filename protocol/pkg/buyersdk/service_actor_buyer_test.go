@@ -170,6 +170,9 @@ type fakeSender struct {
 	sendErr      error
 	sends        []ServiceActorCallIntent
 	onPreflight  func()
+	// panics makes SendCall panic after recording the send, as a defect
+	// inside custody would.
+	panics bool
 }
 
 func (f *fakeSender) Preflight(context.Context, ServiceActorCallIntent) error {
@@ -182,6 +185,9 @@ func (f *fakeSender) SendCall(_ context.Context, intent ServiceActorCallIntent) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sends = append(f.sends, intent)
+	if f.panics {
+		panic("a defect inside custody after the send started")
+	}
 	return f.sendErr
 }
 
