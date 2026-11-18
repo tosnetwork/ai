@@ -45,7 +45,8 @@ if [ "$(git -C "$openfox_tree" rev-parse HEAD)" != "$OPENFOX_COMMIT" ]; then
   echo "the OpenFox worktree is not at OPENFOX_COMMIT" >&2
   exit 2
 fi
-(cd "$openfox_tree" && go build -trimpath -o "$bin/openfox" ./cmd/openfox)
+# OpenFox's own release tags: the pure-Go Olm and the standard JSON codec.
+(cd "$openfox_tree" && go build -trimpath -tags goolm,stdjson -o "$bin/openfox" ./cmd/openfox)
 install -m 0755 "$TOSCTL" "$bin/tosctl"
 chmod 0755 "$bin"/*
 # The record of what was built.
