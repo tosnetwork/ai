@@ -41,6 +41,8 @@ type fakeChain struct {
 	// anyCapability makes every Capability ID owned by owner, as a
 	// verifier that does not check the ID would.
 	anyCapability bool
+	// unavailable makes packet verification fail transiently.
+	unavailable bool
 }
 
 func (c *fakeChain) ResolveAgent(id string) (*nativev1.AgentStateV1, bool, error) {
@@ -64,6 +66,20 @@ func (c *fakeChain) VerifyProviderCard(ctx context.Context, verifier mldsa44.Ver
 	}
 	return buyersdk.VerifiedProviderCard{Source: source, CapabilityID: capabilityID, PacketJSON: raw, Key: key, Card: card,
 		Checkpoint: 1, VerifiedAt: now}, nil
+}
+
+// VerifyPacket verifies like a receiver at a checkpoint; unavailable makes
+// the finalized read fail.
+func (c *fakeChain) VerifyPacket(ctx context.Context, verifier mldsa44.Verifier, packet agentpacket.Packet) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.unavailable {
+		return errors.New("finalized state is unavailable")
+	}
+	if err := agentpacket.Verify(ctx, verifier, c, &agentpacket.ReplayGuard{}, packet, c.clock.Now()); err != nil {
+		return errors.Join(buyersdk.ErrPacketRefused, err)
+	}
+	return nil
 }
 
 func (c *fakeChain) VerifyAgentCard(ctx context.Context, verifier mldsa44.Verifier, agentID string,
@@ -103,6 +119,8 @@ type fakeRelay struct {
 	crash   bool
 	crashOn int
 	crashed []byte
+	// mailboxes are the buyer's mailboxes, by relay.
+	mailboxes map[string]*fakeMailbox
 }
 
 func (r *fakeRelay) client(base string) (RelayClient, error) {
@@ -151,6 +169,85 @@ func (c relayClient) Describe(context.Context) (agentpacketrelay.RelayDescriptio
 		return agentpacketrelay.RelayDescription{}, errors.New("relay unavailable")
 	}
 	return agentpacketrelay.RelayDescription{MaxTTLSeconds: 86400}, nil
+}
+
+// fakeMailbox is the buyer's mailbox at one relay: the envelopes held, the
+// acknowledged IDs, and an error each listing answers instead.
+type fakeMailbox struct {
+	held      [][]byte
+	acked     map[[32]byte]bool
+	listErr   error
+	lists     int
+	downloads int
+	// serve, when set, replaces the bytes a download of that ID returns.
+	serve map[[32]byte][]byte
+}
+
+func (r *fakeRelay) box(base string) *fakeMailbox {
+	if r.mailboxes == nil {
+		r.mailboxes = map[string]*fakeMailbox{}
+	}
+	box := r.mailboxes[base]
+	if box == nil {
+		box = &fakeMailbox{acked: map[[32]byte]bool{}, serve: map[[32]byte][]byte{}}
+		r.mailboxes[base] = box
+	}
+	return box
+}
+
+// hold puts an envelope into the buyer's mailbox at a relay.
+func (r *fakeRelay) hold(base string, envelope []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	box := r.box(base)
+	box.held = append(box.held, append([]byte(nil), envelope...))
+}
+
+func (c relayClient) List(_ context.Context, agentID string) (agentpacketrelay.Mailbox, error) {
+	c.relay.mu.Lock()
+	defer c.relay.mu.Unlock()
+	box := c.relay.box(c.base)
+	box.lists++
+	if box.listErr != nil {
+		return agentpacketrelay.Mailbox{}, box.listErr
+	}
+	mailbox := agentpacketrelay.Mailbox{AgentID: agentID}
+	for _, envelope := range box.held {
+		header, err := agentpacketseal.ParseEnvelope(envelope)
+		if err != nil || box.acked[header.EnvelopeID] || header.RecipientAgentID != agentID {
+			continue
+		}
+		mailbox.Envelopes = append(mailbox.Envelopes, agentpacketrelay.MailboxEntry{EnvelopeID: header.EnvelopeID,
+			RecipientKeyID: header.RecipientKeyID, Size: uint32(len(envelope)), ReceivedAtUnix: uint64(fxNow.Unix()),
+			ExpiresAtUnix: header.ExpiresAtUnix})
+	}
+	return mailbox, nil
+}
+
+func (c relayClient) Download(_ context.Context, _ string, envelopeID [32]byte) ([]byte, error) {
+	c.relay.mu.Lock()
+	defer c.relay.mu.Unlock()
+	box := c.relay.box(c.base)
+	box.downloads++
+	if served, ok := box.serve[envelopeID]; ok {
+		return append([]byte(nil), served...), nil
+	}
+	for _, envelope := range box.held {
+		if header, err := agentpacketseal.ParseEnvelope(envelope); err == nil && header.EnvelopeID == envelopeID {
+			return append([]byte(nil), envelope...), nil
+		}
+	}
+	return nil, &agentpacketrelay.StatusError{StatusCode: 404}
+}
+
+func (c relayClient) Ack(_ context.Context, _ string, envelopeID [32]byte, secret [agentpacketseal.AckSecretSize]byte) error {
+	c.relay.mu.Lock()
+	defer c.relay.mu.Unlock()
+	if !agentpacketseal.CheckAck(envelopeID, secret) {
+		return &agentpacketrelay.StatusError{StatusCode: 403}
+	}
+	c.relay.box(c.base).acked[envelopeID] = true
+	return nil
 }
 
 // failingSigner refuses every signature, as a locked custody would.

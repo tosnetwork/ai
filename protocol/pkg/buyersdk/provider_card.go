@@ -148,16 +148,53 @@ func (b *ServiceActorBuyer) VerifyAgentCard(ctx context.Context, verifier mldsa4
 // ErrAgentCard reports an Agent's own key card that does not verify.
 var ErrAgentCard = errors.New("the Agent key card does not verify against finalized state")
 
+// ErrPacketRefused reports a delivered Agent Packet that fails verification
+// against finalized state for good: a malformed packet, a bad signature, or
+// a sender or recipient that is not a finalized, live Agent. Any other
+// error of VerifyPacket is transient: finalized state was unavailable.
+var ErrPacketRefused = errors.New("the Agent Packet does not verify against finalized state")
+
+// VerifyPacket verifies a delivered Agent Packet at a fresh finalized
+// checkpoint exactly as a receiver does (agentpacket.Verify): its shape, a
+// controller of the finalized, live sender Agent signed it, and the
+// recipient is a finalized Agent. The replay guard is per call, because
+// the receiver deduplicates by its durable inbox: a packet whose durable
+// write failed must verify again on the next poll (AGENT_PACKET_RELAY_V1
+// section 8.5).
+func (b *ServiceActorBuyer) VerifyPacket(ctx context.Context, verifier mldsa44.Verifier, packet agentpacket.Packet) error {
+	if ctx == nil || verifier == nil {
+		return errors.New("invalid packet verification request")
+	}
+	session, err := b.config.Reader.BeginBuyerSession(ctx)
+	if err != nil {
+		return err
+	}
+	var readErr error
+	agents := sessionAgents{ctx: ctx, session: session, network: b.config.Network, readErr: &readErr}
+	if err := agentpacket.Verify(ctx, verifier, agents, &agentpacket.ReplayGuard{}, packet, b.config.Now()); err != nil {
+		if readErr != nil {
+			return readErr
+		}
+		return fmt.Errorf("%w: %v", ErrPacketRefused, err)
+	}
+	return nil
+}
+
 // sessionAgents resolves Agents at one finalized buyer checkpoint for packet
 // verification. A state of another network or of another object is refused.
+// When readErr is set, it records a failed finalized read.
 type sessionAgents struct {
 	ctx     context.Context
 	session ServiceActorSession
 	network *nativev1.NetworkDomain
+	readErr *error
 }
 
 func (s sessionAgents) ResolveAgent(id string) (*nativev1.AgentStateV1, bool, error) {
 	state, found, err := s.session.ResolveRegistry(s.ctx, id)
+	if err != nil && s.readErr != nil {
+		*s.readErr = err
+	}
 	if err != nil || !found {
 		return nil, false, err
 	}

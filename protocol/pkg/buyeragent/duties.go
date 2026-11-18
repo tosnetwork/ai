@@ -54,6 +54,8 @@ type DutyView struct {
 	Waiting bool `json:"waiting_for_finalized_history,omitempty"`
 	// Delivery is the task delivery round of a pending request.
 	Delivery *DeliveryView `json:"delivery,omitempty"`
+	// Result is the result round of a responded request.
+	Result *ResultView `json:"result,omitempty"`
 }
 
 // TaskDeliverer delivers the task of an admitted, pending purchase;
@@ -182,6 +184,9 @@ func (a *Agent) duty(ctx context.Context, requestHash string) (DutyView, error) 
 	}
 	if report.Status == serviceactor.StatusPending && a.config.Delivery != nil {
 		return a.deliver(ctx, view, requestHash, purchase, report)
+	}
+	if report.Status == serviceactor.StatusResponded && a.config.Results != nil {
+		return a.receive(ctx, view, requestHash, purchase, report)
 	}
 	view.Operation = lifecycleFor(report.Status)
 	if view.Operation == "" {

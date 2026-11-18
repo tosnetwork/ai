@@ -68,14 +68,21 @@ type CardVerifier interface {
 		capabilityID string, raw []byte) (buyersdk.VerifiedProviderCard, error)
 	VerifyAgentCard(ctx context.Context, verifier mldsa44.Verifier, agentID string,
 		raw []byte) (agentpacketseal.RecipientKey, agentpacketseal.KeyCard, error)
+	// VerifyPacket verifies a delivered packet against finalized state;
+	// buyersdk.ErrPacketRefused marks a permanent refusal.
+	VerifyPacket(ctx context.Context, verifier mldsa44.Verifier, packet agentpacket.Packet) error
 }
 
 // RelayClient is the part of a relay client the carrier uses: the
-// description the carriage check reads and the deposit that delivers an
-// envelope. agentpacketrelay.Client implements it.
+// description the carriage check reads, the deposit that delivers an
+// envelope, and the listing, download and acknowledgement of the buyer's
+// mailbox. agentpacketrelay.Client implements it.
 type RelayClient interface {
 	Describe(ctx context.Context) (agentpacketrelay.RelayDescription, error)
 	Deposit(ctx context.Context, envelope []byte) (agentpacketrelay.DepositOutcome, error)
+	List(ctx context.Context, agentID string) (agentpacketrelay.Mailbox, error)
+	Download(ctx context.Context, agentID string, envelopeID [32]byte) ([]byte, error)
+	Ack(ctx context.Context, agentID string, envelopeID [32]byte, secret [agentpacketseal.AckSecretSize]byte) error
 }
 
 // CarrierConfig wires a Carrier.
@@ -113,6 +120,12 @@ type Carrier struct {
 	verified map[string]map[string]buyersdk.VerifiedProviderCard
 	// answered is when each relay last answered its description.
 	answered map[string]time.Time
+	// poll is the polling state of each relay; settled and refused are the
+	// mailbox memories of relay section 8.6 (receive.go).
+	pollMu  sync.Mutex
+	poll    map[string]*relayPoll
+	settled *envelopeMemory
+	refused *envelopeMemory
 }
 
 // relayKeyRecord is one relay key: its seed and the buyer card for it.
@@ -165,7 +178,7 @@ func NewCarrier(config CarrierConfig) (*Carrier, error) {
 	if err := checkPrivateDir(config.StateDir); err != nil {
 		return nil, err
 	}
-	for _, name := range []string{"relay-keys", "provider-cards", "outbox"} {
+	for _, name := range []string{"relay-keys", "provider-cards", "outbox", "inbox", "received"} {
 		path := filepath.Join(config.StateDir, name)
 		if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
@@ -181,7 +194,8 @@ func NewCarrier(config CarrierConfig) (*Carrier, error) {
 		config.Random = func(value []byte) error { _, err := rand.Read(value); return err }
 	}
 	return &Carrier{config: config, verified: map[string]map[string]buyersdk.VerifiedProviderCard{},
-		answered: map[string]time.Time{}}, nil
+		answered: map[string]time.Time{}, poll: map[string]*relayPoll{},
+		settled: newEnvelopeMemory(MaxEnvelopeMemory), refused: newEnvelopeMemory(MaxEnvelopeMemory)}, nil
 }
 
 func (c *Carrier) keyDir() string  { return filepath.Join(c.config.StateDir, "relay-keys") }

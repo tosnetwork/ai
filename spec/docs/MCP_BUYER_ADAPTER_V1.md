@@ -25,10 +25,13 @@ The carriage check of 7.1 (`buyeragent.Carrier`, with the buyer's relay
 keys and cards and the learned provider cards) is implemented.
 
 Task delivery (7.2, `Carrier.DeliverTask`, run by the duty round) is
-implemented.
+implemented. So are relay polling (`Carrier.Poll` and `Carrier.RunPoll`) and
+result acceptance (7.3, `Carrier.ReceiveResult`, run by the duty round). The
+agent binary does not run the poller yet; that wiring is part of the agent
+subcommand.
 
-Not yet implemented are relay polling and result acceptance (7.3), the
-finalized-state reads behind search, quote and result, and `init`; section
+Not yet implemented are the finalized-state reads behind search, quote and
+result, the agent subcommand's wiring, and `init`; section
 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
@@ -935,6 +938,78 @@ deliveries it examines per purchase (default 16) (frames 7.2, Q9). On
 acceptance it sends the ack (frames 5.3) and answers every
 redelivery with the ack again. It takes a provider card carried in the result
 only under relay 6.4.
+
+**Polling.** `Carrier.Poll` lists the buyer's mailbox at every relay of
+every held buyer card, including cards past `not_after` whose key is still
+retained. Each relay is listed every 15 seconds plus up to 20 % random
+jitter. After a failed listing that relay backs off: 30 seconds, doubling up
+to 5 minutes, and at least the relay's `Retry-After` (at most 1 hour).
+`Carrier.RunPoll` repeats the pass until the agent stops and needs no MCP
+session; it uses the host clock, since it schedules only local work. Each
+listed envelope follows relay 8.5:
+
+- An envelope ID already settled is acknowledged at this relay as well,
+  without a download (relay 8.6).
+- An envelope this relay served before that would not open, and one naming
+  a key the buyer does not hold, is skipped until its listed expiry. This
+  memory is keyed by relay and envelope ID, so a failure at one relay never
+  suppresses another relay's copy.
+- Otherwise the envelope is downloaded and opened under the held key. The
+  opened envelope ID must equal the listed one; if the open fails, the
+  envelope is never acknowledged.
+- The packet must decode within 128 KiB, name this buyer, and pass
+  `buyersdk.VerifyPacket`, which is `agentpacket.Verify` at a fresh
+  finalized checkpoint. A failure for good is `ErrPacketRefused`; an
+  unavailable finalized read is transient.
+- The packet must then carry a rail result frame of an admitted purchase
+  (`Agent.LookupPurchase`), sent by that purchase's provider for its frame
+  binding, with its Capability and Accepted Quote
+  (`railwork.CheckPacketFields`).
+- The frame is stored durably under its message digest. The same bytes again
+  are a duplicate. Other bytes for a held index are a frame conflict. A
+  purchase holds at most 8 messages; a frame of a ninth is dropped and the
+  provider's redelivery brings it again.
+- A stored frame is acknowledged after the durable write. A packet refused
+  for good after a successful open is acknowledged without storing, so junk
+  cannot hold the mailbox. A transient failure is neither stored nor
+  acknowledged and is retried on the next pass.
+
+The memories of settled and refused envelopes hold at most 8,192 entries
+each. An entry is forgotten at its listed expiry, and at the latest 24 hours
+and 5 minutes after it was recorded.
+
+**Result round.** The duty round runs `Carrier.ReceiveResult` for every
+request whose finalized status is `responded`. The round's clock is the
+checkpoint's chain time. The Receipt binding comes from the journal record
+and the validated Quote: the provider, the manifest digest and the
+manifest's toolchain digest, which prepare now records. Until the result's
+retention end (`response_deadline + retention_seconds`, frames 11.3), each
+round does the following:
+
+- Every complete inbox message is examined with `railwork.CheckResultFrom`
+  and then `railwork.ValidateResult`. A provider card the result carries is
+  learned under relay 6.4 whether or not the result passes.
+- A failing message is discarded and counted, and the purchase stays open.
+  So is a set of frames that does not join. After 16 failing deliveries, any
+  further delivery is discarded unexamined. An incomplete message waits for
+  its other frames.
+- The first passing message is accepted. Its artifact is stored durably
+  before the receiving record names it accepted, and the record keeps the
+  Receipt.
+- Once a result is accepted, an ack is due. Any later delivery makes it due
+  again. The ack carries the buyer card and expires 3,600 seconds after
+  signing.
+- With no accepted result, a result-request carrying the buyer card goes out
+  at once, then at most every 21,600 seconds. It expires at the retention end
+  or 86,100 seconds after signing, whichever is earlier.
+- Ack and result-request are sealed to a provider card valid at the chain
+  time, and are subject to the same expiry cap and 409 re-seal as tasks
+  (7.2). They are not journaled: one that no relay accepted is built afresh
+  in the next round. Without a provider card the round sends nothing and
+  waits.
+
+After the retention end nothing is sent and the purchase's inbox is
+dropped. An accepted result stays stored.
 
 ## 8. Economics the preview states
 

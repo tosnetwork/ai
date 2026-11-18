@@ -57,6 +57,7 @@ type PurchaseRecord struct {
 	// and the result retention.
 	ProviderAgentID     string `json:"provider_agent_id"`
 	ManifestDigest      string `json:"manifest_digest"`
+	ToolchainDigest     string `json:"toolchain_digest"`
 	ProviderName        string `json:"untrusted_provider_name"`
 	ProviderDescription string `json:"untrusted_provider_description"`
 	RetentionSeconds    uint64 `json:"retention_seconds"`

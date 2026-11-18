@@ -9,9 +9,63 @@ import (
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal/keycardtest"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 )
+
+// deliveredPacket is a packet the fixture's Agent signs to recipient.
+func deliveredPacket(t *testing.T, recipient string) agentpacket.Packet {
+	t.Helper()
+	keyID, err := mldsa44.ParseKeyIDText(keycardtest.Keys.KeyID(cardController))
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := agentpacket.Sign(context.Background(), keycardtest.Keys, cardController, agentpacket.Packet{
+		SenderAgentID: saAgent, RecipientAgentID: recipient, CapabilityID: saCapability,
+		QuoteCommitment: "tvm-cell-sha256:" + strings.Repeat("3c", 32), Sequence: 1, Nonce: [32]byte{1},
+		Payload: []byte("frame"), CreatedAtUnix: uint64(saNow.Unix()), SenderKeyID: keyID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return packet
+}
+
+// A delivered packet verifies against finalized state; a refusal for good
+// is ErrPacketRefused, and an unavailable read is transient.
+func TestADeliveredPacketIsVerifiedAgainstFinalizedState(t *testing.T) {
+	fixture := cardFixture(t)
+	recipient := "agent_" + strings.Repeat("66", 32)
+	fixture.chain.others = map[string]*nativev1.NativeStateV1{recipient: {Network: fixture.chain.agent.Network,
+		State: &nativev1.NativeStateV1_Agent{Agent: keycardtest.Agent(recipient, "recipient-packet")}}}
+	packet := deliveredPacket(t, recipient)
+	ctx := context.Background()
+	if err := fixture.buyer.VerifyPacket(ctx, keycardtest.Keys, packet); err != nil {
+		t.Fatalf("a good packet: %v", err)
+	}
+	// The replay guard is per call: the same packet verifies again.
+	if err := fixture.buyer.VerifyPacket(ctx, keycardtest.Keys, packet); err != nil {
+		t.Fatalf("the same packet again: %v", err)
+	}
+	tampered := packet
+	tampered.Payload = []byte("other")
+	if err := fixture.buyer.VerifyPacket(ctx, keycardtest.Keys, tampered); !errors.Is(err, ErrPacketRefused) {
+		t.Fatalf("a tampered packet: %v", err)
+	}
+	unknown := deliveredPacket(t, "agent_"+strings.Repeat("77", 32))
+	if err := fixture.buyer.VerifyPacket(ctx, keycardtest.Keys, unknown); !errors.Is(err, ErrPacketRefused) {
+		t.Fatalf("a packet to an unknown recipient: %v", err)
+	}
+	fixture.chain.registryErr = errors.New("reader unavailable")
+	if err := fixture.buyer.VerifyPacket(ctx, keycardtest.Keys, packet); err == nil || errors.Is(err, ErrPacketRefused) {
+		t.Fatalf("an unavailable read: %v", err)
+	}
+	fixture.chain.registryErr = nil
+	if err := fixture.buyer.VerifyPacket(ctx, nil, packet); err == nil {
+		t.Fatal("a packet verified without a verifier")
+	}
+}
 
 const cardController = "provider-packet"
 

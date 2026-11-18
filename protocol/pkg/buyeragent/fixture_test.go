@@ -80,6 +80,8 @@ type fakeBuyer struct {
 	responseDeadline uint64
 	// chainTime is the checkpoint chain time Resolve reports.
 	chainTime int64
+	// responseHash is the finalized response hash Resolve reports.
+	responseHash string
 }
 
 func (f *fakeBuyer) Resolve(_ context.Context, requestHash string) (*buyersdk.RequestReport, error) {
@@ -102,7 +104,7 @@ func (f *fakeBuyer) Resolve(_ context.Context, requestHash string) (*buyersdk.Re
 		}
 	}
 	return &buyersdk.RequestReport{Phase: buyersdk.PhaseAdmitted, Status: f.status, ResponseDeadline: f.responseDeadline,
-		ChainTime: f.chainTime}, nil
+		ChainTime: f.chainTime, ResponseHash: f.responseHash}, nil
 }
 
 // SendLifecycle journals the send as buyersdk does and records it.

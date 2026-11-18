@@ -58,6 +58,9 @@ type Config struct {
 	// Delivery carries the task of each admitted, pending purchase; nil
 	// delivers nothing (an agent wired without a carrier).
 	Delivery TaskDeliverer
+	// Results accepts the result of each responded purchase; nil accepts
+	// none.
+	Results ResultReceiver
 	// MaxLifecycleSends bounds the expire, claim_refund and sweep sends in
 	// one budget window. Zero means 2 * MaxCalls + 8 (section 6).
 	MaxLifecycleSends int
@@ -321,8 +324,9 @@ func (a *Agent) Prepare(ctx context.Context, params PrepareParams) (PurchaseView
 	purchase = PurchaseRecord{RequestHash: requestHash, QuoteID: params.QuoteID, IdempotencyKey: params.IdempotencyKey,
 		SourceDigest: sourceDigest, ExecutionNonce: key.ExecutionNonce, ArchiveBytes: len(archive),
 		Members: checked.Members, CreatedUnix: now.Unix(), ProviderAgentID: validated.Proposal.ProviderAgentId,
-		ManifestDigest: validated.Proposal.ManifestDigest, ProviderName: validated.Manifest.Name,
-		ProviderDescription: validated.Manifest.Description, RetentionSeconds: validated.Manifest.RetentionSeconds}
+		ManifestDigest: validated.Proposal.ManifestDigest, ToolchainDigest: validated.Manifest.ToolchainDigest,
+		ProviderName: validated.Manifest.Name, ProviderDescription: validated.Manifest.Description,
+		RetentionSeconds: validated.Manifest.RetentionSeconds}
 	if record.Phase == buyersdk.PhasePrepared {
 		if carriageErr := a.config.Carriage.CheckCarriage(ctx, record, archive); carriageErr != nil {
 			if record, err = a.config.Buyer.Withdraw(requestHash); err != nil {
