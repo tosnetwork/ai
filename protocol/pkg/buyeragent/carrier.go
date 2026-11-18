@@ -2,6 +2,7 @@ package buyeragent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -68,10 +69,12 @@ type CardVerifier interface {
 		raw []byte) (agentpacketseal.RecipientKey, agentpacketseal.KeyCard, error)
 }
 
-// RelayDescriber is the part of a relay client the carriage check uses;
-// agentpacketrelay.Client implements it.
-type RelayDescriber interface {
+// RelayClient is the part of a relay client the carrier uses: the
+// description the carriage check reads and the deposit that delivers an
+// envelope. agentpacketrelay.Client implements it.
+type RelayClient interface {
 	Describe(ctx context.Context) (agentpacketrelay.RelayDescription, error)
+	Deposit(ctx context.Context, envelope []byte) (agentpacketrelay.DepositOutcome, error)
 }
 
 // CarrierConfig wires a Carrier.
@@ -93,8 +96,11 @@ type CarrierConfig struct {
 	Relays []string
 	// RelayClient returns the client of a relay base URL, for the buyer's
 	// relays and those a provider card names.
-	RelayClient func(baseURL string) (RelayDescriber, error)
+	RelayClient func(baseURL string) (RelayClient, error)
 	Now         func() time.Time
+	// Random fills packet nonces and acknowledgement secrets; nil is
+	// crypto/rand.
+	Random func([]byte) error
 }
 
 // Carrier holds the buyer's relay keys and cards and the verified provider
@@ -158,7 +164,7 @@ func NewCarrier(config CarrierConfig) (*Carrier, error) {
 	if err := checkPrivateDir(config.StateDir); err != nil {
 		return nil, err
 	}
-	for _, name := range []string{"relay-keys", "provider-cards"} {
+	for _, name := range []string{"relay-keys", "provider-cards", "outbox"} {
 		path := filepath.Join(config.StateDir, name)
 		if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
@@ -169,6 +175,9 @@ func NewCarrier(config CarrierConfig) (*Carrier, error) {
 	}
 	if config.Now == nil {
 		config.Now = time.Now
+	}
+	if config.Random == nil {
+		config.Random = func(value []byte) error { _, err := rand.Read(value); return err }
 	}
 	return &Carrier{config: config, verified: map[string]map[string]buyersdk.VerifiedProviderCard{},
 		answered: map[string]time.Time{}}, nil

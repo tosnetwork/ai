@@ -81,15 +81,47 @@ func (c *fakeChain) VerifyAgentCard(ctx context.Context, verifier mldsa44.Verifi
 	return key, card, nil
 }
 
-// fakeRelay answers its description unless down.
+// fakeRelay answers its description unless down, and stores deposits
+// unless told to answer a deposit otherwise.
 type fakeRelay struct {
 	mu    sync.Mutex
 	down  map[string]bool
 	asked map[string]int
+	// deposits are the envelopes each relay accepted, in order; answer
+	// overrides the outcome of a deposit at a relay.
+	deposits map[string][][]byte
+	answer   map[string]agentpacketrelay.DepositResult
+	attempts map[string]int
+	// crash makes a deposit panic, as a process dying mid-deposit would
+	// stop the round.
+	crash bool
 }
 
-func (r *fakeRelay) client(base string) (RelayDescriber, error) {
+func (r *fakeRelay) client(base string) (RelayClient, error) {
 	return relayClient{relay: r, base: base}, nil
+}
+
+func (c relayClient) Deposit(_ context.Context, envelope []byte) (agentpacketrelay.DepositOutcome, error) {
+	c.relay.mu.Lock()
+	defer c.relay.mu.Unlock()
+	if c.relay.attempts == nil {
+		c.relay.attempts = map[string]int{}
+	}
+	c.relay.attempts[c.base]++
+	if c.relay.crash {
+		panic("the agent stopped during a deposit")
+	}
+	if _, err := agentpacketseal.ParseEnvelope(envelope); err != nil {
+		return agentpacketrelay.DepositOutcome{}, agentpacketrelay.ErrInvalidArgument
+	}
+	if result, set := c.relay.answer[c.base]; set {
+		return agentpacketrelay.DepositOutcome{Result: result}, nil
+	}
+	if c.relay.deposits == nil {
+		c.relay.deposits = map[string][][]byte{}
+	}
+	c.relay.deposits[c.base] = append(c.relay.deposits[c.base], append([]byte(nil), envelope...))
+	return agentpacketrelay.DepositOutcome{Result: agentpacketrelay.DepositStored, StatusCode: 201}, nil
 }
 
 type relayClient struct {

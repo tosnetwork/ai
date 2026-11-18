@@ -2,6 +2,8 @@ package buyeragent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"time"
@@ -50,6 +52,45 @@ type DutyView struct {
 	// Waiting reports that the operation was already sent recently and is
 	// waiting for finalized history.
 	Waiting bool `json:"waiting_for_finalized_history,omitempty"`
+	// Delivery is the task delivery round of a pending request.
+	Delivery *DeliveryView `json:"delivery,omitempty"`
+}
+
+// TaskDeliverer delivers the task of an admitted, pending purchase;
+// Carrier implements it.
+type TaskDeliverer interface {
+	DeliverTask(ctx context.Context, task TaskDelivery) (DeliveryView, error)
+}
+
+// deliver runs the task delivery round of a pending request (section 7.2):
+// the duty round carries the task as it carries the refund duties, with or
+// without an MCP session.
+func (a *Agent) deliver(ctx context.Context, view DutyView, requestHash string, purchase PurchaseRecord,
+	report *buyersdk.RequestReport) (DutyView, error) {
+	record, err := a.config.Buyer.Journal().Read(requestHash)
+	if err != nil {
+		return view, err
+	}
+	archive, err := readPrivate(a.store.archivePath(requestHash))
+	if err != nil {
+		return view, err
+	}
+	if sum := sha256.Sum256(archive); "sha256:"+hex.EncodeToString(sum[:]) != purchase.SourceDigest {
+		return view, errors.New("the stored source archive does not match its digest")
+	}
+	delivered, err := a.config.Delivery.DeliverTask(ctx, TaskDelivery{Record: record, Archive: archive,
+		ExecutionNonce: purchase.ExecutionNonce, ProviderAgentID: purchase.ProviderAgentID,
+		ResponseDeadline: time.Unix(int64(report.ResponseDeadline), 0), RetentionSeconds: purchase.RetentionSeconds})
+	view.Delivery = &delivered
+	switch {
+	case err == nil:
+		return view, nil
+	case errors.Is(err, ErrNoRelayAccepted), errors.Is(err, ErrNoProviderCard):
+		return view, refusal(CodeDependencyUnavailable, "the task is not yet held by a relay of the provider", err)
+	case errors.Is(err, ErrTaskDeadlinePassed):
+		return view, nil
+	}
+	return view, refusal(CodeInternal, "the task could not be delivered", err)
 }
 
 // RefundNow runs the duty of one purchase now: the expire, claim_refund or
@@ -113,7 +154,8 @@ func (a *Agent) RunDuties(ctx context.Context, interval time.Duration, report fu
 
 func (a *Agent) duty(ctx context.Context, requestHash string) (DutyView, error) {
 	view := DutyView{RequestHash: requestHash, Reference: PurchaseReference(requestHash)}
-	if _, err := a.store.readPurchase(requestHash); err != nil {
+	purchase, err := a.store.readPurchase(requestHash)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return view, refusal(CodeNotFound, "no purchase has this request hash", err)
 		}
@@ -136,6 +178,9 @@ func (a *Agent) duty(ctx context.Context, requestHash string) (DutyView, error) 
 	view.Status = string(report.Status)
 	if view.Status == "" {
 		view.Status = string(report.Phase)
+	}
+	if report.Status == serviceactor.StatusPending && a.config.Delivery != nil {
+		return a.deliver(ctx, view, requestHash, purchase, report)
 	}
 	view.Operation = lifecycleFor(report.Status)
 	if view.Operation == "" {
