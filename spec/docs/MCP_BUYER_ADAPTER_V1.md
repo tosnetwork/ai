@@ -596,11 +596,18 @@ protocol fields:
 - it replaces invalid UTF-8 with `U+FFFD`;
 - it bounds each provider string at 256 characters and the provider block at
   4,096, marking truncation, and every other string at 512;
-- it collapses runs of spaces in provider text, hard-wraps it at 64
-  characters, and starts every provider row with the gutter `| `. A
-  terminal's soft wrap of a long line can then never put provider text at
-  the start of a row, where it could pass for the end marker or a protocol
-  field.
+- it collapses every run of Unicode space separators (category Zs, which
+  includes `U+00A0` and `U+3000`) in provider text into one space;
+- it hard-wraps provider text at 64 display columns, the gutter not
+  counted:
+  - a wide, fullwidth or East Asian ambiguous character counts two columns;
+  - a combining mark counts none;
+  - any other character counts one;
+- it starts every provider row with the gutter `| `.
+
+Non-ASCII text, such as a CJK manifest, stays readable. A terminal's soft
+wrap of a long line can then never put provider text at the start of a
+row, where it could pass for the end marker or a protocol field.
 
 The provider text it shows is the manifest's `name` and `description`. The
 response SLA, the refund claim window and the cleanup bounty come from the
