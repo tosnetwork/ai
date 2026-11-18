@@ -1,11 +1,11 @@
 {
   "schema": "tos.service.registry.deployment.v1",
   "status": "passed-initial-public-testnet",
-  "owner_designation": "pending",
+  "owner_designation": "designated 2026-11-18 by the network owner as the designated initial public test network for Gate C (team decision log entry 13.563)",
   "protocol": "tos_service_v1",
   "acceptance_profile": "operator-designated-initial-public-testnet",
-  "qualifies_as_public_testnet_gate_c": false,
-  "qualification_note": "conditional on owner designation: the lifecycle passed, but the epoch-7 network has not yet been designated as the initial public test network for Gate C; a designation is recorded in its own later change",
+  "qualifies_as_public_testnet_gate_c": true,
+  "qualification_note": "the lifecycle passed and the owner designated the epoch-7 network as the initial public test network for Gate C on 2026-11-18; operator independence, public HTTPS and the independent review of release d3bb66d0 remain open and are not established by this record",
   "operator_independence": false,
   "public_internet_reachability": false,
   "known_limitations": [
