@@ -29,7 +29,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const usage = "usage: tos-service-buyer <discover|prepare|call|status|requests|agent|confirm> [flags]"
+const usage = "usage: tos-service-buyer <discover|prepare|call|status|requests|init|agent|confirm> [flags]"
 
 // decodeStrict decodes a configuration document strictly: unknown fields,
 // duplicate keys and trailing data are refused.
@@ -95,6 +95,9 @@ func run(arguments []string, out io.Writer) error {
 	command, rest := arguments[0], arguments[1:]
 	if command == "confirm" {
 		return runConfirm(rest)
+	}
+	if command == "init" {
+		return runInit(rest, out)
 	}
 	if command == "agent" {
 		return runAgent(rest)

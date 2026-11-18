@@ -31,9 +31,11 @@ result acceptance (7.3, `Carrier.ReceiveResult`, run by the duty round).
 `tos-service-buyer agent` (2.4) serves the socket and runs the duty round and
 the relay poller over pinned-CA HTTPS relay clients.
 
-Not yet implemented are the finalized-state reads behind search and quote,
-and `init`; section
-16 lists that work. It supersedes the retired
+`tos-service-buyer init` (3.2, `protocol/pkg/buyerinit`) is implemented and
+writes the configuration `tos-service-buyer agent` reads.
+
+Not yet implemented are the finalized-state reads behind search and quote;
+section 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
 
@@ -249,26 +251,77 @@ purpose bits exist, `init` registers a packet-only controller.
 ### 3.2 `tos-service-buyer init`
 
 `init` runs as the custody account and drives `tosctl` only; it never sees key
-material. It is idempotent and prints every change in a plan step before an
-apply step makes it, like the OpenFox setup:
+material. It has two explicit modes:
 
-1. pin the `tosctl` binary by SHA-256 and check that its configured endpoints
-   are the verified endpoints on the verified network (as the buyersdk
-   sender's preflight does);
-2. select or create the wallet (`tosctl wallet`) and report its finalized
-   balance; funding it is the user's step;
-3. create the packet controller in the vault if absent
-   (`tosctl agent native-registry controller`), write the Agent policy (one
-   controller, weight 1, every purpose, as OpenFox does until the purpose bits
-   exist) and register the Agent (`tosctl agent native-registry
-   register-agent`), then wait until the Agent is finalized and live;
-4. generate a relay key seed (`agentpacketseal.GenerateSeed`), store it in a
-   custody-owned `0600` file, and sign a key card with the packet controller
-   (`agentpacketseal.KeyCardPacket`, `agentpacket.Sign` through `tosctl`)
-   naming the configured relay URLs;
-5. write the agent configuration: network, endpoints, quorum, code hashes,
-   wallet name, controller name, relays, client uid, budget policy
-   (section 6) and optional provider allow-list.
+- **`tos-service-buyer init plan`** prints every change it would make (the
+  wallet and controller it would create, the activation, the Agent
+  registration with the value it attaches, the configuration file) and the
+  wallet's finalized balance and missing funding. It sends nothing and
+  creates no key, directory, journal or file.
+- **`tos-service-buyer init apply`** makes the changes. It is idempotent and
+  resumable: a re-run reads finalized state first and continues where the last
+  run stopped.
+
+Both refuse to run as root or as the configured client (developer) uid, and
+check every input before `tosctl` runs: absolute clean paths, the configuration
+file outside the state directory, `tosctl` names for the wallet and
+controller, a 64-hex `tosctl` pin, 3 to 8 endpoints with a strict-majority
+quorum, 1 to 4 distinct canonical relay URLs, a relay CA file whenever a
+relay is `https` (the agent verifies relays against that pinned CA only, never
+the system pool), and the budget bounds of section 6. The steps are:
+
+1. pin the `tosctl` binary by SHA-256; derive the identity domain with
+   `tosctl agent native-registry domain`; require the registry code file to
+   hash to the code that `tosctl` signs for; require every configured endpoint
+   to serve the domain's genesis and every endpoint `tosctl` submits through to
+   be one of them (as the buyersdk sender's preflight does);
+2. select the wallet, or create it (`tosctl wallet create`, version V4R2,
+   workchain 0), and report its finalized state and balance. Funding it is
+   the user's step. A wallet that is not active is activated
+   (`tosctl wallet activate`) once its finalized balance covers the
+   activation and the registration;
+3. select the packet controller, or create it
+   (`tosctl agent native-registry new-controller`, read back and compared).
+   Then write the Agent policy (one controller, weight 1, every purpose, until
+   the purpose bits exist) and build the registration with
+   `tosctl agent native-registry register-agent`. The nonce is journaled
+   before the build and the signed registration before it is sent. The
+   registration's destination must be the address the Agent ID derives under
+   the network and the registry code. It is sent from the wallet attaching
+   2 TOS, and only from a V3R2, V4R2 or V5R1 wallet, whose messages expire.
+   `init` then waits until the Agent is finalized, not revoked, under a policy
+   holding the packet controller;
+4. relays: `init` records the relay URLs (`--relay`, 1 to 4, required until
+   the official relay URLs of O3 are published) and the `--relay-ca-file`
+   an `https` relay needs, and creates no relay key. The agent
+   issues its key and card for each purchase window when it first needs one
+   (3.3), so a card always covers the window it serves;
+5. write the agent configuration (schema
+   `tos.service.mcp-buyer.agent-config.v1`, custody-owned `0600`, decoded
+   strictly with unknown fields refused, and read back after writing).
+   It holds the state and socket directories, client uid, network, endpoints,
+   quorum, registry code file and hash, actor code hash, manifest directory,
+   wallet address, Agent ID, the pinned `tosctl` with its configuration,
+   wallet name and controller name, the controller's key ID, relays, relay CA
+   file and budget policy. It holds no key and no vault credential; the vault
+   URL is read from `VAULT_URL` and passed to `tosctl` only in its
+   environment.
+
+**Journal and resumption.** The journal (`<state dir>/init/journal.json`,
+`0600`, in a `0700` directory under an exclusive lock) binds the network,
+registry code hash, wallet name and address, and controller name and key ID.
+Once a registration may be on chain, a change to any of them is refused, as is
+a configuration file that already names an Agent with no journal beside it. A
+chain step (activation, registration) is marked as sending before `tosctl`
+runs. On a re-run, a step whose effect is in finalized state is never sent
+again. A step still marked as sending is waited on until it lands or its
+inclusion window (5 minutes) has passed on finalized chain time, and only then
+sent again. A send that `tosctl` refused before broadcasting returns the step
+to pending.
+
+**Confirmation.** Every chain send (the activation and the value-carrying
+registration) is confirmed on the custody account's terminal by typing `yes`,
+unless `apply --yes` is given. Without a confirmation nothing is sent.
 
 Where the registration is submitted through a gateway instead of directly,
 the action JSON is reviewed and signed with `tos-service-wallet`, which also
@@ -1386,7 +1439,9 @@ refusals, crash recovery and the confirmation boundary:
   checks, full re-validation of client requests, the random confirmation code
   and `decide`);
 - an MCP package and `protocol/cmd/tos-service-buyer-mcp` on go-sdk v1.7.0;
-- `tos-service-buyer` subcommands `init`, `agent`, `confirm` (with the
+- `tos-service-buyer` subcommands `init` (implemented: `protocol/pkg/buyerinit`
+  over `buyersdk.TOSCTLInitCustody` and the finalized account read
+  `toschain.ServiceActorSession.Account`), `agent`, `confirm` (with the
   terminal checks of 5.1 and the rendering rules of 5.2) and `evidence`;
 - the user guide, written as the Service Actor rewrite of
   [`GATE_E_BUYER_ONBOARDING.md`](GATE_E_BUYER_ONBOARDING.md).
@@ -1410,6 +1465,9 @@ Decided by the owner on 2026-11-18:
   change or authorize any protocol fact, and every packet it carries is
   verified against finalized state. A team-operated relay is therefore a
   carrier only and does not affect the independence of the Gate D roles.
+  Until the official relay URLs are published, `init` has no default and
+  requires `--relay` (1 to 4); once they are published they become the
+  default. An `https` relay also requires `--relay-ca-file` at `init`.
 - **O5. Shared buyer runtime: the direction.** The buyer agent package is
   meant to become the shared buyer runtime that OpenFox may adopt later, as
   it adopted `railwork`. V1 does not do that switch.
