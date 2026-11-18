@@ -297,11 +297,17 @@ def check_receipt(document):
     if "sha256:" + hashlib.sha256(artifact).hexdigest() != receipt["artifact_digest"]:
         raise SystemExit("artifact digest mismatch")
     members = {}
+    end = 0
     with tarfile.open(fileobj=io.BytesIO(artifact), mode="r:") as archive:
         for member in archive.getmembers():
             if not member.isreg() or member.name in members or member.name not in ("output.log", "report.json"):
                 raise SystemExit("artifact members")
             members[member.name] = archive.extractfile(member).read()
+            end = max(end, member.offset_data + (member.size + 511) // 512 * 512)
+    # Section 7.2: the end-of-archive marker follows the last member and
+    # nothing follows the marker.
+    if artifact[end:] != bytes(1024):
+        raise SystemExit("artifact does not end exactly with the end-of-archive marker")
     if set(members) != {"output.log", "report.json"} or \
             "sha256:" + hashlib.sha256(members["output.log"]).hexdigest() != receipt["result_digest"] or \
             "sha256:" + hashlib.sha256(members["report.json"]).hexdigest() != receipt["report_digest"]:
