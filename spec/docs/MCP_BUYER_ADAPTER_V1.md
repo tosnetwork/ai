@@ -7,8 +7,10 @@ MCP adapter on the Service Actor rail. The agent core (the re-validation of
 client requests, the prepared-call cap and the withdrawn phase, the agent
 socket with its peer-credential roles, and the confirmation code and
 decision) is implemented in `protocol/pkg/buyeragent` and
-`protocol/pkg/buyersdk`. The confirmer, the MCP server, the relay carriage,
-the lifecycle duties and `init` are not yet; section 16 lists that work. It supersedes the retired
+`protocol/pkg/buyersdk`. The confirmer (`protocol/pkg/buyerconfirm`,
+`tos-service-buyer confirm`) is implemented. Not yet implemented are the MCP
+server, the relay carriage, the lifecycle duties and `init`; section 16
+lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
 
@@ -582,10 +584,19 @@ protocol fields:
   except the line breaks it emits itself), `0x7f`, C1 controls (`U+0080` to
   `U+009F`) and the bidirectional formatting characters (`U+061C`,
   `U+200E`, `U+200F`, `U+202A` to `U+202E`, `U+2066` to `U+2069`) as
-  visible `\u{...}` escapes;
+  visible `\u{...}` escapes. It also escapes the invisible characters that
+  can hide or split text: `U+200B` to `U+200D`, `U+2028`, `U+2029` and
+  `U+FEFF`;
 - it replaces invalid UTF-8 with `U+FFFD`;
 - it bounds each provider string at 256 characters and the provider block at
-  4,096, marking truncation.
+  4,096, marking truncation, and every other string at 512.
+
+The provider text it shows is the manifest's `name` and `description`. The
+response SLA, the refund claim window and the cleanup bounty come from the
+finalized offer: the agent stores them with the Quote when it verifies the
+offer, and refuses a Quote stored again with other terms. The retention
+comes from the manifest. The confirmer computes every deadline from the
+agent's clock at presentation.
 
 Archive member names are already restricted to the safe charset of 4.5, and
 the agent refuses any other, so none of them needs escaping. The rendering
