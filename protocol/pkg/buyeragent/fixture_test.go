@@ -293,6 +293,17 @@ func testLimits() buyersdk.ServiceActorLimits {
 
 func quotePackage(t *testing.T, now time.Time) (*nativev1.RequestQuoteProposalRequest, *nativev1.QuoteProposalPackageV1) {
 	t.Helper()
+	binding, err := nativecore.AgentPacketTransportBinding(fxProvider, nativecore.MaxAgentPacketTransportRequestBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return quotePackageWith(t, now, binding)
+}
+
+// quotePackageWith is quotePackage with the given transport binding.
+func quotePackageWith(t *testing.T, now time.Time, binding nativecore.TransportBindingV1) (*nativev1.RequestQuoteProposalRequest,
+	*nativev1.QuoteProposalPackageV1) {
+	t.Helper()
 	network := servicefixture.Network()
 	settlement := servicefixture.Settlement{ActorAccount: bytes.Repeat([]byte{0x77}, 32),
 		ActorCodeHash: bytes.Repeat([]byte{0x88}, 32), AttestorKey: mldsa44.KeyIDText(fxKeyID)}
@@ -308,10 +319,6 @@ func quotePackage(t *testing.T, now time.Time) (*nativev1.RequestQuoteProposalRe
 	}
 	terms := servicefixture.Terms(fxKeyID, metadata)
 	termsHash, err := nativecore.ServiceActorTermsHash(terms)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding, err := nativecore.AgentPacketTransportBinding(fxProvider, nativecore.MaxAgentPacketTransportRequestBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

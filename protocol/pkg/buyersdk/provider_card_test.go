@@ -173,3 +173,30 @@ func TestAProviderCardForAnUnknownCapabilityOrSourceIsRefused(t *testing.T) {
 		t.Fatal("a card was verified without a verifier")
 	}
 }
+
+func TestAnAgentsOwnCardVerifiesOnlyForThatLiveAgent(t *testing.T) {
+	fixture := cardFixture(t)
+	raw := providerCard(t, saAgent, cardController)
+	key, card, err := fixture.buyer.VerifyAgentCard(context.Background(), keycardtest.Keys, saAgent, raw)
+	if err != nil || key.AgentID != saAgent || card.NotAfterUnix == 0 {
+		t.Fatalf("own card: %+v %v", key, err)
+	}
+	other := "agent_" + strings.Repeat("66", 32)
+	if _, _, err := fixture.buyer.VerifyAgentCard(context.Background(), keycardtest.Keys, other, raw); !errors.Is(err, ErrAgentCard) {
+		t.Fatalf("a card verified for another Agent: %v", err)
+	}
+	if _, _, err := fixture.buyer.VerifyAgentCard(context.Background(), keycardtest.Keys, saAgent,
+		providerCard(t, saAgent, "removed-controller")); !errors.Is(err, ErrAgentCard) {
+		t.Fatalf("a card of a controller outside the policy: %v", err)
+	}
+	if _, _, err := fixture.buyer.VerifyAgentCard(context.Background(), keycardtest.Keys, saAgent, []byte("{}")); !errors.Is(err, ErrAgentCard) {
+		t.Fatalf("not a packet: %v", err)
+	}
+	if _, _, err := fixture.buyer.VerifyAgentCard(context.Background(), nil, saAgent, raw); err == nil {
+		t.Fatal("a card verified without a verifier")
+	}
+	fixture.chain.agent.GetAgent().Tombstoned = true
+	if _, _, err := fixture.buyer.VerifyAgentCard(context.Background(), keycardtest.Keys, saAgent, raw); !errors.Is(err, ErrAgentCard) {
+		t.Fatalf("a tombstoned Agent's card: %v", err)
+	}
+}

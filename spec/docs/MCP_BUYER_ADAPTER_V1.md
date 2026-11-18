@@ -21,8 +21,12 @@ verification of a provider card from any source
 The refund duties (section 11) run in the agent without an MCP session, and
 `tos_buyer_refund` advances them.
 
-Not yet implemented are the relay carriage, the
-finalized-state reads behind search, quote and result, and `init`; section
+The carriage check of 7.1 (`buyeragent.Carrier`, with the buyer's relay
+keys and cards and the learned provider cards) is implemented.
+
+Not yet implemented are task delivery, relay polling and result acceptance
+(7.2, 7.3), the finalized-state reads behind search, quote and result, and
+`init`; section
 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
@@ -806,6 +810,27 @@ whose package cannot be carried; items 3 to 5 extend it to everything else
 the task and its result need. A purchase that fails the check costs nothing;
 a purchase paid without it could only end in a timeout refund that keeps the
 storage fee.
+
+`buyeragent.Carrier` implements the check, at prepare and again before the
+call:
+
+- **Order.** Item 4 runs before item 2, because the task is encoded with
+  the fresh buyer card that item 4 signs.
+- **Buyer card (item 4).** Each check signs a fresh card for a newly drawn
+  relay key. The card covers the response deadline plus the result's
+  retention plus 300 seconds, capped at 30 days. The key is stored before the
+  card can reach anyone. The card is then verified with `VerifyAgentCard`
+  against finalized state.
+- **Provider card (item 3).** Provider cards are learned from any source with
+  `LearnProviderCard`, at most 8 per Capability; the card expiring first is
+  dropped. The check uses only a card of the Quote's provider that is usable
+  now (verified again when the last verification is over 10 minutes old)
+  and valid through the response deadline. Of several, it picks the one
+  relay 6.3 selects.
+- **Relays (item 5).** A relay that answered within 10 minutes is not asked
+  again.
+- **Keys.** Relay keys are kept until `not_after + 86,400 + 300` and then
+  destroyed (`DestroyExpiredKeys`).
 
 ### 7.2 Delivery
 
