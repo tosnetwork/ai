@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/tosutils-go/address"
+	"github.com/tosnetwork/tosutils-go/tlb"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
@@ -96,5 +100,65 @@ func TestInboundQueryIDOfEveryTransactionKind(t *testing.T) {
 		if query != want.query || known != want.known {
 			t.Errorf("%s: query %d known %v, want %d %v", name, query, known, want.query, want.known)
 		}
+	}
+}
+
+func externalIn(t *testing.T, body *cell.Cell) *tlb.Message {
+	return &tlb.Message{MsgType: tlb.MsgTypeExternalIn, Msg: &tlb.ExternalMessage{SrcAddr: address.NewAddressNone(),
+		DstAddr: rawAddress(t, testActor), ImportFee: tlb.ZeroCoins, Body: body}}
+}
+
+func lifecycleOut(t *testing.T, destination string, query uint64) *tlb.Message {
+	return &tlb.Message{MsgType: tlb.MsgTypeInternal, Msg: &tlb.InternalMessage{IHRDisabled: true, Bounce: true,
+		SrcAddr: rawAddress(t, testActor), DstAddr: rawAddress(t, destination), Amount: tlb.FromNanoTONU(200_000_000),
+		IHRFee: tlb.ZeroCoins, FwdFee: tlb.ZeroCoins,
+		Body: cell.BeginCell().MustStoreUInt(nativecore.ServiceActorExpireOpcode, 32).MustStoreUInt(query, 64).EndCell()}}
+}
+
+// The wallet history since an anchor names each transaction's external
+// message hash and its internal out-messages with their query IDs, and a
+// walk that does not meet its anchor is refused.
+func TestWalletHistoryNamesExternalMessagesAndTheirOutMessages(t *testing.T) {
+	ours := cell.BeginCell().MustStoreUInt(5, 32).EndCell()
+	other := cell.BeginCell().MustStoreUInt(6, 32).EndCell()
+	anchor := buildTransaction(t, 10, 1000, nil, internalIn(t, testBuyer, cell.BeginCell().EndCell()), true, 0)
+	first := buildTransaction(t, 11, 1001, &anchor, externalIn(t, ours), true, 0, lifecycleOut(t, testBuyer, 42),
+		payout(t, testOwner, 1))
+	second := buildTransaction(t, 12, 1002, &first, externalIn(t, other), true, 0)
+	history := []tlb.Transaction{second, first, anchor}
+	root := bytes.Repeat([]byte{0xa1}, 32)
+	session := testSession(t, sessionServer(t, history, 42, root, root), sessionServer(t, history, 42, root, root),
+		sessionServer(t, history, 42, root, root))
+	ctx := context.Background()
+	last, err := session.WalletLastTransaction(ctx, testActor)
+	if err != nil || last.LT != 12 || last.Hash != hex.EncodeToString(second.Hash) {
+		t.Fatalf("last transaction %+v %v", last, err)
+	}
+	walk, err := session.WalletHistory(ctx, testActor, ActorTxID{LT: anchor.LT, Hash: hex.EncodeToString(anchor.Hash)})
+	if err != nil || len(walk.Transactions) != 2 {
+		t.Fatalf("wallet history %+v %v", walk, err)
+	}
+	oursMessage, _ := externalIn(t, ours).ToCell()
+	if got := walk.Transactions[1]; got.LT != 11 || got.ExternalMessageHash != hex.EncodeToString(oursMessage.Hash()) ||
+		len(got.Out) != 2 || got.Out[0] != (WalletOutMessage{Destination: testBuyer, QueryID: 42, Known: true}) ||
+		got.Out[1] != (WalletOutMessage{Destination: testOwner}) {
+		t.Fatalf("reduced transaction %+v", got)
+	}
+	if walk.Transactions[0].ExternalMessageHash == walk.Transactions[1].ExternalMessageHash {
+		t.Fatal("two different external messages share a hash")
+	}
+	if _, err := session.WalletHistory(ctx, testActor, ActorTxID{LT: 9, Hash: strings.Repeat("ab", 32)}); !errors.Is(err, ErrHistoryAnchorMissing) {
+		t.Fatalf("a walk without its anchor: %v", err)
+	}
+	if _, err := session.WalletHistory(ctx, testActor, ActorTxID{}); err == nil {
+		t.Fatal("a walk without an anchor was accepted")
+	}
+	// An internal inbound message has no external hash.
+	anchorCell, err := anchor.ToCell()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reduced, err := reduceWalletTransaction(anchor, anchorCell); err != nil || reduced.ExternalMessageHash != "" {
+		t.Fatalf("an internal inbound message got an external hash: %+v %v", reduced, err)
 	}
 }

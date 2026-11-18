@@ -1012,25 +1012,45 @@ show its effect first. A send that custody never started does not count.
 
 After that the agent sends the operation again while the status still
 requires it, but only once every earlier send of it is **settled** at a fresh
-finalized checkpoint, whose chain time is the clock. Before each send the
-agent records the buyer wallet's finalized seqno and a bound on the wallet
-message's `valid_until`. The bound is the send's start plus custody's
-3-minute deadline, the wallet message's 2-minute lifetime and 5 minutes of
-clock skew. An earlier send is settled when one of these holds:
+finalized checkpoint, whose chain time is the clock.
+
+**What each send records.** Before the send the agent records the buyer
+wallet's finalized seqno and its last finalized transaction (the send's
+anchor). It also records a fallback bound on `valid_until`: the send's start
+plus custody's 3-minute deadline, plus the pinned tosctl's 2-minute wallet
+message lifetime, plus 5 minutes of clock skew. Once tosctl has signed, it
+prints `Wallet message seqno=<n> valid_until=<unix> hash=sha256:<hex>`,
+before it broadcasts. The agent records this report: the signed seqno, the
+exact `valid_until` and the message hash. The fallback bound is used only
+for a send whose report is lost. That happens only when the agent stops
+during the send; a run without the line broadcast nothing.
+
+**When an earlier send is settled.** One of these holds:
 
 1. the actor's finalized history since the call holds a transaction from the
    buyer wallet carrying the send's `query_id`. The message executed,
    whatever its outcome, so a `claim_refund` that failed with 1921
    (under-backed actor) is retried until the deadline;
-2. the checkpoint is past the bound and the wallet's seqno is still the one
-   recorded before the send. The wallet accepted no message since, and the
-   send's message has expired, so it never executes;
-3. the checkpoint is past the bound plus a 10-minute delivery allowance, the
-   wallet's seqno has moved, and the history since the call holds no
-   transaction from the wallet that could be the send's. A failed
-   transaction whose body shows no `query_id` could be.
+2. the message has expired before it could execute. For a reported send,
+   the checkpoint is past the signed `valid_until` and the wallet's seqno
+   has not passed the signed one. For a send whose report is lost, the
+   checkpoint is past the fallback bound and the wallet's seqno is still the
+   one recorded before the send;
+3. for a reported send, the wallet's finalized history since the send's
+   anchor shows it:
+   - the transaction of the send's exact message, which sent the actor
+     nothing for this send. The send reached no actor. If it did send the
+     actor this send's message, rule 1 settles it once the actor's
+     transaction is finalized;
+   - or no transaction of that message, while the wallet's seqno has moved
+     past the signed one. A different message consumed that seqno, so the
+     send can never execute, and it is settled at once, without waiting for
+     its `valid_until`.
 
-Otherwise the earlier message may still be in flight, and the duty waits.
+Otherwise the earlier message may still be in flight, and the duty waits. A
+send whose report is lost and whose recorded seqno has moved stays unsettled
+until rule 1 applies. This happens only after the agent stopped during that
+send.
 The contract would refuse a second claim or sweep in any case. The rule
 keeps the agent from sending one that finalized state has not proven
 necessary. The call itself is never sent twice (section 10, "At most one

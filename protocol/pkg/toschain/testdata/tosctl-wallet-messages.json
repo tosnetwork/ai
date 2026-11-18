@@ -1,0 +1,19 @@
+{
+  "source": "tos e35426d06a9a0258c7a50b56cb46d9dc4691332c (tos#492), WalletContract::build_message for a V4R2 and a V5R1 wallet (Ed25519 seed 0x42 x 32, subwallet 698983191, workchain 0, global_id 42) to 0:77..77 with 200000000 nanoTOS and an expire body (opcode 0x53564303, query_id 9, request_id 3), seqno 7; hash is WalletContract::signed_message's hash, the one the Wallet message line prints",
+  "messages": [
+    {
+      "version": "V4R2",
+      "boc_base64": "te6ccgEBAgEAwgAB6YgBw0WxpYmOIVkVTmv+jj6ZYfcGFExS8580Hda3kKofkCgDoQOH7EurUZ9KMZK2M/Zod5ox1bv+Ge/NLHAiSlnpCfkRDhrg7Z3MbVBl1gORmTRazxIYqHyw6M4oWV6skf0gIAAAAVFNTRi7V+vxsAAAADgAHAEAkGIAO7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7ugX14QAAAAAAAAAAAAAAAAAABTVkMDAAAAAAAAAAkAAAAAAAAAAw==",
+      "hash": "cbfa5fcd491f445290435a8f9154bd28d8ad0cf782262e0ebf9b716545551ed0",
+      "seqno": 7,
+      "valid_until": 1794997814
+    },
+    {
+      "version": "V5R1",
+      "boc_base64": "te6ccgEBBAEAzwAB7YgA7f0ewDtNAtN2ub90ce5XeF1nWh38g2oVvuAnXWrpIVIDm0s7cAAAAVFNTRi7V+vxsAAAAD07dTjN6yGXdq3ypysNdSByGNoziEYEnqlnSKRnE137KJuU0w6+UDIRGs8NZL1qY5qMsUMc5hXo6UeAwtsI3F4ZAQIKDsPIbQMCAwAAAJBiADu7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7oF9eEAAAAAAAAAAAAAAAAAAAU1ZDAwAAAAAAAAAJAAAAAAAAAAM=",
+      "hash": "ed164356b8d65ac9a1a2c21b89b93809c5c209807abb080ece302c901799ca48",
+      "seqno": 7,
+      "valid_until": 1794997814
+    }
+  ]
+}

@@ -37,6 +37,10 @@ type ServiceActorSession interface {
 	GetRefund(ctx context.Context, actor string, requestID uint64) (*nativecore.ServiceActorRefundV1, error)
 	// WalletSeqno reads a wallet's seqno at the checkpoint.
 	WalletSeqno(ctx context.Context, wallet string) (uint32, error)
+	// WalletLastTransaction and WalletHistory read a wallet's last
+	// transaction, and its history since an anchor, at the checkpoint.
+	WalletLastTransaction(ctx context.Context, wallet string) (toschain.ActorTxID, error)
+	WalletHistory(ctx context.Context, wallet string, anchor toschain.ActorTxID) (*toschain.WalletHistory, error)
 }
 
 // ServiceActorReader opens buyer sessions.

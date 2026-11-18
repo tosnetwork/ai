@@ -14,16 +14,18 @@ type fakeLifecycle struct {
 	intents []LifecycleIntent
 	err     error
 	panics  bool
+	// submission is what custody reports about the message it signed.
+	submission LifecycleSubmission
 }
 
-func (f *fakeLifecycle) SendLifecycle(_ context.Context, intent LifecycleIntent) error {
+func (f *fakeLifecycle) SendLifecycle(_ context.Context, intent LifecycleIntent) (LifecycleSubmission, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.intents = append(f.intents, intent)
 	if f.panics {
 		panic("a defect inside custody during a lifecycle send")
 	}
-	return f.err
+	return f.submission, f.err
 }
 
 var lifecycleEndpoints = vetter{endpoints: []string{"https://a.example/jsonRPC", "https://b.example/jsonRPC",
@@ -37,7 +39,7 @@ func TestTheLifecycleSenderNamesTheOperationRequestAndDestination(t *testing.T) 
 			return []byte("OK Service Actor " + operation + " message submitted to " + saActor + "\n"), nil
 		}
 		intent := LifecycleIntent{Operation: operation, Actor: saActor, RequestID: 3, QueryID: 9, Destination: saBuyer}
-		if err := sender.SendLifecycle(context.Background(), intent); err != nil {
+		if _, err := sender.SendLifecycle(context.Background(), intent); err != nil {
 			t.Fatalf("%s: %v", operation, err)
 		}
 		want := fmt.Sprintf("agent service send --operation %s --address %s --from buyer --query-id 9 --request-id 3",
@@ -51,7 +53,7 @@ func TestTheLifecycleSenderNamesTheOperationRequestAndDestination(t *testing.T) 
 	}
 	silent, _ := testSender(t, validConfig, lifecycleEndpoints, nil)
 	silent.runWithPath = func(context.Context, ...string) ([]byte, error) { return []byte("nothing"), nil }
-	if err := silent.SendLifecycle(context.Background(), LifecycleIntent{Operation: LifecycleExpire, Actor: saActor,
+	if _, err := silent.SendLifecycle(context.Background(), LifecycleIntent{Operation: LifecycleExpire, Actor: saActor,
 		RequestID: 3, QueryID: 9}); err == nil || errors.Is(err, ErrCallNotStarted) {
 		t.Fatalf("an unreported lifecycle send was not ambiguous: %v", err)
 	}
@@ -61,15 +63,62 @@ func TestTheLifecycleSenderNamesTheOperationRequestAndDestination(t *testing.T) 
 		"zero query id":               {Operation: LifecycleExpire, Actor: saActor},
 	} {
 		started, calls := testSender(t, validConfig, lifecycleEndpoints, nil)
-		if err := started.SendLifecycle(context.Background(), intent); !errors.Is(err, ErrCallNotStarted) || len(*calls) != 0 {
+		if _, err := started.SendLifecycle(context.Background(), intent); !errors.Is(err, ErrCallNotStarted) || len(*calls) != 0 {
 			t.Errorf("%s was handed to custody: %v", name, err)
 		}
 	}
 	unverified, calls := testSender(t, validConfig, vetter{endpoints: lifecycleEndpoints.endpoints,
 		bad: map[string]bool{"https://a.example/jsonRPC": true}}, nil)
-	if err := unverified.SendLifecycle(context.Background(), LifecycleIntent{Operation: LifecycleExpire, Actor: saActor,
+	if _, err := unverified.SendLifecycle(context.Background(), LifecycleIntent{Operation: LifecycleExpire, Actor: saActor,
 		RequestID: 3, QueryID: 9}); !errors.Is(err, ErrCallNotStarted) || len(*calls) != 0 {
 		t.Fatalf("a send through an unverified endpoint started: %v", err)
+	}
+}
+
+const announcedLine = "Wallet message seqno=7 valid_until=2000000120 hash=sha256:" +
+	"abababababababababababababababababababababababababababababababab"
+
+// The sender reports the wallet message tosctl announced, on success and on
+// an ambiguous outcome alike.
+func TestTheLifecycleSenderReportsTheAnnouncedWalletMessage(t *testing.T) {
+	want := LifecycleSubmission{Announced: true, Seqno: 7, ValidUntilUnix: 2_000_000_120, MessageHash: strings.Repeat("ab", 32)}
+	for name, run := range map[string]func(context.Context, ...string) ([]byte, error){
+		"submitted": func(context.Context, ...string) ([]byte, error) {
+			return []byte(announcedLine + "\nOK Service Actor expire message submitted to " + saActor + "\n"), nil
+		},
+		"ambiguous": func(context.Context, ...string) ([]byte, error) {
+			return []byte(announcedLine + "\nwallet message sha256:ab may have been submitted\n"), errors.New("exit status 1")
+		},
+	} {
+		sender, _ := testSender(t, validConfig, lifecycleEndpoints, nil)
+		sender.runWithPath = run
+		got, _ := sender.SendLifecycle(context.Background(), LifecycleIntent{Operation: LifecycleExpire, Actor: saActor,
+			RequestID: 3, QueryID: 9})
+		if got != want {
+			t.Errorf("%s: reported %+v", name, got)
+		}
+	}
+}
+
+// Exactly one well-formed line is trusted; anything else announces
+// nothing.
+func TestOnlyOneWellFormedWalletMessageLineIsTrusted(t *testing.T) {
+	if got := parseWalletMessage([]byte("x\n" + announcedLine + "\r\ny")); !got.Announced || got.Seqno != 7 {
+		t.Fatalf("a well-formed line was not read: %+v", got)
+	}
+	for name, output := range map[string]string{
+		"no line":            "OK Service Actor expire message submitted",
+		"two lines":          announcedLine + "\n" + announcedLine,
+		"no expiry":          strings.Replace(announcedLine, "valid_until=2000000120", "valid_until=none", 1),
+		"zero expiry":        strings.Replace(announcedLine, "valid_until=2000000120", "valid_until=0", 1),
+		"seqno over 32 bits": strings.Replace(announcedLine, "seqno=7", "seqno=4294967296", 1),
+		"uppercase hash":     strings.Replace(announcedLine, "abab", "ABAB", 1),
+		"short hash":         announcedLine[:len(announcedLine)-2],
+		"inside a line":      "error: " + announcedLine,
+	} {
+		if got := parseWalletMessage([]byte(output)); got.Announced {
+			t.Errorf("%s: announced %+v", name, got)
+		}
 	}
 }
 
