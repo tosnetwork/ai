@@ -174,6 +174,31 @@ func TestSocketRolesComeFromPeerCredentials(t *testing.T) {
 	}
 }
 
+// A panic while serving one request becomes a fixed internal error on that
+// connection; the agent keeps serving, and its lock is free afterwards.
+func TestAPanicInARequestFailsOnlyThatConnection(t *testing.T) {
+	f := newFixture(t)
+	server := serve(t, f, RoleClient)
+	archive := base64.StdEncoding.EncodeToString(sourceTar(t))
+	f.buyer.panics.Store(true)
+	crashed, answered := call(t, server, "prepare", map[string]any{"quote_id": f.quoteID, "idempotency_key": keyA,
+		"archive_base64": archive})
+	if !answered || crashed.OK || crashed.Error == nil || crashed.Error.Code != CodeInternal ||
+		crashed.Error.Message != "the agent failed while handling the request" {
+		t.Fatalf("a panicking request was answered with %+v", crashed)
+	}
+	f.buyer.panics.Store(false)
+	listed, answered := call(t, server, "purchases", map[string]any{"page_size": 10})
+	if !answered || !listed.OK {
+		t.Fatalf("the agent stopped serving after a panic: %+v", listed)
+	}
+	prepared, answered := call(t, server, "prepare", map[string]any{"quote_id": f.quoteID, "idempotency_key": keyA,
+		"archive_base64": archive})
+	if !answered || !prepared.OK {
+		t.Fatalf("the agent's lock or state was left broken by a panic: %+v", prepared)
+	}
+}
+
 // A client that holds every connection it may open cannot keep the
 // confirmer out: the custody account has its own pool.
 func TestAClientCannotTakeTheConfirmersConnections(t *testing.T) {

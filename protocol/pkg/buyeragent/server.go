@@ -269,6 +269,24 @@ func (s *Server) Close() error { return s.listener.Close() }
 
 // handle serves one request of an admitted peer.
 func (s *Server) handle(ctx context.Context, role Role, connection *net.UnixConn) {
+	response := s.answer(ctx, role, connection)
+	_ = connection.SetWriteDeadline(time.Now().Add(writeTimeout))
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		encoded, _ = json.Marshal(failure(refusal(CodeInternal, "the agent could not encode its answer", err)))
+	}
+	_, _ = connection.Write(append(encoded, '\n'))
+}
+
+// answer reads and serves one request. A panic while doing so becomes a
+// fixed internal error for this connection only: the agent keeps serving
+// the other connections and keeps its refund duties.
+func (s *Server) answer(ctx context.Context, role Role, connection *net.UnixConn) (response Response) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			response = failure(refusal(CodeInternal, "the agent failed while handling the request", nil))
+		}
+	}()
 	_ = connection.SetReadDeadline(time.Now().Add(readTimeout))
 	reader := bufio.NewReaderSize(io.LimitReader(connection, MaxRequestBytes+1), 64<<10)
 	line, err := reader.ReadSlice('\n')
@@ -277,21 +295,13 @@ func (s *Server) handle(ctx context.Context, role Role, connection *net.UnixConn
 		more, err = reader.ReadSlice('\n')
 		line = append(append([]byte(nil), line...), more...)
 	}
-	var response Response
 	switch {
 	case len(line) > MaxRequestBytes:
-		response = failure(refusal(CodeBadInput, "the request exceeds the 2 MiB bound", nil))
+		return failure(refusal(CodeBadInput, "the request exceeds the 2 MiB bound", nil))
 	case err != nil:
-		response = failure(refusal(CodeBadInput, "the request is not one newline-terminated JSON object", err))
-	default:
-		response = s.dispatch(ctx, role, line[:len(line)-1])
+		return failure(refusal(CodeBadInput, "the request is not one newline-terminated JSON object", err))
 	}
-	_ = connection.SetWriteDeadline(time.Now().Add(writeTimeout))
-	encoded, err := json.Marshal(response)
-	if err != nil {
-		encoded, _ = json.Marshal(failure(refusal(CodeInternal, "the agent could not encode its answer", err)))
-	}
-	_, _ = connection.Write(append(encoded, '\n'))
+	return s.dispatch(ctx, role, line[:len(line)-1])
 }
 
 func failure(err error) Response {

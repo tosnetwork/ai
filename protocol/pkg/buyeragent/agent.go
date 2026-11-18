@@ -506,24 +506,28 @@ func (a *Agent) RequestPayment(ctx context.Context, params RequestPaymentParams)
 	if params.WaitSeconds < 0 || params.WaitSeconds > MaxWaitSeconds {
 		return PurchaseView{}, refusal(CodeBadInput, "wait_seconds must be 0 to 300", nil)
 	}
-	a.mutex.Lock()
-	record, purchase, err := a.loadLocked(params.RequestHash)
-	if err == nil && record.Phase == buyersdk.PhasePrepared && purchase.RequestedUnix == 0 {
-		purchase.RequestedUnix = a.now().Unix()
-		err = a.store.writePurchase(purchase)
-		a.notifyLocked()
-	}
-	a.mutex.Unlock()
+	var record buyersdk.CallRecord
+	var purchase PurchaseRecord
+	var err error
+	a.withLock(func() {
+		record, purchase, err = a.loadLocked(params.RequestHash)
+		if err == nil && record.Phase == buyersdk.PhasePrepared && purchase.RequestedUnix == 0 {
+			purchase.RequestedUnix = a.now().Unix()
+			err = a.store.writePurchase(purchase)
+			a.notifyLocked()
+		}
+	})
 	if err != nil {
 		return PurchaseView{}, err
 	}
 	timer := time.NewTimer(time.Duration(params.WaitSeconds) * time.Second)
 	defer timer.Stop()
 	for {
-		a.mutex.Lock()
-		record, purchase, err = a.loadLocked(params.RequestHash)
-		changed := a.changed
-		a.mutex.Unlock()
+		var changed chan struct{}
+		a.withLock(func() {
+			record, purchase, err = a.loadLocked(params.RequestHash)
+			changed = a.changed
+		})
 		if err != nil {
 			return PurchaseView{}, err
 		}
@@ -705,60 +709,76 @@ func (a *Agent) Decide(ctx context.Context, params DecideParams) (PurchaseView, 
 	if len(params.Code) > 64 || (params.Decision == DecisionDecline && params.Code != "") {
 		return PurchaseView{}, refusal(CodeBadInput, "code is longer than 64 characters or given with a decline", nil)
 	}
-	a.mutex.Lock()
+	var record buyersdk.CallRecord
+	var purchase PurchaseRecord
+	var view PurchaseView
+	var err error
+	confirmed := false
+	a.withLock(func() {
+		record, purchase, view, confirmed, err = a.decideLocked(params)
+	})
+	if !confirmed {
+		return view, err
+	}
+	return a.pay(ctx, record, purchase)
+}
+
+// decideLocked applies a decision under the agent's lock. It reports
+// confirmed only for a matching code, which it has already spent; the send
+// then runs outside the lock.
+func (a *Agent) decideLocked(params DecideParams) (buyersdk.CallRecord, PurchaseRecord, PurchaseView, bool, error) {
 	record, purchase, err := a.loadLocked(params.RequestHash)
 	if err != nil {
-		a.mutex.Unlock()
-		return PurchaseView{}, err
+		return record, purchase, PurchaseView{}, false, err
 	}
 	now := a.now()
 	if record.Phase != buyersdk.PhasePrepared || purchase.RequestedUnix == 0 || purchase.ConfirmationNonce == "" {
-		a.mutex.Unlock()
-		return a.viewOf(record, purchase), refusal(CodeConflict, "the purchase has no current presentation", nil)
+		return record, purchase, a.viewOf(record, purchase), false,
+			refusal(CodeConflict, "the purchase has no current presentation", nil)
 	}
 	if !now.Before(time.Unix(purchase.PresentedUnix, 0).Add(ConfirmationLifetime)) {
 		purchase.ConfirmationNonce, purchase.PresentedUnix = "", 0
-		err := a.store.writePurchase(purchase)
-		a.mutex.Unlock()
-		if err != nil {
-			return PurchaseView{}, err
+		if err := a.store.writePurchase(purchase); err != nil {
+			return record, purchase, PurchaseView{}, false, err
 		}
-		return a.viewOf(record, purchase), refusal(CodeConflict, "the confirmation code expired; present the purchase again", nil)
+		return record, purchase, a.viewOf(record, purchase), false,
+			refusal(CodeConflict, "the confirmation code expired; present the purchase again", nil)
 	}
 	if params.Decision == DecisionDecline {
 		view, err := a.withdrawLocked(params.RequestHash, outcomeDeclined)
-		a.mutex.Unlock()
-		return view, err
+		return record, purchase, view, false, err
 	}
 	nonce, err := parseNonce(purchase.ConfirmationNonce)
 	if err != nil {
-		a.mutex.Unlock()
-		return PurchaseView{}, err
+		return record, purchase, PurchaseView{}, false, err
 	}
 	if !codesMatch(ConfirmationCode(nonce, fieldsOf(record, purchase)), params.Code) {
 		purchase.CodeFailures++
 		if err := a.store.writePurchase(purchase); err != nil {
-			a.mutex.Unlock()
-			return PurchaseView{}, err
+			return record, purchase, PurchaseView{}, false, err
 		}
 		if purchase.CodeFailures >= MaxCodeFailures {
 			view, err := a.withdrawLocked(params.RequestHash, outcomeCodeFailures)
-			a.mutex.Unlock()
 			if err != nil {
-				return view, err
+				return record, purchase, view, false, err
 			}
-			return view, refusal(CodeDeclined, "too many wrong codes; the purchase was withdrawn", nil)
+			return record, purchase, view, false, refusal(CodeDeclined, "too many wrong codes; the purchase was withdrawn", nil)
 		}
-		a.mutex.Unlock()
-		return a.viewOf(record, purchase), refusal(CodeBadInput, "the code does not match", nil)
+		return record, purchase, a.viewOf(record, purchase), false, refusal(CodeBadInput, "the code does not match", nil)
 	}
 	purchase.ConfirmationNonce, purchase.PresentedUnix = "", 0
 	if err := a.store.writePurchase(purchase); err != nil {
-		a.mutex.Unlock()
-		return PurchaseView{}, err
+		return record, purchase, PurchaseView{}, false, err
 	}
-	a.mutex.Unlock()
-	return a.pay(ctx, record, purchase)
+	return record, purchase, PurchaseView{}, true, nil
+}
+
+// withLock runs fn holding the agent's lock, and releases the lock even
+// if fn panics, so a recovered panic never leaves the agent stuck.
+func (a *Agent) withLock(fn func()) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	fn()
 }
 
 // pay repeats the carriage check on the stored archive and hands the call
@@ -776,9 +796,7 @@ func (a *Agent) pay(ctx context.Context, record buyersdk.CallRecord, purchase Pu
 		return a.viewOf(record, purchase), refusal(CodeNotCarriable, "the purchase cannot be carried to its provider", err)
 	}
 	called, callErr := a.config.Buyer.Call(ctx, record.RequestHash)
-	a.mutex.Lock()
-	a.notifyLocked()
-	a.mutex.Unlock()
+	a.withLock(a.notifyLocked)
 	view := a.viewOf(called, purchase)
 	if called.RequestHash == "" {
 		view = a.viewOf(record, purchase)
