@@ -585,25 +585,33 @@ configuration: the `call` goes to the actor shown, and refunds go to the buyer
 wallet shown. The confirmer prints both in this block.
 
 **Rendering.** The confirmer treats every string it prints as hostile, even
-protocol fields:
-- it escapes C0 controls (`0x00` to `0x1f`, including newline and tab,
-  except the line breaks it emits itself), `0x7f`, C1 controls (`U+0080` to
-  `U+009F`) and the bidirectional formatting characters (`U+061C`,
-  `U+200E`, `U+200F`, `U+202A` to `U+202E`, `U+2066` to `U+2069`) as
-  visible `\u{...}` escapes. It also escapes the invisible characters that
-  can hide or split text: `U+200B` to `U+200D`, `U+2028`, `U+2029` and
-  `U+FEFF`;
-- it replaces invalid UTF-8 with `U+FFFD`;
-- it bounds each provider string at 256 characters and the provider block at
+protocol fields. The rule is an allowlist, which does not change as new
+characters are found:
+1. It NFC-normalizes the string first, so a sequence that composes is shown
+   as its one composed character.
+2. A rune is shown as itself only if:
+   - its category is a letter, number, punctuation mark or symbol (L*, N*,
+     P*, S*), excluding the variation selectors `U+FE00` to `U+FE0F` and
+     `U+E0100` to `U+E01EF`; or
+   - it is `U+0020`.
+3. In provider text, every Zs character collapses to one space before
+   rule 2 is applied.
+4. Everything else is escaped as `\u{XXXX}`. That is every mark (Mn, Mc,
+   Me), every control, format, private-use, surrogate or unassigned code
+   point (Cc, Cf, Co, Cs, Cn), and Zl and Zp. Invalid UTF-8 becomes
+   `U+FFFD`.
+5. Width: printable ASCII counts one column. Every other shown rune counts
+   two; over-counting is the safe direction. An escape counts its ASCII
+   length.
+
+No shown rune can therefore be zero width, combine with its neighbour,
+select a presentation, or be under-counted, whatever the terminal.
+
+The confirmer also:
+- bounds each provider string at 256 characters and the provider block at
   4,096, marking truncation, and every other string at 512;
-- it collapses every run of Unicode space separators (category Zs, which
-  includes `U+00A0` and `U+3000`) in provider text into one space;
-- it hard-wraps provider text at 64 display columns, the gutter not
-  counted:
-  - a wide, fullwidth or East Asian ambiguous character counts two columns;
-  - a combining mark counts none;
-  - any other character counts one;
-- it starts every provider row with the gutter `| `.
+- hard-wraps provider text at 64 counted columns, the gutter not counted;
+- starts every provider row with the gutter `| `.
 
 Non-ASCII text, such as a CJK manifest, stays readable. A terminal's soft
 wrap of a long line can then never put provider text at the start of a

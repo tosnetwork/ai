@@ -43,7 +43,7 @@ func TestEscapeMakesControlsBidiAndInvalidBytesVisible(t *testing.T) {
 	for name, input := range cases {
 		out := Escape(input, MaxProviderString)
 		for _, r := range out {
-			if escaped(r) {
+			if !shown(r) && r != '\\' {
 				t.Errorf("%s: %q kept a raw %U", name, out, r)
 			}
 		}

@@ -18,7 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
-	"golang.org/x/text/width"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Rendering bounds (section 5.2).
@@ -44,25 +44,36 @@ const (
 	refundWarningAge = 24 * time.Hour
 )
 
-// escaped reports whether r is printed as a visible escape: C0 controls,
-// DEL, C1 controls, the bidirectional formatting characters, and the
-// invisible separators and joiners that can hide or reorder text.
-func escaped(r rune) bool {
-	switch {
-	case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
-		return true
-	case r == 0x061c, r == 0x200e, r == 0x200f, r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
-		return true
-	case r >= 0x200b && r <= 0x200d, r == 0x2028, r == 0x2029, r == 0xfeff:
+// shown reports whether r is printed as itself. The rule is an allowlist,
+// so a character terminals disagree on can never be printed raw:
+//   - U+0020 is shown;
+//   - a letter, number, punctuation mark or symbol (L*, N*, P*, S*) is
+//     shown, except the variation selectors U+FE00 to U+FE0F and U+E0100
+//     to U+E01EF;
+//   - everything else is escaped: every mark (Mn, Mc, Me), every control,
+//     format, private-use, surrogate or unassigned code point (Cc, Cf, Co,
+//     Cs, Cn), every other separator (Zl, Zp, and Zs other than U+0020),
+//     and the variation selectors.
+//
+// So no shown rune can be zero width, combine with its neighbour, select
+// another presentation, or reorder text.
+func shown(r rune) bool {
+	if r == ' ' {
 		return true
 	}
-	return false
+	if (r >= 0xfe00 && r <= 0xfe0f) || (r >= 0xe0100 && r <= 0xe01ef) {
+		return false
+	}
+	return unicode.In(r, unicode.L, unicode.N, unicode.P, unicode.S)
 }
 
-// Escape renders s for a terminal. Invalid UTF-8 becomes U+FFFD; every
-// rune escaped() reports becomes a visible \u{XXXX}; and at most limit
-// source characters are kept, the rest replaced by a truncation mark.
+// Escape renders s for a terminal. It NFC-normalizes s first, so a
+// sequence that composes is shown as its one composed character. Invalid
+// UTF-8 becomes U+FFFD. Every rune shown() refuses becomes a visible
+// \u{XXXX}. At most limit source characters are kept, the rest replaced by
+// a truncation mark.
 func Escape(s string, limit int) string {
+	s = norm.NFC.String(s)
 	var out strings.Builder
 	count := 0
 	for index := 0; index < len(s); {
@@ -75,7 +86,7 @@ func Escape(s string, limit int) string {
 		r, size := utf8.DecodeRuneInString(s[index:])
 		index += size
 		count++
-		if escaped(r) {
+		if !shown(r) {
 			fmt.Fprintf(&out, "\\u{%04X}", r)
 			continue
 		}
@@ -98,19 +109,15 @@ const (
 	ProviderGutter    = "| "
 )
 
-// displayWidth is the number of terminal columns r takes, counted so that a
-// row is never wider than counted. A combining mark takes none. A wide or
-// fullwidth character takes two. So does an ambiguous one, which some
-// terminals draw two columns wide.
+// displayWidth is the number of columns r is counted as taking. Printable
+// ASCII counts one. Every other shown rune counts two, the most any
+// terminal draws for it, so a row is never wider than counted. An escape is
+// ASCII and counts its length.
 func displayWidth(r rune) int {
-	if unicode.In(r, unicode.Mn, unicode.Me) {
-		return 0
+	if r >= 0x20 && r <= 0x7e {
+		return 1
 	}
-	switch width.LookupRune(r).Kind() {
-	case width.EastAsianWide, width.EastAsianFullwidth, width.EastAsianAmbiguous:
-		return 2
-	}
-	return 1
+	return 2
 }
 
 // collapseSpaces turns every run of Unicode space separators (category Zs:
