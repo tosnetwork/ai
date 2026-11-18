@@ -227,6 +227,28 @@ func TestApplyResendsOnlyAfterTheWindowPassesOnChainTime(t *testing.T) {
 	}
 }
 
+func TestEverySendRunsUnderTheSendDeadline(t *testing.T) {
+	// The window a lost send is waited out for covers the latest moment
+	// tosctl can sign plus the message's lifetime, stated here rather than
+	// derived from the code under test.
+	if sendResolutionWindow != 5*time.Minute || maxSendTime+walletMessageLifetime > sendResolutionWindow {
+		t.Fatalf("window %v, send time %v, lifetime %v", sendResolutionWindow, maxSendTime, walletMessageLifetime)
+	}
+	w := newWorld(t)
+	in := w.input(t)
+	if _, err := Apply(context.Background(), in, w.env(true)); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.budgets) != 2 {
+		t.Fatalf("%d sends recorded, want the activation and the registration", len(w.budgets))
+	}
+	for index, budget := range w.budgets {
+		if budget <= 0 || budget > 3*time.Minute {
+			t.Errorf("send %d ran with %v left, not under a deadline of at most 3 minutes", index, budget)
+		}
+	}
+}
+
 func TestApplyReturnsANotStartedSendToPending(t *testing.T) {
 	w := newWorld(t)
 	in := w.input(t)
