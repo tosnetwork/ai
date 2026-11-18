@@ -19,7 +19,6 @@ import (
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
 	"github.com/tosnetwork/ai/protocol/internal/osguard"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
@@ -97,7 +96,7 @@ func readAgentConfig(path string) (agentConfig, error) {
 	if err != nil {
 		return config, err
 	}
-	if err := jsonstrict.Decode(raw, &config); err != nil {
+	if err := decodeStrict(raw, &config); err != nil {
 		return config, fmt.Errorf("the agent configuration does not decode strictly: %w", err)
 	}
 	if config.Schema != AgentConfigSchema {

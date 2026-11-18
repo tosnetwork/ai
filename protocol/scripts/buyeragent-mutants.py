@@ -1466,6 +1466,11 @@ MUTANTS = [
      "\tif !info.Mode().IsRegular() || !osguard.CurrentUserOwns(info) {\n"
      '\t\treturn config, errors.New("the agent configuration must be',
      "TestTheAgentConfigurationIsReadStrictly"),
+    # A lenient decoder lets unknown fields and duplicate keys through.
+    ("agent-config-strict", BUYERCMD + "main.go",
+     "\treturn jsonstrict.Decode(raw, value)",
+     "\t_ = jsonstrict.Decode\n\treturn json.Unmarshal(raw, value)",
+     "TestTheAgentConfigurationIsReadStrictly"),
     ("agent-config-schema", BUYERCMD + "agent.go",
      "\tif config.Schema != AgentConfigSchema {",
      "\tif false {",
