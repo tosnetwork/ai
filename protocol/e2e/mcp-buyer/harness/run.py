@@ -425,6 +425,12 @@ async def main() -> int:
     from tostester.n6_cluster import _wait_all_heights
     from tostester.network import Network, StartOptions, _write_model
 
+    # Container root holds no DAC_OVERRIDE: it takes the work directory over
+    # with CHOWN for the run and gives it back to the host account at the
+    # end.
+    os.chown(WORK, 0, 0)
+    for path in WORK.iterdir():
+        os.chown(path, 0, 0)
     private_dir(WORK / "logs", None)
     build = json.loads((WORK / "build.json").read_text())
     evidence.update({
