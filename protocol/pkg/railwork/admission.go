@@ -177,3 +177,28 @@ func (a *Admission) CheckVerifiedBinding(verifiedActor string, verifiedRequestHa
 func (a *Admission) FrameBindingMatchesQuote() bool {
 	return a != nil && a.Message.Binding.RequestHash == a.RequestHash && a.Message.Binding.Actor() == a.Actor
 }
+
+// CheckPacketFields is the packet check of section 2.1 for a task: the
+// Agent Packets that carried it must name the task's Capability and the
+// Accepted Quote commitment derived from its package. Call it with the
+// packet fields every frame of the message arrived with.
+func (a *Admission) CheckPacketFields(capabilityID, quoteCommitment string) error {
+	if a == nil {
+		return ErrInvalidInput
+	}
+	return CheckPacketFields(capabilityID, quoteCommitment, a.Task.Header.CapabilityID, a.QuoteCommitment, RefusalTaskNotAdmitted)
+}
+
+// CheckPacketFields compares the capability_id and quote_commitment a
+// message's packets carried with the ones its request has (section 2.1):
+// the receiver's stored purchase or request for a result, an ack or a
+// result-request. A mismatch is refused with label.
+func CheckPacketFields(packetCapabilityID, packetQuoteCommitment, capabilityID, quoteCommitment string, label Refusal) error {
+	if !capabilityPattern.MatchString(capabilityID) || !quoteCommitmentPattern.MatchString(quoteCommitment) || label == "" {
+		return ErrInvalidInput
+	}
+	if packetCapabilityID != capabilityID || packetQuoteCommitment != quoteCommitment {
+		return refuse(label, "the packets name another Capability or Accepted Quote than the request")
+	}
+	return nil
+}

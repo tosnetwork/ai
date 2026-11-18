@@ -245,6 +245,34 @@ func TestVerifiedBindingMustBeTheDerivedRequest(t *testing.T) {
 	}
 }
 
+func TestPacketFieldsMustNameTheRequestsCapabilityAndQuote(t *testing.T) {
+	fixture := newTaskFixture(t)
+	admission, err := fixture.provider.CheckTask(fixture.message(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = admission.CheckPacketFields(testCap, admission.QuoteCommitment); err != nil {
+		t.Fatalf("the task's own packet fields refused: %v", err)
+	}
+	otherQuote := "tvm-cell-sha256:" + strings.Repeat("0e", 32)
+	for name, fields := range map[string][2]string{
+		"another Capability": {"cap_" + strings.Repeat("46", 32), admission.QuoteCommitment},
+		"another Quote":      {testCap, otherQuote},
+		"no Quote":           {testCap, ""},
+		"no Capability":      {"", admission.QuoteCommitment},
+	} {
+		if err = admission.CheckPacketFields(fields[0], fields[1]); !errors.Is(err, ErrTaskNotAdmitted) {
+			t.Errorf("%s: err=%v", name, err)
+		}
+	}
+	if err = CheckPacketFields(testCap, otherQuote, testCap, admission.QuoteCommitment, RefusalAckUnmatched); !errors.Is(err, ErrAckUnmatched) {
+		t.Errorf("stored-request mismatch: err=%v", err)
+	}
+	if err = CheckPacketFields(testCap, otherQuote, testCap, "", RefusalAckUnmatched); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("no stored Quote: err=%v", err)
+	}
+}
+
 func TestFrameBindingMustEqualTheVerifiedRequest(t *testing.T) {
 	fixture := newTaskFixture(t)
 	message := fixture.message(t)

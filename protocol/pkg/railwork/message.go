@@ -51,6 +51,8 @@ var (
 	walletPattern     = regexp.MustCompile(`^0:[0-9a-f]{64}$`)
 	hex64Pattern      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	sha256Pattern     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	// quoteCommitmentPattern is an Accepted Quote commitment.
+	quoteCommitmentPattern = regexp.MustCompile(`^tvm-cell-sha256:[0-9a-f]{64}$`)
 )
 
 // TaskHeader is the canonical header of a task (section 5.1). Every field
