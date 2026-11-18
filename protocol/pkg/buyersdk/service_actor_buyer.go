@@ -150,7 +150,7 @@ func (b *ServiceActorBuyer) Prepare(ctx context.Context, request *nativev1.Reque
 		return CallRecord{}, err
 	}
 	if uint64(now.Unix()) >= validated.Proposal.ExpiresAtUnixSeconds {
-		return CallRecord{}, errors.New("the Quote has expired")
+		return CallRecord{}, ErrQuoteExpired
 	}
 	admission, err := b.admit(ctx, validated)
 	if err != nil {
@@ -288,6 +288,18 @@ func (b *ServiceActorBuyer) reconstruct(record CallRecord) (*quoteexchange.Valid
 	return validated, intent, nil
 }
 
+// Withdraw withdraws a call that is still prepared; it is never sent and
+// stops reserving budget.
+func (b *ServiceActorBuyer) Withdraw(requestHash string) (CallRecord, error) {
+	return b.config.Journal.Withdraw(requestHash, b.config.Now())
+}
+
+// Journal returns the buyer's call journal.
+func (b *ServiceActorBuyer) Journal() *ServiceActorJournal { return b.config.Journal }
+
+// Limits returns the buyer's budget limits.
+func (b *ServiceActorBuyer) Limits() ServiceActorLimits { return b.config.Limits }
+
 // Call re-verifies a prepared call at a fresh checkpoint, runs the custody
 // preflight, durably enters the sending phase and hands the call to custody.
 // A call that left the prepared phase is never sent again.
@@ -304,7 +316,7 @@ func (b *ServiceActorBuyer) Call(ctx context.Context, requestHash string) (CallR
 		return record, err
 	}
 	if uint64(b.config.Now().Unix()) >= record.ExpiresAtUnix {
-		return record, errors.New("the Quote has expired")
+		return record, ErrQuoteExpired
 	}
 	if _, err := b.admit(ctx, validated); err != nil {
 		return record, err
@@ -366,7 +378,7 @@ func (b *ServiceActorBuyer) Resolve(ctx context.Context, requestHash string) (*R
 	if err != nil {
 		return nil, err
 	}
-	if record.Phase == PhasePrepared || record.Phase == PhaseSending {
+	if record.Phase == PhasePrepared || record.Phase == PhaseSending || record.Phase == PhaseWithdrawn {
 		return &RequestReport{Phase: record.Phase}, nil
 	}
 	validated, intent, err := b.reconstruct(record)

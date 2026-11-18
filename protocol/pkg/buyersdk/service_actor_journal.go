@@ -35,6 +35,9 @@ const (
 	PhaseAdmitted CallPhase = "admitted"
 	// PhaseRefused: the finalized call transaction aborted.
 	PhaseRefused CallPhase = "refused"
+	// PhaseWithdrawn: withdrawn while still prepared. It was never handed to
+	// custody, holds no reservation and is never sent.
+	PhaseWithdrawn CallPhase = "withdrawn"
 )
 
 const callRecordSchema = "tos.service.service-actor-call.v1"
@@ -82,13 +85,36 @@ type ServiceActorLimits struct {
 	MaxCalls          int
 	MaxPerCallNanoTOS *big.Int
 	MaxWindowNanoTOS  *big.Int
+	// MaxPrepared bounds the unexpired prepared records, which wait for a
+	// decision and reserve budget meanwhile. Zero means no bound beyond
+	// MaxCalls; when set it is at most MaxCalls.
+	MaxPrepared int
 }
 
 func (l ServiceActorLimits) valid() bool {
 	return l.Window > 0 && l.Window <= 31*24*time.Hour && l.MaxCalls > 0 && l.MaxCalls <= 100_000 &&
 		l.MaxPerCallNanoTOS != nil && l.MaxPerCallNanoTOS.Sign() > 0 && l.MaxWindowNanoTOS != nil &&
-		l.MaxWindowNanoTOS.Cmp(l.MaxPerCallNanoTOS) >= 0
+		l.MaxWindowNanoTOS.Cmp(l.MaxPerCallNanoTOS) >= 0 && l.MaxPrepared >= 0 && l.MaxPrepared <= l.MaxCalls
 }
+
+// Valid reports whether the limits are bounded and consistent.
+func (l ServiceActorLimits) Valid() bool { return l.valid() }
+
+// ErrTooManyPrepared reports that the unexpired prepared records already
+// reach MaxPrepared.
+var ErrTooManyPrepared = errors.New("too many prepared calls are waiting for a decision")
+
+// ErrOverBudget is what every per-call and window budget refusal is.
+var ErrOverBudget = errors.New("the call is over the buyer's budget")
+
+// ErrQuoteExpired reports a Quote past its expiry.
+var ErrQuoteExpired = errors.New("the Quote has expired")
+
+type budgetError string
+
+func (e budgetError) Error() string { return string(e) }
+
+func (e budgetError) Is(target error) bool { return target == ErrOverBudget }
 
 // ServiceActorJournal is an owner-private directory of call records. Every
 // read-modify-write holds one exclusive file lock across processes, and every
@@ -146,7 +172,7 @@ func validHex64(value string) bool {
 // while its send time is inside the window; a refused call holds nothing.
 func (r CallRecord) reservation(now time.Time, window time.Duration) bool {
 	switch r.Phase {
-	case PhaseRefused:
+	case PhaseRefused, PhaseWithdrawn:
 		return false
 	case PhasePrepared:
 		return uint64(now.Unix()) < r.ExpiresAtUnix
@@ -162,7 +188,7 @@ func (r CallRecord) reservation(now time.Time, window time.Duration) bool {
 func fitsBudget(records []CallRecord, candidate CallRecord, limits ServiceActorLimits, now time.Time) error {
 	payment, ok := new(big.Int).SetString(candidate.PaymentNanoTOS, 10)
 	if !ok || payment.Sign() <= 0 || payment.Cmp(limits.MaxPerCallNanoTOS) > 0 {
-		return errors.New("the call payment exceeds the per-call limit")
+		return budgetError("the call payment exceeds the per-call limit")
 	}
 	total, calls := new(big.Int).Set(payment), 1
 	for _, existing := range records {
@@ -177,7 +203,7 @@ func fitsBudget(records []CallRecord, candidate CallRecord, limits ServiceActorL
 		calls++
 	}
 	if calls > limits.MaxCalls || total.Cmp(limits.MaxWindowNanoTOS) > 0 {
-		return errors.New("the call exceeds the buyer's window budget")
+		return budgetError("the call exceeds the buyer's window budget")
 	}
 	return nil
 }
@@ -207,8 +233,74 @@ func (j *ServiceActorJournal) Create(record CallRecord, limits ServiceActorLimit
 		if err := fitsBudget(records, record, limits, now); err != nil {
 			return err
 		}
+		if limits.MaxPrepared > 0 && waitingPrepared(records, now) >= limits.MaxPrepared {
+			return ErrTooManyPrepared
+		}
 		return j.writeUnlocked(record)
 	})
+}
+
+// waitingPrepared counts the prepared records whose Quote has not expired.
+func waitingPrepared(records []CallRecord, now time.Time) int {
+	count := 0
+	for _, record := range records {
+		if record.Phase == PhasePrepared && uint64(now.Unix()) < record.ExpiresAtUnix {
+			count++
+		}
+	}
+	return count
+}
+
+// Withdraw moves a prepared record to withdrawn under the lock. A record in
+// any other phase is refused with its phase, so a call that custody may
+// already hold is never withdrawn.
+func (j *ServiceActorJournal) Withdraw(requestHash string, now time.Time) (CallRecord, error) {
+	return j.Transition(requestHash, []CallPhase{PhasePrepared}, func(r *CallRecord) error {
+		r.Phase, r.UpdatedUnix = PhaseWithdrawn, now.Unix()
+		return nil
+	})
+}
+
+// Records returns every record, ordered by request hash.
+func (j *ServiceActorJournal) Records() ([]CallRecord, error) {
+	var result []CallRecord
+	err := j.withLock(func() error {
+		records, err := j.recordsUnlocked()
+		result = records
+		return err
+	})
+	return result, err
+}
+
+// Reserved returns the payment total and the call count that the limits'
+// window currently holds, counted as the budget check counts them.
+func (j *ServiceActorJournal) Reserved(limits ServiceActorLimits, now time.Time) (*big.Int, int, error) {
+	if !limits.valid() {
+		return nil, 0, errors.New("invalid buyer limits")
+	}
+	total, calls := new(big.Int), 0
+	err := j.withLock(func() error {
+		records, err := j.recordsUnlocked()
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			if !record.reservation(now, limits.Window) {
+				continue
+			}
+			amount, ok := new(big.Int).SetString(record.PaymentNanoTOS, 10)
+			if !ok {
+				return errors.New("a journal record carries an invalid payment")
+			}
+			total.Add(total, amount)
+			calls++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return total, calls, nil
 }
 
 // BeginSend moves a prepared record to sending under the lock, after
@@ -232,7 +324,7 @@ func (j *ServiceActorJournal) BeginSend(requestHash string, limits ServiceActorL
 			return fmt.Errorf("call %s is %s and is never sent again", requestHash, record.Phase)
 		}
 		if uint64(now.Unix()) >= record.ExpiresAtUnix {
-			return errors.New("the Quote has expired")
+			return ErrQuoteExpired
 		}
 		if err := fitsBudget(records, record, limits, now); err != nil {
 			return err

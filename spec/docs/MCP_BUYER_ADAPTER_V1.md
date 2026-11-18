@@ -2,9 +2,13 @@
 
 ## Status and scope
 
-**Status:** design, not implemented. This document specifies a buyer-side MCP
-adapter on the Service Actor rail. No code conforms to it yet; section 16
-lists the work an implementation needs. It supersedes the retired
+**Status:** design, partly implemented. This document specifies a buyer-side
+MCP adapter on the Service Actor rail. The agent core (the re-validation of
+client requests, the prepared-call cap and the withdrawn phase, the agent
+socket with its peer-credential roles, and the confirmation code and
+decision) is implemented in `protocol/pkg/buyeragent` and
+`protocol/pkg/buyersdk`. The confirmer, the MCP server, the relay carriage,
+the lifecycle duties and `init` are not yet; section 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
 
@@ -123,6 +127,10 @@ writable by group or others, or when its configuration names no client uid.
 Requests are single strict JSON objects (unknown fields and trailing data
 refused) of at most 2 MiB, schema `tos.service.mcp-buyer.agent-api.v1`; the
 API is local between binaries of one release and is not a protocol surface.
+Connections are admitted per role, after the peer lookup: 12 for the client
+account and a separate 4 for the custody account. A client that holds all
+of its connections (a payment request can wait 300 seconds) therefore
+never locks the confirmer out.
 
 **The agent trusts nothing the MCP server checked.** The MCP server runs in
 the developer account, which the model controls, so its checks are a
@@ -321,14 +329,31 @@ Input: `quote_id`, `source_path`, `idempotency_key` (16 to 64 characters
 `[A-Za-z0-9_-]`).
 
 `source_path` names either a POSIX tar or a directory, and its real path
-(symlinks resolved) MUST lie under one of the configured workspace roots. A
-directory is packed deterministically into an uncompressed USTAR archive:
-entries sorted by name, regular files and directories only, owner and
-timestamps zeroed, modes normalized; a symlink, hard link, device or FIFO
-refuses the request (the provider refuses them anyway,
-[`SOFTWARE_WORK_EXECUTION_V1.md`](SOFTWARE_WORK_EXECUTION_V1.md)). A supplied
-tar is checked against the same rules. The archive is at most
-`min(max_request_bytes, 1,048,576)` bytes and has at most 4,096 entries.
+(symlinks resolved) MUST lie under one of the configured workspace roots.
+Either way the server sends the **canonical archive** of the members, packed
+by `buyeragent.PackSourceArchive`:
+- regular files and directories only, sorted by name; a symlink, hard link,
+  device or FIFO refuses the request (the provider refuses them anyway,
+  [`SOFTWARE_WORK_EXECUTION_V1.md`](SOFTWARE_WORK_EXECUTION_V1.md));
+- directories carry a trailing `/` and no data;
+- every header is USTAR:
+  - mode `0644` for a file, `0755` for a directory;
+  - uid, gid and mtime zero;
+  - empty link, user and group names, and zero device numbers;
+  - the name split into prefix and name only when it exceeds 100 bytes,
+    at the last `/` that fits;
+  - header bytes 500 to 511 zero;
+- member data is padded to its block with zero bytes;
+- the archive ends with exactly two zero blocks.
+
+A supplied tar is unpacked under the same rules and repacked. The agent
+accepts only these exact bytes: it parses the archive, re-encodes the parsed
+members, and refuses any input that differs from the re-encoding by a single
+byte. A header field, a padding byte or a trailing block can therefore carry
+nothing that the confirmer's member list does not show.
+
+The archive is at most `min(max_request_bytes, 1,048,576)` bytes and has at
+most 4,096 entries (the size bound already implies fewer).
 
 **Member names.** Every member name is 1 to 255 bytes of the safe charset
 `[A-Za-z0-9._+-]` and `/`, with no empty, `.` or `..` segment, no leading
@@ -366,7 +391,7 @@ reference (5.3) and `state = awaiting_confirmation`. Prepare pays nothing.
 
 Input: `request_hash`, `wait_seconds` (0 to 300, default 120).
 
-It marks the purchase as presented to the confirmer and then waits up to
+It makes the purchase visible in the confirmer's queue and then waits up to
 `wait_seconds` for the human's decision, sending MCP progress notifications
 while it waits. When the client declares the elicitation capability, the
 server also sends one elicitation that tells the human the purchase reference
@@ -501,12 +526,17 @@ Deployment requirements, stated in the user guide and checked where possible:
   when it can read the agent's state directory, or when its effective uid is
   the custody account.
 
-**Residual risk.** The terminal-owner check cannot tell `ssh localhost`, or
-any SSH login to the custody account started from a developer-account
-session, from SSH from another device: in both cases `sshd` allocates a
-terminal owned by the custody account. Only the guide's instruction, never to open the
-confirmer from the developer's own session, covers that case. Section 13
-records it.
+**Residual risk.** The terminal-owner check cannot detect a custody-owned
+terminal that a developer-account process allocated and still drives. It
+gets one when, from a developer-account shell, it runs any of:
+- `ssh localhost`, or any SSH login to the custody account;
+- `su --pty`, which allocates a new pseudo-terminal for the target account;
+- `sudo -u` when the sudoers policy sets `use_pty`.
+
+In each case the confirmer sees a terminal owned by the custody account,
+just as it does for SSH from another device. Only the guide's instruction
+covers these cases: never open the confirmer from the developer's own
+session. Section 13 records it.
 
 A single-account setup is not offered: it would claim a safety it cannot
 deliver (owner decision O1, section 17).
@@ -563,9 +593,12 @@ rule still applies to them.
 
 ### 5.3 Confirmation code and decision
 
-When a purchase is first presented to the confirmer, the agent draws a fresh
-128-bit random `confirmation_nonce`, stores it in the custody-owned purchase
-record, and derives
+The agent draws a fresh 128-bit random `confirmation_nonce` only when the
+confirmer itself fetches the purchase (`present`, a custody-only socket
+method), and only if no nonce of that purchase is still within its lifetime.
+No client request draws, rotates or reads a nonce. A client therefore can
+neither learn the code nor make it change under the human. The agent stores
+the nonce in the custody-owned purchase record and derives
 
 ```text
 confirmation_digest = SHA-256("tos.service.mcp-buyer.confirmation.v2" || 0x00 ||
@@ -892,6 +925,7 @@ request the SDK rejects against the input schema is a JSON-RPC error
 | `MCP_BUYER_DEPENDENCY_UNAVAILABLE` | no RPC quorum, or a relay or gateway unreachable; nothing was sent | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_BUYER_AGENT_UNAVAILABLE` | the agent socket does not answer | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_BUYER_AMBIGUOUS` | a `call` or lifecycle send may have been submitted | `RESOLVE_BEFORE_RETRY` |
+| `MCP_BUYER_PERMISSION_DENIED` | the socket peer's account may not call this method (2.3) | `NEVER` |
 | `MCP_BUYER_INTERNAL` | anything else | `NEVER` |
 
 `awaiting_confirmation`, `submitted` and `ambiguous` are states, not errors,
@@ -904,7 +938,7 @@ returned by tools that were asked to act. The frames' refusal labels (frames
 | Threat | Mitigation | Residual |
 |---|---|---|
 | The model spends on its own (misaligned, or steered by injected text in the repository, a web page or provider output) | no custody in the developer account; payment only on a custody-uid `decide` (5.1) | a human who confirms without reading |
-| The model types into the confirmer or reads its screen (`su`/`sudo -u`/`ssh localhost` from its shell, an IDE terminal, `tmux send-keys`, XTEST or `xdotool`, `ptrace` of the terminal emulator) | channel MUST of 5.1; the confirmer refuses non-terminal input and a controlling terminal not owned by the custody account; the confirmation code is random per presentation and never reaches the developer account (5.3) | `ssh localhost`, or any SSH login to the custody account started from the developer's session, gets a custody-owned terminal and passes the check; only the guide's instruction covers it |
+| The model types into the confirmer or reads its screen (`su`/`sudo -u`/`ssh localhost` from its shell, an IDE terminal, `tmux send-keys`, XTEST or `xdotool`, `ptrace` of the terminal emulator) | channel MUST of 5.1; the confirmer refuses non-terminal input and a controlling terminal not owned by the custody account; the confirmation code is random per presentation and never reaches the developer account (5.3) | `ssh localhost` (or any SSH login to the custody account), `su --pty`, or `sudo -u` under `use_pty`, started from the developer's session, gets a custody-owned terminal and passes the check; only the guide's instruction covers it |
 | The model exfiltrates secrets by packing them into a purchase for a provider it controls | the full member listing and sensitive-name highlighting in the confirmer; optional provider allow-list. Workspace roots are no mitigation here: the model can pack any readable file itself (2.3) | the human approves a bad listing |
 | Provider text or member names forge or hide confirmer output (terminal escapes, bidirectional reordering, fake protocol lines) | safe member-name charset enforced by the agent (4.5); C0, C1 and bidi controls escaped; strings bounded; protocol fields printed after the provider block behind a fixed separator (5.2) | a human misled by plain but deceptive provider prose |
 | The model calls the agent socket directly, bypassing the MCP server's checks | the agent re-validates every client request (2.3); `decide` only from the custody uid | none beyond those checks |
