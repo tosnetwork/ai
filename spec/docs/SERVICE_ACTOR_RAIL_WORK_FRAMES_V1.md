@@ -20,7 +20,9 @@ This is the precondition for a buyer adapter that does not embed OpenFox.
 - the `package_base64` and `receipt_boc_base64` bounds (5.1, 5.2, 10);
 - non-zero response hashes (5.2, 5.3);
 - the artifact tar shape (7.2 item 3);
-- the buyer's redelivery rule (7.2).
+- the buyer's redelivery rule (7.2);
+- the packet-field check (2.1) and the order of the binding check (7.1
+  item 6).
 
 No deployed OpenFox sender emits anything these rules refuse: its versions
 follow the manifest version syntax, its largest Quote package is 2,195 bytes,
@@ -79,9 +81,16 @@ state, MUST require `recipient_agent_id` to be its own Agent, and MUST
 refuse a packet whose payload does not start with the frame magic and version
 (section 3) before any write; OpenFox refuses it for good. A receiver MUST
 bind every message to the packet's verified `sender_agent_id` (section 9).
-OpenFox does not compare the packet's `capability_id` or `quote_commitment`
-with the frame or the request (section 15, Q1); the request binding is the
-frame's.
+A receiver MUST also refuse a message whose packets name another
+`capability_id` or `quote_commitment` than the request it is bound to:
+- for a task, the provider's own Capability and the Accepted Quote of the
+  task's package;
+- for a result, an ack or a result-request, the Capability and Quote of the
+  receiver's stored purchase or request.
+
+Every frame of one message arrives with the same two fields. The request
+binding itself is the frame's. OpenFox at `682c8bc3` does not compare these
+fields (Q1).
 
 OpenFox bounds an inbound packet JSON at 131,072 bytes, the Messenger event
 bound. One frame (at most 121 + 61,440 bytes) fits a packet within the
@@ -360,8 +369,12 @@ failure refuses the task without executing (section 12).
    execution and respond budgets still end strictly before
    `response_deadline` at the checkpoint's chain time (OpenFox also requires
    the manifest's wall-clock limit to fit its execution budget).
-6. The frame's `request_hash` and `actor_account` equal the verified request
-   hash and actor (section 15, Q3 on ordering).
+6. The frame's `request_hash` and `actor_account` equal the request hash of
+   6.3 and the quoted actor. The provider checks this before it claims the
+   slot (item 7), so a task framed for another request never consumes one.
+   They also equal the verified request hash and actor of item 5, which must
+   be the derived ones. OpenFox at `682c8bc3` makes only the verified
+   comparison, and only after taking the slot (Q3).
 7. No other admission of the slot `(quote_commitment, actor, request_id)`
    exists: a slot is executed at most once.
 
@@ -612,18 +625,12 @@ Receipt codec covers.
 
 ## 15. Open questions
 
-- **Q1. Packet fields are not bound.** OpenFox sets the packet's
-  `capability_id` and `quote_commitment` (2.1) but no receiver compares them
-  with the task's Capability, the verified Quote or a stored purchase. A
-  conforming sender sets them as 2.1 says; whether a receiver MUST refuse a
-  mismatch is open.
+- **Q1. Packet fields are not bound.** Resolved: a receiver refuses a
+  mismatch (2.1).
 - **Q2. `capability_version` charset.** Resolved: `0x21` to `0x7e` (5.1).
   OpenFox at `682c8bc3` decodes any 1 to 128 bytes.
-- **Q3. Binding check after slot claim.** OpenFox checks the frame's
-  `request_hash` and `actor_account` against the verified request (7.1 item 6)
-  after the admission gate has taken the slot. A buyer whose own task frames
-  carry a wrong binding consumes its slot without execution and is refunded by
-  timeout. Whether the check must precede the slot claim is open.
+- **Q3. Binding check after slot claim.** Resolved: the derived binding is
+  checked before the slot claim (7.1 item 6).
 - **Q4. Package size.** Resolved: at most 8,192 bytes decoded (5.1).
 - **Q5. Receipt size.** Resolved: at most 512 bytes decoded at decode time
   and at acceptance (5.2, 7.2). OpenFox at `682c8bc3` bounds it only at
