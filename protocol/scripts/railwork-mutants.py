@@ -30,9 +30,13 @@ one alone changes no outcome:
 - the offset guard before the end-of-archive comparison: the tar reader
   fails on a last member whose padding is missing, so the offset never
   passes the end; the guard only keeps the slice in range;
-- the Base64 text bounds of package_base64 and receipt_boc_base64:
-  canonical Base64 longer than either bound always decodes past the byte
-  bound checked after it;
+- the Base64 text bound of receipt_boc_base64: canonical Base64 longer than
+  it always decodes past the 512-byte bound checked after it;
+- the package bound's text check and its decoded byte checks (at decode
+  and encode): MaxPackageBytes is a multiple of three, so each alone
+  refuses exactly the packages over the bound and removing one changes no
+  outcome; the bound itself is red-controlled through its derivation
+  (package-bound-derivation) and the tests at and one byte over it;
 - the one-block header position in ArtifactMembers: any extension block
   (PAX, GNU long name) sits where the member header should be and carries
   a type flag other than '0', which the type-flag check refuses;
@@ -194,14 +198,6 @@ MUTANTS = [
     ("version-charset-high", "message.go",
      "\t\tif version[index] < 0x21 || version[index] > 0x7e {",
      "\t\tif version[index] < 0x21 || version[index] > 0x7f {",
-     "TestReceiverBoundsAcceptTheBoundAndRefuseOnePast"),
-    ("package-decoded-bound", "message.go",
-     "if !ok || len(pkg) == 0 || len(pkg) > MaxPackageBytes {",
-     "if !ok || len(pkg) == 0 {",
-     "TestVectorNegativeMessagesAreRefused"),
-    ("package-encode-bound", "message.go",
-     "if len(task.Package) == 0 || len(task.Package) > MaxPackageBytes {",
-     "if len(task.Package) == 0 {",
      "TestReceiverBoundsAcceptTheBoundAndRefuseOnePast"),
     ("receipt-decoded-bound", "message.go",
      "if !ok || len(receipt) == 0 || len(receipt) > MaxReceiptBytes {",
