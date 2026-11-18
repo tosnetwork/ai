@@ -593,6 +593,9 @@ func TestATamperedRelayKeyIsRefused(t *testing.T) {
 	if _, _, err := f.carrier.HeldKeys(); err == nil {
 		t.Fatal("a key file that does not name its key ID was listed")
 	}
+	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err == nil {
+		t.Fatal("a card whose file does not name its key ID was reused")
+	}
 	var record relayKeyRecord
 	if err := readJSON(renamed, &record); err != nil {
 		t.Fatal(err)
@@ -606,6 +609,9 @@ func TestATamperedRelayKeyIsRefused(t *testing.T) {
 	}
 	if _, _, err := f.carrier.HeldKeys(); err == nil {
 		t.Fatal("a key of another Agent was listed")
+	}
+	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err == nil {
+		t.Fatal("a card of another Agent was reused")
 	}
 }
 
