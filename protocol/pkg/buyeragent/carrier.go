@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -590,7 +591,9 @@ func buyerCardWindow(record buyersdk.CallRecord, retentionSeconds uint64) (time.
 // against finalized state. A held card that covers the window is reused,
 // the one ending last; only when none does is a new key drawn and a card
 // signed. A prepare loop therefore adds keys and signatures only when the
-// window it needs grows past every held card.
+// window it needs grows past every held card. A held card naming other
+// relays than the configured ones is not reused: the provider would seal
+// results to relays the buyer no longer polls.
 func (c *Carrier) BuyerCard(ctx context.Context, notAfter time.Time) ([]byte, error) {
 	held, err := c.heldBuyerCards()
 	if err != nil {
@@ -601,6 +604,9 @@ func (c *Carrier) BuyerCard(ctx context.Context, notAfter time.Time) ([]byte, er
 	for index := range held {
 		card := held[index].card
 		if card.NotBeforeUnix > now || card.NotAfterUnix < uint64(notAfter.Unix()) {
+			continue
+		}
+		if !slices.Equal(card.Relays, c.config.Relays) {
 			continue
 		}
 		if best == nil || card.NotAfterUnix > best.card.NotAfterUnix {

@@ -248,8 +248,10 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
     maximum is refused at prepare, before payment, with
     `MCP_BUYER_CARD_WINDOW_TOO_LONG`. V1 issues no successor card, so a
     window the card cannot cover could not be carried.
-  - **Reuse.** A held card that already covers the window is used again;
-    a new key and card are made only when none does.
+  - **Reuse.** A held card that already covers the window, and names
+    exactly the configured relays, is used again. A new key and card are
+    made only when none does, so a reconfigured relay list never sends
+    results to relays the agent no longer polls.
   - **Keys.** The agent keeps each private key until
     `not_after_unix + 86,400 + 300` and polls every relay of every card
     whose key it holds.

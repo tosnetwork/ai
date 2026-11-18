@@ -287,6 +287,37 @@ func TestAHeldBuyerCardThatCoversTheWindowIsReused(t *testing.T) {
 	}
 }
 
+// A held card naming other relays than the configured ones is not reused:
+// a reconfigured buyer gets a card for the relays it now polls.
+func TestAHeldBuyerCardForOtherRelaysIsNotReused(t *testing.T) {
+	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
+	f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
+	signer := &countingSigner{}
+	f.carrier.config.Signer = signer
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil {
+		t.Fatal(err)
+	}
+	// Sorted, as NewCarrier stores them.
+	f.carrier.config.Relays = []string{"https://buyer-relay-two.example", buyerRelay}
+	raw, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour))
+	if err != nil || signer.calls != 2 {
+		t.Fatalf("a card for other relays was reused: %d signatures, %v", signer.calls, err)
+	}
+	packet, err := agentpacket.DecodeJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := agentpacketseal.DecodeKeyCard(packet.Payload)
+	if err != nil || len(card.Relays) != 2 {
+		t.Fatalf("the new card names %v: %v", card.Relays, err)
+	}
+	// With the configuration back, the first card is reused again.
+	f.carrier.config.Relays = []string{buyerRelay}
+	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err != nil || signer.calls != 2 {
+		t.Fatalf("the card for the configured relays was not reused: %d %v", signer.calls, err)
+	}
+}
+
 // Every cheap item runs before the buyer card: a purchase that fails one
 // signs nothing and draws no key.
 func TestNoBuyerCardIsSignedForAPurchaseThatFailsACheapItem(t *testing.T) {
