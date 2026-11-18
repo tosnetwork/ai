@@ -3683,11 +3683,15 @@ func (x *QuoteProposalPackageV1) GetTransportBindingBoc() []byte {
 	return nil
 }
 
+// provider_key_card_packet_json is optional and non-authoritative: the
+// provider's signed key card packet JSON (1 to 16,384 bytes) or empty, next
+// to the package and never part of it.
 type RequestQuoteProposalResponse struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	Package       *QuoteProposalPackageV1 `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                     protoimpl.MessageState  `protogen:"open.v1"`
+	Package                   *QuoteProposalPackageV1 `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	ProviderKeyCardPacketJson []byte                  `protobuf:"bytes,2,opt,name=provider_key_card_packet_json,json=providerKeyCardPacketJson,proto3" json:"provider_key_card_packet_json,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RequestQuoteProposalResponse) Reset() {
@@ -3723,6 +3727,13 @@ func (*RequestQuoteProposalResponse) Descriptor() ([]byte, []int) {
 func (x *RequestQuoteProposalResponse) GetPackage() *QuoteProposalPackageV1 {
 	if x != nil {
 		return x.Package
+	}
+	return nil
+}
+
+func (x *RequestQuoteProposalResponse) GetProviderKeyCardPacketJson() []byte {
+	if x != nil {
+		return x.ProviderKeyCardPacketJson
 	}
 	return nil
 }
@@ -4009,9 +4020,10 @@ const file_tos_service_v1_native_proto_rawDesc = "" +
 	"\x16QuoteProposalPackageV1\x12;\n" +
 	"\bproposal\x18\x01 \x01(\v2\x1f.tos.service.v1.QuoteProposalV1R\bproposal\x126\n" +
 	"\x17canonical_manifest_cbor\x18\x02 \x01(\fR\x15canonicalManifestCbor\x122\n" +
-	"\x15transport_binding_boc\x18\x04 \x01(\fR\x13transportBindingBocJ\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\x10escrow_terms_bocR\x12dispute_policy_boc\"`\n" +
+	"\x15transport_binding_boc\x18\x04 \x01(\fR\x13transportBindingBocJ\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\x10escrow_terms_bocR\x12dispute_policy_boc\"\xa2\x01\n" +
 	"\x1cRequestQuoteProposalResponse\x12@\n" +
-	"\apackage\x18\x01 \x01(\v2&.tos.service.v1.QuoteProposalPackageV1R\apackage*\xf0\b\n" +
+	"\apackage\x18\x01 \x01(\v2&.tos.service.v1.QuoteProposalPackageV1R\apackage\x12@\n" +
+	"\x1dprovider_key_card_packet_json\x18\x02 \x01(\fR\x19providerKeyCardPacketJson*\xf0\b\n" +
 	"\x11NativeErrorCodeV1\x12$\n" +
 	" NATIVE_ERROR_CODE_V1_UNSPECIFIED\x10\x00\x12%\n" +
 	" NATIVE_ERROR_CODE_V1_BAD_MESSAGE\x10\x98\x11\x12'\n" +

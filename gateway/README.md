@@ -111,6 +111,20 @@ startup. A mode-2 binding that names any Agent other than `provider_agent_id`
 loads, but no proposal is ever produced: every request fails as a retryable
 dependency-unavailable error, so check it before deploying.
 
+The optional `provider_key_card_file` names an owner-only `0600` file of at
+most 16 KiB. It holds the provider's current Agent Packet Relay encryption key
+card as signed Agent Packet JSON. With it, every Quote response also carries
+the card in `provider_key_card_packet_json`, next to the package and never
+inside it. A buyer without an offer file can then reach a provider that
+receives only through a relay. The gateway reads the file for every Quote, so
+the provider republishes a card by replacing the file. It serves the card
+only when the card is a key card packet of `provider_agent_id` that is valid
+now; otherwise it serves the Quote without a card. A configured card that is
+missing or invalid at startup stops the gateway. The gateway checks no
+signature: the buyer verifies the card against finalized state and the
+Capability's finalized owner before sealing to it
+([`spec/docs/API.md`](../spec/docs/API.md), "Provider key card").
+
 The optional Intent Carrier (`TOS_SERVICE_INTENT_CARRIER_DIRECTORY`) admits a
 publication only under an ML-DSA-44 Action Authority Writer Fence and
 AuthorizedActionV1. `TOS_SERVICE_INTENT_AUTHORITY_PINS` is a comma-separated

@@ -4,8 +4,10 @@
 Each mutant removes or weakens one check of protocol/pkg/buyeragent or of
 the buyersdk journal it relies on: archive and input re-validation, the
 confirmation code and its lifetime, the peer-credential role table, the
-deployment checks and the prepared-call cap. A mutant is applied through
-`go test -overlay`, so the working tree is never modified.
+deployment checks and the prepared-call cap. It also covers the provider
+key card checks the buyer depends on: the gateway's shape check and card
+file, and the buyer's verification of a card from any source. A mutant is
+applied through `go test -overlay`, so the working tree is never modified.
 
 A mutant is caught only when its named test reports `--- FAIL: <test>`.
 These are script errors, not catches:
@@ -42,10 +44,132 @@ AGENT = "protocol/pkg/buyeragent/"
 SDK = "protocol/pkg/buyersdk/"
 CONFIRM = "protocol/pkg/buyerconfirm/"
 MCP = "protocol/pkg/mcpbuyer/"
+QUOTE = "protocol/pkg/quoteexchange/"
+GATEWAY = "gateway/internal/nativegateway/"
+PROFILE = "gateway/internal/quotesource/"
 
 # (name, file from the repository root, original text, mutated text, test
 # that must fail). The test runs in the mutated file's package.
 MUTANTS = [
+    # Provider key card shape check a gateway runs before serving a card
+    # next to a Quote (API.md, "Provider key card").
+    ("qx-card-bound", QUOTE + "keycard.go",
+     'len(raw) == 0 || len(raw) > MaxProviderKeyCardBytes || providerAgentID == ""',
+     'len(raw) == 0 || providerAgentID == ""',
+     "TestAProviderKeyCardOutsideItsBoundIsRefused"),
+    ("qx-card-json", QUOTE + "keycard.go",
+     "packet, err := agentpacket.DecodeJSON(raw)\n\tif err != nil {\n\t\treturn ErrProviderKeyCard\n",
+     "packet, err := agentpacket.DecodeJSON(raw)\n\tif err != nil {\n\t\treturn nil\n",
+     "TestAPacketThatIsNotAKeyCardIsRefused"),
+    ("qx-card-audience", QUOTE + "keycard.go",
+     "if packet.RecipientAgentID != agentpacketseal.KeyCardAudience ||",
+     "if false ||",
+     "TestAPacketThatIsNotAKeyCardIsRefused"),
+    ("qx-card-capability", QUOTE + "keycard.go",
+     "packet.CapabilityID != agentpacketseal.KeyCardCapability ||",
+     "false ||",
+     "TestAPacketThatIsNotAKeyCardIsRefused"),
+    ("qx-card-commitment", QUOTE + "keycard.go",
+     'packet.QuoteCommitment != "" ||',
+     "false ||",
+     "TestAPacketThatIsNotAKeyCardIsRefused"),
+    ("qx-card-sender", QUOTE + "keycard.go",
+     "packet.SenderAgentID != providerAgentID {",
+     "false {",
+     "TestAProviderKeyCardOfAnotherAgentIsRefused"),
+    ("qx-card-body", QUOTE + "keycard.go",
+     "DecodeKeyCard(packet.Payload)\n\tif err != nil {\n\t\treturn ErrProviderKeyCard\n",
+     "DecodeKeyCard(packet.Payload)\n\tif err != nil {\n\t\treturn nil\n",
+     "TestAPacketThatIsNotAKeyCardIsRefused"),
+    ("qx-card-window", QUOTE + "keycard.go",
+     "CheckKeyCardTime(card, now); err != nil {\n\t\treturn ErrProviderKeyCard\n",
+     "CheckKeyCardTime(card, now); err != nil {\n\t\treturn nil\n",
+     "TestAProviderKeyCardOutsideItsWindowIsRefused"),
+    # The gateway serves only a card it read and that passes the shape
+    # check, as a copy, and serves the Quote either way.
+    ("gw-card-nil-source", GATEWAY + "server.go",
+     "\tif s.ProviderCards == nil {\n\t\treturn nil\n\t}\n",
+     "",
+     "TestTheGatewayLeavesOutACardItCannotServe"),
+    ("gw-card-read-error", GATEWAY + "server.go",
+     "if err != nil || quoteexchange.CheckProviderKeyCard(raw, providerAgentID, now) != nil {",
+     "if _ = err; quoteexchange.CheckProviderKeyCard(raw, providerAgentID, now) != nil {",
+     "TestTheGatewayLeavesOutACardItCannotServe"),
+    ("gw-card-shape", GATEWAY + "server.go",
+     "if err != nil || quoteexchange.CheckProviderKeyCard(raw, providerAgentID, now) != nil {",
+     "if err != nil {",
+     "TestTheGatewayLeavesOutACardItCannotServe"),
+    ("gw-card-copy", GATEWAY + "server.go",
+     "\treturn append([]byte(nil), raw...)\n",
+     "\treturn raw\n",
+     "TestTheServedCardIsACopy"),
+    # The quote profile's card file.
+    ("qs-card-unset", PROFILE + "profile.go",
+     '\tif profile.ProviderKeyCardFile == "" {\n\t\treturn nil, nil\n\t}\n',
+     "",
+     "TestAProfileWithoutACardFileServesNoCard"),
+    ("qs-card-load-shape", PROFILE + "profile.go",
+     "profile.ProviderAgentID, now); err != nil {",
+     "profile.ProviderAgentID, now); err != nil && false {",
+     "TestAMisconfiguredCardFileIsRefusedAtStart"),
+    ("qs-card-nil", PROFILE + "profile.go",
+     '\tif c == nil {\n\t\treturn nil, errors.New("no provider key card file is configured")\n\t}\n',
+     "",
+     "TestANilCardFileFailsClosed"),
+    # Buyer verification of a provider key card from any source (relay 6.3,
+    # 6.4).
+    ("sdk-card-source", SDK + "provider_card.go",
+     '\tdefault:\n\t\treturn VerifiedProviderCard{}, fmt.Errorf("%w: unknown card source %q", ErrProviderCard, source)\n',
+     "",
+     "TestAProviderCardForAnUnknownCapabilityOrSourceIsRefused"),
+    ("sdk-card-bound", SDK + "provider_card.go",
+     "len(raw) == 0 || len(raw) > quoteexchange.MaxProviderKeyCardBytes {",
+     "len(raw) == 0 {",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-card-capability-network", SDK + "provider_card.go",
+     "capability == nil || !proto.Equal(state.Network, b.config.Network) ||",
+     "capability == nil ||",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-card-capability-id", SDK + "provider_card.go",
+     "\t\tcapability.CapabilityId != capabilityID || ",
+     "\t\t",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-card-capability-tombstone", SDK + "provider_card.go",
+     "capability.Tombstoned || ",
+     "",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-card-owner", SDK + "provider_card.go",
+     "if packet.SenderAgentID != capability.OwnerAgentId {",
+     "if false {",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-card-verify", SDK + "provider_card.go",
+     '\tif err != nil {\n\t\treturn VerifiedProviderCard{}, fmt.Errorf("%w: %v", ErrProviderCard, err)\n\t}\n',
+     "\t_ = err\n",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-agent-kind", SDK + "provider_card.go",
+     "if agent == nil || agent.AgentId != id ||",
+     "if agent.AgentId != id ||",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-agent-id", SDK + "provider_card.go",
+     "agent == nil || agent.AgentId != id || !proto.Equal(state.Network, s.network)",
+     "agent == nil || !proto.Equal(state.Network, s.network)",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-agent-network", SDK + "provider_card.go",
+     "agent.AgentId != id || !proto.Equal(state.Network, s.network)",
+     "agent.AgentId != id",
+     "TestAProviderCardThatIsNotTheOwnersIsRefused"),
+    ("sdk-usable-window", SDK + "provider_card.go",
+     "now.Sub(c.VerifiedAt) > ProviderCardReverifyAfter",
+     "false",
+     "TestAProviderCardIsUsableOnlyForTenMinutesAfterItsVerification"),
+    ("sdk-usable-before", SDK + "provider_card.go",
+     "now.Before(c.VerifiedAt) || ",
+     "",
+     "TestAProviderCardIsUsableOnlyForTenMinutesAfterItsVerification"),
+    ("sdk-usable-card-time", SDK + "provider_card.go",
+     "CheckKeyCardTime(c.Card, now); err != nil {",
+     "CheckKeyCardTime(c.Card, now); err != nil && false {",
+     "TestAProviderCardIsUnusableAfterItsOwnExpiryEvenWhenRecentlyVerified"),
     # Archive rules (section 4.5).
     ("member-charset", AGENT + "archive.go",
      "len(name) > MaxMemberNameBytes || !memberNamePattern.MatchString(name)",
@@ -516,6 +640,49 @@ MUTANTS = [
 # redundant). Deleting the check must leave every test of its package
 # passing; the script runs the whole package to prove it.
 REDUNDANT = [
+    # Provider key card checks that a later check of the same function
+    # repeats. They stay for their specific errors and to bound work early.
+    ("qx-card-empty", QUOTE + "keycard.go",
+     "len(raw) == 0 || len(raw) > MaxProviderKeyCardBytes",
+     "len(raw) > MaxProviderKeyCardBytes",
+     "an empty input does not decode as an Agent Packet"),
+    ("qx-card-no-provider", QUOTE + "keycard.go",
+     ' || providerAgentID == "" {',
+     " {",
+     "no decoded packet has an empty sender, so the sender check refuses it"),
+    ("qs-card-read-error", PROFILE + "profile.go",
+     "\traw, err := cards.ProviderKeyCard()\n\tif err != nil {\n\t\treturn nil, err\n\t}\n",
+     "\traw, _ := cards.ProviderKeyCard()\n",
+     "a refused read returns no bytes, which the shape check refuses"),
+    ("qs-card-read-bound", PROFILE + "profile.go",
+     "readPrivate(c.path, quoteexchange.MaxProviderKeyCardBytes)",
+     "readPrivate(c.path, 1<<20)",
+     "the shape check refuses a card over the bound; the read bound only limits memory"),
+    ("sdk-card-request", SDK + "provider_card.go",
+     '\tif ctx == nil || verifier == nil || capabilityID == "" {\n'
+     '\t\treturn VerifiedProviderCard{}, errors.New("invalid provider key card verification request")\n\t}\n',
+     "",
+     "VerifySender refuses a nil verifier, and an empty Capability ID is not in finalized state"),
+    ("sdk-card-json", SDK + "provider_card.go",
+     '\tif err != nil {\n\t\treturn VerifiedProviderCard{}, fmt.Errorf("%w: it is not an Agent Packet", ErrProviderCard)\n\t}\n',
+     "",
+     "a packet that does not decode has an empty sender, which is never the finalized owner"),
+    ("sdk-card-found", SDK + "provider_card.go",
+     "if !found || capability == nil ||",
+     "if _ = found; capability == nil ||",
+     "a state that is not found holds no Capability"),
+    ("sdk-card-no-owner", SDK + "provider_card.go",
+     'capability.Tombstoned || capability.OwnerAgentId == "" {',
+     "capability.Tombstoned {",
+     "no decoded packet has an empty sender, so the owner check refuses it"),
+    ("sdk-usable-zero", SDK + "provider_card.go",
+     "c.VerifiedAt.IsZero() || ",
+     "",
+     "a zero verification time is always more than 10 minutes before any real clock"),
+    ("sdk-agent-not-found", SDK + "provider_card.go",
+     "\tif err != nil || !found {\n\t\treturn nil, false, err\n\t}\n",
+     "\t_, _ = found, err\n",
+     "a state that is not found holds no Agent, which the kind check refuses"),
     # The variation selectors are category Mn, which the category rule
     # already escapes; the explicit exclusion states the spec's rule and
     # keeps it if a selector were ever recategorized.

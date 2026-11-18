@@ -61,6 +61,8 @@ type saChain struct {
 	// transitions are the Registry transition transactions the objects'
 	// histories hold, by kind; an absent kind is unproven.
 	transitions map[nativecore.RegistryTransitionKind]toschain.RegistryTransitionTx
+	// others are further finalized Registry objects by ID.
+	others map[string]*nativev1.NativeStateV1
 }
 
 func (c *saChain) BeginBuyerSession(context.Context) (ServiceActorSession, error) {
@@ -71,9 +73,13 @@ func (c *saChain) BeginBuyerSession(context.Context) (ServiceActorSession, error
 	for kind, transition := range c.transitions {
 		transitions[kind] = transition
 	}
+	others := make(map[string]*nativev1.NativeStateV1, len(c.others))
+	for id, state := range c.others {
+		others[id] = proto.Clone(state).(*nativev1.NativeStateV1)
+	}
 	return &saSession{checkpoint: c.checkpoint, capability: proto.Clone(c.capability).(*nativev1.NativeStateV1),
 		agent: proto.Clone(c.agent).(*nativev1.NativeStateV1), data: c.data, history: append([]toschain.ActorTransaction(nil), c.history...),
-		getterLie: c.getterLie, transitions: transitions}, nil
+		getterLie: c.getterLie, transitions: transitions, others: others}, nil
 }
 
 type saSession struct {
@@ -83,6 +89,7 @@ type saSession struct {
 	history           []toschain.ActorTransaction
 	getterLie         bool
 	transitions       map[nativecore.RegistryTransitionKind]toschain.RegistryTransitionTx
+	others            map[string]*nativev1.NativeStateV1
 }
 
 func (s *saSession) RegistryTransition(_ context.Context, object string, kind nativecore.RegistryTransitionKind,
@@ -114,7 +121,11 @@ func (s *saSession) ResolveRegistry(_ context.Context, id string) (*nativev1.Nat
 	case saAgent:
 		state = s.agent
 	default:
-		return nil, false, nil
+		other, found := s.others[id]
+		if !found {
+			return nil, false, nil
+		}
+		state = other
 	}
 	state.Reference = &nativev1.ChainReference{FinalizedCheckpoint: s.checkpoint}
 	return state, true, nil
