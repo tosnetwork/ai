@@ -945,8 +945,14 @@ purchase at one checkpoint and acts on the required action:
 Lifecycle sends go through `tosctl agent service send --operation`
 `expire`, `claim-refund` or `sweep-expired-request` with the pinned binary.
 They are journaled before custody starts and treated as ambiguous until
-finalized history shows them, like the call. A `claim_refund` that fails with
-1921 (under-backed actor) is retried until the deadline and reported.
+finalized history shows them, like the call. An operation that has been
+handed to custody is not sent again for 10 minutes, so finalized history can
+show its effect first. A send that custody never started does not count.
+After that the agent sends it again while the status still requires it, so a
+`claim_refund` that fails with 1921 (under-backed actor) is retried until the
+deadline. Every send counts against the lifecycle bound of section 6. Each
+duty round looks at every purchase whose call was handed to custody, at
+least every 60 seconds, whether or not an MCP client is connected.
 
 ### 11.3 If the agent is offline
 

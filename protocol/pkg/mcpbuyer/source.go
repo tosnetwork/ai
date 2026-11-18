@@ -168,7 +168,10 @@ func readBounded(path string, limit int) ([]byte, error) {
 }
 
 func readTar(path string, maxBytes int) ([]buyeragent.SourceFile, error) {
-	raw, err := readBounded(path, 4*maxBytes)
+	// A supplied tar is read up to the archive bound and no further. Its
+	// repacked form is never larger than its members, so a tar over the
+	// bound could not be carried anyway.
+	raw, err := readBounded(path, maxBytes)
 	if err != nil {
 		return nil, err
 	}

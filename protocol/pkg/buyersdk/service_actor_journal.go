@@ -83,6 +83,9 @@ type CallRecord struct {
 	ResponseSLASeconds       uint32 `json:"response_sla_seconds,omitempty"`
 	RefundClaimWindowSeconds uint32 `json:"refund_claim_window_seconds,omitempty"`
 	CleanupBountyNanoTOS     string `json:"cleanup_bounty_nanotos,omitempty"`
+	// Lifecycle holds the expire, claim_refund and sweep sends for the
+	// admitted request, oldest first.
+	Lifecycle []LifecycleSend `json:"lifecycle,omitempty"`
 }
 
 // ServiceActorLimits bounds what the buyer may reserve.
@@ -144,8 +147,17 @@ func OpenServiceActorJournal(directory string, now time.Time) (*ServiceActorJour
 			return err
 		}
 		for _, record := range records {
+			changed := false
 			if record.Phase == PhaseSending {
-				record.Phase, record.UpdatedUnix = PhaseAmbiguous, now.Unix()
+				record.Phase, changed = PhaseAmbiguous, true
+			}
+			for index := range record.Lifecycle {
+				if record.Lifecycle[index].Phase == PhaseSending {
+					record.Lifecycle[index].Phase, changed = PhaseAmbiguous, true
+				}
+			}
+			if changed {
+				record.UpdatedUnix = now.Unix()
 				if err := journal.writeUnlocked(record); err != nil {
 					return err
 				}
