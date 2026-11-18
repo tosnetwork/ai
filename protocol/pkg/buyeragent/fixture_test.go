@@ -36,6 +36,7 @@ var (
 	fxKey   = bytes.Repeat([]byte{0x5a}, mldsa44.PublicKeySize)
 	fxKeyID = func() [32]byte { id, _ := mldsa44.KeyID(fxKey); return id }()
 	fxNow   = time.Unix(2_000_000_000, 0)
+	fxTerms = OfferTerms{ResponseSLASeconds: 3_600, RefundClaimWindowSeconds: 7_200, CleanupBountyNanoTOS: "100000000"}
 )
 
 // fakeBuyer stands in for buyersdk.ServiceActorBuyer over a real journal:
@@ -278,7 +279,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(agent.Close)
 	request, value := quotePackage(t, fxNow)
-	quoteID, err := agent.StoreQuote(request, value)
+	quoteID, err := agent.StoreQuote(request, value, fxTerms)
 	if err != nil {
 		t.Fatal(err)
 	}
