@@ -71,3 +71,28 @@ func requireReported(t *testing.T, reports *recordingReports, parts ...string) {
 	}
 	t.Fatalf("no report names %q among %v", parts, reports.errs)
 }
+
+// A demand lasts at least two maintenance passes: with a sweep interval
+// longer than the default window, a demand refreshed on the previous pass
+// still keeps its request outstanding, and one two passes stale does not.
+func TestADemandOutlivesASweepIntervalLongerThanItsWindow(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0)
+	nodes := newRelayNodes(t, now, [2]string{"2", "4"}, [2]string{"7", "9"})
+	a, b := nodes[0], nodes[1]
+	relay := a.d.relay
+	sweep := 3 * time.Minute
+	relay.pulls.Lock()
+	relay.sweep = sweep
+	relay.pulls.Unlock()
+	if err := relay.demandEvidence(b.d.config.AgentID, now); err != nil {
+		t.Fatal(err)
+	}
+	relay.pulls.Lock()
+	defer relay.pulls.Unlock()
+	if !relay.demandedLocked(b.d.config.AgentID, now.Add(sweep+time.Second)) {
+		t.Fatal("a demand refreshed one pass ago lapsed")
+	}
+	if relay.demandedLocked(b.d.config.AgentID, now.Add(2*sweep+time.Second)) {
+		t.Fatal("a demand two passes stale still counts")
+	}
+}

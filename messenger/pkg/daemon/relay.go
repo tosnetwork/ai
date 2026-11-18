@@ -40,11 +40,12 @@ const (
 	relayRedepositPercent = 80
 	// relayResponseWindow is the per (peer, own descriptor) response limit.
 	relayResponseWindow = time.Hour
-	// relayDemandWindow is how long a demand for a peer's evidence keeps its
-	// request outstanding without being refreshed: the caller that needs the
-	// evidence (a roster waiting to be built) refreshes it on every retry, so
-	// the need ends by itself within this window once the caller stops. It
-	// spans two retry passes so one late pass does not end it.
+	// relayDemandWindow is the least time a demand for a peer's evidence
+	// keeps its request outstanding without being refreshed: the caller that
+	// needs the evidence (a roster waiting to be built) refreshes it on every
+	// retry, so the need ends by itself within the window once the caller
+	// stops. The window is at least two maintenance passes (demandWindow), so
+	// one late pass, or a sweep interval longer than this, does not end it.
 	relayDemandWindow = 2 * relayEvidenceRetry
 	// descriptorExpiredBase and descriptorExpiredCap bound the wait after a
 	// descriptor-expired ack when this node's evidence is not newer.
@@ -92,6 +93,9 @@ type relayRuntime struct {
 	// own waiting on the peer's evidence asked for it (guarded by pulls). It
 	// is in memory only: after a restart the caller's next retry asks again.
 	demands map[string]time.Time
+	// sweep is the maintenance pass interval run was started with; zero
+	// before run (tests drive the passes themselves).
+	sweep time.Duration
 
 	// index is the open-delivery index of the sweep in progress.
 	indexMutex sync.Mutex
@@ -583,11 +587,18 @@ func (r *relayRuntime) demandedLocked(peer string, now time.Time) bool {
 	if !found {
 		return false
 	}
-	if now.Sub(at) > relayDemandWindow {
+	if now.Sub(at) > r.demandWindow() {
 		delete(r.demands, peer)
 		return false
 	}
 	return true
+}
+
+// demandWindow is relayDemandWindow, or two maintenance passes when the
+// sweep interval is longer: the Commit retry that refreshes a demand runs
+// once per pass, after the pull sweep that judges it.
+func (r *relayRuntime) demandWindow() time.Duration {
+	return max(relayDemandWindow, 2*r.sweep)
 }
 
 func (r *relayRuntime) requestEvidenceLocked(peer string, now time.Time) error {
@@ -1269,6 +1280,9 @@ func refuseOpenFailure(err error) error {
 // retires expired relay evidence and, with private rooms, drops expired room
 // parts and retires ended rooms.
 func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync.WaitGroup) {
+	r.pulls.Lock()
+	r.sweep = sweep
+	r.pulls.Unlock()
 	group.Add(2)
 	go func() {
 		defer group.Done()
