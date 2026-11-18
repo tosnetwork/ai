@@ -1,4 +1,4 @@
-.PHONY: verify fmt-check proto-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants \
+.PHONY: verify fmt-check proto-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants \
 	test-privileged \
 	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors messenger-cross-build \
 	messenger-fuzz
@@ -53,6 +53,11 @@ spec-check:
 # Opt-in; not part of verify (it builds the package once per mutant).
 railwork-mutants:
 	GOWORK=off python3 -I protocol/scripts/railwork-mutants.py
+
+# Red controls for the MCP buyer agent's security checks, under the same
+# rules. Opt-in; not part of verify.
+buyeragent-mutants:
+	GOWORK=off python3 -I protocol/scripts/buyeragent-mutants.py
 
 # Bounded native fuzzing of the strict PredictionMarket decoders; the regular
 # suite runs the fixed seeds. The budget is an execution count, not a
