@@ -111,8 +111,11 @@ contradict them.
   funding path describes the retired escrow rail).
 - [A2A Software-Work Adapter V1](docs/A2A_ADAPTER_V1.md) maps official A2A
   Tasks and results into the same finalized Native commercial lifecycle.
-- [MCP Software-Work Tool Adapter V1](docs/MCP_ADAPTER_V1.md) exposes that
-  lifecycle as one authority-gated, purchase-bound MCP tool.
+- [MCP Buyer Adapter V1](docs/MCP_BUYER_ADAPTER_V1.md) designs a local MCP
+  server that lets an MCP client buy a software-work service on the Service
+  Actor rail, with payment confirmed by a human outside the model (design;
+  it supersedes the retired provider-side
+  [MCP tool](docs/MCP_ADAPTER_V1.md)).
 - [x402 Adapter Decision](docs/X402_ADAPTER_DECISION.md) explains why x402 is
   deferred and constrains any future integration to negotiation over the
   existing canonical TOS escrow lifecycle.

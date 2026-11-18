@@ -115,7 +115,8 @@ business-category opcodes.
 - [Software Work Manifest V1](SOFTWARE_WORK_MANIFEST_V1.md)
 - [Software Work Execution V1](SOFTWARE_WORK_EXECUTION_V1.md)
 - [A2A Adapter V1](A2A_ADAPTER_V1.md)
-- [MCP Adapter V1](MCP_ADAPTER_V1.md)
+- [MCP Buyer Adapter V1](MCP_BUYER_ADAPTER_V1.md) (design)
+- [MCP Adapter V1](MCP_ADAPTER_V1.md) (superseded)
 - [A2A Use Cases](A2A_USE_CASES.md)
 
 Software work is the first deeply specified commerce profile, not the root

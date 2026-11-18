@@ -202,7 +202,8 @@ replay test, not the fresh external interoperability requirement.
 two paragraphs above were removed with the escrow rail in `execution/` commit
 `0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c`. They are history, not current
 code or evidence. An MCP buyer adapter on the Service Actor rail is planned
-for Gate D; it has no design yet.
+for Gate D; its design is `docs/MCP_BUYER_ADAPTER_V1.md`, not yet
+implemented.
 
 ## 1. Gate A — Registry protocol freeze
 
@@ -339,7 +340,12 @@ Deliver on the Service Actor rail:
   lifecycle covering all three terminal states is recorded in
   `deployments/local-service-actor-settlement-lifecycle-20261114.json`
   (`qualifies_as_public_acceptance: false`); reconstruction by a second
-  resolver is not recorded.
+  resolver is not recorded;
+- 🟡 MCP buyer adapter, so that an MCP client can buy without an Agent
+  runtime — designed in `docs/MCP_BUYER_ADAPTER_V1.md` (local stdio server
+  without custody; payment only after a human confirms it from a separate
+  custody account; a long-running buyer agent for delivery and refunds); not
+  implemented.
 
 Delivered earlier:
 
@@ -451,7 +457,8 @@ Deliver:
 - ⬜ MCP tool adapter — **retired**: the provider-side tool below was built on
   the escrow execution Gate and removed with the escrow rail in `execution/`
   commit `0d0dfc22`; an MCP buyer adapter on the Service Actor rail is planned
-  for Gate D and has no design yet. The retired implementation: official MCP
+  for Gate D and designed in `docs/MCP_BUYER_ADAPTER_V1.md` (not yet
+  implemented). The retired implementation: official MCP
   2026-07-28 typed tool registration,
   committed input/result mapping, shared production finalized-chain execution
   Gate, stateless streamable-HTTP binding, and negative tests were implemented;
@@ -818,7 +825,8 @@ is not implied by Gate C's initial profile.
     Those adapters and that Gate were removed with the escrow rail
     (`protocol/` `b9ad8e17`, `execution/` `0d0dfc22`), so engineering is not
     complete: an MCP buyer adapter on the Service Actor rail is planned for
-    Gate D (no design yet), and the onboarding runbooks need a Service Actor
+    Gate D (design: `docs/MCP_BUYER_ADAPTER_V1.md`, not yet implemented), and
+    the onboarding runbooks need a Service Actor
     rewrite. After that, the remaining Gate E task is one independently
     operated provider/buyer working session using the public onboarding docs.
     The optional x402 adapter has been evaluated and

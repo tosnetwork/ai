@@ -1,55 +1,13 @@
 # MCP Software-Work Tool Adapter V1
 
-**Retired (2026-11-08).** The provider-side MCP tool this document describes
-no longer exists. It was built on the escrow execution Gate and was removed
-with the escrow rail in `execution/` commit
+**Superseded.** The provider-side MCP tool `tos_service_software_work` that
+this document described was retired on 2026-11-08: it was built on the escrow
+execution Gate and was removed with the escrow rail in `execution/` commit
 `0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c` (`execution/pkg/mcpadapter`, its
 public HTTP boundary and the cross-transport acceptance test); the Gate itself
-was removed in `protocol/` commit `b9ad8e17`. The software-work profile now
-settles in native TOS on the Service Actor
-([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
-[`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-The text below is kept as history only; it is not a current specification and
-no implementation conforms to it.
+was removed in `protocol/` commit `b9ad8e17`. No implementation conforms to
+it.
 
-A **buyer-side** MCP adapter on the Service Actor rail is planned for Gate D
-(`ROADMAP.md`), so that TOS services can be bought from an MCP client without
-an Agent runtime. It has no design yet; when one is written it will replace
-this document rather than revise it.
-
-The MCP tool `tos_service_software_work` maps the official MCP Go SDK's typed
-`tools/call` boundary into the same Native software-work runner. MCP is
-model-controlled transport; tool discovery, arguments, client identity, and
-tool results have no Agent, payment, Receipt, or settlement authority.
-
-The input contains the exact funded escrow address, Accepted Quote commitment,
-execution ID, input digest, source digest, and canonical standard-Base64 source
-archive. The input digest uses domain `tos.service.mcp.software-work-input.v1`, a zero byte, and canonical
-JSON of protocol, escrow address, Quote, execution ID, and source digest. Unknown or changed
-bytes fail before authoritative reads.
-
-Before execution, a production gate must both verify finalized Capability,
-manifest, Accepted Quote, funded escrow, endpoint, and signer, and atomically
-claim one `(Quote commitment, escrow, execution ID, input digest, source
-digest)` intent under the shared `(Quote commitment, escrow)` purchase slot.
-The same slot is used by A2A and every future adapter. Merely
-observing a funded escrow is insufficient: accepting another execution ID for
-the same purchase would allow repeated unpaid computation.
-
-Success returns structured content containing finalized evidence and exact
-result, artifact, report, source, toolchain, and sandbox commitments. Artifact
-locations require HTTPS and remain unauthenticated transport hints; their
-SHA-256 digests authenticate bytes. Tool success is neither a signed Receipt
-nor permission to release funds.
-
-V1 uses official Go SDK `github.com/modelcontextprotocol/go-sdk` v1.7.0 and its
-MCP 2026-07-28 tool model. Experimental MCP task augmentation, sampling,
-prompts, resources, arbitrary commands, remote policy selection, and automatic
-payment are outside this adapter.
-
-The production finalized execution-claim Gate and official stateless
-streamable-HTTP binding are implemented. The shared public boundary requires
-TLS 1.3, bearer authentication, bounded bodies/headers/concurrency, and rejects
-browser origins by default. Gate E completion still requires a fresh
-interoperability session. The local TLS cross-transport suite already proves
-that an A2A-claimed purchase cannot execute again through MCP.
+The current MCP design is the buyer-side adapter on the Service Actor rail,
+[`MCP_BUYER_ADAPTER_V1.md`](MCP_BUYER_ADAPTER_V1.md). The retired text stays
+in git history: this file as it was before the commit that replaced it.
