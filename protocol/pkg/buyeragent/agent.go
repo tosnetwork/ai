@@ -61,6 +61,8 @@ type Config struct {
 	// Results accepts the result of each responded purchase; nil accepts
 	// none.
 	Results ResultReceiver
+	// Offers serves search and quote; nil refuses both.
+	Offers *Offers
 	// MaxLifecycleSends bounds the expire, claim_refund and sweep sends in
 	// one budget window. Zero means 2 * MaxCalls + 8 (section 6).
 	MaxLifecycleSends int

@@ -72,6 +72,8 @@ func RoleFor(peerUID, custodyUID, clientUID uint32) Role {
 // (MCP_BUYER_ADAPTER_V1 section 2.3). Only the custody account may present
 // or decide.
 var methodRoles = map[string]map[Role]bool{
+	"search":          {RoleClient: true, RoleCustody: true},
+	"quote":           {RoleClient: true, RoleCustody: true},
 	"prepare":         {RoleClient: true},
 	"withdraw":        {RoleClient: true, RoleCustody: true},
 	"request_payment": {RoleClient: true},
@@ -347,6 +349,18 @@ func (s *Server) dispatch(ctx context.Context, role Role, raw []byte) Response {
 func (s *Server) call(ctx context.Context, request Request) (any, error) {
 	agent := s.agent
 	switch request.Method {
+	case "search":
+		var params SearchParams
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return agent.Search(ctx, params)
+	case "quote":
+		var params QuoteParams
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return agent.Quote(ctx, params)
 	case "prepare":
 		var params PrepareParams
 		if err := decodeParams(request.Params, &params); err != nil {

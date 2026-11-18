@@ -44,6 +44,16 @@ func (f *fakeAgent) Call(_ context.Context, method string, params, result any) e
 		answer = buyeragent.DutyView{RequestHash: view.RequestHash, Reference: view.Reference, Status: "overdue",
 			Operation: "expire", Sent: true}
 	}
+	offer := buyeragent.OfferView{Checkpoint: 41, CapabilityID: view.CapabilityID, CapabilityVersion: "1.0.0",
+		ProviderAgentID: view.ProviderAgentID, PriceNanoTOS: "300000000", ProviderName: "build",
+		ProviderDescription: f.provide}
+	switch method {
+	case "search":
+		answer = buyeragent.SearchView{Checkpoint: 41, Offers: []buyeragent.OfferView{offer}, Dropped: 2, FailedSources: 1}
+	case "quote":
+		answer = buyeragent.QuoteView{QuoteID: strings.Repeat("cd", 32), Source: buyeragent.QuoteSourceLocal, Offer: offer,
+			Carriable: false, NotCarriable: "item_3"}
+	}
 	if method == "purchases" {
 		answer = buyeragent.PurchasesView{Purchases: []buyeragent.PurchaseView{view},
 			Budget: buyeragent.BudgetView{ReservedNanoTOS: "700000000", ReservedCalls: 1}}
@@ -135,7 +145,7 @@ func TestTheToolSetIsFixedAndSaysWhatIsUntrusted(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{ToolPrepare: false, ToolRequestPayment: false, ToolWithdraw: false, ToolStatus: true,
-		ToolPurchases: true, ToolRefund: false}
+		ToolPurchases: true, ToolRefund: false, ToolSearch: true, ToolQuote: true}
 	if len(listed.Tools) != len(want) {
 		t.Fatalf("%d tools", len(listed.Tools))
 	}
