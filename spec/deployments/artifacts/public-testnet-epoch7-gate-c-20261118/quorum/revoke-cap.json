@@ -1,0 +1,57 @@
+{
+  "acceptance_profile": "operator-designated-initial-public-testnet",
+  "endpoints": [
+    "V1",
+    "V2",
+    "V3"
+  ],
+  "expected_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+  "generated_at": "2026-11-18T01:53:54Z",
+  "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+  "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+  "network": "tos:global-id:2",
+  "objects": [
+    {
+      "found": true,
+      "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+      "state": {
+        "capability": {
+          "capability_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "generation": "2",
+          "last_action_hash": "sha256:4b6137e62d2265bf3c5aef75ac87e50f490aa004364f8ea270124b0aed4b9a90",
+          "owner_agent_id": "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+          "sequence": "2",
+          "tombstoned": true,
+          "versions": [
+            {
+              "manifest_digest": "sha256:185de37af8264a7f6397fae1ef20125dd833325bc1410761f331433aea82750b",
+              "revoked": true,
+              "version": "v1"
+            },
+            {
+              "manifest_digest": "sha256:c42cfb9f9baf4803422d0ec97e9038b70219dee476416c37fe2e059cc29df8a2",
+              "version": "v2"
+            }
+          ]
+        },
+        "finalized_at": "2026-11-18T01:53:54Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "3568",
+          "logical_time": "3577000005",
+          "transaction_hash": "sha256:132b0a768a1842fc75d13cb6be1c7f808aa47c43b234d288e5b16993ba1a4059"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:8f1328670fcbbf6b73f1d490c5142c922ba14ba53dbf480fc7b0274d94a82209"
+      }
+    }
+  ],
+  "quorum": 2,
+  "registry_workchain": 0,
+  "schema": "tos.service.gate-c.quorum-check.v1"
+}

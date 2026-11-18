@@ -1,0 +1,59 @@
+{
+  "acceptance_profile": "operator-designated-initial-public-testnet",
+  "endpoints": [
+    "V1",
+    "V2",
+    "V3"
+  ],
+  "expected_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+  "generated_at": "2026-11-18T01:54:00Z",
+  "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+  "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+  "network": "tos:global-id:2",
+  "objects": [
+    {
+      "found": true,
+      "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+      "state": {
+        "agent": {
+          "agent_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "generation": "2",
+          "last_action_hash": "sha256:e0bba400f9ff1c4571e846c9b47eab4600a6eabfb7687bd3a8a3e63ff0d900d6",
+          "policy": {
+            "controllers": [
+              {
+                "key_id": "mldsa44:bdab59ed4dca64b478d366da987d36014c6d85b897334d21b509d3f223a46291",
+                "mldsa44_public_key": "cwiObiBsIes4JDGG2KzrGWeHDTawqY7VfHntdMgl9oRhg+xUUNQ+zAe5SjyO2fC0xO7n7Kn4bbyuwo33mULRenuRxOXmjquHi/2IXBmqgFhLovaI03zSHJDt4xaEe8wj90ksqyGUVF1RHuMYJlh+rVodWKEE5b8h0Vt/fakQinBYecBDqPB74rNAWFUTEv0sk/wODkhFeeT9KzsBZ9NmgnaZfwTGHrNJ9uicodb8tqll6MoVpBdqnHtErUpvoYm+hpG2Q5Dt1KQT6I9xMgNl3Ho4kBOYQzytlfuhkzklirT2iWCUhBtdi+z4RwI/ULbAO4Yogo1EryxVI6+PoBgR4TDuiuk/qdHLlySpgyG73pm5Q23bgR2RkIKXSytWgXPJWK7Su2nHJFSOVTuoFy9jduM2AdBrkol6sbXbqeYYMTgKDk6aFWSxlaqGE6JP1vjDJ6HrYaV82ZYbzRyF099lgl6aSb+cB2Wu+fBDy7rF796MqxWRW5+kNuOB1/Ks/HI6PNQwoPG5A0Zq1gSy8Ohj2469+kANYFY911tXTT27X2KhPfZGLEajP/lmNjQ+BRdc2OckZC/EQ7BhUoAgU3OM4vmM5kDpnhTeArTYMUz2zmAs9mPwifTz8BuobeklZe6FbIFFiNG/DryxR4NubwcrTl1Jo5vYhxd/d2HPHhNYU7UEBs+Ovyjz5vshuOV4pCZlgb1QyCZ4IeAGkq2uLcDlf3eOTx6DGY92ozVhVcgjsMINIL7FUbBqt7da6Yz5iX7CjKH2kxrl5o/v9tdMC7HAaaUexoP4F4wJfhfTDrzSCVqDya2x7TL5lPqneFhVB3T+h3PicnCzvwxBLzB43RqXg5XinUNkSbnbhYAoJUg55i40sOJcoMteC/fEmNBmYpjXaBnNv7icEf2dpX1X7G+yG0vdLKFGSBvgsyWTWFaD/G+6lKm2WN9GFOCzMPyM9l3nJtXJC2vOIR8pBvecNqySZrQSjYUZ0kVtbnNPaf2SuLIOGEJJeEUyEmAzhGAJCy3vVfxAQrtznV9KXHqlTWfgI8SHMPDg97UaKPcXz5EJ7MzRAb2j+fGoNiWYlA4fsgp4MtpbKe7ZNdcG4rKCfuNXxaQbZPRGf9QVcou2z2o29S68oLgfKau33WNGnsLKWTo/FA+cXhLUXJhRKA9HxQyusQwWmMSFq0YOFIIubIRbYyfX5GDdx7RZKczbjUq2BYUS2Lqi/ji4yVaSdOfweH40HZulu61ZWOsAMw3quk5nYoKIsKdC8I2J9y/2cR/vJIuvWHFwWUtPq/pCE40WZR2AMBuxtsudAcZStGsz24db5hJoRnbd1LD5Wh1ektAlWKUVPAYbsijqE11HGf1hbVkAa/HLoUxK6pZPku9Re1nPisCQGGp+y+e4EPiobSXaVj7ASAtR6qyvOO73mNgRJR1HxKdS7kzsn7lx8i9ijIHOqUZQun5RYpOJ+ctCvMIEOQcV94n1BaJvOdeqUfDq/30f0+gjri7rZuSlQLE4GcaFIf3tE1c4/m5I1HnLnhsAc/NTSaHeDFNC9GGZJl1+bS4JPMwipc44PWInBOj5j+r+8C2Z8UmgbIl23X4y+qJrhVUYwSsIDsjx8HWsANvz9eRe/Ti43cx0dkopQBMjnK7kgyCk+Y4424MFL5hBHC3uBD60Zzxx+1WGf15s4928UztfRUsNtBy/nQ8QOXiFCeP/OIb3bsfXuoHhmOiQzrq6YeMBWNhQ/4z6LLXRDpR0EDw4lw==",
+                "purpose_mask": 15,
+                "recovery": true,
+                "weight": 1
+              }
+            ],
+            "recovery_threshold": 1,
+            "recovery_timelock_seconds": "120",
+            "threshold": 1
+          },
+          "sequence": "2",
+          "tombstoned": true
+        },
+        "finalized_at": "2026-11-18T01:54:00Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "3583",
+          "logical_time": "3592000003",
+          "transaction_hash": "sha256:546086f92ea2fd236faf7234cc84f6592f20089b4b333076ebbb25086194207c"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:6d77322f770822f69d193b6e1503ea133055c0022d4a59747f2cbeaa6c92af50"
+      }
+    }
+  ],
+  "quorum": 2,
+  "registry_workchain": 0,
+  "schema": "tos.service.gate-c.quorum-check.v1"
+}

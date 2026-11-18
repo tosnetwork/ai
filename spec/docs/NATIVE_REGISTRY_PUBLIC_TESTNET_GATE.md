@@ -107,3 +107,34 @@ record explicitly discloses that all nodes and endpoints share one host and
 that the endpoints are loopback HTTP. Independent operators, public HTTPS,
 gateway failover, and Internet reachability remain mandatory Gate F/G work and
 must not be inferred from this acceptance.
+
+## Epoch-7 public testnet lifecycle — 2026-11-18
+
+The complete required lifecycle passed under `tos_service_v1` on the epoch-7
+public testnet (global id 2, ConfigParam 8 at global version 16, genesis
+2026-11-18 01:30 UTC). The deployment record is
+`deployments/public-testnet-epoch7-gate-c-20261118.json`; its labeled quorum
+outputs are under
+`deployments/artifacts/public-testnet-epoch7-gate-c-20261118/`.
+
+- The first Agent registration deployed the frozen release; the deployed code
+  read from all three endpoints has code hash `d3bb66d0…c628b28a`.
+- Two Agents were registered with distinct ML-DSA-44 controllers. Agent A
+  updated its policy to two-of-two with new-key possession, then recovered to
+  a new controller after a 120 s policy timelock. A Capability was registered,
+  version v2 was added and v1 revoked. The Capability was transferred to B
+  with B's acceptance. Then the Capability and Agent A were revoked.
+- Five refusal controls were each refused with their exact exit code and left
+  canonical state unchanged: 2209 (threshold), 2212 (completion before the
+  timelock), 2211 (duplicate version), 2210 (mutation by the former owner) and
+  2203 (a Capability action in the wrong envelope, recorded as a runner
+  defect and resent correctly).
+- Every step was resolved by `native-gate-c-check` against three
+  validator-backed endpoints with quorum two.
+
+**Verdict: lifecycle passed under the initial public-testnet profile; owner
+designation pending.** All validators are run by one project operator. The
+endpoints are validator loopback JSON-RPC listeners reached through SSH
+forwards. The independent security review of release `d3bb66d0` remains open.
+Independent operators, public HTTPS and Internet reachability remain Gate F/G
+work.

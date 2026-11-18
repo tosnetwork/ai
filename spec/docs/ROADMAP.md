@@ -263,23 +263,27 @@ Deliver:
 - ✅ designated initial public-testnet ConfigParam 8 at global version 16 or
   later, which provides `PQCHECKSIG_MLDSA44` for ML-DSA-44 controller
   signatures (`NATIVE_REGISTRY_PUBLIC_TESTNET_GATE.md`, initial profile);
-- ⬜ current-domain public-testnet deployment record binding network domain, contract
-  address, deployed code BOC, code hash, transaction, and exact source commit;
-- ⬜ current-domain three-validator strict-majority finalized
+- ✅ current-domain public-testnet deployment record binding network domain, contract
+  address, deployed code BOC, code hash, transaction, and exact source commit
+  (`deployments/public-testnet-epoch7-gate-c-20261118.json`);
+- ✅ current-domain three-validator strict-majority finalized
   resolution through the production typed-state resolver;
 - ✅ wallet action signing and semantic confirmation, including exact action-hash
   confirmation and fee-payer destination, amount, body, and StateInit binding;
 - ✅ registry typed-state checker with machine-readable three-endpoint quorum
   evidence; and
-- ⬜ recovery, transfer, former-owner rejection, and revocation drills on the
-  designated initial public test network.
+- ✅ recovery, transfer, former-owner rejection, and revocation drills on the
+  epoch-7 public test network (owner designation pending).
 
 Accept the initial profile when distinct controller keys register, update,
 transfer, revoke, and resolve objects through validator-backed quorum without
 trusting the reference gateway. Independent operators and public HTTPS are
 required by Gates F and G.
 
-**Gate status: ⬜ Current-domain deployment pending.** The reproducible contract,
+**Gate status: lifecycle evidence published; owner designation and the
+independent review of release `d3bb66d0` pending.** The epoch-7 record of
+2026-11-18 deploys fresh objects and completes the quorum lifecycle under
+`tos_service_v1`. The reproducible contract,
 wallet, resolver, and lifecycle tooling pass locally. The 2026-08-14 deployment
 is archived pre-migration evidence and cannot establish authority for
 `tos_service_v1`. Gate C must deploy fresh objects and repeat the complete

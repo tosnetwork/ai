@@ -1,0 +1,65 @@
+{
+  "acceptance_profile": "operator-designated-initial-public-testnet",
+  "endpoints": [
+    "V1",
+    "V2",
+    "V3"
+  ],
+  "expected_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+  "generated_at": "2026-11-18T01:40:28Z",
+  "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+  "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+  "network": "tos:global-id:2",
+  "objects": [
+    {
+      "found": true,
+      "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+      "state": {
+        "agent": {
+          "agent_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "generation": "1",
+          "last_action_hash": "sha256:5690076d905e59e8fa16aafdd0046c150c1b318e4b85729a74b693dd894f153b",
+          "policy": {
+            "controllers": [
+              {
+                "key_id": "mldsa44:987f454fe629784acac5648171dba3d9e2e09cdf66f1a8ad8e45825f5f712bea",
+                "mldsa44_public_key": "8YvzT62vM8s9ZNZRbpwIeOnGq1jsNSbduY9uaxfB0xOSebolB9pezL5s/ORK/sM/FxFyogbA0v7kxqVom21nzF9U737eHhGh03geKQtR2KMEngr9I24+wX6euGTRLYH0ewnUxIIYZMp2YMOJL2xhy7ZexrmRIVKYjqtZuWW3vbJYCcyWyXOdwiDisdJEv/nLeiy+nFlEoRcX8G1giwUyyU+K14b2IyEJD1/yGsnrqKjQjl15dN6kA6XYtMTb+Z4eldMlb47TZqC5P4krYR+8cBpjde6YWG3pIJsPRl2SPGETBrJtP9y+82VTmr+gE4CEW4p3RWUf9l3IerrjPrcyoKXfbxt5OYV8PdgOwYwjv56m9LgcmwbILkEZCh+eeZV5b1HZvw5zeYNiZh1BgagI5XdO8I8Jsm9meu2SPuPWTnyRTxlTz/glZJkDDKpnCBqZSl+K70X9v0TMWsGTYBIaejcEFLl+LBOhG4UJVI7viSE1JfpUydoBLJn6caR5ocJRw3+DX5iCJDZGjrPnt9Q7lcjqzwKpt3i3NSfLORSeP33BB6NdCq4ijzdSdr7Bi5vPibsN8cGzcvxlsDuQWv8jYn/ipR8v6m5IbX/aWr0w2y+4Do2QKSxZGUh9PB9fU09A508OoO8diWZ2vUskuvfV4+iANLjZo/bEiHn2zm89nmuJUEVxiB6ExPF8GlVNzZvbUQ7r+aHy1iKizGocUTcS+7gTh0SxEOqAHSuwuH1AJ914pjE1XCzBGZaXofaJvt6q/6ZcrPNJElePIc8Ay2uLMBXJBwU16vpUdPVvEUE1IBZpL9u74vvDChcFbsVJuNOg6gGmsU82XgFqm43gySRbd3hhQTt59Phqk0RRwSfxvl0mtf2Bti7rVA7TvH+ueqdPIFunu1fzKQHHxOfC8CWBrhk4IxOQsxXAhGAu9AT91dWkDzmKDTAoRi7dJRYKebfmq7MuHrfChPh84/1qFEvG/SyVirI2S8R0MdQbvqVbiTgHVvbt1sISPALOFnprQbhc9I8nhnb4jeXt/dbUhNbawcwC7YqbZhA3MBlKXeo1S4LU5QwpTUmoV+C8MITmW11NI4HV1OcEDzu8533q3Zxy6s4Wu7/90I6v9tGPjAu5nH0A/8jqzlY/camvZFF+p8UvDm8YyZ8mrut+kCIbNwoqyyvPAtA+fwQrSZ5ZrJqcFPSTXcc4w2bOExIl1Eziy0LI5w5yf8qLrkESa+iGWPNzL25onC0LlzirHTeSHPS8HTPV2vSyfGldC7ONATd0IUCkl5BgfCLqMwYrcJeX8he9X6t7INVUq0QPZcjMoAOtwtuZk4OqJLxch6l15JH+rgthvWtETQ9gjkjKkVSTkRsx76T4SXSnsGRgmj87BmrbrbpVenp06Y5JmqSyk4Rdi93vXDn9foUbIIMGPWe+V2g57eg4zK4pn+uxHEE946kg+fxUEzr5p+evHJPIP4RoLmVDUlwPRiLfXWULT+RpawJs1Y/hY3xvucALN//k8XE4+xQW3o39yhVj/S62rTZHv1TQGxbaTDUd3LWcvb37bzPnZdcMD4PhLN1C6Qnca4qdaSD2fAtym1uh6k3cFhZf27CXO1n8QFDABv916zSxKk/70p7Z3L+UVdjIkkTIpq7nP70V+TiT1/E6pjZECrEgdu7R76E1EkU+3XLUGOg0Tek4lntGzDmfW9LZrcRFss/7yU+EmxzN0NpNeJ+pp/XAxqQyxgBOBjiTsRWbyJOIs+O/fg==",
+                "purpose_mask": 15,
+                "recovery": true,
+                "weight": 1
+              },
+              {
+                "key_id": "mldsa44:9c54c1386b8e519e6e555d2ea40f1e39bc372d6e38355c58f38d505df0fdc92e",
+                "mldsa44_public_key": "iEF2X78/C4U6LVMrzG2z1qHAjIQ+7VTC3w0smjePrTLVbIE4T8PwvqGz3pvAmwTzx4UpAJkAzS7qcwWhcfRWG61kAYCYAUkSNxEPPJut29Et+u9hnQR0/czONPouJ24+MV6JJvLTxsEJr4x/eMhMLfQ3Yy0ob+mwlrOAtDdRcu+0PFMkspyLAGJA3xx5+N4s9OLrvTd/pa25HRT3kztWpZG67WonHOB8iVQ5BMRkZnweiSAjigLfbLAGmFBRJWOAKYH95vHGdT8TmO6uX9k2NSdakVG1OK7Ie5oN/3xaqJedhuMNjeNAxc3t9zA6j0VuTNUAuaYzffbJMOO9yjSq7qUDQ791+ILoS1A9vlH4ia77FSBzHcOB1T40rM4RrpHibL3eUt0D1et1fTRTGo5qgzcXl6ttgpf7SmEo5X9w0UcB3x3B4aMmyTw8oQPiaIflg6bkrIW0hN6+uTVS5Tk+R7OruReosApwr/2894QEQ+QhhHv1dKM9jS1xqIkYJiuQkLfGjdDSGcj3HR3D7sYVmORoP1Rl21Ot7wsV4ZXQKz5/o1SSNFwEPyDBXVWxVBglBFFAfNEE5q+C1LOF5begh1pyvLuHhOMQKVECjFHnzb4B2bJVPtGZKWZR/cbKAFuuE3szpXq+298DbKJKU4wIn8HPZ/xPGV+gqY3AQGb/drvLwmRD8BFcKtHfk0bmGzA5O5a2pQpbnCRp3nQdG00RpR36jWrQy+Ss+ax77yzC7lxnv77t1sPzFGYTq2I54xd6+Cyg8GNWLa0Ov8clS3JvAsDwzTacJeYH5DlofKxbqy3JGt2JkDhyiOH1uLDOOadOSWCHSILhH3IgLfkjNjRcX5VM0Zg9A3cl1toM+jMbnCUwZBNgmHdis07+1iYwIhWiWsanWqIytttuwceIe5A6CWChGET7VK728P7uEsxuee99rqO30J2kDTo0EnvykkwU1s1iANeSZdUTXRKCu+AAWF09o8lvxvpJYPsIPpFOzB+3H+j8mDaDpqy5f26M8MTNu29AqkDhDPI9bhufPKsghItKSvk/MAXM4TrRkggQxZk59AhR/VFypo1ZnawIE9Uq5PQ0ixNR0QWHQBoFsT6Ll/GcYE7LC1WL0avZu9zttwzDRdPtzBr1zdPFazYZb6AmcA7cGXLJhf04CsEcjpg4B3/aP7eR+RfkYUyUBcHC6qPgW1CTYUFVIoY8nEEd8WJdK3jB1ZUZz7MCtWIsAtrrXIYf6aYpejnlbhtAh9c3ShzM7CPvfoth4IokQGj7RWDcyx4oeYxwD4ICyVdpUzVLQEt+hvtYql5sMu8CJx5Rodv6a/ooBunxbljETji/80aNYduY7LGFI8mFaEtvR/eaga5ASpfw08VoUPIkvrE4WdVZAJfVehJF0E4ZMRVIscW/ssKa/p0/kX7MDtTRd3cn/+bQu+5o2616Y2qqcmPGffohkntsOPH0sbD9R2S+allHr2VKsf5LPmN7S0G9s0CLvBnGLhCutjGosjopkor8/PSCONuEB4gDZ7supfeOd1U+YAQbYFD+vhDWzC0OptmqLadTKrfxI3HylqbF0pmiYy2F4UEaSmxFkHZcwfFH5BhP8Huv0vR8qhJCc5lkpvuyJO3B4BkFtTcanit56yKb+LTujQgGTwHQRiBBgWLnYbzCex99d0L7n7LUbb39PXXXTKv6CElUcISoAdLqSMjDzFZKMSFG6jdQE3RmU+3kXc5bbe4A5UQe5HRFIjL9R6V9eg==",
+                "purpose_mask": 15,
+                "recovery": true,
+                "weight": 1
+              }
+            ],
+            "recovery_threshold": 1,
+            "recovery_timelock_seconds": "120",
+            "threshold": 1
+          },
+          "sequence": "1"
+        },
+        "finalized_at": "2026-11-18T01:40:28Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "1568",
+          "logical_time": "1568000003",
+          "transaction_hash": "sha256:084eccd63771d16a54a99c5c0c4a5457bfd75b39ed44d1a7d0da5b3ce216d3c0"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:937f885dd703309632857f6ff82367fe4d6dd4345eebb9bf6bc13735e5ea3b64"
+      }
+    }
+  ],
+  "quorum": 2,
+  "registry_workchain": 0,
+  "schema": "tos.service.gate-c.quorum-check.v1"
+}

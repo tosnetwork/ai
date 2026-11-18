@@ -1,0 +1,136 @@
+{
+  "acceptance_profile": "operator-designated-initial-public-testnet",
+  "endpoints": [
+    "V1",
+    "V2",
+    "V3"
+  ],
+  "expected_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+  "generated_at": "2026-11-18T01:53:48Z",
+  "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+  "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+  "network": "tos:global-id:2",
+  "objects": [
+    {
+      "found": true,
+      "object_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+      "state": {
+        "agent": {
+          "agent_id": "agent_d1a2c49b75d44413dc8483495833565f78001a77ae63cabf918b6baf49144898",
+          "generation": "2",
+          "last_action_hash": "sha256:e42bbbcf65fd63d01884c5ef471a4f788d76d62b6960764d5cd5c45185a0cf64",
+          "policy": {
+            "controllers": [
+              {
+                "key_id": "mldsa44:bdab59ed4dca64b478d366da987d36014c6d85b897334d21b509d3f223a46291",
+                "mldsa44_public_key": "cwiObiBsIes4JDGG2KzrGWeHDTawqY7VfHntdMgl9oRhg+xUUNQ+zAe5SjyO2fC0xO7n7Kn4bbyuwo33mULRenuRxOXmjquHi/2IXBmqgFhLovaI03zSHJDt4xaEe8wj90ksqyGUVF1RHuMYJlh+rVodWKEE5b8h0Vt/fakQinBYecBDqPB74rNAWFUTEv0sk/wODkhFeeT9KzsBZ9NmgnaZfwTGHrNJ9uicodb8tqll6MoVpBdqnHtErUpvoYm+hpG2Q5Dt1KQT6I9xMgNl3Ho4kBOYQzytlfuhkzklirT2iWCUhBtdi+z4RwI/ULbAO4Yogo1EryxVI6+PoBgR4TDuiuk/qdHLlySpgyG73pm5Q23bgR2RkIKXSytWgXPJWK7Su2nHJFSOVTuoFy9jduM2AdBrkol6sbXbqeYYMTgKDk6aFWSxlaqGE6JP1vjDJ6HrYaV82ZYbzRyF099lgl6aSb+cB2Wu+fBDy7rF796MqxWRW5+kNuOB1/Ks/HI6PNQwoPG5A0Zq1gSy8Ohj2469+kANYFY911tXTT27X2KhPfZGLEajP/lmNjQ+BRdc2OckZC/EQ7BhUoAgU3OM4vmM5kDpnhTeArTYMUz2zmAs9mPwifTz8BuobeklZe6FbIFFiNG/DryxR4NubwcrTl1Jo5vYhxd/d2HPHhNYU7UEBs+Ovyjz5vshuOV4pCZlgb1QyCZ4IeAGkq2uLcDlf3eOTx6DGY92ozVhVcgjsMINIL7FUbBqt7da6Yz5iX7CjKH2kxrl5o/v9tdMC7HAaaUexoP4F4wJfhfTDrzSCVqDya2x7TL5lPqneFhVB3T+h3PicnCzvwxBLzB43RqXg5XinUNkSbnbhYAoJUg55i40sOJcoMteC/fEmNBmYpjXaBnNv7icEf2dpX1X7G+yG0vdLKFGSBvgsyWTWFaD/G+6lKm2WN9GFOCzMPyM9l3nJtXJC2vOIR8pBvecNqySZrQSjYUZ0kVtbnNPaf2SuLIOGEJJeEUyEmAzhGAJCy3vVfxAQrtznV9KXHqlTWfgI8SHMPDg97UaKPcXz5EJ7MzRAb2j+fGoNiWYlA4fsgp4MtpbKe7ZNdcG4rKCfuNXxaQbZPRGf9QVcou2z2o29S68oLgfKau33WNGnsLKWTo/FA+cXhLUXJhRKA9HxQyusQwWmMSFq0YOFIIubIRbYyfX5GDdx7RZKczbjUq2BYUS2Lqi/ji4yVaSdOfweH40HZulu61ZWOsAMw3quk5nYoKIsKdC8I2J9y/2cR/vJIuvWHFwWUtPq/pCE40WZR2AMBuxtsudAcZStGsz24db5hJoRnbd1LD5Wh1ektAlWKUVPAYbsijqE11HGf1hbVkAa/HLoUxK6pZPku9Re1nPisCQGGp+y+e4EPiobSXaVj7ASAtR6qyvOO73mNgRJR1HxKdS7kzsn7lx8i9ijIHOqUZQun5RYpOJ+ctCvMIEOQcV94n1BaJvOdeqUfDq/30f0+gjri7rZuSlQLE4GcaFIf3tE1c4/m5I1HnLnhsAc/NTSaHeDFNC9GGZJl1+bS4JPMwipc44PWInBOj5j+r+8C2Z8UmgbIl23X4y+qJrhVUYwSsIDsjx8HWsANvz9eRe/Ti43cx0dkopQBMjnK7kgyCk+Y4424MFL5hBHC3uBD60Zzxx+1WGf15s4928UztfRUsNtBy/nQ8QOXiFCeP/OIb3bsfXuoHhmOiQzrq6YeMBWNhQ/4z6LLXRDpR0EDw4lw==",
+                "purpose_mask": 15,
+                "recovery": true,
+                "weight": 1
+              }
+            ],
+            "recovery_threshold": 1,
+            "recovery_timelock_seconds": "120",
+            "threshold": 1
+          },
+          "sequence": "1"
+        },
+        "finalized_at": "2026-11-18T01:53:47Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:b866efc73ea52d00503711f8699d6ea7c4dad757ea43361f5e87d76a5a784fc3",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "3551",
+          "logical_time": "3558000003",
+          "transaction_hash": "sha256:5bd8ba5ee8485eaeba199cb476d2b18996e626f65b0e20835130353d8f1050aa"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:0cfc7988ab6bbe8d9d0cf97f8af039f2a282f87d135d2222521d452621a00a41"
+      }
+    },
+    {
+      "found": true,
+      "object_id": "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+      "state": {
+        "agent": {
+          "agent_id": "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+          "generation": "1",
+          "last_action_hash": "sha256:72a53ca18f1f4b024dcb9ed45c90801cd75e93c4a431c349c30d69f3007a9ebf",
+          "policy": {
+            "controllers": [
+              {
+                "key_id": "mldsa44:0c4e68a33f3400ab747f57007cee05e985e76cdd0f9620d0e993d01caeb04c36",
+                "mldsa44_public_key": "22ueNCqzpusoJ29nhtVmwp/3MfX4LR2B3rnVahX5+q3tio3BdLDoW/oQbUqts+bSe1dvVhGTZsOHPWtG0vZXowQOkzyHzMP/vI3t5bD5X0pE9QEUtqiJ4VSU+LdCw6RZ8wu2a1+mINSXi+YxmEURG3ci02ZeKrRNC7BNq+x1ll4icA6pyBJ+m8cdEblwwKidx5ktOUL++xXhgo6TUCunuQLJI1IbORpiyV6c8d4Z3cSLUgcv0CJK49jHGUl6vXKPJQp0AazAwYxogHpeNaZlLrlFWNmV5HwxxqGnpG/DVb/k4vlkTL5o4pF4MI+DT9C/yhrLeUbtAHXBN6EaMohWKxNCMZaZ4mhu/5sawCJjzJITXX4VLBj3etYEzYJqcrz7zBvixgjt9pzkuTIENb4xlsYFX5MIpKgXMjgJ9qCh+ohEmrlBA/2JKJd5C7HsZekxSl8fHdxMESTRXBwnf4Wo2n/FriZ9WLTO/VlKhns+vypZYjkLRec8tkP6sVZ+5OwdihpwwDf3UUbOA+TTdrBfozafxYTjtKdVkNnZ8hDhI5WEYgf0SkUbaWWfHXCq/QuumMnH1e+gWMtFwsqHrEMF78Vc9635lHMjOJ0fm+N+hrBLoZ7IMqqbEcCrsKLP+jJIgtxQxHVnzrMIPggInuHCX6erdZnpLNKov7OqFZbrgoqXK68HJpRt0DbMqFhsRPd7Ec+ow1AEdzXrFGrW0gg3cYsq8U0WRG7XoWKeHvKXPQ+/8lZCB3awnSdQ7O8Z3ClJ5CojMoAeBxg3AQEqnBGD5X1YCQrvVW0kPRHNT3vprDMPs2LKpxS+AJqocCHjS5zwOu2BZiPDDHgkxCIYY1XLFdKVpSp1dr8CCtygWr1BXfmwLrYzqI04F/JbPRPRU83qvkChpUCc1sjFBDW6IMSFtv4GIUQqhET3k1txEuHOAUg+bs5XG7GWXHBgbUiKzH5a6rD27UfT+kPPB6IVqVJzBXb3/5G8SNWENukobFuhR8WUspAhPHCN1zZZbDMoEUTbH4ou+mZT2mKHDbNpa/Ft5/NyBrlEjeS8AenL8gDqkf9nN3qpoUvo6flLUJUD6AafPo8choQgHY0C+VoD5Epm6Q7oQwOhIyd3QOJP+lEjoWgWP+owLnbGtyE/ogB6nP+QJHukLckW8KuNDr1lnGr7p4BkxCpgXOIb+sUJx7iKFI2G7J0kvRXY5uk3aK9RCA/8qukc5M1wXqJZ6qNvv4yY++HvXEjAvBILgx70Y05wrgdYm1ar1U2IWQliP/5IEMT+TwMqnV2LTYWOQ55/iq9FQ2/ZsUWctbUlEvGI+d9rtMaCLdACP/Ckuk/T5JAXMK631nQ7aAQCDEO/9sgGOgD9D0xTbOWbpysM41gppFmd4rNg4vPawO5i9i98cbaYiLXAutY6KIqrOCRXsXci8XtS+toiZSfojX9QunYRFdSOo1l82kHq1t8IAIwtR1IlE0huGC5xJkySflsJFWxrDgyUe+z8zvA5g4hbTFu1B1PDvZUwpNEtWN52IO1hCuAjvgdoDf9BBaDr52cBziNaGN/xBLuAYr5C6xECN6y3OETh3bgOV1lfNoXl+oOZew8od3UHhLBtyUkgrrGNvofv5PGeuRBSCj/VwskUfRpU5y7Z5W/rp74g3I5woPbhpWAAFlOex5/EgTOYVFX2p5yFJoYurmttDk0EzqPj/vVSLyeRbpi8gtLXOTReIzVae06ZcGFMBgN0qztyqBh2lwD+LQ/VzQ==",
+                "purpose_mask": 15,
+                "recovery": true,
+                "weight": 1
+              }
+            ],
+            "recovery_threshold": 1,
+            "recovery_timelock_seconds": "120",
+            "threshold": 1
+          },
+          "sequence": "1"
+        },
+        "finalized_at": "2026-11-18T01:53:47Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:6c6db14c60e068152cb0197354e3b53c070a2789f3a4a87e9b043bc4f255f470",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "3552",
+          "logical_time": "3538000005",
+          "transaction_hash": "sha256:924b2d82f0454c0e06ddd5b0dbc24b4bd8da790b0bc29b3744157196b0c3370b"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:9502f84cd344d0aa4330f5cf76083219d0b5eba8d82533fd5f70009b12da3e98"
+      }
+    },
+    {
+      "found": true,
+      "object_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+      "state": {
+        "capability": {
+          "capability_id": "cap_b3e6d98e5e548c454572c9e363d919d588d86256755052fef854e52fffee5f95",
+          "generation": "2",
+          "last_action_hash": "sha256:54e60617835cb2a970a692bdad028fba06053140ce0821bc1263db2fcb99bf11",
+          "owner_agent_id": "agent_352e58dcad3b01d6a5e7515840eae223aeda7c7ba96a8a207044d825cd89d89d",
+          "sequence": "1",
+          "versions": [
+            {
+              "manifest_digest": "sha256:185de37af8264a7f6397fae1ef20125dd833325bc1410761f331433aea82750b",
+              "revoked": true,
+              "version": "v1"
+            },
+            {
+              "manifest_digest": "sha256:c42cfb9f9baf4803422d0ec97e9038b70219dee476416c37fe2e059cc29df8a2",
+              "version": "v2"
+            }
+          ]
+        },
+        "finalized_at": "2026-11-18T01:53:47Z",
+        "network": {
+          "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+          "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+          "network_id": "tos:global-id:2"
+        },
+        "reference": {
+          "account": "0:a1a660a2aa7fe67e73ef1dfc632c22d9efad8fe863507862068482901f8a69b0",
+          "contract_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "finalized_checkpoint": "3552",
+          "logical_time": "3558000005",
+          "transaction_hash": "sha256:5d057bed104f59d585b5fae1f925dd99b1ec42648d179d6e07c8410003126a98"
+        },
+        "tvm_state_hash": "tvm-cell-sha256:80bdef550f957a34f84b371c6a30b2ae39c05eed0108fc0999afe62e59b086bb"
+      }
+    }
+  ],
+  "quorum": 2,
+  "registry_workchain": 0,
+  "schema": "tos.service.gate-c.quorum-check.v1"
+}
