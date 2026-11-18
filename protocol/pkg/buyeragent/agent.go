@@ -300,7 +300,9 @@ func (a *Agent) Prepare(ctx context.Context, params PrepareParams) (PurchaseView
 	}
 	purchase = PurchaseRecord{RequestHash: requestHash, QuoteID: params.QuoteID, IdempotencyKey: params.IdempotencyKey,
 		SourceDigest: sourceDigest, ExecutionNonce: key.ExecutionNonce, ArchiveBytes: len(archive),
-		Members: checked.Members, CreatedUnix: now.Unix()}
+		Members: checked.Members, CreatedUnix: now.Unix(), ProviderAgentID: validated.Proposal.ProviderAgentId,
+		ManifestDigest: validated.Proposal.ManifestDigest, ProviderName: validated.Manifest.Name,
+		ProviderDescription: validated.Manifest.Description, RetentionSeconds: validated.Manifest.RetentionSeconds}
 	if record.Phase == buyersdk.PhasePrepared {
 		if carriageErr := a.config.Carriage.CheckCarriage(ctx, record, archive); carriageErr != nil {
 			if record, err = a.config.Buyer.Withdraw(requestHash); err != nil {
@@ -389,6 +391,17 @@ type PurchaseView struct {
 	ArchiveBytes      int      `json:"archive_bytes"`
 	Members           []Member `json:"members"`
 	Requested         bool     `json:"payment_requested"`
+	// The preview of section 4.5: the provider, the manifest and its text,
+	// and the terms the deadlines and refunds follow. The text is the
+	// provider's own and untrusted.
+	ProviderAgentID          string `json:"provider_agent_id"`
+	ManifestDigest           string `json:"manifest_digest"`
+	ProviderName             string `json:"untrusted_provider_name"`
+	ProviderDescription      string `json:"untrusted_provider_description"`
+	ResponseSLASeconds       uint32 `json:"response_sla_seconds"`
+	RefundClaimWindowSeconds uint32 `json:"refund_claim_window_seconds"`
+	CleanupBountyNanoTOS     string `json:"cleanup_bounty_nanotos"`
+	RetentionSeconds         uint64 `json:"retention_seconds"`
 }
 
 func stateOf(record buyersdk.CallRecord, purchase PurchaseRecord, now time.Time) string {
@@ -422,7 +435,11 @@ func (a *Agent) viewOf(record buyersdk.CallRecord, purchase PurchaseRecord) Purc
 		PriceNanoTOS: record.PriceNanoTOS, StorageFeeNanoTOS: record.StorageFeeNanoTOS,
 		PaymentNanoTOS: record.PaymentNanoTOS, TermsHash: record.TermsHash, QuoteCommitment: record.QuoteCommitment,
 		QuoteExpiresUnix: record.ExpiresAtUnix, SourceDigest: purchase.SourceDigest, ArchiveBytes: purchase.ArchiveBytes,
-		Members: append([]Member(nil), purchase.Members...), Requested: purchase.RequestedUnix != 0}
+		Members: append([]Member(nil), purchase.Members...), Requested: purchase.RequestedUnix != 0,
+		ProviderAgentID: purchase.ProviderAgentID, ManifestDigest: purchase.ManifestDigest,
+		ProviderName: purchase.ProviderName, ProviderDescription: purchase.ProviderDescription,
+		ResponseSLASeconds: record.ResponseSLASeconds, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,
+		CleanupBountyNanoTOS: record.CleanupBountyNanoTOS, RetentionSeconds: purchase.RetentionSeconds}
 }
 
 // RequestHashParams names one purchase.
