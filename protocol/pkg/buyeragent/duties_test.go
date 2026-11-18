@@ -100,6 +100,32 @@ func TestASentOperationIsNotRepeatedBeforeTheRetry(t *testing.T) {
 	}
 }
 
+// After the retry interval the agent asks again, but an earlier send that
+// finalized state has not settled holds the operation back: the duty waits
+// and counts no send.
+func TestAnUnsettledEarlierSendKeepsTheDutyWaiting(t *testing.T) {
+	f := newFixture(t)
+	view := f.paid(t, keyA)
+	ctx := context.Background()
+	f.setStatus(serviceactor.StatusOverdue)
+	f.buyer.lifecycleErr = errors.New("tosctl exited after submitting")
+	if _, err := f.agent.RefundNow(ctx, view.RequestHash); err == nil || codeOf(t, err) != CodeAmbiguous {
+		t.Fatalf("the first send: %v", err)
+	}
+	f.buyer.lifecycleErr = nil
+	f.clock.advance(LifecycleRetry)
+	f.buyer.mu.Lock()
+	f.buyer.lifecycleUnsettled = true
+	f.buyer.mu.Unlock()
+	out, err := f.agent.RefundNow(ctx, view.RequestHash)
+	if err != nil || out.Sent || !out.Waiting {
+		t.Fatalf("an unsettled earlier send: %+v %v", out, err)
+	}
+	if sent := f.buyer.sentLifecycle(); len(sent) != 1 {
+		t.Fatalf("sends %v", sent)
+	}
+}
+
 func TestLifecycleSendsAreBoundedPerWindow(t *testing.T) {
 	f := newFixture(t)
 	// The default bound is 2 * MaxCalls + 8 (section 6).

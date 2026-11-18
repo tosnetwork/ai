@@ -14,9 +14,14 @@ The stdio MCP server (`protocol/pkg/mcpbuyer`, `tos-service-buyer-mcp`) is
 implemented with `tos_buyer_prepare`, `tos_buyer_request_payment`,
 `tos_buyer_withdraw`, `tos_buyer_status` and `tos_buyer_purchases`. Its
 search, quote, result and refund tools come with the agent methods behind
-them.
+them. The gateway's Quote-carried provider key card and the buyer's
+verification of a provider card from any source
+(`buyersdk.ServiceActorBuyer.VerifyProviderCard`, 3.3) are implemented.
 
-Not yet implemented are the relay carriage, the lifecycle duties, the
+The refund duties (section 11) run in the agent without an MCP session, and
+`tos_buyer_refund` advances them.
+
+Not yet implemented are the relay carriage, the
 finalized-state reads behind search, quote and result, and `init`; section
 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
@@ -33,7 +38,10 @@ provider does not answer. It is a Gate D component: the external buyer of the
 Gate D pilot (section 15) will most naturally be such a developer.
 
 **Normative inputs.** This design adds no protocol object, frame, contract
-message or authority. It composes:
+message or authority. Its one wire addition is the optional,
+non-authoritative provider key card that a gateway serves next to a Quote
+package (`RequestQuoteProposalResponse.provider_key_card_packet_json`,
+[`API.md`](API.md), "Provider key card"). It composes:
 
 - the Service Actor contract and its settlement binding
   ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
@@ -235,12 +243,19 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
   response deadline can always be issued. It keeps each private key until
   `not_after_unix + 86,400 + 300` and polls every relay of every card whose key
   it holds.
-- **Provider card.** Taken from an offer file (schema
-  `tos.openfox.rail-offer.v2`, an untrusted input the user or a catalog
-  supplies) or in band from a result of the same purchase. The agent uses a
-  card only after `VerifyKeyCard` against finalized state at most 10 minutes
-  before sealing **and** only when the card's Agent equals the Capability's
-  finalized owner (relay 6.4).
+- **Provider card.** Taken from one of three sources, all untrusted:
+  an offer file (schema `tos.openfox.rail-offer.v2`, which the user or a
+  catalog supplies), a gateway Quote response (the card served next to the
+  package, [`API.md`](API.md) "Provider key card"), or in band from a result
+  of the same purchase. Every source goes through one check,
+  `buyersdk.ServiceActorBuyer.VerifyProviderCard`. The card's Agent must
+  equal the Capability's finalized owner, read at the verifying checkpoint,
+  and the card must pass `VerifyKeyCard` against finalized state (relay 6.4).
+  The agent seals to a card only while `VerifiedProviderCard.UsableAt`
+  holds, which means it was verified at most 10 minutes earlier and is inside
+  its own validity window (relay 6.3). Otherwise it verifies the card again.
+  Of several usable cards it seals to the one relay 6.3 selects. Without a
+  verified card it does not pay (7.1 item 3).
 - **Polling.** The agent lists each relay every 15 seconds with up to 20 %
   jitter, backs off to at most 5 minutes on error or `429`, opens envelopes
   under relay 8.5, verifies the inner packet (`agentpacket.Verify`), checks the
@@ -324,7 +339,10 @@ The agent:
 3. builds the Quote Proposal **locally** with `quoteprovider` from the same
    finalized checkpoint, so no gateway Quote is needed; a gateway Quote MAY be
    used instead and is then validated by `quoteexchange.Validate` and
-   cross-checked field by field against the finalized offer;
+   cross-checked field by field against the finalized offer. A gateway
+   Quote may come with the provider's key card, which is how a buyer with no
+   offer file reaches a provider it can contact only through a relay. The
+   agent verifies that card under 3.3 like a card from any other source;
 4. runs the source-independent items of the carriability check (7.1 items 1
    and 3 to 5, and item 2 for the package and version).
 
@@ -948,9 +966,33 @@ They are journaled before custody starts and treated as ambiguous until
 finalized history shows them, like the call. An operation that has been
 handed to custody is not sent again for 10 minutes, so finalized history can
 show its effect first. A send that custody never started does not count.
-After that the agent sends it again while the status still requires it, so a
-`claim_refund` that fails with 1921 (under-backed actor) is retried until the
-deadline. Every send counts against the lifecycle bound of section 6. Each
+
+After that the agent sends the operation again while the status still
+requires it, but only once every earlier send of it is **settled** at a fresh
+finalized checkpoint, whose chain time is the clock. Before each send the
+agent records the buyer wallet's finalized seqno and a bound on the wallet
+message's `valid_until`. The bound is the send's start plus custody's
+3-minute deadline, the wallet message's 2-minute lifetime and 5 minutes of
+clock skew. An earlier send is settled when one of these holds:
+
+1. the actor's finalized history since the call holds a transaction from the
+   buyer wallet carrying the send's `query_id`. The message executed,
+   whatever its outcome, so a `claim_refund` that failed with 1921
+   (under-backed actor) is retried until the deadline;
+2. the checkpoint is past the bound and the wallet's seqno is still the one
+   recorded before the send. The wallet accepted no message since, and the
+   send's message has expired, so it never executes;
+3. the checkpoint is past the bound plus a 10-minute delivery allowance, the
+   wallet's seqno has moved, and the history since the call holds no
+   transaction from the wallet that could be the send's. A failed
+   transaction whose body shows no `query_id` could be.
+
+Otherwise the earlier message may still be in flight, and the duty waits.
+The contract would refuse a second claim or sweep in any case. The rule
+keeps the agent from sending one that finalized state has not proven
+necessary. The call itself is never sent twice (section 10, "At most one
+call"). Every send counts
+against the lifecycle bound of section 6. Each
 duty round looks at every purchase whose call was handed to custody, at
 least every 60 seconds, whether or not an MCP client is connected.
 
@@ -1018,7 +1060,7 @@ returned by tools that were asked to act. The frames' refusal labels (frames
 | A relay drops, delays, replays or reorders envelopes | at-least-once delivery, redelivery, several relays, durable inbox, packet and frame checks | delay; mailbox IDs, sizes and timing visible to the relay |
 | A lying RPC endpoint | strict-majority quorum of 3 to 8 endpoints at one checkpoint | a colluding majority |
 | A substituted `tosctl` binary | pinned SHA-256 and pinned configuration bytes | none at the pin |
-| A crash or power loss during a send | journal phases; `ambiguous` is never re-sent | delay until finalized history resolves it |
+| A crash or power loss during a send | journal phases; an `ambiguous` call is never re-sent, and an `ambiguous` lifecycle send is repeated only once settled (11.2) | delay until finalized history resolves it |
 | A single-account deployment | start-time checks (2.3, 5.1) | a `sudo` path the agent cannot see |
 
 ## 14. Out of scope
@@ -1062,7 +1104,13 @@ refusals, crash recovery and the confirmation boundary:
 
 - `protocol/pkg/buyersdk`: a terminal `withdrawn` phase that holds no
   reservation; journaled `expire`, `claim_refund` (destination fixed to the
-  buyer wallet) and sweep senders over the pinned `tosctl`;
+  buyer wallet) and sweep senders over the pinned `tosctl`; provider key
+  card verification for every card source (`VerifyProviderCard`);
+- the gateway's Quote-carried provider key card: the protobuf field, the
+  quote profile's `provider_key_card_file`, and the shape check
+  `quoteexchange.CheckProviderKeyCard`. The provider half, where OpenFox
+  writes its current card to that file and republishes it, is an OpenFox
+  follow-up;
 - a buyer agent package in `protocol/` (purchase records, relay carrier, the
   buyer state machine of frames 11.1, the socket API with peer-credential
   checks, full re-validation of client requests, the random confirmation code

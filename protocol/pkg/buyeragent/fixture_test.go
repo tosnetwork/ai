@@ -70,6 +70,9 @@ type fakeBuyer struct {
 	resolveErr   error
 	lifecycle    []string
 	lifecycleErr error
+	// lifecycleUnsettled makes every send report an earlier send of the
+	// operation that may still execute, as buyersdk does.
+	lifecycleUnsettled bool
 }
 
 func (f *fakeBuyer) Resolve(_ context.Context, requestHash string) (*buyersdk.RequestReport, error) {
@@ -97,6 +100,11 @@ func (f *fakeBuyer) Resolve(_ context.Context, requestHash string) (*buyersdk.Re
 // SendLifecycle journals the send as buyersdk does and records it.
 func (f *fakeBuyer) SendLifecycle(_ context.Context, requestHash, operation string) (buyersdk.CallRecord, error) {
 	f.mu.Lock()
+	if f.lifecycleUnsettled {
+		f.mu.Unlock()
+		record, err := f.journal.Read(requestHash)
+		return record, errors.Join(err, buyersdk.ErrLifecycleUnsettled)
+	}
 	f.lifecycle = append(f.lifecycle, requestHash+" "+operation)
 	sendErr := f.lifecycleErr
 	f.mu.Unlock()

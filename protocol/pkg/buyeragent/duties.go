@@ -13,8 +13,9 @@ import (
 // Refund duties (MCP_BUYER_ADAPTER_V1 section 11).
 const (
 	// LifecycleRetry is how long a send of one operation stands before the
-	// agent sends it again. A send takes effect only when finalized history
-	// shows it; until then it is not repeated.
+	// agent considers sending it again. Even then the buyer sends it only
+	// once finalized state settles the earlier send
+	// (buyersdk.ErrLifecycleUnsettled).
 	LifecycleRetry = 10 * time.Minute
 	// MaxDutyInterval bounds how long the agent waits between rounds of
 	// duties.
@@ -159,6 +160,11 @@ func (a *Agent) duty(ctx context.Context, requestHash string) (DutyView, error) 
 	}
 	updated, err := a.config.Buyer.SendLifecycle(ctx, requestHash, view.Operation)
 	switch {
+	case errors.Is(err, buyersdk.ErrLifecycleUnsettled):
+		// An earlier send may still execute; it is not repeated until
+		// finalized state settles it (section 11.2).
+		view.Waiting = true
+		return view, nil
 	case errors.Is(err, buyersdk.ErrCallNotStarted):
 		return view, refusal(CodeDependencyUnavailable, "the lifecycle send was not handed to custody", err)
 	case err != nil && lastPhase(updated) == buyersdk.PhaseAmbiguous:

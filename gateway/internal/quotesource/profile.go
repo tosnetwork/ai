@@ -18,6 +18,7 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteprovider"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
@@ -50,6 +51,45 @@ type Profile struct {
 	// StateDirectory is an owner-only directory for the finalized checkpoint
 	// high-water files.
 	StateDirectory string `json:"state_directory"`
+	// ProviderKeyCardFile, when set, is the owner-only file holding the
+	// provider's current encryption key card packet JSON, which the gateway
+	// serves next to each Quote. The provider republishes the card by
+	// replacing the file; the gateway reads it for every Quote.
+	ProviderKeyCardFile string `json:"provider_key_card_file,omitempty"`
+}
+
+// CardFile serves the provider key card from the profile's card file.
+type CardFile struct {
+	path string
+}
+
+// ProviderKeyCard reads the current card. The gateway checks its shape
+// before serving it.
+func (c *CardFile) ProviderKeyCard() ([]byte, error) {
+	if c == nil {
+		return nil, errors.New("no provider key card file is configured")
+	}
+	return readPrivate(c.path, quoteexchange.MaxProviderKeyCardBytes)
+}
+
+// LoadCardFile returns the profile's card source, or nil when the profile
+// names no card file. A configured card must be readable and a currently
+// valid key card of the profile's provider when the gateway starts, so a
+// misconfigured card is reported instead of being silently left out of
+// every Quote.
+func LoadCardFile(profile Profile, now time.Time) (*CardFile, error) {
+	if profile.ProviderKeyCardFile == "" {
+		return nil, nil
+	}
+	cards := &CardFile{path: profile.ProviderKeyCardFile}
+	raw, err := cards.ProviderKeyCard()
+	if err != nil {
+		return nil, err
+	}
+	if err := quoteexchange.CheckProviderKeyCard(raw, profile.ProviderAgentID, now); err != nil {
+		return nil, errors.New("provider key card file does not hold a currently valid key card of the profile's provider")
+	}
+	return cards, nil
 }
 
 // LoadProfile reads and validates the profile and its canonical manifest.
@@ -109,18 +149,27 @@ func NewProvider(profile Profile, manifest []byte, sessions quoteprovider.Sessio
 }
 
 // Load reads the profile and opens a quorum-finalized Service Actor reader
-// for it: the Capability and the actor are read at one checkpoint.
+// for it: the Capability and the actor are read at one checkpoint. It also
+// returns the profile's provider key card source, nil when none is named.
 func Load(path string, network *nativev1.NetworkDomain, registryCodeHash string,
-	timeout time.Duration) (*quoteprovider.Provider, error) {
+	timeout time.Duration) (*quoteprovider.Provider, *CardFile, error) {
 	profile, manifest, err := LoadProfile(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	cards, err := LoadCardFile(profile, time.Now())
+	if err != nil {
+		return nil, nil, err
 	}
 	reader, err := openReader(profile, network, registryCodeHash)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return NewProvider(profile, manifest, quoteprovider.FromChain(reader), network, registryCodeHash, timeout)
+	provider, err := NewProvider(profile, manifest, quoteprovider.FromChain(reader), network, registryCodeHash, timeout)
+	if err != nil {
+		return nil, nil, err
+	}
+	return provider, cards, nil
 }
 
 func openReader(profile Profile, network *nativev1.NetworkDomain, registryCodeHash string) (*toschain.ServiceActorReader, error) {

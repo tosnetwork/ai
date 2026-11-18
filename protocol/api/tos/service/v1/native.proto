@@ -223,7 +223,10 @@ message QuoteProposalPackageV1 {
   bytes canonical_manifest_cbor = 2;
   bytes transport_binding_boc = 4;
 }
-message RequestQuoteProposalResponse { QuoteProposalPackageV1 package = 1; }
+// provider_key_card_packet_json is optional and non-authoritative: the
+// provider's signed key card packet JSON (1 to 16,384 bytes) or empty, next
+// to the package and never part of it.
+message RequestQuoteProposalResponse { QuoteProposalPackageV1 package = 1; bytes provider_key_card_packet_json = 2; }
 service NativeService { rpc SubmitNativeAction(SubmitNativeActionRequest) returns (SubmitNativeActionResponse); rpc ResolveNativeState(ResolveNativeStateRequest) returns (ResolveNativeStateResponse); }
 service DNSAliasService { rpc ResolveDNSAlias(ResolveDNSAliasRequest) returns (ResolveDNSAliasResponse); }
 service CapabilityDiscoveryService {

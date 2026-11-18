@@ -125,7 +125,7 @@ func TestLifecycleSendsAreJournaledAndAlwaysRefundTheBuyer(t *testing.T) {
 		t.Fatalf("an ambiguous lifecycle send: %+v %v", ambiguous.Lifecycle, err)
 	}
 	lifecycle.err = ErrCallNotStarted
-	notStarted, err := f.buyer.SendLifecycle(ctx, record.RequestHash, LifecycleExpire)
+	notStarted, err := f.buyer.SendLifecycle(ctx, record.RequestHash, LifecycleSweep)
 	if !errors.Is(err, ErrCallNotStarted) || notStarted.Lifecycle[2].Phase != PhasePrepared {
 		t.Fatalf("a send custody never started: %+v %v", notStarted.Lifecycle, err)
 	}

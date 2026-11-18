@@ -74,11 +74,22 @@ type Server struct {
 	Backend     Backend
 	Catalog     DiscoveryCatalog
 	QuoteSource QuoteSource
-	Network     *nativev1.NetworkDomain
+	// ProviderCards, when set, supplies the provider key card served next to
+	// each Quote. It is optional and grants no authority.
+	ProviderCards ProviderCardSource
+	Network       *nativev1.NetworkDomain
+	// Now is the clock for Quote expiry and card validity; nil is time.Now.
+	Now func() time.Time
 }
 
 type QuoteSource interface {
 	RequestQuoteProposal(context.Context, *nativev1.RequestQuoteProposalRequest) (*nativev1.QuoteProposalPackageV1, error)
+}
+
+// ProviderCardSource returns the provider's current encryption key card
+// packet JSON. The gateway checks only its shape; the buyer verifies it.
+type ProviderCardSource interface {
+	ProviderKeyCard() ([]byte, error)
 }
 
 type DiscoveryCatalog interface {
@@ -214,7 +225,8 @@ func (s *Server) RequestQuoteProposal(ctx context.Context, request *connect.Requ
 		// remote caller is told only its fixed class.
 		return nil, discoveryError(quoteprovider.PublicError(err), publicerrors.DependencyUnavailable)
 	}
-	validated, err := quoteexchange.Validate(s.Network, request.Msg, proposal, time.Now())
+	now := s.now()
+	validated, err := quoteexchange.Validate(s.Network, request.Msg, proposal, now)
 	if err != nil {
 		return nil, publicerrors.New(publicerrors.Conflict, errors.New("Quote Proposal source returned conflicting preimages"), 0)
 	}
@@ -223,7 +235,31 @@ func (s *Server) RequestQuoteProposal(ctx context.Context, request *connect.Requ
 	if err = railwork.CheckCarriableQuote(proposal, validated.TransportBinding); err != nil {
 		return nil, publicerrors.New(publicerrors.Conflict, errors.New("Quote Proposal package is too large to be carried"), 0)
 	}
-	return connect.NewResponse(&nativev1.RequestQuoteProposalResponse{Package: proposal}), nil
+	return connect.NewResponse(&nativev1.RequestQuoteProposalResponse{Package: proposal,
+		ProviderKeyCardPacketJson: s.providerCard(validated.Proposal.ProviderAgentId, now)}), nil
+}
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+// providerCard returns the provider key card to serve next to a Quote, or
+// nil. A card that cannot be read, or is not a currently valid key card of
+// the proposal's provider, is left out and the Quote is still served: the
+// card is a convenience the buyer verifies, and a buyer may hold a card from
+// another source.
+func (s *Server) providerCard(providerAgentID string, now time.Time) []byte {
+	if s.ProviderCards == nil {
+		return nil
+	}
+	raw, err := s.ProviderCards.ProviderKeyCard()
+	if err != nil || quoteexchange.CheckProviderKeyCard(raw, providerAgentID, now) != nil {
+		return nil
+	}
+	return append([]byte(nil), raw...)
 }
 
 func (s *Server) authorizeDiscovery(header string, requestContext *nativev1.RequestContext, required Permission) error {

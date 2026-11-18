@@ -61,6 +61,20 @@ type saChain struct {
 	// transitions are the Registry transition transactions the objects'
 	// histories hold, by kind; an absent kind is unproven.
 	transitions map[nativecore.RegistryTransitionKind]toschain.RegistryTransitionTx
+	// others are further finalized Registry objects by ID.
+	others map[string]*nativev1.NativeStateV1
+	// wallet is the buyer wallet's seqno getter and the checkpoint clock.
+	wallet saWallet
+}
+
+// saWallet is the buyer wallet and clock of the fake chain. A zero
+// chainTime is saNow.
+type saWallet struct {
+	seqno     uint32
+	seqnoErr  error
+	chainTime time.Time
+	// onSeqno runs inside the seqno read, as a concurrent writer would.
+	onSeqno func()
 }
 
 func (c *saChain) BeginBuyerSession(context.Context) (ServiceActorSession, error) {
@@ -71,9 +85,13 @@ func (c *saChain) BeginBuyerSession(context.Context) (ServiceActorSession, error
 	for kind, transition := range c.transitions {
 		transitions[kind] = transition
 	}
+	others := make(map[string]*nativev1.NativeStateV1, len(c.others))
+	for id, state := range c.others {
+		others[id] = proto.Clone(state).(*nativev1.NativeStateV1)
+	}
 	return &saSession{checkpoint: c.checkpoint, capability: proto.Clone(c.capability).(*nativev1.NativeStateV1),
 		agent: proto.Clone(c.agent).(*nativev1.NativeStateV1), data: c.data, history: append([]toschain.ActorTransaction(nil), c.history...),
-		getterLie: c.getterLie, transitions: transitions}, nil
+		getterLie: c.getterLie, transitions: transitions, others: others, wallet: c.wallet}, nil
 }
 
 type saSession struct {
@@ -83,6 +101,18 @@ type saSession struct {
 	history           []toschain.ActorTransaction
 	getterLie         bool
 	transitions       map[nativecore.RegistryTransitionKind]toschain.RegistryTransitionTx
+	others            map[string]*nativev1.NativeStateV1
+	wallet            saWallet
+}
+
+func (s *saSession) WalletSeqno(_ context.Context, wallet string) (uint32, error) {
+	if wallet != saBuyer {
+		return 0, errors.New("the seqno of another wallet was read")
+	}
+	if s.wallet.onSeqno != nil {
+		s.wallet.onSeqno()
+	}
+	return s.wallet.seqno, s.wallet.seqnoErr
 }
 
 func (s *saSession) RegistryTransition(_ context.Context, object string, kind nativecore.RegistryTransitionKind,
@@ -104,8 +134,13 @@ func (s *saSession) RegistryTransition(_ context.Context, object string, kind na
 	return &transition, nil
 }
 
-func (s *saSession) Checkpoint() uint64   { return s.checkpoint }
-func (s *saSession) ChainTime() time.Time { return saNow }
+func (s *saSession) Checkpoint() uint64 { return s.checkpoint }
+func (s *saSession) ChainTime() time.Time {
+	if s.wallet.chainTime.IsZero() {
+		return saNow
+	}
+	return s.wallet.chainTime
+}
 func (s *saSession) ResolveRegistry(_ context.Context, id string) (*nativev1.NativeStateV1, bool, error) {
 	var state *nativev1.NativeStateV1
 	switch id {
@@ -114,7 +149,11 @@ func (s *saSession) ResolveRegistry(_ context.Context, id string) (*nativev1.Nat
 	case saAgent:
 		state = s.agent
 	default:
-		return nil, false, nil
+		other, found := s.others[id]
+		if !found {
+			return nil, false, nil
+		}
+		state = other
 	}
 	state.Reference = &nativev1.ChainReference{FinalizedCheckpoint: s.checkpoint}
 	return state, true, nil
@@ -136,7 +175,13 @@ func (s *saSession) ReadActor(_ context.Context, address string) (*toschain.Acto
 
 func (s *saSession) History(_ context.Context, _ string, anchor *toschain.ActorTxID) (*toschain.ActorHistory, error) {
 	if anchor != nil {
-		return nil, errors.New("not used")
+		for index, transaction := range s.history {
+			if transaction.LT == anchor.LT && transaction.Hash == anchor.Hash {
+				return &toschain.ActorHistory{Result: toschain.HistoryAnchorReached, Head: s.head(),
+					Transactions: append([]toschain.ActorTransaction(nil), s.history[:index]...)}, nil
+			}
+		}
+		return nil, toschain.ErrHistoryAnchorMissing
 	}
 	return &toschain.ActorHistory{Result: toschain.HistoryComplete, Head: s.head(), Transactions: s.history}, nil
 }

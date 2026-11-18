@@ -1109,7 +1109,12 @@ Buyers who use a Gateway get Quotes from the Gateway's provider Quote profile
 who use OpenFox, set that profile's `transport` block (in the Gateway's
 profile file, not in the OpenFox rail configuration) to `security_mode` `2`,
 `base_url` `agent-packet:<PROVIDER_AGENT_ID>` and `max_request_bytes`
-`1048576`.
+`1048576`. A provider that receives only through a relay also names its
+current key card in the profile's `provider_key_card_file`. The Gateway then
+serves the card with each Quote, and a buyer without the offer file can
+still reach the provider (`gateway/README.md`; [`API.md`](API.md),
+"Provider key card"). OpenFox does not yet write that file, so for now it is
+kept current by hand from the card in the offer file.
 
 After a manual publication, write the provider section of the rail
 configuration by hand (fields in the

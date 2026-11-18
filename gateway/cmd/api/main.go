@@ -60,11 +60,18 @@ func main() {
 	network := &nativev1.NetworkDomain{NetworkId: cfg.Catalog.NetworkID,
 		GenesisRootHash: cfg.Catalog.GenesisRootHash, GenesisFileHash: cfg.Catalog.GenesisFileHash}
 	var quoteSource nativegateway.QuoteSource
+	var providerCards nativegateway.ProviderCardSource
 	if cfg.QuoteProfileFile != "" {
-		quoteSource, err = quotesource.Load(cfg.QuoteProfileFile, network, cfg.Catalog.RegistryCodeHash, cfg.TOSRPC.Timeout)
+		provider, cards, err := quotesource.Load(cfg.QuoteProfileFile, network, cfg.Catalog.RegistryCodeHash, cfg.TOSRPC.Timeout)
 		if err != nil {
 			logger.Error("configure provider Quote source", "error", err)
 			os.Exit(2)
+		}
+		quoteSource = provider
+		// A nil *CardFile stays out of the interface, so "no card" is a nil
+		// source rather than a source that always fails.
+		if cards != nil {
+			providerCards = cards
 		}
 	}
 
@@ -78,7 +85,7 @@ func main() {
 
 	gateway := &nativegateway.Server{
 		Authorizer: nativegateway.NewTokenAuthorizer(cfg.NativeReadToken, cfg.NativeRelayToken),
-		Backend:    backend, Catalog: catalog, QuoteSource: quoteSource, Network: network,
+		Backend:    backend, Catalog: catalog, QuoteSource: quoteSource, ProviderCards: providerCards, Network: network,
 	}
 	limiter, err := ingress.NewLimiter(cfg.Ingress, nil)
 	if err != nil {
