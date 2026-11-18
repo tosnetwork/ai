@@ -23,6 +23,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
+	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 )
 
 const (
@@ -63,6 +64,64 @@ type fakeBuyer struct {
 	// panics makes Prepare panic, standing in for any defect a request
 	// reaches.
 	panics atomic.Bool
+	// status is the finalized status Resolve reports for admitted calls;
+	// lifecycle records every lifecycle send and lifecycleErr fails them.
+	status       serviceactor.Status
+	resolveErr   error
+	lifecycle    []string
+	lifecycleErr error
+}
+
+func (f *fakeBuyer) Resolve(_ context.Context, requestHash string) (*buyersdk.RequestReport, error) {
+	record, err := f.journal.Read(requestHash)
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.resolveErr != nil {
+		return nil, f.resolveErr
+	}
+	if record.Phase == buyersdk.PhaseSubmitted {
+		id := uint64(0)
+		if _, err := f.journal.Transition(requestHash, []buyersdk.CallPhase{buyersdk.PhaseSubmitted}, func(r *buyersdk.CallRecord) error {
+			r.Phase, r.RequestID = buyersdk.PhaseAdmitted, &id
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return &buyersdk.RequestReport{Phase: buyersdk.PhaseAdmitted, Status: f.status}, nil
+}
+
+// SendLifecycle journals the send as buyersdk does and records it.
+func (f *fakeBuyer) SendLifecycle(_ context.Context, requestHash, operation string) (buyersdk.CallRecord, error) {
+	f.mu.Lock()
+	f.lifecycle = append(f.lifecycle, requestHash+" "+operation)
+	sendErr := f.lifecycleErr
+	f.mu.Unlock()
+	phase := buyersdk.PhaseSubmitted
+	switch {
+	case errors.Is(sendErr, buyersdk.ErrCallNotStarted):
+		phase = buyersdk.PhasePrepared
+	case sendErr != nil:
+		phase = buyersdk.PhaseAmbiguous
+	}
+	record, err := f.journal.Transition(requestHash, []buyersdk.CallPhase{buyersdk.PhaseAdmitted}, func(r *buyersdk.CallRecord) error {
+		r.Lifecycle = append(r.Lifecycle, buyersdk.LifecycleSend{Operation: operation, QueryID: uint64(len(r.Lifecycle) + 1),
+			Phase: phase, SentUnix: f.now().Unix()})
+		return nil
+	})
+	if err != nil {
+		return record, err
+	}
+	return record, sendErr
+}
+
+func (f *fakeBuyer) sentLifecycle() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.lifecycle...)
 }
 
 func (f *fakeBuyer) Prepare(_ context.Context, request *nativev1.RequestQuoteProposalRequest, value *nativev1.QuoteProposalPackageV1,

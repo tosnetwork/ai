@@ -40,6 +40,10 @@ func (f *fakeAgent) Call(_ context.Context, method string, params, result any) e
 		PaymentNanoTOS: "700000000", Members: []buyeragent.Member{{Name: "main.go", SizeBytes: 5}},
 		ProviderName: "build", ProviderDescription: f.provide}
 	var answer any = view
+	if method == "refund_now" {
+		answer = buyeragent.DutyView{RequestHash: view.RequestHash, Reference: view.Reference, Status: "overdue",
+			Operation: "expire", Sent: true}
+	}
 	if method == "purchases" {
 		answer = buyeragent.PurchasesView{Purchases: []buyeragent.PurchaseView{view},
 			Budget: buyeragent.BudgetView{ReservedNanoTOS: "700000000", ReservedCalls: 1}}
@@ -130,7 +134,8 @@ func TestTheToolSetIsFixedAndSaysWhatIsUntrusted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{ToolPrepare: false, ToolRequestPayment: false, ToolWithdraw: false, ToolStatus: true, ToolPurchases: true}
+	want := map[string]bool{ToolPrepare: false, ToolRequestPayment: false, ToolWithdraw: false, ToolStatus: true,
+		ToolPurchases: true, ToolRefund: false}
 	if len(listed.Tools) != len(want) {
 		t.Fatalf("%d tools", len(listed.Tools))
 	}
@@ -309,5 +314,24 @@ func TestDeploymentChecksRefuseAReachableCustody(t *testing.T) {
 	write(t, plain, "not a socket")
 	if err := CheckDeployment(Deployment{AgentStateDir: closed, AgentSocket: plain}); !errors.Is(err, ErrSocketMissing) {
 		t.Errorf("a regular file at the socket path: %v", err)
+	}
+}
+
+func TestRefundRunsTheAgentsDueStep(t *testing.T) {
+	agent := &fakeAgent{}
+	h := connect(t, agent)
+	result := h.call(t, ToolRefund, map[string]any{"request_hash": strings.Repeat("ab", 32)})
+	if result.IsError {
+		t.Fatalf("refund: %s", text(result))
+	}
+	calls, params := agent.recorded()
+	if len(calls) != 1 || calls[0] != "refund_now" ||
+		params[0].(buyeragent.RequestHashParams).RequestHash != strings.Repeat("ab", 32) {
+		t.Fatalf("calls %v %v", calls, params)
+	}
+	var out RefundResult
+	structured(t, result, &out)
+	if out.Duty == nil || !out.Duty.Sent || out.Duty.Operation != "expire" || !strings.Contains(text(result), "Sent expire") {
+		t.Fatalf("refund result %+v: %s", out, text(result))
 	}
 }

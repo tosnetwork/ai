@@ -167,4 +167,17 @@ func TestASourceOverTheBoundIsRefused(t *testing.T) {
 	if _, err := rootsFor(t, root).LoadSource(source, buyeragent.MaxArchiveBytes); !errors.Is(err, ErrSourceRefused) {
 		t.Fatalf("a source over 1 MiB was packed: %v", err)
 	}
+	// A supplied tar is read up to the archive bound and no further: one
+	// with a small member and padding past 1 MiB is refused unread.
+	var padded bytes.Buffer
+	writer := tar.NewWriter(&padded)
+	writer.WriteHeader(&tar.Header{Name: "a.go", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1})
+	writer.Write([]byte("x"))
+	writer.Close()
+	padded.Write(make([]byte, buyeragent.MaxArchiveBytes))
+	path := filepath.Join(root, "padded.tar")
+	write(t, path, padded.String())
+	if _, err := rootsFor(t, root).LoadSource(path, buyeragent.MaxArchiveBytes); !errors.Is(err, ErrSourceRefused) {
+		t.Fatalf("a tar over the bound was read: %v", err)
+	}
 }

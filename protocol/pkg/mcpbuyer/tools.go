@@ -55,6 +55,7 @@ const (
 	ToolWithdraw       = "tos_buyer_withdraw"
 	ToolStatus         = "tos_buyer_status"
 	ToolPurchases      = "tos_buyer_purchases"
+	ToolRefund         = "tos_buyer_refund"
 )
 
 func boolPointer(value bool) *bool { return &value }
@@ -87,6 +88,36 @@ func (t *Tools) Register(server *mcp.Server) {
 		Description: "Lists the buyer agent's purchases and the budget in use." + untrustedNote,
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
 	}, t.purchases)
+	mcp.AddTool(server, &mcp.Tool{Name: ToolRefund, Title: "Run a TOS purchase's due refund step",
+		Description: "Runs, now, the refund step the request's finalized status requires: expire, claim_refund or " +
+			"sweep. The buyer agent runs it on its own schedule anyway. Every refund is paid to the buyer wallet, and " +
+			"the step spends only network fees." + untrustedNote,
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: true, DestructiveHint: boolPointer(false)},
+	}, t.refund)
+}
+
+// RefundResult is the structured content of tos_buyer_refund.
+type RefundResult struct {
+	Duty  *buyeragent.DutyView `json:"duty,omitempty"`
+	Error *ToolError           `json:"error,omitempty"`
+}
+
+func (t *Tools) refund(ctx context.Context, _ *mcp.CallToolRequest, input RequestHashInput) (*mcp.CallToolResult, RefundResult, error) {
+	var duty buyeragent.DutyView
+	if err := t.agent.Call(ctx, "refund_now", buyeragent.RequestHashParams{RequestHash: input.RequestHash}, &duty); err != nil {
+		result, toolErr := refused(err)
+		return result, RefundResult{Error: toolErr}, nil
+	}
+	summary := fmt.Sprintf("Purchase %s: finalized status %s.", duty.Reference, duty.Status)
+	switch {
+	case duty.Sent:
+		summary += " Sent " + duty.Operation + "; finalized history decides when it takes effect."
+	case duty.Waiting:
+		summary += " " + duty.Operation + " was already sent and is waiting for finalized history."
+	default:
+		summary += " Nothing is due."
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: summary}}}, RefundResult{Duty: &duty}, nil
 }
 
 // ToolError is a refusal in structured content (section 12).
