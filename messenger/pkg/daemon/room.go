@@ -377,6 +377,10 @@ func partRefusal(err error) carrierapi.Response {
 		return carrierapi.Retry()
 	case errors.Is(err, relayframe.ErrReassemblyNotAdmitted):
 		return carrierapi.Refusal(carrierapi.CodeNotAdmitted)
+	case errors.Is(err, eventlog.ErrRoomPartRefusedObject):
+		// A later part of an object already refused: relay-acknowledged,
+		// stored nowhere.
+		return carrierapi.Refusal(carrierapi.CodeNotAccepted)
 	case errors.Is(err, relayframe.ErrFrameMalformed), errors.Is(err, relayframe.ErrFrameDigest),
 		errors.Is(err, relayframe.ErrReassemblyCut):
 		return carrierapi.Refusal(carrierapi.CodeFrameMalformed)
@@ -404,25 +408,25 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 		// the later parts that arrived first are dropped with it.
 		roomID, kind, err := relayframe.RoomObjectPrefix(frame.Part)
 		if err != nil {
-			return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeFrameMalformed))
+			return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeFrameMalformed), now)
 		}
 		if !(roomSenders{runtime: r}).MayHoldInRoom(sender, roomID) {
-			return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeNotAdmitted))
+			return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeNotAdmitted), now)
 		}
 		// The room's end is judged first: at it the sender's credential has
 		// expired too, and the refusal is room-ended, not its evidence.
 		ended := roomInbound{ctx: ctx, sender: sender, object: relayframe.RoomObject{Type: kind, RoomID: roomID},
 			digest: frame.ObjectDigest, now: now}
 		if response, refused := r.endedRoom(ended); refused {
-			return r.refuseObject(sender, frame, response)
+			return r.refuseObject(sender, frame, response, now)
 		}
 		if response, refused := r.removedRoom(ended); refused {
-			return r.refuseObject(sender, frame, response)
+			return r.refuseObject(sender, frame, response, now)
 		}
 		// Only the room's authority sends handshake objects (section 11.5):
 		// another member's part 0 is refused before anything of it is held.
 		if response, refused := r.nonAuthority(ended); refused {
-			return r.refuseObject(sender, frame, response)
+			return r.refuseObject(sender, frame, response, now)
 		}
 		peer, pinned, err := r.objectEvidence(roomID, kind, sender, frame.Evidence, now)
 		if err != nil {
@@ -433,7 +437,7 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 			if r.parts.HoldsFirstPart(sender, frame.ObjectDigest) {
 				return evidenceRefusal(err)
 			}
-			return r.refuseObject(sender, frame, evidenceRefusal(err))
+			return r.refuseObject(sender, frame, evidenceRefusal(err), now)
 		}
 		if pinned {
 			firstPeer = &peer
@@ -442,7 +446,7 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 	// A later part names no room, but its sender must still be one parts are
 	// held from at all, judged before the part store writes anything.
 	if frame.PartIndex != 0 && !(roomSenders{runtime: r}).MayHold(sender) {
-		return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeNotAdmitted))
+		return r.refuseObject(sender, frame, carrierapi.Refusal(carrierapi.CodeNotAdmitted), now)
 	}
 	result, err := r.parts.Add(sender, frame, now)
 	if err != nil {
@@ -466,9 +470,7 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 	}
 	response, settle := r.handleComplete(ctx, sender, frame.ObjectDigest, result, now)
 	if settle {
-		if err := r.parts.Settle(sender, frame.ObjectDigest); err != nil {
-			r.daemon.report("room part settlement", err)
-		}
+		r.settleComplete(sender, frame.ObjectDigest, response, now)
 	}
 	// Card admissions a roster taught and card forgets a removal queued are
 	// sent now, outside the handling lock.
@@ -480,14 +482,15 @@ func (r *roomRuntime) deliver(ctx context.Context, sender string, frame relayfra
 // refuseObject answers an intake refusal of one of a sender's parts. Nothing
 // of a refused object is stored (sections 11.3, 11.5): the parts of it that
 // arrived before, and the Reassembler's entry, are dropped before the
-// refusal is relay-acknowledged. A retry refuses nothing and drops nothing;
-// a drop the store could not make is retried, so the redelivered part is
+// refusal is relay-acknowledged, and the object's tombstone refuses the
+// parts of it still in flight. A retry refuses nothing and drops nothing; a
+// drop the store could not make is retried, so the redelivered part is
 // judged, and its object dropped, again.
-func (r *roomRuntime) refuseObject(sender string, frame relayframe.Frame, response carrierapi.Response) carrierapi.Response {
+func (r *roomRuntime) refuseObject(sender string, frame relayframe.Frame, response carrierapi.Response, now time.Time) carrierapi.Response {
 	if response.Result == carrierapi.ResultRetry {
 		return response
 	}
-	if err := r.parts.Refuse(sender, frame.ObjectDigest); err != nil {
+	if err := r.parts.Refuse(sender, frame.ObjectDigest, now); err != nil {
 		r.daemon.report("room part refusal", err)
 		return carrierapi.Retry()
 	}
@@ -544,8 +547,35 @@ func (r *roomRuntime) handleReplayed(completed eventlog.RoomPartCompletion) {
 	if response.Result == carrierapi.ResultRetry || !settle {
 		return
 	}
-	if err := r.parts.Settle(completed.Sender, completed.Digest); err != nil {
+	r.settleComplete(completed.Sender, completed.Digest, response, now)
+}
+
+// settleComplete settles a complete object the caller handled durably. One
+// it refused is settled by Refuse, which leaves its tombstone: a later
+// generation's parts still in flight are refused without being stored until
+// a part 0 is accepted again.
+func (r *roomRuntime) settleComplete(sender string, digest [sha256.Size]byte, response carrierapi.Response, now time.Time) {
+	var err error
+	if refusesObject(response) {
+		err = r.parts.Refuse(sender, digest, now)
+	} else {
+		err = r.parts.Settle(sender, digest)
+	}
+	if err != nil {
 		r.daemon.report("room part settlement", err)
+	}
+}
+
+// refusesObject reports whether the answer to a complete object refused it:
+// a relay refusal, an ignored object, or a rejected room ack.
+func refusesObject(response carrierapi.Response) bool {
+	switch response.Result {
+	case carrierapi.ResultRefused, carrierapi.ResultIgnored:
+		return true
+	case carrierapi.ResultAck:
+		return response.AckOutcome == relayframe.OutcomeRejected
+	default:
+		return false
 	}
 }
 

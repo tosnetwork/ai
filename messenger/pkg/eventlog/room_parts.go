@@ -53,6 +53,19 @@ const (
 // re-delivered part is a duplicate in memory and is written then.
 var ErrRoomPartStore = errors.New("room part could not be stored")
 
+// ErrRoomPartRefusedObject refuses a later part of an object the caller
+// refused (Refuse): it is relay-acknowledged and never stored.
+var ErrRoomPartRefusedObject = errors.New("room part of a refused object")
+
+// The bounds of the refused-object tombstones: per authenticated sender and
+// in total. The oldest tombstone gives way to a new one at either bound; a
+// part of the object it named is then judged by the Reassembler's own caps
+// again, never by more than them.
+const (
+	MaxRefusedRoomObjectsPerSender = 16
+	MaxRefusedRoomObjects          = 1024
+)
+
 type roomPartRecord struct {
 	Schema         string `json:"schema"`
 	SenderAgentID  string `json:"sender_agent_id"`
@@ -114,6 +127,18 @@ type RoomParts struct {
 	// settled yet, with the time they completed. A sweep leaves their parts
 	// alone until the lifetime has passed since completion.
 	unsettled map[roomPartKey]time.Time
+	// refused are the tombstones of objects the caller refused, keyed by
+	// the authenticated packet sender and the object digest, with the time
+	// of the refusal. A later part of such an object, still in flight when
+	// the refusal was answered, is refused without being stored. They live
+	// for the part lifetime and only in memory: everything stored before a
+	// refusal is deleted with it, so a restart reopens nothing that was
+	// stored, and a part arriving after one is held only under the
+	// Reassembler's per-peer caps and lifetime until its part 0 is judged
+	// (and refused) again. An accepted part 0 of the object lifts its
+	// tombstone, so a sender's next generation, under renewed evidence, is
+	// held again.
+	refused map[roomPartKey]time.Time
 }
 
 // OpenRoomParts binds an empty Reassembler to the part store and replays
@@ -131,7 +156,8 @@ func (j *Journal) OpenRoomParts(reassembler *relayframe.Reassembler, now time.Ti
 	if usage := reassembler.Usage(); usage.Objects != 0 {
 		return nil, RoomPartReplay{}, errors.New("the room part store replays into an empty reassembler only")
 	}
-	parts := &RoomParts{journal: j, reassembler: reassembler, unsettled: map[roomPartKey]time.Time{}}
+	parts := &RoomParts{journal: j, reassembler: reassembler, unsettled: map[roomPartKey]time.Time{},
+		refused: map[roomPartKey]time.Time{}}
 	parts.mutex.Lock()
 	defer parts.mutex.Unlock()
 	report, err := parts.replay(now)
@@ -217,6 +243,15 @@ func (p *RoomParts) Add(sender string, frame relayframe.Frame, now time.Time) (r
 	defer p.mutex.Unlock()
 	key := roomPartKey{sender: sender, digest: frame.ObjectDigest}
 	split := frame.PartCount > 1 && frame.PartIndex < frame.PartCount && ids.Agent.MatchString(sender)
+	if split {
+		p.expireRefused(now)
+		if frame.PartIndex == 0 {
+			// The caller accepted this part 0: the object is held afresh.
+			delete(p.refused, key)
+		} else if _, refused := p.refused[key]; refused {
+			return relayframe.PartResult{}, ErrRoomPartRefusedObject
+		}
+	}
 	// A part of a split object is stored before the Reassembler sees it, so
 	// a part the Reassembler holds, or an object it completes, is never only
 	// in memory: a store failure leaves the Reassembler unchanged and the
@@ -311,11 +346,17 @@ func (p *RoomParts) HoldsFirstPart(sender string, digest [sha256.Size]byte) bool
 // Refuse drops one object of a sender that the caller refused at intake (its
 // part 0, or a later part, judged refused): the Reassembler's entry, every
 // stored part and an unsettled completion, so nothing of a refused object
-// stays stored until the lifetime ends. An object not held is a no-op, and
-// so is a sender that is no Agent identifier: Add stores parts only of one.
-func (p *RoomParts) Refuse(sender string, digest [sha256.Size]byte) error {
+// stays stored until the lifetime ends, and leaves the object's tombstone,
+// so its later parts still in flight are refused without being stored. It
+// is also how the caller settles a complete object it refused. An object not
+// held is dropped all the same, and a sender that is no Agent identifier is
+// a no-op: Add stores parts only of one.
+func (p *RoomParts) Refuse(sender string, digest [sha256.Size]byte, now time.Time) error {
 	if p == nil {
 		return errors.New("no room part store")
+	}
+	if now.IsZero() {
+		return errors.New("invalid room part refusal time")
 	}
 	if !ids.Agent.MatchString(sender) {
 		return nil
@@ -323,9 +364,77 @@ func (p *RoomParts) Refuse(sender string, digest [sha256.Size]byte) error {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	key := roomPartKey{sender: sender, digest: digest}
+	p.markRefused(key, now)
 	p.reassembler.DropObject(sender, digest)
 	delete(p.unsettled, key)
 	return p.journal.removeRoomObjectParts(key)
+}
+
+// RefusedObject reports whether a sender's object holds a live tombstone.
+func (p *RoomParts) RefusedObject(sender string, digest [sha256.Size]byte, now time.Time) bool {
+	if p == nil {
+		return false
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.expireRefused(now)
+	_, refused := p.refused[roomPartKey{sender: sender, digest: digest}]
+	return refused
+}
+
+// markRefused plants a tombstone, making room under both bounds by
+// dropping the oldest. The mutex is held.
+func (p *RoomParts) markRefused(key roomPartKey, now time.Time) {
+	p.expireRefused(now)
+	if _, held := p.refused[key]; !held {
+		for p.countRefused(key.sender) >= MaxRefusedRoomObjectsPerSender {
+			p.dropOldestRefused(key.sender)
+		}
+		for len(p.refused) >= MaxRefusedRoomObjects {
+			p.dropOldestRefused("")
+		}
+	}
+	p.refused[key] = now
+}
+
+// expireRefused drops the tombstones older than the part lifetime, which
+// every part of their objects has outlived. The mutex is held.
+func (p *RoomParts) expireRefused(now time.Time) {
+	for key, at := range p.refused {
+		if now.Sub(at) >= p.reassembler.Lifetime() {
+			delete(p.refused, key)
+		}
+	}
+}
+
+// countRefused counts a sender's tombstones. The mutex is held.
+func (p *RoomParts) countRefused(sender string) int {
+	count := 0
+	for key := range p.refused {
+		if key.sender == sender {
+			count++
+		}
+	}
+	return count
+}
+
+// dropOldestRefused drops the oldest tombstone, of one sender or, with an
+// empty sender, of all. The mutex is held.
+func (p *RoomParts) dropOldestRefused(sender string) {
+	var oldest roomPartKey
+	var at time.Time
+	found := false
+	for key, refused := range p.refused {
+		if sender != "" && key.sender != sender {
+			continue
+		}
+		if !found || refused.Before(at) || refused.Equal(at) && bytes.Compare(key.digest[:], oldest.digest[:]) < 0 {
+			oldest, at, found = key, refused, true
+		}
+	}
+	if found {
+		delete(p.refused, oldest)
+	}
 }
 
 // Sweep drops every incomplete object past the lifetime and deletes its
