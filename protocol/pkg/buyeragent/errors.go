@@ -9,6 +9,7 @@ const (
 	CodeNotFound              = "MCP_BUYER_NOT_FOUND"
 	CodeOfferInvalid          = "MCP_BUYER_OFFER_INVALID"
 	CodeNotCarriable          = "MCP_BUYER_NOT_CARRIABLE"
+	CodeCardWindowTooLong     = "MCP_BUYER_CARD_WINDOW_TOO_LONG"
 	CodeOverBudget            = "MCP_BUYER_OVER_BUDGET"
 	CodeQuoteExpired          = "MCP_BUYER_QUOTE_EXPIRED"
 	CodeConflict              = "MCP_BUYER_CONFLICT"
@@ -48,6 +49,17 @@ func refusal(code, message string, cause error) *Error {
 		disposition = DispositionResolveBeforeRetry
 	}
 	return &Error{Code: code, Disposition: disposition, Message: message, cause: cause}
+}
+
+// carriageRefusal maps a failed carriage check to its refusal: a purchase
+// whose buyer card would outlive the card lifetime has its own code, so a
+// client can tell it from a transient failure and pick a shorter offer.
+func carriageRefusal(err error) *Error {
+	if errors.Is(err, ErrCardWindowTooLong) {
+		return refusal(CodeCardWindowTooLong,
+			"the Quote expiry, response SLA and result retention together exceed the 30-day key card lifetime", err)
+	}
+	return refusal(CodeNotCarriable, "the purchase cannot be carried to its provider", err)
 }
 
 // asError maps any error to the Error a client sees; an error that is not

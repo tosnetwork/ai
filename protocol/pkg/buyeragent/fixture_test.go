@@ -24,6 +24,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -73,6 +74,8 @@ type fakeBuyer struct {
 	// lifecycleUnsettled makes every send report an earlier send of the
 	// operation that may still execute, as buyersdk does.
 	lifecycleUnsettled bool
+	// responseSLA, when set, replaces fxResponseSLA in the journaled terms.
+	responseSLA uint32
 }
 
 func (f *fakeBuyer) Resolve(_ context.Context, requestHash string) (*buyersdk.RequestReport, error) {
@@ -162,7 +165,18 @@ func (f *fakeBuyer) Prepare(_ context.Context, request *nativev1.RequestQuotePro
 		StorageFeeNanoTOS: validated.Proposal.StorageFeeNanotos, AttestorKeyID: validated.Proposal.AttestorKeyId,
 		PaymentNanoTOS: "700000000", ExpiresAtUnix: validated.Proposal.ExpiresAtUnixSeconds,
 		Phase: buyersdk.PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix(),
-		ResponseSLASeconds: fxResponseSLA, RefundClaimWindowSeconds: fxRefundWindow, CleanupBountyNanoTOS: fxCleanupBounty}
+		ResponseSLASeconds: fxResponseSLA, RefundClaimWindowSeconds: fxRefundWindow, CleanupBountyNanoTOS: fxCleanupBounty,
+		BuyerAddressInReq: request.BuyerAddress}
+	if f.responseSLA != 0 {
+		record.ResponseSLASeconds = f.responseSLA
+	}
+	// The package is journaled as buyersdk journals it, so a real carriage
+	// check can read it.
+	packageBytes, err := proto.Marshal(value)
+	if err != nil {
+		return buyersdk.CallRecord{}, err
+	}
+	record.PackageBase64 = base64.StdEncoding.EncodeToString(packageBytes)
 	if err := f.journal.Create(record, f.limits, now); err != nil {
 		return buyersdk.CallRecord{}, err
 	}
@@ -218,13 +232,19 @@ type fakeCarriage struct {
 	mu    sync.Mutex
 	err   error
 	calls int
+	// carrier, when set, decides instead of err: the real carriage check.
+	carrier *Carrier
 }
 
-func (c *fakeCarriage) CheckCarriage(context.Context, buyersdk.CallRecord, []byte) error {
+func (c *fakeCarriage) CheckCarriage(ctx context.Context, record buyersdk.CallRecord, archive []byte) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.calls++
-	return c.err
+	carrier, err := c.carrier, c.err
+	c.mu.Unlock()
+	if carrier != nil {
+		return carrier.CheckCarriage(ctx, record, archive)
+	}
+	return err
 }
 
 func (c *fakeCarriage) set(err error) {
@@ -293,6 +313,17 @@ func testLimits() buyersdk.ServiceActorLimits {
 
 func quotePackage(t *testing.T, now time.Time) (*nativev1.RequestQuoteProposalRequest, *nativev1.QuoteProposalPackageV1) {
 	t.Helper()
+	binding, err := nativecore.AgentPacketTransportBinding(fxProvider, nativecore.MaxAgentPacketTransportRequestBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return quotePackageWith(t, now, binding)
+}
+
+// quotePackageWith is quotePackage with the given transport binding.
+func quotePackageWith(t *testing.T, now time.Time, binding nativecore.TransportBindingV1) (*nativev1.RequestQuoteProposalRequest,
+	*nativev1.QuoteProposalPackageV1) {
+	t.Helper()
 	network := servicefixture.Network()
 	settlement := servicefixture.Settlement{ActorAccount: bytes.Repeat([]byte{0x77}, 32),
 		ActorCodeHash: bytes.Repeat([]byte{0x88}, 32), AttestorKey: mldsa44.KeyIDText(fxKeyID)}
@@ -308,10 +339,6 @@ func quotePackage(t *testing.T, now time.Time) (*nativev1.RequestQuoteProposalRe
 	}
 	terms := servicefixture.Terms(fxKeyID, metadata)
 	termsHash, err := nativecore.ServiceActorTermsHash(terms)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding, err := nativecore.AgentPacketTransportBinding(fxProvider, nativecore.MaxAgentPacketTransportRequestBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -113,6 +113,41 @@ func (b *ServiceActorBuyer) VerifyProviderCard(ctx context.Context, verifier mld
 		Key: key, Card: card, Checkpoint: session.Checkpoint(), VerifiedAt: now}, nil
 }
 
+// VerifyAgentCard verifies a key card of agentID against a fresh finalized
+// checkpoint: agentpacketseal.VerifyKeyCard (the Agent finalized and live, a
+// controller of its finalized policy signed the card, the card valid now)
+// and the card's sender equal to agentID. The buyer runs it on its own fresh
+// card, which proves the packet controller can still sign for the buyer
+// Agent (MCP_BUYER_ADAPTER_V1 section 7.1 item 4).
+func (b *ServiceActorBuyer) VerifyAgentCard(ctx context.Context, verifier mldsa44.Verifier, agentID string,
+	raw []byte) (agentpacketseal.RecipientKey, agentpacketseal.KeyCard, error) {
+	var noKey agentpacketseal.RecipientKey
+	var noCard agentpacketseal.KeyCard
+	if ctx == nil || verifier == nil || agentID == "" || len(raw) == 0 || len(raw) > quoteexchange.MaxProviderKeyCardBytes {
+		return noKey, noCard, errors.New("invalid key card verification request")
+	}
+	packet, err := agentpacket.DecodeJSON(raw)
+	if err != nil {
+		return noKey, noCard, fmt.Errorf("%w: it is not an Agent Packet", ErrAgentCard)
+	}
+	if packet.SenderAgentID != agentID {
+		return noKey, noCard, fmt.Errorf("%w: it is a card of another Agent", ErrAgentCard)
+	}
+	session, err := b.config.Reader.BeginBuyerSession(ctx)
+	if err != nil {
+		return noKey, noCard, err
+	}
+	key, card, err := agentpacketseal.VerifyKeyCard(ctx, verifier,
+		sessionAgents{ctx: ctx, session: session, network: b.config.Network}, packet, b.config.Now())
+	if err != nil {
+		return noKey, noCard, fmt.Errorf("%w: %v", ErrAgentCard, err)
+	}
+	return key, card, nil
+}
+
+// ErrAgentCard reports an Agent's own key card that does not verify.
+var ErrAgentCard = errors.New("the Agent key card does not verify against finalized state")
+
 // sessionAgents resolves Agents at one finalized buyer checkpoint for packet
 // verification. A state of another network or of another object is refused.
 type sessionAgents struct {
