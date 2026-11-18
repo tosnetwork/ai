@@ -551,7 +551,7 @@ func TestVectorNegativeMessagesAreRefused(t *testing.T) {
 
 func TestVectorNegativeArtifactsAreRefused(t *testing.T) {
 	document := loadVectors(t)
-	if len(document.NegativeArtifacts) != 5 {
+	if len(document.NegativeArtifacts) != 6 {
 		t.Fatalf("%d negative artifacts", len(document.NegativeArtifacts))
 	}
 	for _, item := range document.NegativeArtifacts {

@@ -213,11 +213,16 @@ const (
 	tarEndOfArchive = 2 * tarBlock
 	// tarTypeflagOffset is the type flag byte within a header block.
 	tarTypeflagOffset = 156
+	// tarMagicOffset starts the magic and version, "ustar\x00" "00" in a
+	// USTAR header.
+	tarMagicOffset = 257
 )
 
+var tarUSTARMagic = []byte("ustar\x0000")
+
 // ArtifactMembers reads exactly output.log and report.json, each once and
-// each a regular file with a single USTAR header block of type flag '0',
-// from a software-work artifact tar. The archive must
+// each a regular file with a single USTAR header block (magic "ustar\x00",
+// version "00", type flag '0'), from a software-work artifact tar. The archive must
 // end with the end-of-archive marker right after the last member's padded
 // data, with no byte after it: exactly what Go's archive/tar Writer.Close
 // emits and the software-work runner writes. Bytes after the marker are
@@ -247,6 +252,9 @@ func ArtifactMembers(artifact []byte) ([]byte, []byte, error) {
 		// '\x00' flag (the reader reports it as TypeReg).
 		if source.Size()-int64(source.Len()) != membersEnd+tarBlock || artifact[membersEnd+tarTypeflagOffset] != tar.TypeReg {
 			return nil, nil, notAccepted("an artifact member header is not one USTAR block with type flag 0")
+		}
+		if !bytes.Equal(artifact[membersEnd+tarMagicOffset:membersEnd+tarMagicOffset+int64(len(tarUSTARMagic))], tarUSTARMagic) {
+			return nil, nil, notAccepted("an artifact member header lacks the USTAR magic and version")
 		}
 		if header.Name != "output.log" && header.Name != "report.json" {
 			return nil, nil, notAccepted("the artifact holds an unexpected member")

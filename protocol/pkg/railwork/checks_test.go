@@ -725,6 +725,46 @@ func TestArtifactMemberHeadersMustBeSingleUSTARBlocksOfTypeZero(t *testing.T) {
 	}
 }
 
+// The artifact shapes Go's tar writer produces for the runner's members
+// pass: the runner's own FormatUSTAR headers across member sizes, and the
+// default writer with no format set. GNU-format headers do not.
+func TestRunnerAndDefaultWriterArtifactsPassAndGNUHeadersDoNot(t *testing.T) {
+	write := func(format tar.Format, output, report []byte) []byte {
+		var buffer bytes.Buffer
+		writer := tar.NewWriter(&buffer)
+		for _, entry := range []struct {
+			name string
+			body []byte
+		}{{"output.log", output}, {"report.json", report}} {
+			if err := writer.WriteHeader(&tar.Header{Name: entry.name, Mode: 0o444, Size: int64(len(entry.body)),
+				ModTime: time.Unix(0, 0), Format: format}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.Write(entry.body); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buffer.Bytes()
+	}
+	for _, outputSize := range []int{0, 1, 511, 512, 513, 100000} {
+		for _, reportSize := range []int{0, 1, 512, 777} {
+			output, report := bytes.Repeat([]byte{'o'}, outputSize), bytes.Repeat([]byte{'r'}, reportSize)
+			for name, format := range map[string]tar.Format{"runner": tar.FormatUSTAR, "default": tar.FormatUnknown} {
+				gotOutput, gotReport, err := ArtifactMembers(write(format, output, report))
+				if err != nil || !bytes.Equal(gotOutput, output) || !bytes.Equal(gotReport, report) {
+					t.Errorf("%s writer, %d/%d bytes: %v", name, outputSize, reportSize, err)
+				}
+			}
+		}
+	}
+	if _, _, err := ArtifactMembers(write(tar.FormatGNU, []byte("o"), []byte("r"))); !errors.Is(err, ErrResultNotAccepted) {
+		t.Errorf("a GNU-format artifact was accepted: %v", err)
+	}
+}
+
 func TestArtifactMustHoldExactlyItsOutputAndReport(t *testing.T) {
 	output, report := [2]string{"output.log", "ok\n"}, [2]string{"report.json", "{}\n"}
 	if gotOutput, gotReport, err := ArtifactMembers(tarOf(t, report, output)); err != nil ||
