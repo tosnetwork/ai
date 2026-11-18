@@ -29,7 +29,10 @@ import time
 from pathlib import Path
 
 MOUNTS = Path("/e2e-mounts")
-BIN = MOUNTS / "bin"
+# The mounted binaries belong to the host account; tosctl and the executor
+# pins accept only root- or self-owned executables, so the harness installs
+# root-owned copies, checked against build.json, and runs those.
+BIN = Path("/opt/e2e-bin")
 WORK = Path("/e2e/work")
 sys.path.insert(0, str(MOUNTS / "scripts"))
 sys.path.insert(0, str(MOUNTS / "tos-source" / "test" / "tostester" / "src"))
@@ -142,6 +145,25 @@ def private_dir(path: Path, account: str | None, mode: int = 0o700, group: int |
     return path
 
 
+def install_binaries(build: dict) -> None:
+    import hashlib
+    import shutil
+    BIN.mkdir(mode=0o755, exist_ok=True)
+    for name, digest in build["binaries"].items():
+        source = MOUNTS / "bin" / name
+        if hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+            raise RuntimeError(f"{name} does not match build.json")
+        shutil.copyfile(source, BIN / name)
+        os.chown(BIN / name, 0, 0)
+        (BIN / name).chmod(0o755)
+    record("root-owned copies of every built binary match build.json", True, sorted(build["binaries"]))
+
+
+def norm(address: str) -> str:
+    from pytosiq_core import Address
+    return Address(address).to_str(is_user_friendly=False).lower()
+
+
 # --- Accounts and tosctl vaults ----------------------------------------------
 
 def tosctl(account: str, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -178,8 +200,8 @@ def configure_tosctl(account: str) -> None:
 
 def wallet_address(account: str, name: str) -> str:
     for wallet in tosctl_json(account, "wallet", "ls"):
-        if wallet.get("name") == name:
-            return wallet["address"]
+        if wallet.get("name") == name and wallet.get("address"):
+            return norm(wallet["address"])
     raise RuntimeError(f"no wallet {name}")
 
 
@@ -247,6 +269,113 @@ def start_executor() -> None:
            {"socket": str(EXECUTOR_SOCKET), "allowed_uid": ACCOUNTS["provider"][0]})
 
 
+# --- Chain objects ----------------------------------------------------------------
+
+PUBLIC = Path("/var/lib/e2e-public")
+REGISTRY_BOC = MOUNTS / "registry-code.boc"
+
+
+def rpc_endpoints() -> list[str]:
+    return [f"http://127.0.0.1:{port}/jsonRPC" for port in RPC_PORTS]
+
+
+def registry_show(account: str, address: str) -> dict:
+    return tosctl_json(account, "agent", "native-registry", "show", "--global-config", str(PUBLIC / "global.json"),
+                       "--network-label", NETWORK_LABEL, "--address", address)
+
+
+def register_agent(account: str, wallet: str, controller: str) -> tuple[str, str]:
+    """Register an Agent whose one controller is `controller`; returns the
+    Agent ID and the controller's key ID text."""
+    created = tosctl_json(account, "agent", "native-registry", "new-controller", "--name", controller)
+    policy = HOME[account] / "private" / f"{controller}-policy.json"
+    as_account(account, ["/usr/bin/tee", str(policy)], input_text=json.dumps(
+        {"threshold": 1, "recovery_threshold": 1, "recovery_timelock": 3600,
+         "controllers": [{"public_key": created["public_key"], "weight": 1, "purposes": 15}]}))
+    view = tosctl_json(account, "agent", "native-registry", "register-agent", "--global-config", str(PUBLIC / "global.json"),
+                       "--network-label", NETWORK_LABEL, "--policy", str(policy), "--nonce", secrets.token_hex(32),
+                       "--signer", controller)
+    args = ["wallet", "send", "--from", wallet, "--to", view["destination"], "--amount", "2", "--body-boc",
+            view["body_boc"], "--yes"]
+    if view.get("state_init_boc"):
+        args += ["--state-init-boc", view["state_init_boc"]]
+    tosctl(account, *args)
+    registered = poll(lambda: registry_show(account, view["destination"]).get("registered"), 240, 3)
+    agent_id = "agent_" + view["object_id"]
+    record(f"{account} Agent registered with its packet controller", bool(registered), agent_id)
+    return agent_id, "mldsa44:" + created["key_id"]
+
+
+# --- The OpenFox provider -----------------------------------------------------------
+
+PROVIDER_RAIL = HOME["provider"] / "rail"
+GATEWAY_CARD = HOME["provider"] / "gateway" / "provider-key-card.json"
+
+
+def openfox(*args: str, timeout: int = 900) -> subprocess.CompletedProcess:
+    return as_account("provider", [str(BIN / "openfox"), "earning", "service", *args], timeout=timeout)
+
+
+def setup_provider(tosctl_sha256: str) -> dict:
+    private_dir(PROVIDER_RAIL, "provider")
+    private_dir(GATEWAY_CARD.parent, "provider")
+    rpc_flags = [flag for endpoint in rpc_endpoints() for flag in ("--rpc", endpoint)]
+    openfox("init", "--rail-config", str(PROVIDER_RAIL / "rail.json"), "--state-dir", str(PROVIDER_RAIL), *rpc_flags,
+            "--global-config", str(PUBLIC / "global.json"), "--network-label", NETWORK_LABEL,
+            "--tosctl", str(BIN / "tosctl"), "--tosctl-sha256", tosctl_sha256,
+            "--tosctl-config", str(HOME["provider"] / "private" / "tosctl-config.json"), "--wallet", "provider",
+            "--registry-code-boc", str(REGISTRY_BOC), "--actor-code-hash", ACTOR_CODE_HASH,
+            "--relay-url", RELAY_URL, "--relay-ca-file", str(HOME["provider"] / "private" / "relay-ca.pem"), "--yes")
+    openfox("offer", "--rail-config", str(PROVIDER_RAIL / "rail.json"), "--price", "0.1", "--storage-fee", "0.2",
+            "--cleanup-bounty", "0.1", "--response-sla", "3600", "--refund-claim-window", "3600",
+            "--executor-socket", str(EXECUTOR_SOCKET), "--gateway-card-out", str(GATEWAY_CARD), "--yes")
+    offer = json.loads(as_account("provider", ["/bin/cat", str(PROVIDER_RAIL / "setup" / "offer.json")]).stdout)
+    card = as_account("provider", ["/usr/bin/stat", "-c", "%u %a", str(GATEWAY_CARD)], check=False).stdout.split()
+    record("OpenFox published its offer and its current key card for the gateway",
+           bool(offer.get("capability_id")) and card[:1] == [str(ACCOUNTS["provider"][0])],
+           {"capability_id": offer.get("capability_id"), "card_owner_and_mode": card})
+    start("provider", [str(BIN / "openfox"), "earning", "service", "serve", "--rail-config",
+                       str(PROVIDER_RAIL / "rail.json")], "openfox.log")
+    return offer
+
+
+# --- The buyer agent -----------------------------------------------------------------
+
+AGENT_STATE = HOME["custody"] / "agent-state"
+AGENT_CONFIG = HOME["custody"] / "private" / "agent.json"
+
+
+def setup_buyer(wallet: str, tosctl_sha256: str) -> dict:
+    agent_id, key_id = register_agent("custody", "buyer", "buyer-packet")
+    private_dir(AGENT_STATE, "custody")
+    private_dir(HOME["custody"] / "manifests", "custody")
+    for directory in ("work", "results"):
+        private_dir(HOME["developer"] / directory, "developer")
+    code_hash = json.loads(as_account(None, [str(BIN / "service-actor-e2e-fixture"), "code-hash", "--boc-file",
+                                             str(REGISTRY_BOC)]).stdout)["code_hash"]
+    config = {
+        "schema": "tos.service.mcp-buyer.agent-config.v1", "state_dir": str(AGENT_STATE), "socket_dir": str(SOCKET_DIR),
+        "client_uid": ACCOUNTS["developer"][0], "network": {key: evidence["network"][key] for key in
+                                                          ("network_id", "genesis_root_hash", "genesis_file_hash")},
+        "rpc_endpoints": rpc_endpoints(), "quorum": 2, "registry_code_boc_file": str(REGISTRY_BOC),
+        "registry_code_hash": code_hash, "registry_workchain": 0, "actor_code_hash": ACTOR_CODE_HASH,
+        "manifest_dir": str(HOME["custody"] / "manifests"), "buyer_wallet": wallet, "buyer_agent_id": agent_id,
+        "tosctl": {"binary": str(BIN / "tosctl"), "sha256": tosctl_sha256,
+                   "config_path": str(HOME["custody"] / "private" / "tosctl-config.json"), "wallet": "buyer",
+                   "packet_controller": "buyer-packet"},
+        "packet_controller_key_id": key_id, "relays": [RELAY_URL],
+        "relay_ca_file": str(HOME["custody"] / "private" / "relay-ca.pem"),
+        "budget": {"window_seconds": 86400, "max_calls": 10, "max_per_call_nanotos": "2000000000",
+                   "max_window_nanotos": "10000000000", "max_unconfirmed": 4, "max_lifecycle_sends_per_window": 28,
+                   "duty_interval_seconds": 30}}
+    as_account("custody", ["/usr/bin/tee", str(AGENT_CONFIG)], input_text=json.dumps(config, indent=2))
+    as_account("custody", ["/bin/chmod", "0600", str(AGENT_CONFIG)])
+    start("custody", [str(BIN / "tos-service-buyer"), "agent", "--config", str(AGENT_CONFIG)], "agent.log")
+    ready = poll(lambda: (SOCKET_DIR / "agent.sock").is_socket(), 120, 1)
+    record("the buyer agent serves its socket as custody", bool(ready), {"agent_id": agent_id})
+    return {"agent_id": agent_id, "packet_key_id": key_id}
+
+
 # --- Negatives that need no purchase --------------------------------------------
 
 def socket_request(account: str, method: str, params: dict) -> dict | None:
@@ -309,6 +438,8 @@ async def main() -> int:
                                   "the source archive and executes nothing; real sandboxed execution is covered by "
                                   "protocol/scripts/service-actor-buyer-e2e.sh with E2E_EXECUTE=1"}})
     try:
+        install_binaries(build)
+        private_dir(PUBLIC, None, 0o755)
         setup_accounts()
         async with Network(Install(MOUNTS / "tos-build", MOUNTS / "tos-source"), Path("/var/lib/e2e-network"),
                            base_port=BASE_PORT) as network:
@@ -327,8 +458,8 @@ async def main() -> int:
             global_config = json.loads((nodes[0].directory / "config.global.json").read_text())
             _write_model(WORK / "liteserver.json", nodes[0].liteserver_config)
             global_config["liteservers"] = json.loads((WORK / "liteserver.json").read_text())["liteservers"]
-            (WORK / "global.json").write_text(json.dumps(global_config, indent=2))
-            (WORK / "global.json").chmod(0o644)
+            (PUBLIC / "global.json").write_text(json.dumps(global_config, indent=2))
+            (PUBLIC / "global.json").chmod(0o644)
             zerostate = network.zerostate.as_block()
             evidence["network"] = {"network_id": NETWORK_LABEL,
                                    "genesis_root_hash": "sha256:" + zerostate.root_hash.hex(),
@@ -339,6 +470,13 @@ async def main() -> int:
             evidence["wallets"] = await provision(network.zerostate.main_wallet(client))
             start_relay()
             start_executor()
+            tosctl_sha256 = build["tosctl_sha256"]
+            evidence["provider"] = setup_provider(tosctl_sha256)
+            evidence["buyer"] = setup_buyer(evidence["wallets"]["custody"], tosctl_sha256)
+            listed = mcp(None)
+            record("the developer's MCP client lists the buyer tools through the real server",
+                   "tos_buyer_result" in listed.get("tools", []), listed.get("tools"))
+            peer_negatives()
     except Exception as error:  # noqa: BLE001 - the evidence records the failure
         record("run completed without an exception", False, repr(error))
     finally:
