@@ -55,3 +55,18 @@ func TestTheShownTermsComeOnlyFromTheJournalRecord(t *testing.T) {
 		t.Fatalf("a record without its admitted terms was presented: %v", err)
 	}
 }
+
+// The client's preview carries the provider, the manifest text and the
+// admitted terms, but no code (section 4.5).
+func TestThePreviewCarriesTheProviderAndTheAdmittedTerms(t *testing.T) {
+	f := newFixture(t)
+	view := f.prepare(t, keyA, sourceTar(t))
+	if view.ProviderAgentID != fxProvider || view.ManifestDigest != f.pkg.Proposal.ManifestDigest ||
+		view.ProviderName == "" || view.RetentionSeconds == 0 {
+		t.Fatalf("preview provider fields: %+v", view)
+	}
+	if view.ResponseSLASeconds != fxResponseSLA || view.RefundClaimWindowSeconds != fxRefundWindow ||
+		view.CleanupBountyNanoTOS != fxCleanupBounty {
+		t.Fatalf("preview terms: %+v", view)
+	}
+}

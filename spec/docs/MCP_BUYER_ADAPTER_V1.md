@@ -8,9 +8,17 @@ client requests, the prepared-call cap and the withdrawn phase, the agent
 socket with its peer-credential roles, and the confirmation code and
 decision) is implemented in `protocol/pkg/buyeragent` and
 `protocol/pkg/buyersdk`. The confirmer (`protocol/pkg/buyerconfirm`,
-`tos-service-buyer confirm`) is implemented. Not yet implemented are the MCP
-server, the relay carriage, the lifecycle duties and `init`; section 16
-lists that work. It supersedes the retired
+`tos-service-buyer confirm`) is implemented.
+
+The stdio MCP server (`protocol/pkg/mcpbuyer`, `tos-service-buyer-mcp`) is
+implemented with `tos_buyer_prepare`, `tos_buyer_request_payment`,
+`tos_buyer_withdraw`, `tos_buyer_status` and `tos_buyer_purchases`. Its
+search, quote, result and refund tools come with the agent methods behind
+them.
+
+Not yet implemented are the relay carriage, the lifecycle duties, the
+finalized-state reads behind search, quote and result, and `init`; section
+16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
 
@@ -394,12 +402,11 @@ reference (5.3) and `state = awaiting_confirmation`. Prepare pays nothing.
 Input: `request_hash`, `wait_seconds` (0 to 300, default 120).
 
 It makes the purchase visible in the confirmer's queue and then waits up to
-`wait_seconds` for the human's decision, sending MCP progress notifications
-while it waits. When the client declares the elicitation capability, the
-server also sends one elicitation that tells the human the purchase reference
-and that the purchase must be confirmed in the confirmer; **the elicitation's
-answer is ignored for authority** (5.4). It never carries the confirmation
-code.
+`wait_seconds` for the human's decision. When the request carries a progress
+token, the server sends a progress notification. That notification gives
+the purchase reference, says the purchase must be confirmed in the confirmer,
+and says that nothing answered in the client pays. The server sends no
+elicitation (5.4). Nothing it sends carries the confirmation code.
 
 Output: one of `awaiting_confirmation` (still undecided; call again),
 `declined`, `expired` (the Quote expired or the offer changed before the
@@ -715,8 +722,11 @@ MCP elicitation lets a server ask the human a question through the client.
 Its answer reaches the server through the client process, which runs in the
 developer account; the agent cannot tell an answer the human gave from one a
 process in that account wrote to the agent socket. An elicitation answer is
-therefore never a payment authorization. V1 uses elicitation only to show the
-human the purchase reference and point to the confirmer. If a later version
+therefore never a payment authorization. V1 sends no elicitation at all. MCP
+2026-07-28, the revision the SDK implements, does not let a server start one
+while it serves a request. The progress notification and the tool result
+show the human the purchase reference and point to the confirmer. If a later
+version
 accepts an in-client confirmation, it needs an authenticator the developer
 account cannot reach, for example a hardware key verified by the agent, and a
 new version of this section.

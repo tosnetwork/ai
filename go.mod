@@ -12,6 +12,7 @@ require (
 	github.com/containerd/platforms v1.0.0-rc.1
 	github.com/containerd/typeurl/v2 v2.2.3
 	github.com/fxamacker/cbor/v2 v2.9.2
+	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/tosnetwork/tosutils-go v1.18.2-0.20260820143526-4d1a10d94bef
 	golang.org/x/sys v0.49.0
@@ -42,6 +43,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/moby/locker v1.0.1 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
@@ -55,10 +57,13 @@ require (
 	github.com/opencontainers/selinux v1.13.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/segmentio/asm v1.1.3 // indirect
+	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xssnick/raptorq v1.5.0 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
@@ -67,7 +72,9 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
