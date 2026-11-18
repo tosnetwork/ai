@@ -21,6 +21,7 @@ import (
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactorindex"
@@ -29,6 +30,12 @@ import (
 )
 
 const usage = "usage: tos-service-buyer <discover|prepare|call|status|requests|agent|confirm> [flags]"
+
+// decodeStrict decodes a configuration document strictly: unknown fields,
+// duplicate keys and trailing data are refused.
+func decodeStrict(raw []byte, value any) error {
+	return jsonstrict.Decode(raw, value)
+}
 
 // usageOutput receives flag errors and usage text.
 var usageOutput io.Writer = os.Stderr
