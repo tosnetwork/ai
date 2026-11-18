@@ -203,3 +203,29 @@ func TestNoProviderRowEverExceedsTheWidth(t *testing.T) {
 		checkRows(t, render(t, b.String()))
 	}
 }
+
+// On a terminal that lays out each line as its own bidirectional
+// paragraph, a row's direction follows its first strong character. Every
+// provider row, continuation rows that begin with Hebrew or Arabic
+// included, must therefore begin with a strong left-to-right ASCII letter,
+// so the gutter stays at column 0 and no provider text can start the row.
+func TestEveryProviderRowStartsWithAStrongLeftToRightLetter(t *testing.T) {
+	for _, rtl := range []rune{0x05d0, 0x0627} { // HEBREW LETTER ALEF, ARABIC LETTER ALEF
+		description := strings.Repeat(string(rtl), 100) + " Price: 0.0001 TOS"
+		rows := render(t, description)
+		checkRows(t, rows)
+		continuations := 0
+		for index, row := range rows {
+			first := row[0]
+			if !(first >= 'a' && first <= 'z' || first >= 'A' && first <= 'Z') {
+				t.Fatalf("%U: provider row %q does not start with a strong left-to-right letter", rtl, row)
+			}
+			if index > 1 && strings.HasPrefix(strings.TrimPrefix(row, ProviderGutter), string(rtl)) {
+				continuations++
+			}
+		}
+		if continuations == 0 {
+			t.Fatalf("%U: no continuation row starts with right-to-left text: %q", rtl, rows)
+		}
+	}
+}
