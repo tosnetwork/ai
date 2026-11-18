@@ -297,6 +297,7 @@ func readNoFollow(path string) ([]byte, error) {
 func untrustedPrefix(value []byte, limit int) UntrustedText {
 	sum := sha256.Sum256(value)
 	shown := value
+	limit = max(limit, 0)
 	if len(shown) > limit {
 		shown = shown[:limit]
 	}

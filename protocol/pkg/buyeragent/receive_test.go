@@ -719,6 +719,64 @@ func TestASettledEnvelopeIsAcknowledgedAtEveryRelay(t *testing.T) {
 // Frames are stored durably and deduplicated; other bytes for a held index
 // are a frame conflict, and a purchase's inbox holds at most
 // MaxOpenMessages messages.
+// A frame refused as inbox-full is never acknowledged: it stays at the
+// relay and is stored on a later pass once the inbox has room.
+func TestAFullInboxLeavesTheEnvelopeAtTheRelay(t *testing.T) {
+	f := newReceiveFixture(t)
+	requestHash := f.task.Record.RequestHash
+	frames, err := railwork.EncodeMessageFrames(railwork.KindResult, f.binding, f.result(t, "held", nil).message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := railwork.DecodeFrame(frames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < MaxOpenMessages; index++ {
+		filler := frame
+		filler.MessageDigest[0] ^= byte(index + 1)
+		if err := f.carrier.storeFrame(requestHash, filler, frames[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	envelope := f.deliver(t, fxProvider, railwork.KindResult, f.binding, f.result(t, "built", nil).message)[0]
+	view, failures := f.carrier.Poll(context.Background(), f.lookup)
+	box := f.relays.box(buyerRelay)
+	if len(failures) != 1 || view.Stored != 0 || view.Acknowledged != 0 || box.acked[idOf(t, envelope)] {
+		t.Fatalf("a full inbox: %+v %v", view, failures)
+	}
+	if err := f.carrier.clearInbox(requestHash); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.advance(PollInterval + PollInterval/5)
+	if view := f.poll(t); view.Stored != 1 || !box.acked[idOf(t, envelope)] {
+		t.Fatalf("the later pass: %+v", view)
+	}
+}
+
+// A frame that conflicts with a held frame is refused for good: it is
+// acknowledged without storing.
+func TestAConflictingFrameIsAcknowledgedUnstored(t *testing.T) {
+	f := newReceiveFixture(t)
+	message := f.result(t, "built", nil).message
+	frames, err := railwork.EncodeMessageFrames(railwork.KindResult, f.binding, message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := railwork.DecodeFrame(frames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := append(append([]byte(nil), frames[0][:len(frames[0])-1]...), frames[0][len(frames[0])-1]^1)
+	if err := f.carrier.storeFrame(f.task.Record.RequestHash, frame, held); err != nil {
+		t.Fatal(err)
+	}
+	envelope := f.deliver(t, fxProvider, railwork.KindResult, f.binding, message)[0]
+	if view := f.poll(t); view.Stored != 0 || view.Refused != 1 || !f.relays.box(buyerRelay).acked[idOf(t, envelope)] {
+		t.Fatalf("a conflicting frame: %+v", view)
+	}
+}
+
 func TestTheInboxDeduplicatesAndIsBounded(t *testing.T) {
 	f := newReceiveFixture(t)
 	frames, err := railwork.EncodeMessageFrames(railwork.KindResult, f.binding, f.result(t, "built", nil).message)

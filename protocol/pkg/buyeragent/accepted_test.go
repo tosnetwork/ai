@@ -46,14 +46,21 @@ func TestTheCarrierReadsBackTheAcceptedResult(t *testing.T) {
 	if err := writePrivate(f.carrier.ArtifactPath(requestHash), result.artifact, false); err != nil {
 		t.Fatal(err)
 	}
-	// A Receipt that no longer hashes to the accepted response hash too.
+	// A Receipt that no longer hashes to the accepted response hash too,
+	// even one that attests the same artifact.
 	state, err := f.carrier.readReceived(requestHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other := f.result(t, "other", nil)
+	report := []byte(`{"ok":true}`)
+	root, _, err := railwork.BuildReceipt(f.receipt, railwork.Outcome{ResultDigest: digestText([]byte("built")),
+		ArtifactDigest: digestText(result.artifact), ReportDigest: digestText(report),
+		CompletedAtUnix: uint64(fxNow.Unix()) + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	otherState := state
-	otherState.ReceiptBase64 = base64.StdEncoding.EncodeToString(receiptOf(t, other.message))
+	otherState.ReceiptBase64 = base64.StdEncoding.EncodeToString(root.ToBOC())
 	if err := writeJSON(f.carrier.receivedPath(requestHash), otherState, false); err != nil {
 		t.Fatal(err)
 	}

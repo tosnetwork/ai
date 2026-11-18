@@ -1029,8 +1029,9 @@ listed envelope follows relay 8.5:
   (`railwork.CheckPacketFields`).
 - The frame is stored durably under its message digest. The same bytes again
   are a duplicate. Other bytes for a held index are a frame conflict. A
-  purchase holds at most 8 messages; a frame of a ninth is dropped and the
-  provider's redelivery brings it again.
+  purchase holds at most 8 messages. A frame of a ninth is a transient
+  failure: it is not acknowledged, stays at the relay, and is taken on a
+  later pass once a result round has emptied the inbox.
 - A stored frame is acknowledged after the durable write. A packet refused
   for good after a successful open is acknowledged without storing, so junk
   cannot hold the mailbox. A transient failure is neither stored nor
