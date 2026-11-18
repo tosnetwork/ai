@@ -213,6 +213,14 @@ func checkInput(in Input) error {
 	if err := checkBudget(in.Budget); err != nil {
 		problems = append(problems, err.Error())
 	}
+	// The agent verifies relays against the pinned CA only, so an https
+	// relay without one could never be reached.
+	for _, relay := range in.Relays {
+		if strings.HasPrefix(relay, "https://") && in.RelayCAFile == "" {
+			problems = append(problems, "an https --relay needs --relay-ca-file")
+			break
+		}
+	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return errors.New("buyerinit: " + strings.Join(problems, "; "))

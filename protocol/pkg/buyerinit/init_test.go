@@ -433,9 +433,13 @@ func TestInitInputIsValidatedBeforeAnythingRuns(t *testing.T) {
 	w := newWorld(t)
 	valid := w.input(t)
 	for name, mutate := range map[string]func(*Input){
-		"a relative config":       func(in *Input) { in.ConfigPath = "agent.json" },
-		"an unclean state dir":    func(in *Input) { in.StateDir = in.StateDir + "/." },
-		"a relative CA file":      func(in *Input) { in.RelayCAFile = "ca.pem" },
+		"a relative config":     func(in *Input) { in.ConfigPath = "agent.json" },
+		"an unclean state dir":  func(in *Input) { in.StateDir = in.StateDir + "/." },
+		"a relative CA file":    func(in *Input) { in.RelayCAFile = "ca.pem" },
+		"an https relay, no CA": func(in *Input) { in.RelayCAFile = "" },
+		"one https relay, no CA": func(in *Input) {
+			in.Relays, in.RelayCAFile = []string{"http://127.0.0.1:8080", "https://relay-a.example"}, ""
+		},
 		"a config in the state":   func(in *Input) { in.ConfigPath = filepath.Join(in.StateDir, "agent.json") },
 		"a nested config":         func(in *Input) { in.ConfigPath = filepath.Join(in.StateDir, "a", "agent.json") },
 		"client uid zero":         func(in *Input) { in.ClientUID = 0 },
@@ -484,6 +488,12 @@ func TestInitInputIsValidatedBeforeAnythingRuns(t *testing.T) {
 	}
 	if err := checkInput(valid); err != nil {
 		t.Fatal(err)
+	}
+	// A loopback http relay is reached without TLS, so it needs no CA.
+	loopback := valid
+	loopback.Relays, loopback.RelayCAFile = []string{"http://127.0.0.1:8080"}, ""
+	if err := checkInput(loopback); err != nil {
+		t.Fatalf("a loopback http relay without a CA: %v", err)
 	}
 	if _, err := Apply(context.Background(), Input{}, w.env(true)); err == nil || len(w.created) != 0 {
 		t.Fatal("an empty input ran")

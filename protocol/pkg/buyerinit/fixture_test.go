@@ -290,6 +290,7 @@ func (w *world) input(t *testing.T) Input {
 		ManifestDir: filepath.Join(root, "manifests"), TOSCTLBinary: "/opt/tosctl/tosctl",
 		TOSCTLSHA256: strings.Repeat("71", 32), TOSCTLConfig: filepath.Join(root, "tosctl-config.json"),
 		Wallet: "buyer", Controller: "packet", Relays: []string{"https://relay-b.example", "https://relay-a.example"},
+		RelayCAFile: filepath.Join(root, "relay-ca.pem"),
 		Budget: BudgetConfig{WindowSeconds: 86_400, MaxCalls: 100, MaxPerCallNanoTOS: "1000000000",
 			MaxWindowNanoTOS: "10000000000", MaxUnconfirmed: 4}}
 }

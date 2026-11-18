@@ -264,8 +264,9 @@ Both refuse to run as root or as the configured client (developer) uid, and
 check every input before `tosctl` runs: absolute clean paths, the configuration
 file outside the state directory, `tosctl` names for the wallet and
 controller, a 64-hex `tosctl` pin, 3 to 8 endpoints with a strict-majority
-quorum, 1 to 4 distinct canonical relay URLs, and the budget bounds of
-section 6. The steps are:
+quorum, 1 to 4 distinct canonical relay URLs, a relay CA file whenever a
+relay is `https` (the agent verifies relays against that pinned CA only, never
+the system pool), and the budget bounds of section 6. The steps are:
 
 1. pin the `tosctl` binary by SHA-256; derive the identity domain with
    `tosctl agent native-registry domain`; require the registry code file to
@@ -288,8 +289,9 @@ section 6. The steps are:
    2 TOS, and only from a V3R2, V4R2 or V5R1 wallet, whose messages expire.
    `init` then waits until the Agent is finalized, not revoked, under a policy
    holding the packet controller;
-4. relays: `init` records the relay URLs (`--relay`, required until the
-   official relay URLs of O3 are published) and creates no relay key. The agent
+4. relays: `init` records the relay URLs (`--relay`, 1 to 4, required until
+   the official relay URLs of O3 are published) and the `--relay-ca-file`
+   an `https` relay needs, and creates no relay key. The agent
    issues its key and card for each purchase window when it first needs one
    (3.3), so a card always covers the window it serves;
 5. write the agent configuration (schema
@@ -1458,6 +1460,9 @@ Decided by the owner on 2026-11-18:
   change or authorize any protocol fact, and every packet it carries is
   verified against finalized state. A team-operated relay is therefore a
   carrier only and does not affect the independence of the Gate D roles.
+  Until the official relay URLs are published, `init` has no default and
+  requires `--relay` (1 to 4); once they are published they become the
+  default. An `https` relay also requires `--relay-ca-file` at `init`.
 - **O5. Shared buyer runtime: the direction.** The buyer agent package is
   meant to become the shared buyer runtime that OpenFox may adopt later, as
   it adopted `railwork`. V1 does not do that switch.
