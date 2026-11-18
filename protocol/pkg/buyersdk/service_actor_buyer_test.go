@@ -369,6 +369,12 @@ func TestBuyerDiscoversVerifiesCallsAndResolves(t *testing.T) {
 	if record.Phase != PhasePrepared || record.PaymentNanoTOS != "700000000" || record.TermsHash != f.pkg.Proposal.TermsHash {
 		t.Fatalf("record = %+v", record)
 	}
+	// The record keeps the admitted policy's SLA, refund window and cleanup
+	// bounty, the fields of the terms the call pins.
+	if record.ResponseSLASeconds != f.policy.ResponseSLA || record.RefundClaimWindowSeconds != f.policy.RefundClaimWindow ||
+		record.CleanupBountyNanoTOS != f.policy.CleanupBounty.String() || record.ResponseSLASeconds == 0 {
+		t.Fatalf("admitted terms in the record: %+v", record)
+	}
 	// The NSR1 request hash commits to the Accepted Quote, execution and input.
 	quote, _, _ := nativecore.BuildAcceptedQuoteCommitment(servicefixture.Network(), f.pkg.Proposal)
 	var quoteHash [32]byte

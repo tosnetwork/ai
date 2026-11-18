@@ -77,6 +77,12 @@ type CallRecord struct {
 	CallTransactionLT  uint64    `json:"call_transaction_lt,omitempty"`
 	CallTransactionHex string    `json:"call_transaction_hash,omitempty"`
 	ExitCode           int32     `json:"exit_code,omitempty"`
+	// The admitted policy's response SLA, refund claim window and cleanup
+	// bounty. They are fields of the terms whose hash the call pins, so
+	// they are exactly the terms the call is admitted under.
+	ResponseSLASeconds       uint32 `json:"response_sla_seconds,omitempty"`
+	RefundClaimWindowSeconds uint32 `json:"refund_claim_window_seconds,omitempty"`
+	CleanupBountyNanoTOS     string `json:"cleanup_bounty_nanotos,omitempty"`
 }
 
 // ServiceActorLimits bounds what the buyer may reserve.

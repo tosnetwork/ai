@@ -38,6 +38,14 @@ var (
 	fxNow   = time.Unix(2_000_000_000, 0)
 )
 
+// The admitted policy's terms the fake buyer journals, as buyersdk
+// Prepare takes them from the admission.
+const (
+	fxResponseSLA   = 3_600
+	fxRefundWindow  = 7_200
+	fxCleanupBounty = "100000000"
+)
+
 // fakeBuyer stands in for buyersdk.ServiceActorBuyer over a real journal:
 // it validates the Quote the way Prepare does, journals the call, and
 // records every send.
@@ -86,7 +94,8 @@ func (f *fakeBuyer) Prepare(_ context.Context, request *nativev1.RequestQuotePro
 		TermsHash: validated.Proposal.TermsHash, PriceNanoTOS: validated.Proposal.PriceNanotos,
 		StorageFeeNanoTOS: validated.Proposal.StorageFeeNanotos, AttestorKeyID: validated.Proposal.AttestorKeyId,
 		PaymentNanoTOS: "700000000", ExpiresAtUnix: validated.Proposal.ExpiresAtUnixSeconds,
-		Phase: buyersdk.PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix()}
+		Phase: buyersdk.PhasePrepared, CreatedUnix: now.Unix(), UpdatedUnix: now.Unix(),
+		ResponseSLASeconds: fxResponseSLA, RefundClaimWindowSeconds: fxRefundWindow, CleanupBountyNanoTOS: fxCleanupBounty}
 	if err := f.journal.Create(record, f.limits, now); err != nil {
 		return buyersdk.CallRecord{}, err
 	}

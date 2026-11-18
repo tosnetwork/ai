@@ -28,7 +28,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const usage = "usage: tos-service-buyer <discover|prepare|call|status|requests> [flags]"
+const usage = "usage: tos-service-buyer <discover|prepare|call|status|requests|confirm> [flags]"
 
 // usageOutput receives flag errors and usage text.
 var usageOutput io.Writer = os.Stderr
@@ -86,6 +86,9 @@ func run(arguments []string, out io.Writer) error {
 		return nil
 	}
 	command, rest := arguments[0], arguments[1:]
+	if command == "confirm" {
+		return runConfirm(rest)
+	}
 	set := flag.NewFlagSet(command, flag.ContinueOnError)
 	set.SetOutput(usageOutput)
 	common := addCommonFlags(set)

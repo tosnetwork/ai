@@ -11,12 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/internal/osguard"
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"google.golang.org/protobuf/proto"
@@ -122,7 +124,9 @@ func (a *Agent) notifyLocked() {
 func (a *Agent) now() time.Time { return a.config.Now() }
 
 // StoreQuote keeps a validated Quote for a later prepare and returns its
-// quote ID, the SHA-256 of the package's deterministic encoding.
+// quote ID, the SHA-256 of the package's deterministic encoding. The terms
+// the confirmer shows are not taken from here: they come from the
+// admission at prepare, bound by the terms hash the call pins.
 func (a *Agent) StoreQuote(request *nativev1.RequestQuoteProposalRequest, value *nativev1.QuoteProposalPackageV1) (string, error) {
 	if request == nil || value == nil {
 		return "", refusal(CodeBadInput, "no Quote was given", nil)
@@ -639,12 +643,29 @@ func (a *Agent) Pending() (PurchasesView, error) {
 // Presentation is what the confirmer shows for one purchase. It is sent
 // only to the custody account.
 type Presentation struct {
-	Purchase       PurchaseView `json:"purchase"`
-	NetworkID      string       `json:"network_id"`
-	BuyerWallet    string       `json:"buyer_wallet"`
-	Budget         BudgetView   `json:"budget"`
-	Code           string       `json:"confirmation_code"`
-	ValidUntilUnix int64        `json:"code_valid_until_unix"`
+	Purchase    PurchaseView `json:"purchase"`
+	NetworkID   string       `json:"network_id"`
+	BuyerWallet string       `json:"buyer_wallet"`
+	Budget      BudgetView   `json:"budget"`
+	// ProviderAgentID and ManifestDigest come from the validated Quote.
+	ProviderAgentID string `json:"provider_agent_id"`
+	ManifestDigest  string `json:"manifest_digest"`
+	// ProviderName and ProviderDescription are the manifest's
+	// human-readable fields: text the provider wrote, which the confirmer
+	// renders as untrusted.
+	ProviderName        string `json:"untrusted_provider_name"`
+	ProviderDescription string `json:"untrusted_provider_description"`
+	// The terms the deadlines and the refund follow.
+	ResponseSLASeconds       uint32 `json:"response_sla_seconds"`
+	RefundClaimWindowSeconds uint32 `json:"refund_claim_window_seconds"`
+	RetentionSeconds         uint64 `json:"retention_seconds"`
+	CleanupBountyNanoTOS     string `json:"cleanup_bounty_nanotos"`
+	AllowanceNanoTOS         string `json:"execution_allowance_nanotos"`
+	// NowUnix is the agent's clock when it presented, so deadlines are
+	// computed from one instant.
+	NowUnix        int64  `json:"now_unix"`
+	Code           string `json:"confirmation_code"`
+	ValidUntilUnix int64  `json:"code_valid_until_unix"`
 }
 
 // Present draws the presentation's nonce, unless the current one is still
@@ -660,6 +681,12 @@ func (a *Agent) Present(requestHash string) (Presentation, error) {
 	now := a.now()
 	if record.Phase != buyersdk.PhasePrepared || purchase.RequestedUnix == 0 {
 		return Presentation{}, refusal(CodeConflict, "the purchase is not waiting for a decision", nil)
+	}
+	// The terms shown come from the journal record, which Prepare filled
+	// from the admitted policy. A record without them cannot be shown
+	// honestly, so it is never presented.
+	if record.ResponseSLASeconds == 0 || record.RefundClaimWindowSeconds == 0 || record.CleanupBountyNanoTOS == "" {
+		return Presentation{}, refusal(CodeOfferInvalid, "the purchase record lacks its admitted terms", nil)
 	}
 	if purchase.ConfirmationNonce == "" || !now.Before(time.Unix(purchase.PresentedUnix, 0).Add(ConfirmationLifetime)) {
 		var nonce [ConfirmationNonceBytes]byte
@@ -679,8 +706,21 @@ func (a *Agent) Present(requestHash string) (Presentation, error) {
 	if err != nil {
 		return Presentation{}, err
 	}
+	request, value, err := a.loadQuote(purchase.QuoteID)
+	if err != nil {
+		return Presentation{}, err
+	}
+	validated, err := quoteexchange.ValidatePortable(a.config.Network, request, value)
+	if err != nil {
+		return Presentation{}, refusal(CodeOfferInvalid, "the stored Quote no longer validates", err)
+	}
 	return Presentation{Purchase: a.viewOf(record, purchase), NetworkID: record.NetworkID, BuyerWallet: record.BuyerWallet,
-		Budget: budget, Code: ConfirmationCode(nonce, fieldsOf(record, purchase)),
+		Budget: budget, ProviderAgentID: validated.Proposal.ProviderAgentId, ManifestDigest: validated.Proposal.ManifestDigest,
+		ProviderName: validated.Manifest.Name, ProviderDescription: validated.Manifest.Description,
+		ResponseSLASeconds: record.ResponseSLASeconds, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,
+		RetentionSeconds: validated.Manifest.RetentionSeconds, CleanupBountyNanoTOS: record.CleanupBountyNanoTOS,
+		AllowanceNanoTOS: strconv.Itoa(nativecore.ServiceActorAdmissionGasAllowance), NowUnix: now.Unix(),
+		Code:           ConfirmationCode(nonce, fieldsOf(record, purchase)),
 		ValidUntilUnix: time.Unix(purchase.PresentedUnix, 0).Add(ConfirmationLifetime).Unix()}, nil
 }
 
