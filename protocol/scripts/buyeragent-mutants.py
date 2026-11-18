@@ -502,6 +502,13 @@ MUTANTS = [
      "if err != nil || info.Mode()&os.ModeSocket == 0 {",
      "if err != nil {",
      "TestDeploymentChecksRefuseAReachableCustody"),
+    # With the tar read at one archive bound, the read check is what
+    # refuses a tar file past it: the parse would otherwise see a truncated
+    # file.
+    ("mcp-read-bound", MCP + "source.go",
+     "if err != nil || len(content) > limit {",
+     "if err != nil {",
+     "TestASourceOverTheBoundIsRefused"),
     ("mcp-tar-read-bound", MCP + "source.go",
      "raw, err := readBounded(path, maxBytes)",
      "raw, err := readBounded(path, 4*maxBytes)",
@@ -653,11 +660,6 @@ REDUNDANT = [
      "",
      "a relative path stays relative after EvalSymlinks, and filepath.Rel refuses to relate it to an "
      "absolute root"),
-    ("mcp-read-bound", MCP + "source.go",
-     "if err != nil || len(content) > limit {",
-     "if err != nil {",
-     "a read past the remaining bound means the archive exceeds 1 MiB, which the packer refuses; the "
-     "check only bounds memory"),
     ("mcp-packed-bound", MCP + "source.go",
      "\tif len(archive) > maxBytes {\n\t\treturn nil, sourceError(\"the packed source archive exceeds its bound\")\n\t}\n",
      "",
