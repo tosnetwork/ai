@@ -1,31 +1,48 @@
 package buyerconfirm
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 )
 
-// Runes the width tests use, with the columns a terminal gives them. The
-// table is the test's own, independent of displayWidth.
+// Runes the rendering tests use.
 const (
-	fullwidthA    = rune(0xff21) // FULLWIDTH LATIN CAPITAL LETTER A: 2
-	cjkMiddle     = rune(0x4e2d) // a CJK ideograph: 2
-	combiningAcut = rune(0x0301) // COMBINING ACUTE ACCENT: 0
-	plusMinus     = rune(0x00b1) // PLUS-MINUS SIGN, East Asian ambiguous: counted 2
+	fullwidthA    = rune(0xff21) // FULLWIDTH LATIN CAPITAL LETTER A, Lu
+	heavyHeart    = rune(0x2764) // HEAVY BLACK HEART, So; with U+FE0F many terminals draw it two wide
+	emojiStyle    = rune(0xfe0f) // VARIATION SELECTOR-16
+	combiningAcut = rune(0x0301) // COMBINING ACUTE ACCENT, Mn
+	plusMinus     = rune(0x00b1) // PLUS-MINUS SIGN, Sm, East Asian ambiguous
 )
 
-func tableWidth(t *testing.T, r rune) int {
-	t.Helper()
-	switch {
-	case r == fullwidthA, r == cjkMiddle, r == plusMinus:
-		return 2
-	case r == combiningAcut:
-		return 0
-	case r >= 0x20 && r < 0x7f:
+// testWidth is the test's own column count: printable ASCII is one column,
+// any other rune two.
+func testWidth(r rune) int {
+	if r >= 0x20 && r <= 0x7e {
 		return 1
 	}
-	t.Fatalf("rune %U is not in the test's width table", r)
-	return 0
+	return 2
+}
+
+// allowed is the test's own statement of the allowlist of section 5.2,
+// written from the category tables rather than from shown().
+func allowed(r rune) bool {
+	switch {
+	case r == ' ':
+		return true
+	case r >= 0xfe00 && r <= 0xfe0f, r >= 0xe0100 && r <= 0xe01ef:
+		return false
+	}
+	for _, table := range []*unicode.RangeTable{unicode.Lu, unicode.Ll, unicode.Lt, unicode.Lm, unicode.Lo, unicode.Nd,
+		unicode.Nl, unicode.No, unicode.Pc, unicode.Pd, unicode.Ps, unicode.Pe, unicode.Pi, unicode.Pf, unicode.Po,
+		unicode.Sm, unicode.Sc, unicode.Sk, unicode.So} {
+		if unicode.Is(table, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // providerBlockRows returns the rows between the provider heading and its
@@ -48,6 +65,8 @@ func providerBlockRows(t *testing.T, out string) []string {
 	return lines[start+1 : end]
 }
 
+// checkRows requires every provider row to carry the gutter, to hold only
+// allowlisted runes, and to fit the wrap width by the test's own count.
 func checkRows(t *testing.T, rows []string) {
 	t.Helper()
 	for _, row := range rows {
@@ -56,7 +75,10 @@ func checkRows(t *testing.T, rows []string) {
 		}
 		columns := 0
 		for _, r := range strings.TrimPrefix(row, ProviderGutter) {
-			columns += tableWidth(t, r)
+			if !allowed(r) {
+				t.Fatalf("provider row %q holds a raw %U", row, r)
+			}
+			columns += testWidth(r)
 		}
 		if columns > ProviderWrapWidth {
 			t.Fatalf("provider row %q takes %d columns, more than %d", row, columns, ProviderWrapWidth)
@@ -64,55 +86,75 @@ func checkRows(t *testing.T, rows []string) {
 	}
 }
 
-// The reviewer's case: one narrow character and 32 wide ones after
-// "description: " fill a whole terminal row by display width. Counting
-// characters would leave the rest of the text to soft-wrap to column 0
-// without the gutter.
-func TestProviderRowsAreWrappedByDisplayWidth(t *testing.T) {
+func render(t *testing.T, description string) []string {
+	t.Helper()
 	p := presentation()
 	p.ProviderName = "build"
-	p.ProviderDescription = "a" + strings.Repeat(string(fullwidthA), 32) + "Price: 0.000000001 TOS"
-	rows := providerBlockRows(t, Render(p, nil))
-	checkRows(t, rows)
-	if len(rows) < 3 {
-		t.Fatalf("a description %d columns wide was not wrapped: %q", 13+1+64+22, rows)
-	}
-	// An ambiguous-width character is counted two columns wide, as some
-	// terminals draw it.
-	p.ProviderDescription = "a" + strings.Repeat(string(plusMinus), 32) + "Price: 0.000000001 TOS"
-	checkRows(t, providerBlockRows(t, Render(p, nil)))
+	p.ProviderDescription = description
+	return providerBlockRows(t, Render(p, nil))
 }
 
-// Combining marks take no column: 51 accented letters after
-// "description: " fill exactly one 64-column row.
-func TestCombiningMarksTakeNoColumn(t *testing.T) {
-	p := presentation()
-	p.ProviderName = "n"
-	p.ProviderDescription = strings.Repeat("e"+string(combiningAcut), 51)
-	rows := providerBlockRows(t, Render(p, nil))
-	if len(rows) != 2 {
-		t.Fatalf("51 accented letters took %d description rows: %q", len(rows)-1, rows)
+// One narrow and 32 wide characters after "description: " fill an
+// 80-column row by display width; counted two each, they wrap in time.
+func TestWideTextIsCountedTwoColumns(t *testing.T) {
+	for _, wide := range []rune{fullwidthA, plusMinus} {
+		rows := render(t, "a"+strings.Repeat(string(wide), 32)+"Price: 0.000000001 TOS")
+		checkRows(t, rows)
+		if len(rows) < 3 {
+			t.Fatalf("%U: a description %d columns wide was not wrapped: %q", wide, 13+1+64+22, rows)
+		}
 	}
-	checkRows(t, rows)
 }
 
-// Mixed wide and combining text is wrapped by display width as well: the
-// combining marks take no column and never start a row of their own.
-func TestMixedWideAndCombiningTextStaysWithinTheWidth(t *testing.T) {
-	p := presentation()
-	var b strings.Builder
-	for index := 0; index < 60; index++ {
-		b.WriteRune('e')
-		b.WriteRune(combiningAcut)
-		b.WriteRune(cjkMiddle)
-	}
-	p.ProviderName = "name"
-	p.ProviderDescription = b.String()
-	rows := providerBlockRows(t, Render(p, nil))
+// The reviewer's case: an emoji with VARIATION SELECTOR-16 is drawn two
+// wide. The selector is escaped and the emoji counted two, so the row still
+// fits.
+func TestAnEmojiPresentationSelectorIsEscapedAndTheEmojiCountedWide(t *testing.T) {
+	rows := render(t, "a"+strings.Repeat(string(heavyHeart)+string(emojiStyle), 32)+"Price: 0.000000001 TOS")
 	checkRows(t, rows)
-	for _, row := range rows {
-		if strings.HasPrefix(row, ProviderGutter+string(combiningAcut)) {
-			t.Fatalf("a combining mark starts row %q", row)
+	joined := strings.Join(rows, "")
+	if strings.ContainsRune(joined, emojiStyle) || !strings.Contains(joined, `\u{FE0F}`) {
+		t.Fatalf("the variation selector was not escaped: %q", rows)
+	}
+}
+
+// Marks are escaped, never stacked over the text or the gutter.
+func TestStackedCombiningMarksAreEscaped(t *testing.T) {
+	rows := render(t, "e"+strings.Repeat(string(combiningAcut), 200))
+	checkRows(t, rows)
+	if !strings.Contains(strings.Join(rows, ""), `\u{0301}`) {
+		t.Fatalf("the combining marks were not escaped: %q", rows)
+	}
+}
+
+// NFC composes first: a letter with one combining accent is shown as its
+// composed letter, Hangul jamo as their syllable.
+func TestTextIsComposedBeforeTheAllowlist(t *testing.T) {
+	if got := Escape("e"+string(combiningAcut), 16); got != string(rune(0x00e9)) {
+		t.Fatalf("e + U+0301 rendered as %q", got)
+	}
+	jamo := string([]rune{0x1100, 0x1161})
+	if got := Escape(jamo, 16); got != string(rune(0xac00)) {
+		t.Fatalf("Hangul jamo rendered as %q", got)
+	}
+	checkRows(t, render(t, strings.Repeat(jamo, 40)))
+}
+
+// Every invisible format character the review found, and the tag
+// characters, are escaped.
+func TestInvisibleFormatAndTagCharactersAreEscaped(t *testing.T) {
+	var invisible []rune
+	for r := rune(0x2060); r <= 0x2064; r++ {
+		invisible = append(invisible, r)
+	}
+	invisible = append(invisible, 0x180e, 0x00ad, 0x200b, 0x200c, 0x200d, 0xfeff, 0x202e, 0x061c)
+	for r := rune(0xe0000); r <= 0xe007f; r++ {
+		invisible = append(invisible, r)
+	}
+	for _, r := range invisible {
+		out := Escape("a"+string(r)+"b", 16)
+		if strings.ContainsRune(out, r) || !strings.HasPrefix(out, "a\\u{") {
+			t.Errorf("%U rendered as %q", r, out)
 		}
 	}
 }
@@ -126,11 +168,38 @@ func TestEveryUnicodeSpaceCollapses(t *testing.T) {
 			t.Errorf("%U: %q", space, got)
 		}
 	}
-	p := presentation()
-	p.ProviderDescription = "x" + strings.Repeat(string(rune(0x3000)), 31) + ProviderEnd
-	for _, row := range strings.Split(Render(p, nil), "\n") {
-		if strings.HasPrefix(row, ProviderGutter) && strings.Contains(row, string(rune(0x3000))) {
+	rows := render(t, "x"+strings.Repeat(string(rune(0x3000)), 31)+ProviderEnd)
+	checkRows(t, rows)
+	for _, row := range rows {
+		if strings.Contains(row, string(rune(0x3000))) {
 			t.Fatalf("a wide space survived in row %q", row)
 		}
+	}
+}
+
+// The property the rules exist for: for any input, over the whole BMP and
+// the astral planes and with invalid bytes, every provider row carries the
+// gutter, holds only allowlisted runes, and fits 64 counted columns.
+func TestNoProviderRowEverExceedsTheWidth(t *testing.T) {
+	random := rand.New(rand.NewSource(20261118))
+	for trial := 0; trial < 3000; trial++ {
+		var b strings.Builder
+		for index := random.Intn(300); index > 0; index-- {
+			switch random.Intn(10) {
+			case 0:
+				b.WriteByte(byte(random.Intn(256)))
+			case 1:
+				b.WriteRune(rune(0x10000 + random.Intn(0x100000)))
+			case 2:
+				b.WriteRune(rune(random.Intn(0x80)))
+			default:
+				r := rune(random.Intn(0x10000))
+				if !utf8.ValidRune(r) {
+					r = utf8.RuneError
+				}
+				b.WriteRune(r)
+			}
+		}
+		checkRows(t, render(t, b.String()))
 	}
 }
