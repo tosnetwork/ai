@@ -240,12 +240,13 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 	if receipt.Body.AdmissionMode != "authorized_decision" || agreementVerifier == nil {
 		return errors.New("claim decision admission mode is unsupported or incomplete")
 	}
-	// A late filing-close receipt and a fallback trigger cutoff exist only for
-	// deterministic fallback admission; an authorized decision carrying either
-	// would sign over an object no check ever reads.
-	if receipt.LateFilingCloseReceipt != nil || receipt.Body.LateFilingCloseReceiptDigest != "" ||
-		receipt.Body.FallbackTriggerCutoffUnix != 0 {
-		return errors.New("authorized claim decision admission carries a late filing-close receipt or fallback cutoff")
+	// A late filing-close digest, a fallback trigger cutoff, a current decision
+	// proof and a fallback decision path exist only for deterministic fallback
+	// admission; an authorized decision carrying any of them would sign over an
+	// object no check ever reads.
+	if receipt.Body.LateFilingCloseReceiptDigest != "" || receipt.Body.FallbackTriggerCutoffUnix != 0 ||
+		receipt.CurrentDecisionAdmissionProof != nil || isFallbackDecisionPathV1(receipt.AuthorizedClaimDecision.Body.DecisionPath) {
+		return errors.New("authorized claim decision admission carries a fallback-only field")
 	}
 	bound, err := FindStageActionAuthorityV1(terms.StageActionAuthorityBinding, "terminal_decision")
 	if err != nil {

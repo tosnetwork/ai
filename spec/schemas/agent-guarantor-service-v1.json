@@ -1278,8 +1278,8 @@
         "coverage_end_commitment": {
           "$ref": "#/$defs/CoverageEndCommitmentV1"
         },
-        "late_filing_close_receipt": {
-          "$ref": "#/$defs/AuthorizedClaimFilingCloseReceiptV1"
+        "current_decision_admission_proof": {
+          "$ref": "#/$defs/ClaimDecisionAdmissionReceiptProofV1"
         },
         "predecessor_claim_state_transition_receipt": {
           "$ref": "#/$defs/AuthorizedClaimStateTransitionReceiptV1"
@@ -8590,8 +8590,9 @@
     "DeterministicFallbackAdmissionVariantV1": {
       "additionalProperties": false,
       "properties": {
-        "authorized_claim_admission_receipt": {
-          "$ref": "#/$defs/AuthorizedClaimAdmissionReceiptV1"
+        "authorized_claim_admission_receipt_digest": {
+          "pattern": "^(sha256|tvm-cell-sha256):[0-9a-f]{64}$",
+          "type": "string"
         },
         "claim_id": {
           "type": "string"
@@ -8606,11 +8607,13 @@
         "coverage_obligation_id": {
           "type": "string"
         },
-        "current_claim_state_transition_receipt": {
-          "$ref": "#/$defs/AuthorizedClaimStateTransitionReceiptV1"
+        "current_claim_state_transition_receipt_digest": {
+          "pattern": "^(sha256|tvm-cell-sha256):[0-9a-f]{64}$",
+          "type": "string"
         },
-        "current_decision_admission_receipt": {
-          "$ref": "#/$defs/AuthorizedClaimDecisionAdmissionReceiptV1"
+        "current_decision_admission_receipt_digest": {
+          "pattern": "^(sha256|tvm-cell-sha256):[0-9a-f]{64}$",
+          "type": "string"
         },
         "decision_sequence": {
           "minimum": 0,
@@ -8628,8 +8631,8 @@
           "pattern": "^(sha256|tvm-cell-sha256):[0-9a-f]{64}$",
           "type": "string"
         },
-        "late_filing_close_receipt": {
-          "$ref": "#/$defs/AuthorizedClaimFilingCloseReceiptV1"
+        "late_filing_close_receipt_descriptor": {
+          "$ref": "#/$defs/ImmutableEvidenceDescriptorV1"
         },
         "source_claim_revision": {
           "minimum": 0,
@@ -8651,7 +8654,7 @@
         "coverage_agreement_body_digest",
         "coverage_obligation_id",
         "claim_id",
-        "authorized_claim_admission_receipt",
+        "authorized_claim_admission_receipt_digest",
         "claim_revision_epoch_expectation",
         "fallback_profile_digest",
         "source_claim_revision",

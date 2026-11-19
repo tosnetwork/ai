@@ -513,10 +513,13 @@ func (permissiveAgreementVerifier) VerifyAgreementEvidence(agentcommerce.Agreeme
 func TestAuthorizedDecisionRefusesFallbackOnlyFields(t *testing.T) {
 	terms := testCoverageTerms(t)
 	now := time.Unix(2_000_000_100, 0).UTC()
-	const want = "late filing-close receipt or fallback cutoff"
+	const want = "carries a fallback-only field"
 	cases := map[string]func(*AuthorizedClaimDecisionAdmissionReceiptV1){
-		"arbitrary filing-close receipt": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
-			receipt.LateFilingCloseReceipt = &AuthorizedClaimFilingCloseReceiptV1{}
+		"current decision proof": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
+			receipt.CurrentDecisionAdmissionProof = &ClaimDecisionAdmissionReceiptProofV1{}
+		},
+		"fallback decision path": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
+			receipt.AuthorizedClaimDecision.Body.DecisionPath = "initial_terminal_fallback"
 		},
 		"filing-close digest only": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
 			receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("f")

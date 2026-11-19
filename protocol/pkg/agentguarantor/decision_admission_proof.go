@@ -96,6 +96,10 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 		body.AdmittedAtUnix == 0 || uint64(now.UTC().Unix()) < body.AdmittedAtUnix {
 		return errors.New("claim decision admission compact proof binding is invalid")
 	}
+	if isFallbackDecisionPathV1(proof.AuthorizedClaimDecision.Body.DecisionPath) !=
+		(body.AdmissionMode == "deterministic_fallback") {
+		return errors.New("claim decision admission compact proof mixes its admission mode and decision path")
+	}
 	claimValidationTime := time.Unix(int64(proof.AuthorizedClaim.Body.CreatedAtUnix), 0).UTC()
 	if err := VerifyClaim(proof.AuthorizedClaim, terms, body.CoverageAgreementBodyDigest,
 		body.CoverageObligationID, authorityResolver, claimValidationTime); err != nil {
@@ -103,7 +107,8 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 	}
 	decisionValidationTime := time.Unix(int64(proof.AuthorizedClaimDecision.Body.DecidedAtUnix), 0).UTC()
 	if err := ValidateClaimDecision(proof.AuthorizedClaimDecision, proof.AuthorizedClaim, terms,
-		authorityResolver, terms.DecisionAuthoritySubjects, decisionValidationTime); err != nil {
+		authorityResolver, decisionAuthoritySubjectsForPathV1(terms, proof.AuthorizedClaimDecision.Body.DecisionPath),
+		decisionValidationTime); err != nil {
 		return err
 	}
 	if err := verifyReceiptAuthorizationSetV1(proof.ReceiptAuthorizations, "claim-decision-admission-receipt", bodyDigest,
