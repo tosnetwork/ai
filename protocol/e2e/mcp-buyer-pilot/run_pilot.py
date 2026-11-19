@@ -200,7 +200,10 @@ def start_container(role: str, tag: str) -> None:
         HANDOFF.mkdir(exist_ok=True)
         (RUN / "verifier-work").mkdir(exist_ok=True)
         mounts += [(HANDOFF, "/v/in", True), (RUN / "verifier-work", "/v/work", False),
-                   (Path("/usr/local/go"), "/usr/local/go", True)]
+                   # The Go toolchain the module pins (go env GOROOT), not
+                   # whatever /usr/local/go holds: the verifier builds with
+                   # GOTOOLCHAIN=local.
+                   (Path(run(["go", "env", "GOROOT"]).stdout.strip()), "/opt/go", True)]
         extra = ["--tmpfs", "/run/codex-home:uid=2101,gid=2101,mode=0700"]
     command = ["docker", "run", "--detach", "--name", CONTAINERS[role], "--network", "bridge", "--cpus", "4",
                "--pids-limit", "2048", "--cap-drop", "ALL", "--cap-add", "SETUID", "--cap-add", "SETGID", "--cap-add",
@@ -437,7 +440,7 @@ def run_verifier(handoff: dict, profile: dict) -> None:
     started = now()
     with (LOGS / "codex-events.jsonl").open("w") as handle:
         result = subprocess.run(["docker", "exec", "-i", "-u", "verifier", "-w", "/v/work", "-e", "HOME=/v/work/home",
-                                 "-e", "CODEX_HOME=/run/codex-home", "-e", "PATH=/usr/local/go/bin:/usr/bin:/bin", "-e",
+                                 "-e", "CODEX_HOME=/run/codex-home", "-e", "PATH=/opt/go/bin:/usr/bin:/bin", "-e",
                                  "GOTOOLCHAIN=local", container, "/opt/pilot-bin/codex", "exec",
                                  "--skip-git-repo-check", "--ephemeral", "-s", "danger-full-access", "--output-schema",
                                  "/v/in/verifier-summary.schema.json", "-o", "/v/work/out/codex-summary.json", "--json",
