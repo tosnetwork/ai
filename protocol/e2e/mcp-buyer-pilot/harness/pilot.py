@@ -71,9 +71,12 @@ SOCKET = SOCKET_DIR / "agent.sock"
 EXECUTOR_SOCKET = Path("/run/tos-service-executor/executor.sock")
 TUNNEL_ACCOUNT = {"provider": "provider", "buyer": "custody", "verifier": "verifier"}
 
-NETWORK_LABEL = os.environ.get("PILOT_NETWORK_LABEL", "tos:global-id:2")
-VALIDATORS = [("V1", "163.44.99.200", 18081), ("V2", "160.251.236.86", 28081), ("V3", "163.44.121.225", 38081)]
-RELAYS = ["https://133.117.73.244:8443", "https://160.251.236.86:8443"]
+# The network, the validators the forwards reach and the relays come from
+# the operator's pilot-endpoints.json beside the pilot pack, not from here.
+_ENDPOINTS = json.loads((PUBLIC_IN / "pilot-endpoints.json").read_text())
+NETWORK_LABEL = _ENDPOINTS["network_label"]
+VALIDATORS = [(v["name"], v["host"], int(v["local_port"])) for v in _ENDPOINTS["validators"]]
+RELAYS = list(_ENDPOINTS["relays"])
 RPC = [f"http://127.0.0.1:{port}/jsonRPC" for _, _, port in VALIDATORS]
 RPC_BASES = [f"http://127.0.0.1:{port}" for _, _, port in VALIDATORS]
 

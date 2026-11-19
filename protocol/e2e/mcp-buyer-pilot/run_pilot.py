@@ -418,7 +418,9 @@ def run_verifier(handoff: dict, profile: dict) -> None:
     container = CONTAINERS["verifier"]
     run(["docker", "exec", "--env-file", SECRETS / "codex.env", "-u", "verifier", container, "python3", "-I", "-c",
          CODEX_AUTH])
-    rpc = "http://127.0.0.1:18081/jsonRPC,http://127.0.0.1:28081/jsonRPC,http://127.0.0.1:38081/jsonRPC"
+    endpoints = json.loads((RUN / "public" / "pilot-endpoints.json").read_text())
+    rpc = ",".join(f"http://127.0.0.1:{v['local_port']}/jsonRPC" for v in endpoints["validators"])
+    names = ", ".join(v["name"] for v in endpoints["validators"])
     prompt = fill((HERE / "verifier" / "verifier.prompt").read_text(), {
         "AI_COMMIT": handoff["ai_commit"], "NETWORK_ID": handoff["network_id"], "RPC": rpc,
         "REGISTRY_HASH": handoff["registry_code_hash"], "ACTOR_HASH": handoff["actor_code_hash"],
@@ -427,8 +429,8 @@ def run_verifier(handoff: dict, profile: dict) -> None:
         "F_HASH": handoff["requests"]["F"]["request_hash"], "BUYER_WALLET": handoff["buyer_wallet"],
         "PRICE_NANO": profile["terms"]["price_nanotos"], "WITHDRAW_TX": handoff["provider_withdraw_transaction"],
         "ENDPOINT_SETUP": "Your own pilot-rpc forwards are already open in this container, with your own key: "
-                          f"{rpc} (V1 163.44.99.200, V2 160.251.236.86, V3 163.44.121.225, each the validator's "
-                          "loopback JSON-RPC, operated by the project). Open no other connection to them.",
+                          f"{rpc} ({names}: each a validator's loopback JSON-RPC, operated by the project). "
+                          "Open no other connection to them.",
         "ENDPOINT_TEARDOWN": "Leave the forwards to the container; they close when it stops."})
     (RUN / "verifier-prompt.txt").write_text(prompt)
     started = now()
@@ -526,6 +528,7 @@ def cmd_purchases() -> None:
             raise RuntimeError(f"the evidence export of {label} failed: {exported.get('stderr')}")
     handoff = write_handoff(profile, requests, withdrawal)
     run_verifier(handoff, profile)
+    finish_credentials()
     save()
     unsigned = run([sys.executable, "-I", HERE / "make_record.py", RUN, RECORD / "record-unsigned.json"], check=False)
     event("unsigned record", summary=unsigned.stdout[-800:])
@@ -555,6 +558,32 @@ def leak_scan(secret_values: list[str]) -> list:
     return found
 
 
+def delete_credentials() -> bool:
+    for name in ("claude.env", "codex.env"):
+        path = SECRETS / name
+        if path.exists():
+            with open(path, "r+b") as handle:
+                handle.write(b"\0" * path.stat().st_size)
+            path.unlink()
+    if SECRETS.exists():
+        SECRETS.rmdir()
+    return not SECRETS.exists()
+
+
+def finish_credentials() -> None:
+    """Once no model session is left: scan the evidence for every token
+    value, then delete the token files, before the record is built. The
+    verifier's in-memory Codex login goes with its container."""
+    secret_values = tokens()
+    leaks = leak_scan(secret_values)
+    deleted = delete_credentials()
+    state["credentials_end"] = {"at": now(), "token_values_scanned": len(secret_values), "leaks": leaks,
+                                "deleted": deleted}
+    event("credentials scanned and deleted", leaks=leaks, deleted=deleted)
+    if leaks:
+        raise RuntimeError(f"a credential was found in {leaks}")
+
+
 def cmd_stop() -> None:
     for role in ROLES:
         (WORKS[role] / "control" / "stop").write_text(now())
@@ -565,16 +594,9 @@ def cmd_stop() -> None:
         run(["docker", "rm", "-f", CONTAINERS[role]], check=False)
     secret_values = tokens()
     leaks = leak_scan(secret_values)
-    for name in ("claude.env", "codex.env"):
-        path = SECRETS / name
-        if path.exists():
-            with open(path, "r+b") as handle:
-                handle.write(b"\0" * path.stat().st_size)
-            path.unlink()
-    if SECRETS.exists():
-        SECRETS.rmdir()
-    state["stop"] = {"at": now(), "leaks": leaks, "credentials_deleted": True}
-    event("stopped", leaks=leaks, credentials_deleted=True)
+    deleted = delete_credentials()
+    state["stop"] = {"at": now(), "leaks": leaks, "credentials_deleted": deleted}
+    event("stopped", leaks=leaks, credentials_deleted=deleted)
     if leaks:
         raise SystemExit(f"secrets found in {leaks}")
 

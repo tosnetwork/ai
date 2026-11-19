@@ -156,23 +156,35 @@ check("dry-check-passed-before-payment", (profile.get("dry_check") or {}).get("w
 check("actor-code-hash-on-every-endpoint", ((verdicts["all"] or {}).get("actor") or {}).get("code_hash_matches") is True)
 check("funding-journal-present", funding is not None)
 
-# The credential scan: every model token still on disk, and the patterns.
-secret_values = []
-for name in ("claude.env", "codex.env"):
-    path = RUN / "secrets" / name
-    if path.exists():
-        secret_values += [line.split("=", 1)[1] for line in path.read_text().splitlines()
-                          if "=" in line and not line.startswith("CODEX_ACCOUNT_ID")]
+# The credentials: the driver scanned the evidence for every token value
+# and deleted the token files before this record is built
+# (run_pilot.py finish_credentials); this script repeats the pattern scan.
+credentials_end = orchestration.get("credentials_end") or {}
+check("model-credentials-scanned-and-deleted-before-the-record", credentials_end.get("deleted") is True and
+      credentials_end.get("leaks") == [] and not (RUN / "secrets" / "claude.env").exists() and
+      not (RUN / "secrets" / "codex.env").exists(), credentials_end)
 patterns = [re.compile(rb"master_key=[0-9A-Fa-f]{8,}"), re.compile(rb"VAULT_URL="),
             re.compile(rb"sk-ant-[A-Za-z0-9_-]{8,}"), re.compile(rb'"refresh_token"\s*:\s*"[^"]+')]
 leaks = []
 for root in [RUN / "logs", RUN / "handoff", vout, RUN / "orchestration.json",
              *[RUN / f"{r}-c" / sub for r in ("provider", "buyer", "verifier") for sub in ("logs", "out", "control")]]:
     for path in ([root] if root.is_file() else (p for p in root.rglob("*") if p.is_file()) if root.exists() else []):
-        data = path.read_bytes()
-        if any(v.encode() in data for v in secret_values if len(v) > 20) or any(p.search(data) for p in patterns):
+        if any(p.search(path.read_bytes()) for p in patterns):
             leaks.append(str(path.relative_to(RUN)))
-check("no-credential-or-vault-secret-in-the-evidence", not leaks, leaks)
+check("no-vault-or-credential-pattern-in-the-evidence", not leaks, leaks)
+
+# The tosctl every role ran: the release named by its provenance record,
+# and listed with this digest in the release's SHA256SUMS.
+provenance = load(RUN / "public" / "release-provenance.json") or {}
+release_sums = (RUN / "public" / "release-SHA256SUMS").read_text().split() if \
+    (RUN / "public" / "release-SHA256SUMS").exists() else []
+tosctl_listed = any(release_sums[i] == build["tosctl_sha256"] and release_sums[i + 1] == "tosctl-linux-x86_64"
+                    for i in range(0, len(release_sums) - 1, 2))
+check("tosctl-is-the-released-binary", tosctl_listed, provenance.get("tag"))
+
+def ok_of(name: str) -> bool:
+    return any(c["id"] == name and c["ok"] for c in checks)
+
 
 computed_pass = all(c["ok"] for c in checks)
 codex_verdict = codex.get("verdict")
@@ -186,7 +198,7 @@ verdict = "AGENT_OPERATED_PILOT_PASSED" if passed else "AGENT_OPERATED_PILOT_FAI
 ai_root = HERE.parents[2]
 endpoint_forms = [{"role": role, "form": "SSH local forward through the restricted pilot-rpc account, with the role's "
                                          "own key, to each validator's loopback JSON-RPC (127.0.0.1:8081)",
-                   "validators": [v["host"] for v in profile["endpoints"]["validators"]],
+                   "validators": [v["name"] for v in profile["endpoints"]["validators"]],
                    "operator": "TOS core development team (project operator of every epoch-7 validator)",
                    "quorum": {"buyer": 2, "provider": 2, "verifier": 3}[role]}
                   for role in ("buyer", "provider", "verifier")]
@@ -201,7 +213,7 @@ record = {
     "qualification_note": "an agent-operated pilot: the buyer is a Claude Code agent and the verifier a Codex agent, "
                           "both run by the core development team, and the provider is the team's OpenFox reference "
                           "seller. It does not meet GATE_D_EXTERNAL_PILOT section 3 and is not Gate D evidence; an "
-                          "independent external pilot remains open (STATUS 13.569).",
+                          "independent external pilot remains open.",
     "independence": {
         "meets_gate_d_section_3": False,
         "rules_not_met": ["1: all three roles run on one host under one operator",
@@ -210,17 +222,23 @@ record = {
                           "5: the verifier reads the same project-run validators as the buyer and the provider"]},
     "participants": [{"role": role, "organization": "TOS core development team", "core_development_team": True,
                       "actor": actor, "hosts_and_network": "the team's coordinator host and its Docker bridge",
-                      "declaration_key": next(({"algorithm": s["algorithm"], "public_key_hex": s["public_key_hex"]}
-                                               for s in (signatures or []) if s["role"] == role), None),
+                      "declaration_key": "a fresh tosctl Ed25519 key in the role's own custody; its public key is in "
+                                         "signatures[]",
                       "shares_no_key_with_another_role": True}
                      for role, actor in (("provider", "OpenFox reference seller, operated by the team"),
                                          ("buyer", "Claude Code CLI agent, operated by the team"),
                                          ("verifier", "Codex CLI agent, operated by the team"))],
-    "buyer_declaration": "the buyer wallet and packet controller were created by tos-service-buyer init through tosctl "
-                         "in the custody account of a container the team operates; the model (Claude Code) had only the "
-                         "tos_buyer_* MCP tools and no shell, file or web tool; every payment was confirmed by the "
-                         "automated pty confirmer under its policy, which no model process could reach; no human "
-                         "confirmed any payment; the container's host also runs the provider",
+    "buyer_declaration": "; ".join([
+        "the buyer wallet and packet controller were created by tos-service-buyer init through tosctl in the custody "
+        "account of a container the team operates",
+        "the model (Claude Code) had only the tos_buyer_* MCP tools and no shell, file or web tool" if ok_of(
+            "the-model-had-only-the-tos-buyer-mcp-tools") else
+        "the check that the model had only the tos_buyer_* MCP tools did NOT pass (see checks)",
+        "every payment was confirmed by the automated pty confirmer under its policy, which no model process could "
+        "reach" if ok_of("two-automated-confirmations-each-passing-its-policy") else
+        "the check of the automated confirmations did NOT pass (see checks)",
+        "no human confirmed any payment",
+        "the container's host also runs the provider"]),
     "automation": {
         "buyer_model_client": {"cli": build.get("claude_version"), "binary_sha256": build["binaries"].get("claude"),
                                "models": sorted({s.get("model") for s in sessions if s.get("model")}),
@@ -238,7 +256,10 @@ record = {
         "init_sends": "tos-service-buyer init apply and OpenFox init and offer ran with --yes, approved by the harness",
         "credentials": "the buyer and verifier agents authenticated with the operator's own Claude and ChatGPT "
                        "accounts, with short-lived access tokens only (no refresh token), passed to the CLI process "
-                       "alone and deleted after the run"},
+                       "alone; " + ("the evidence was scanned for every token value and the token files were deleted "
+                                    "before this record was built" if ok_of(
+                                        "model-credentials-scanned-and-deleted-before-the-record") else
+                                    "the token scan and deletion before this record did NOT pass (see checks)")},
     "network": {"network_id": profile["network_label"],
                 "genesis_root_hash": "sha256:" + base64.b64decode(zero_state["root_hash"]).hex(),
                 "genesis_file_hash": "sha256:" + base64.b64decode(zero_state["file_hash"]).hex(),
@@ -251,8 +272,13 @@ record = {
     "source_commits": {"ai": build["ai_commit"], "openfox": build["openfox_commit"],
                        "operator_driver": git(ai_root, "rev-parse", "HEAD"),
                        "operator_driver_tree_clean": git(ai_root, "status", "--porcelain") == "",
-                       "tosctl": build.get("tosctl_source"), "verifier_clone": verifier_build.get("commit")
-                       or verifier_build.get("ai_commit")},
+                       "harness_commits_after_the_containers_started": [
+                           line for line in git(ai_root, "log", "--format=%h %s", f"{build['ai_commit']}..HEAD", "--",
+                                                "protocol/e2e/mcp-buyer-pilot").splitlines()],
+                       "tosctl": {"repository": provenance.get("repository"), "release_tag": provenance.get("tag"),
+                                  "tag_commit": provenance.get("tag_commit"), "asset": "tosctl-linux-x86_64",
+                                  "listed_in_release_sha256sums": tosctl_listed},
+                       "verifier_clone": verifier_build.get("commit")},
     "binaries": {"built_by_operator": build["binaries"], "tosctl_sha256": build["tosctl_sha256"],
                  "verifier_tos_service_verify_sha256": verifier_build.get("sha256") or verifier_build.get(
                      "binary_sha256"), "verifier_built_by": "the Codex verifier, from a fresh clone"},
@@ -293,31 +319,50 @@ record = {
            "the 3600 s minimum"]),
         *([] if funding else ["the funding operations journal was not attached to this record"])],
 }
-if FORBIDDEN_VERDICT in json.dumps(record):
-    raise SystemExit("the record would name the Gate D verdict")
+def verify_signature(signature: dict, digest: str) -> bool:
+    if signature.get("message_hex") != digest or not re.fullmatch(r"[0-9a-f]{64}", signature.get("public_key_hex", "")):
+        return False
+    with tempfile.TemporaryDirectory() as directory:
+        spki = bytes.fromhex("302a300506032b6570032100" + signature["public_key_hex"])
+        Path(directory, "key.pem").write_text("-----BEGIN PUBLIC KEY-----\n" + base64.b64encode(spki).decode() +
+                                              "\n-----END PUBLIC KEY-----\n")
+        Path(directory, "msg").write_bytes(bytes.fromhex(digest))
+        try:
+            Path(directory, "sig").write_bytes(bytes.fromhex(signature.get("signature_hex", "")))
+        except ValueError:
+            return False
+        return subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", f"{directory}/key.pem", "-rawin",
+                               "-in", f"{directory}/msg", "-sigfile", f"{directory}/sig"],
+                              capture_output=True).returncode == 0
+
+
+def refuse_gate_d_verdict(value) -> None:
+    if FORBIDDEN_VERDICT in json.dumps(value):
+        raise SystemExit("the record would name the Gate D verdict; nothing was written")
+
+
+refuse_gate_d_verdict(record)
 record_sha256 = hashlib.sha256(canonical(record)).hexdigest()
-record["record_sha256"] = record_sha256
 if signatures:
-    verified = []
-    for signature in signatures:
-        ok = signature["message_hex"] == record_sha256
-        if ok:
-            with tempfile.TemporaryDirectory() as directory:
-                spki = bytes.fromhex("302a300506032b6570032100" + signature["public_key_hex"])
-                pem = "-----BEGIN PUBLIC KEY-----\n" + base64.b64encode(spki).decode() + "\n-----END PUBLIC KEY-----\n"
-                Path(directory, "key.pem").write_text(pem)
-                Path(directory, "msg").write_bytes(bytes.fromhex(record_sha256))
-                Path(directory, "sig").write_bytes(bytes.fromhex(signature["signature_hex"]))
-                ok = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", f"{directory}/key.pem",
-                                     "-rawin", "-in", f"{directory}/msg", "-sigfile", f"{directory}/sig"],
-                                    capture_output=True).returncode == 0
-        verified.append(ok)
-    record["signatures"] = [{"role": s["role"], "algorithm": s["algorithm"], "public_key_hex": s["public_key_hex"],
-                             "signature_hex": s["signature_hex"], "verified": ok}
-                            for s, ok in zip(signatures, verified)]
-    if not all(verified):
-        verdict = "AGENT_OPERATED_PILOT_FAILED"
+    verified = [verify_signature(s, record_sha256) for s in signatures]
+    roles_signed = sorted(s.get("role") for s, ok in zip(signatures, verified) if ok)
+    if roles_signed != ["buyer", "provider", "verifier"]:
+        # A signature that does not verify over the signed digest fails the
+        # written record itself: the verdict, the status and the check say
+        # so, and the digest is recomputed over that failed record.
+        record["checks"].append({"id": "three-declaration-signatures-verify", "ok": False,
+                                 "detail": [{"role": s.get("role"), "verified": ok} for s, ok in zip(signatures, verified)]})
+        record["verdict"], record["status"] = "AGENT_OPERATED_PILOT_FAILED", "agent-pilot-failed"
+        refuse_gate_d_verdict(record)
+        record_sha256 = hashlib.sha256(canonical(record)).hexdigest()
+    record["record_sha256"] = record_sha256
+    record["signatures"] = [{"role": s.get("role"), "algorithm": s.get("algorithm"),
+                             "public_key_hex": s.get("public_key_hex"), "signature_hex": s.get("signature_hex"),
+                             "verified": ok} for s, ok in zip(signatures, verified)]
+else:
+    record["record_sha256"] = record_sha256
 OUT.write_text(json.dumps(record, indent=2) + "\n")
-failed = [c["id"] for c in checks if not c["ok"]]
-print(json.dumps({"record_sha256": record_sha256, "verdict": verdict, "failed_checks": failed}))
-sys.exit(0 if verdict == "AGENT_OPERATED_PILOT_PASSED" else 1)
+failed = [c["id"] for c in record["checks"] if not c["ok"]]
+print(json.dumps({"record_sha256": record_sha256, "verdict": record["verdict"], "signed": bool(signatures),
+                  "failed_checks": failed}))
+sys.exit(0 if record["verdict"] == "AGENT_OPERATED_PILOT_PASSED" else 1)
