@@ -468,8 +468,11 @@ func (c *TOSCTLInitCustody) SendRegistration(ctx context.Context, wallet string,
 		"--amount-nanotos", strconv.FormatUint(valueNano, 10), "--body-boc", registration.BodyBOC,
 		"--state-init-boc", registration.StateInitBOC, "--yes")
 	if err != nil {
-		// These are checks tosctl makes before it broadcasts anything.
-		for _, phrase := range []string{"Wrong amount value", "is uninitialized", "is frozen", "[E100: Not found]"} {
+		// These are wallet checks tosctl makes before it builds the message.
+		// A generic error such as a vault or RPC "not found" is not one of
+		// them: it can come after the broadcast. tosctl's wallet send prints
+		// no signed-message line, so there is no positive marker either.
+		for _, phrase := range []string{"Wrong amount value", "is uninitialized", "is frozen"} {
 			if finalFailure(output, phrase) {
 				return fmt.Errorf("tosctl %s refused before broadcasting: %w", label, ErrCallNotStarted)
 			}

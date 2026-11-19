@@ -37,10 +37,17 @@ const (
 	walletFeeMarginNano uint64 = 50_000_000
 )
 
-// sendResolutionWindow is how long after a send its message may still be
-// included: the wallet message's two-minute expiry plus margin. Past it on
-// finalized chain time, an absent effect can no longer appear.
-const sendResolutionWindow = 5 * time.Minute
+// Send timing. tosctl signs a wallet message valid for walletMessageLifetime
+// from the moment it signs, which is at most maxSendTime after the step is
+// stamped: every send runs under that deadline and tosctl is killed at it.
+// So sendResolutionWindow after the stamp, an absent message can no longer
+// be included, and a slow tosctl cannot sign later than the window allows.
+// tosctl's wallet send reports no valid_until of its own to use instead.
+const (
+	maxSendTime           = 3 * time.Minute
+	walletMessageLifetime = 2 * time.Minute
+	sendResolutionWindow  = maxSendTime + walletMessageLifetime
+)
 
 var (
 	// ErrConfirmationRequired is a send the human did not confirm.
@@ -660,7 +667,7 @@ func (r *run) ensureAgent(wallet *buyersdk.CustodyWallet, controller *buyersdk.C
 				func(s Session) (bool, error) {
 					value, err := s.Account(r.ctx, wallet.Address)
 					return value.Active(), err
-				}, func() error { return r.env.Custody.ActivateWallet(r.ctx, r.in.Wallet) }); err != nil {
+				}, func(ctx context.Context) error { return r.env.Custody.ActivateWallet(ctx, r.in.Wallet) }); err != nil {
 				return "", err
 			}
 		}
@@ -688,8 +695,8 @@ func (r *run) ensureAgent(wallet *buyersdk.CustodyWallet, controller *buyersdk.C
 		}
 	}
 	if err := r.chainStep("agent.register", "the registration of Agent "+registration.AgentID, &r.journal.Agent,
-		RegistrationValueNano, r.agentEffect(registration.AgentID, controller.Text()), func() error {
-			return r.env.Custody.SendRegistration(r.ctx, r.in.Wallet, RegistrationValueNano, registration)
+		RegistrationValueNano, r.agentEffect(registration.AgentID, controller.Text()), func(ctx context.Context) error {
+			return r.env.Custody.SendRegistration(ctx, r.in.Wallet, RegistrationValueNano, registration)
 		}); err != nil {
 		return "", err
 	}
