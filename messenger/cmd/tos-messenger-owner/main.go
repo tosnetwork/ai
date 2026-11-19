@@ -24,7 +24,10 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/localapi"
 )
 
-const decisionSchema = "tos.messaging.owner-decision.v1"
+// decisionSchema names the offline-signing envelope. v2 matches the request
+// layout without mandate fields, so a v1 envelope prepared by an older tool
+// is refused rather than signed against a different preimage.
+const decisionSchema = "tos.messaging.owner-decision.v2"
 
 type decisionEnvelope struct {
 	Schema          string           `json:"schema"`

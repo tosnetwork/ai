@@ -34,7 +34,7 @@ than silently forking two implementations.
 | Payload schema | fixed by the kind and carried explicitly, so a decoder reads a declared shape rather than guessing one from a name | `envelope.PayloadSchemaOf` |
 | Human rendering | carried, covered by the event identifier, and never automation input; a disagreement with the payload is not a preference to resolve | `envelope.Event.Rendering` |
 | Owner approval | a local-only kind refused on every network route, so a remote party cannot express local authority at all | `envelope.LocalOnly` |
-| Negotiation kinds | conversation, not commitment; none of them create, accept, or fund anything | `envelope.eventKinds` |
+| Negotiation kinds | retired and reserved; the `negotiation` class carries only `intent.application`, and Agreement work uses the typed `agreement.*` kinds as non-authorizing payloads | `envelope.eventKinds`, `payload.RetiredKinds` |
 | Descriptor policy | committed by the Agent and enforced at bind time, which bounds what a delegated key can advertise even after it is taken | `directory.DescriptorPolicy` |
 | Relay set | optional, with a defined digest for the empty set so nobody invents a placeholder | `directory.EmptyRelaySetDigest` |
 | Prekey set coherence | one network, one Agent, one endpoint, one suite, unique devices, all signed, enforced in the digest rather than left to each caller | `e2ee.ValidateSet` |

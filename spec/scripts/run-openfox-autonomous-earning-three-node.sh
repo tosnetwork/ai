@@ -43,7 +43,7 @@ python3 "$repo/spec/scripts/agent-commerce-reference.py" \
 
 (cd "$repo/protocol" && go test ./pkg/agentcommerce ./pkg/buyersdk ./pkg/executiongate ./pkg/nativecore ./pkg/paiddemand ./pkg/toschain) \
   | tee "$artifacts/logs/protocol.log"
-(cd "$workspace/tos-messenger" && go test ./pkg/economicaction ./pkg/intentcarrier ./pkg/negotiation ./pkg/localapi) \
+(cd "$repo/messenger" && go test ./pkg/economicaction ./pkg/intentcarrier ./pkg/localapi) \
   | tee "$artifacts/logs/messenger.log"
 (cd "$repo/gateway" && go test ./internal/intentcarrier ./internal/quotesource) \
   | tee "$artifacts/logs/gateway.log"

@@ -7,6 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -340,6 +343,41 @@ func TestRetiredKindsAndSchemasStayUnused(t *testing.T) {
 				t.Fatalf("retired kind %q supports retired schema %q", kind, schema)
 			}
 		}
+	}
+
+	// No Messenger source outside this list may name a retired kind or
+	// schema, so an on-disk record or a new codec cannot quietly take one.
+	// Tests are skipped because they name retired identifiers to prove they
+	// are refused.
+	retired := append(append([]string(nil), RetiredKinds...), RetiredSchemas...)
+	root := filepath.Join("..", "..")
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "testdata" || entry.Name() == "target" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+			filepath.Base(path) == "retired.go" {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, identifier := range retired {
+			if strings.Contains(string(content), `"`+identifier+`"`) {
+				t.Errorf("%s names retired identifier %q", path, identifier)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
 	}
 }
 

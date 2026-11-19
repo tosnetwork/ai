@@ -82,7 +82,9 @@ remains, and now contains only `intent.application`.
 
 The local owner/runtime interface likewise reserves the operation names
 `mandates.place`, `mandates.revoke` and `mandates.list` and the action effect
-name `spend`; a request naming any of them is refused as unknown. The domain
+name `spend`; a request naming any of them is refused as unknown. The local
+record schemas `tos.messaging.economic-execution-claim.v1` and
+`tos.messaging.negotiation-state.v1` are reserved and never reused. The domain
 separators of the retired negotiation-record, negotiation-terms, mandate,
 budget, mandate-budget and economic-execution objects, and the owner-decision
 v1 layout that signed mandate fields, are reserved and never reused.
