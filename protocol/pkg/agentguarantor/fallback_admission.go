@@ -3,35 +3,43 @@ package agentguarantor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
+// ClaimFilingCloseReceiptMediaTypeV1 is the media type a late filing-close
+// descriptor names.
+const ClaimFilingCloseReceiptMediaTypeV1 = GuarantorMediaTypePrefixV1 + "claim-filing-close.v1+cbor"
+
+// DeterministicFallbackAdmissionSourceIdentityV1 returns the source-head and
+// identity digests of a fallback request. Both are computed from the request's
+// references alone, so producer and verifier derive them before any referenced
+// object is available.
 func DeterministicFallbackAdmissionSourceIdentityV1(variant DeterministicFallbackAdmissionVariantV1) (string, string, error) {
-	claimReceiptDigest, claimErr := ClaimAdmissionReceiptDigestV1(variant.AuthorizedClaimAdmissionReceipt)
 	epochDigest, epochErr := ClaimRevisionEpochExpectationDigestV1(variant.ClaimRevisionEpochExpectation)
-	if claimErr != nil || epochErr != nil || variant.CoverageAgreementBodyDigest != variant.AuthorizedClaimAdmissionReceipt.Body.CoverageAgreementBodyDigest ||
-		variant.CoverageObligationID != variant.AuthorizedClaimAdmissionReceipt.Body.CoverageObligationID ||
-		variant.ClaimID != variant.AuthorizedClaimAdmissionReceipt.Body.ClaimID || !validDigest(variant.FallbackProfileDigest) ||
+	lateCloseDigest := ""
+	var lateErr error
+	if descriptor := variant.LateFilingCloseReceiptDescriptor; descriptor != nil {
+		lateErr = validateImmutableEvidenceDescriptor(*descriptor)
+		lateCloseDigest = descriptor.ContentDigest
+	}
+	optionalDigest := func(value string) bool { return value == "" || validDigest(value) }
+	if epochErr != nil || lateErr != nil || !validDigest(variant.CoverageAgreementBodyDigest) ||
+		!validToken(variant.CoverageObligationID, 128) || !validDigest(variant.ClaimID) ||
+		!validDigest(variant.AuthorizedClaimAdmissionReceiptDigest) ||
+		!optionalDigest(variant.CurrentDecisionAdmissionReceiptDigest) ||
+		!optionalDigest(variant.CurrentClaimStateTransitionReceiptDigest) || !validDigest(variant.FallbackProfileDigest) ||
 		variant.SourceClaimRevision == 0 || variant.SourceClaimStateRevision == 0 ||
 		!validToken(variant.SourceClaimState, 128) || variant.TriggerCutoffUnix == 0 || variant.DecisionSequence == 0 {
 		return "", "", errors.New("deterministic fallback source identity is invalid")
 	}
-	currentDecisionDigest, currentTransitionDigest, lateCloseDigest := "", "", ""
-	if variant.CurrentDecisionAdmissionReceipt != nil {
-		currentDecisionDigest, _ = ClaimDecisionAdmissionReceiptDigestV1(*variant.CurrentDecisionAdmissionReceipt)
-	}
-	if variant.CurrentClaimStateTransitionReceipt != nil {
-		currentTransitionDigest, _ = ClaimStateTransitionReceiptDigestV1(*variant.CurrentClaimStateTransitionReceipt)
-	}
-	if variant.LateFilingCloseReceipt != nil {
-		lateCloseDigest, _ = ClaimFilingCloseReceiptDigestV1(*variant.LateFilingCloseReceipt)
-	}
-	head := ClaimDecisionSourceHeadV1{SchemaVersion: 1, AuthorizedClaimAdmissionReceiptDigest: claimReceiptDigest,
-		CurrentDecisionAdmissionReceiptDigest:    currentDecisionDigest,
-		CurrentClaimStateTransitionReceiptDigest: currentTransitionDigest,
+	head := ClaimDecisionSourceHeadV1{SchemaVersion: 1,
+		AuthorizedClaimAdmissionReceiptDigest:    variant.AuthorizedClaimAdmissionReceiptDigest,
+		CurrentDecisionAdmissionReceiptDigest:    variant.CurrentDecisionAdmissionReceiptDigest,
+		CurrentClaimStateTransitionReceiptDigest: variant.CurrentClaimStateTransitionReceiptDigest,
 		LateFilingCloseReceiptDigest:             lateCloseDigest, ClaimRevisionEpochExpectationDigest: epochDigest}
 	headDigest, err := guarantorCodec.Digest("tos.service.agent-guarantor-claim-decision-source-head.v1", head)
 	if err != nil {
@@ -42,6 +50,117 @@ func DeterministicFallbackAdmissionSourceIdentityV1(variant DeterministicFallbac
 		ClaimRevisionEpochExpectationDigest: epochDigest}
 	identityDigest, err := guarantorCodec.Digest("tos.service.agent-guarantor-fallback-admission-identity.v1", identity)
 	return headDigest, identityDigest, err
+}
+
+// deterministicFallbackSourceV1 is the source head behind a fallback
+// request's references. The claim admission receipt is the admission
+// receipt's own top-level copy.
+type deterministicFallbackSourceV1 struct {
+	currentDecision *ClaimDecisionAdmissionReceiptProofV1
+	transition      *AuthorizedClaimStateTransitionReceiptV1
+	lateFilingClose *AuthorizedClaimFilingCloseReceiptV1
+}
+
+// bindDeterministicFallbackReferencesV1 pairs each reference of a fallback
+// request with the single object behind it before any signature is checked.
+// Each object is carried at most once, the current-decision proof is carried
+// directly only where no transition receipt carries it, and the late
+// filing-close receipt is the only object retrieved. Nothing the bound objects
+// themselves reference is followed, so the work per receipt is constant.
+func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmissionReceiptV1,
+	variant DeterministicFallbackAdmissionVariantV1, terms CoverageTermsV1,
+	authorityResolver AuthorityKeyResolver) (deterministicFallbackSourceV1, error) {
+	var source deterministicFallbackSourceV1
+	claimDigest, err := ClaimAdmissionReceiptDigestV1(receipt.AuthorizedClaimAdmissionReceipt)
+	if err != nil || variant.AuthorizedClaimAdmissionReceiptDigest != claimDigest ||
+		receipt.Body.AuthorizedClaimAdmissionReceiptDigest != claimDigest {
+		return source, errors.New("claim decision fallback claim admission reference differs from the carried receipt")
+	}
+	switch variant.SourceClaimState {
+	case "initial_reviewing":
+		if variant.CurrentDecisionAdmissionReceiptDigest != "" || variant.CurrentClaimStateTransitionReceiptDigest != "" ||
+			receipt.CurrentDecisionAdmissionProof != nil || receipt.PredecessorClaimStateTransitionReceipt != nil {
+			return source, errors.New("initial fallback carries a predecessor head")
+		}
+	case "disputed", "evidence_required":
+		if variant.CurrentClaimStateTransitionReceiptDigest != "" || receipt.PredecessorClaimStateTransitionReceipt != nil {
+			return source, errors.New("nonterminal fallback carries a transition head")
+		}
+		proof := receipt.CurrentDecisionAdmissionProof
+		if proof == nil {
+			return source, errors.New("nonterminal fallback lacks its current decision admission proof")
+		}
+		if _, err := ClaimDecisionAdmissionReceiptProofDigestV1(*proof); err != nil ||
+			proof.ReceiptEnvelopeDigest != variant.CurrentDecisionAdmissionReceiptDigest {
+			return source, errors.New("nonterminal fallback decision proof differs from its reference")
+		}
+		source.currentDecision = proof
+	case "reviewing_after_challenge", "reviewing_after_nonterminal_response":
+		if receipt.CurrentDecisionAdmissionProof != nil {
+			return source, errors.New("reviewing fallback carries its current decision proof outside its transition receipt")
+		}
+		transition := receipt.PredecessorClaimStateTransitionReceipt
+		if transition == nil {
+			return source, errors.New("reviewing fallback lacks its transition receipt")
+		}
+		transitionDigest, err := ClaimStateTransitionReceiptDigestV1(*transition)
+		if err != nil || transitionDigest != variant.CurrentClaimStateTransitionReceiptDigest {
+			return source, errors.New("reviewing fallback transition receipt differs from its reference")
+		}
+		if transition.DecisionAdmissionProof.ReceiptEnvelopeDigest != variant.CurrentDecisionAdmissionReceiptDigest {
+			return source, errors.New("reviewing fallback decision reference differs from its transition's proof")
+		}
+		source.transition = transition
+		source.currentDecision = &transition.DecisionAdmissionProof
+	default:
+		return source, errors.New("claim decision fallback source state is not registered")
+	}
+	descriptor := variant.LateFilingCloseReceiptDescriptor
+	if descriptor == nil {
+		if receipt.Body.LateFilingCloseReceiptDigest != "" {
+			return source, errors.New("ordinary fallback admission names a late filing-close receipt")
+		}
+		return source, nil
+	}
+	if receipt.Body.LateFilingCloseReceiptDigest != descriptor.ContentDigest {
+		return source, errors.New("late fallback receipt names a filing-close receipt other than its request")
+	}
+	filing, err := resolveLateFilingCloseReceiptV1(*descriptor, terms, authorityResolver)
+	if err != nil {
+		return source, err
+	}
+	source.lateFilingClose = &filing
+	return source, nil
+}
+
+// resolveLateFilingCloseReceiptV1 retrieves the one late filing-close receipt
+// a fallback request references. Retrieval is required at every assurance
+// level: an absent resolver, a wrong length, noncanonical or undecodable
+// bytes, or a digest other than the descriptor's fails closed.
+func resolveLateFilingCloseReceiptV1(descriptor ImmutableEvidenceDescriptorV1, terms CoverageTermsV1,
+	authorityResolver AuthorityKeyResolver) (AuthorizedClaimFilingCloseReceiptV1, error) {
+	var filing AuthorizedClaimFilingCloseReceiptV1
+	if validateImmutableEvidenceDescriptor(descriptor) != nil || descriptor.ContentType != ClaimFilingCloseReceiptMediaTypeV1 ||
+		descriptor.RetrievalPolicyDigest != terms.ClaimAdmissionProfile.ProfileDigest ||
+		descriptor.ContentSize > terms.ClaimClosureCapacity.MaximumClaimFilingCloseReceiptEnvelopeBytes {
+		return filing, errors.New("late filing-close descriptor is not the Agreement-bound filing-close reference")
+	}
+	wire, err := resolveImmutableEvidenceV1(authorityResolver, descriptor, true)
+	if err != nil {
+		return filing, fmt.Errorf("late filing-close receipt is unavailable: %w", err)
+	}
+	if guarantorCodec.Unmarshal(wire, &filing) != nil {
+		return AuthorizedClaimFilingCloseReceiptV1{}, errors.New("late filing-close receipt is undecodable")
+	}
+	reencoded, err := guarantorCodec.Marshal(filing)
+	if err != nil || !bytes.Equal(wire, reencoded) {
+		return AuthorizedClaimFilingCloseReceiptV1{}, errors.New("late filing-close receipt is noncanonical")
+	}
+	digest, err := ClaimFilingCloseReceiptDigestV1(filing)
+	if err != nil || digest != descriptor.ContentDigest {
+		return AuthorizedClaimFilingCloseReceiptV1{}, errors.New("late filing-close receipt differs from its descriptor")
+	}
+	return filing, nil
 }
 
 func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmissionReceiptV1, terms CoverageTermsV1,
@@ -70,39 +189,60 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	if err != nil || variant.FallbackProfileDigest != fallbackDigest {
 		return errors.New("claim decision fallback profile is not Agreement-bound")
 	}
-	if err := VerifyClaimAdmissionReceiptV1(variant.AuthorizedClaimAdmissionReceipt, terms, agreementVerifier,
-		authorityResolver, fenceResolver, now); err != nil {
+	source, err := bindDeterministicFallbackReferencesV1(receipt, variant, terms, authorityResolver)
+	if err != nil {
 		return err
 	}
-	claimReceiptDigest, _ := ClaimAdmissionReceiptDigestV1(variant.AuthorizedClaimAdmissionReceipt)
-	claim := variant.AuthorizedClaimAdmissionReceipt.AuthorizedClaimIngressReceipt.AuthorizedClaim
+	claimAdmission := receipt.AuthorizedClaimAdmissionReceipt
+	if err := VerifyClaimAdmissionReceiptV1(claimAdmission, terms, agreementVerifier,
+		authorityResolver, fenceResolver, now); err != nil {
+		return fmt.Errorf("claim decision fallback has an invalid claim admission: %w", err)
+	}
+	claimReceiptDigest := variant.AuthorizedClaimAdmissionReceiptDigest
+	claim := claimAdmission.AuthorizedClaimIngressReceipt.AuthorizedClaim
+	sameClaim := func(agreement, obligation, claimID string) bool {
+		return agreement == claim.Body.CoverageAgreementBodyDigest && obligation == claim.Body.CoverageObligationID &&
+			claimID == claim.Body.ClaimID
+	}
 	decision := receipt.AuthorizedClaimDecision
 	decisionDigest, decisionErr := ClaimDecisionDigestV1(decision)
 	cutDigest, cutErr := ClaimIngressAdmissionCutProofDigestV1(receipt.ClaimRevisionIngressCutProof)
 	endDigest, endErr := CoverageEndCommitmentDigestV1(receipt.CoverageEndCommitment)
-	if decisionErr != nil || cutErr != nil || endErr != nil || receipt.Body.AuthorizedClaimAdmissionReceiptDigest != claimReceiptDigest ||
+	if decisionErr != nil || cutErr != nil || endErr != nil ||
 		variant.SourceClaimRevision != claim.Body.ClaimRevision || variant.ClaimRevisionEpochExpectation.ExpectedClaimRevision != claim.Body.ClaimRevision ||
-		variant.CoverageAgreementBodyDigest != claim.Body.CoverageAgreementBodyDigest ||
-		variant.CoverageObligationID != claim.Body.CoverageObligationID || variant.ClaimID != claim.Body.ClaimID {
+		!sameClaim(variant.CoverageAgreementBodyDigest, variant.CoverageObligationID, variant.ClaimID) {
 		return errors.New("claim decision fallback source claim is substituted")
 	}
-	lateRecovery := variant.LateFilingCloseReceipt != nil
+	lateRecovery := source.lateFilingClose != nil
 	lateFilingDigest := ""
 	if lateRecovery {
-		if receipt.LateFilingCloseReceipt == nil ||
-			!equalCanonical(*receipt.LateFilingCloseReceipt, *variant.LateFilingCloseReceipt) {
-			return errors.New("late fallback admission omits or substitutes its filing-close receipt")
-		}
-		filing := *variant.LateFilingCloseReceipt
+		filing := *source.lateFilingClose
 		if filing.AuthorizedActivationEvidence == nil {
 			return errors.New("late fallback filing receipt lacks activation evidence")
+		}
+		if filing.Body.CoverageAgreementBodyDigest != claim.Body.CoverageAgreementBodyDigest ||
+			filing.Body.CoverageObligationID != claim.Body.CoverageObligationID {
+			return errors.New("late fallback filing-close receipt belongs to another coverage")
+		}
+		// The filing close and the claim admission must stand on the same
+		// activation: the claim admission request carries it, and the filing
+		// close is verified against the offer its own copy carries.
+		var submission ClaimSubmissionActionBodyV1
+		if guarantorCodec.Unmarshal(claimAdmission.StageActionAdmissionEvidence.CanonicalRequest, &submission) != nil {
+			return errors.New("late fallback claim admission request is undecodable")
+		}
+		admittedActivation, admittedErr := CoverageActivationEvidenceDigestV1(
+			submission.AuthorityInstanceEffect.AuthorizedCoverageActivationEvidence)
+		filingActivation, filingErr := CoverageActivationEvidenceDigestV1(*filing.AuthorizedActivationEvidence)
+		if admittedErr != nil || filingErr != nil || admittedActivation != filingActivation {
+			return errors.New("late fallback filing-close receipt stands on another activation")
 		}
 		offer, offerErr := extractFirmOfferFromAcceptanceV1(filing.AuthorizedActivationEvidence.AuthorizedAcceptanceReceipt)
 		if offerErr != nil || VerifyClaimFilingCloseReceiptV1(filing, offer, agreementVerifier,
 			authorityResolver, fenceResolver, now) != nil {
 			return errors.New("late fallback filing-close receipt is invalid")
 		}
-		lateFilingDigest, _ = ClaimFilingCloseReceiptDigestV1(filing)
+		lateFilingDigest = variant.LateFilingCloseReceiptDescriptor.ContentDigest
 		if filing.Body.ClosedAtUnix <= terms.TerminalResolutionDeadlineUnix ||
 			filing.Body.ClosedAtUnix > terms.LateIngressRecoveryDeadlineUnix ||
 			filing.ClaimIngressAdmissionCutProof.PendingOrAmbiguousCount != 0 {
@@ -119,8 +259,6 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		if !timelyClaimFound {
 			return errors.New("late fallback does not identify a timely admitted ingress")
 		}
-	} else if receipt.LateFilingCloseReceipt != nil {
-		return errors.New("ordinary fallback admission carries a late filing-close receipt")
 	}
 	wantPriorState, wantPath := "", "terminal_fallback"
 	wantSequence := uint64(0)
@@ -132,56 +270,45 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	var priorPendingToken *DecisionApplicationTokenV1
 	switch variant.SourceClaimState {
 	case "initial_reviewing":
-		if variant.CurrentDecisionAdmissionReceipt != nil || variant.CurrentClaimStateTransitionReceipt != nil {
-			return errors.New("initial fallback carries a predecessor head")
-		}
 		wantPriorState, wantPath, wantSequence = "admitted", "initial_terminal_fallback", 1
-		cutoff, ok = checkedDurationAddV1(variant.AuthorizedClaimAdmissionReceipt.Body.AdmittedAtUnix, terms.ReviewDeadlineSeconds)
+		cutoff, ok = checkedDurationAddV1(claimAdmission.Body.AdmittedAtUnix, terms.ReviewDeadlineSeconds)
 	case "disputed", "evidence_required":
-		if variant.CurrentDecisionAdmissionReceipt == nil || variant.CurrentClaimStateTransitionReceipt != nil {
-			return errors.New("nonterminal fallback lacks its current decision admission")
+		current := *source.currentDecision
+		if err := VerifyClaimDecisionAdmissionReceiptProofV1(current, terms, authorityResolver, now); err != nil {
+			return fmt.Errorf("nonterminal fallback decision proof is invalid: %w", err)
 		}
-		current := *variant.CurrentDecisionAdmissionReceipt
-		if err := VerifyClaimDecisionAdmissionReceiptV1(current, terms, agreementVerifier,
-			authorityResolver, fenceResolver, now); err != nil || current.Body.AdmittedClaimState != variant.SourceClaimState ||
-			current.Body.ResolutionDueAtUnix == 0 {
+		body := current.ReceiptBody
+		if !sameClaim(body.CoverageAgreementBodyDigest, body.CoverageObligationID, body.ClaimID) ||
+			body.AdmittedClaimState != variant.SourceClaimState || body.ResolutionDueAtUnix == 0 {
 			return errors.New("nonterminal fallback decision head is invalid")
 		}
-		wantPriorState, wantSequence, cutoff, ok = variant.SourceClaimState, current.Body.DecisionSequence+1,
-			current.Body.ResolutionDueAtUnix, true
-		predecessorDecisionDigest = current.Body.AuthorizedClaimDecisionDigest
-		predecessorAdmissionDigest, _ = ClaimDecisionAdmissionReceiptDigestV1(current)
+		wantPriorState, wantSequence, cutoff, ok = variant.SourceClaimState, body.DecisionSequence+1,
+			body.ResolutionDueAtUnix, true
+		predecessorDecisionDigest = body.AuthorizedClaimDecisionDigest
+		predecessorAdmissionDigest = current.ReceiptEnvelopeDigest
 	case "reviewing_after_challenge", "reviewing_after_nonterminal_response":
-		if variant.CurrentDecisionAdmissionReceipt == nil || variant.CurrentClaimStateTransitionReceipt == nil {
-			return errors.New("reviewing fallback lacks its decision and transition head")
-		}
-		current := *variant.CurrentDecisionAdmissionReceipt
-		transition := *variant.CurrentClaimStateTransitionReceipt
-		if err := VerifyClaimDecisionAdmissionReceiptV1(current, terms, agreementVerifier,
-			authorityResolver, fenceResolver, now); err != nil {
-			return err
-		}
+		transition := *source.transition
 		if err := VerifyClaimStateTransitionReceiptV1(transition, terms, agreementVerifier,
 			authorityResolver, fenceResolver, now); err != nil {
 			return err
 		}
-		currentDigest, _ := ClaimDecisionAdmissionReceiptDigestV1(current)
-		predecessorAdmissionDigest = currentDigest
-		predecessorTransitionDigest, _ = ClaimStateTransitionReceiptDigestV1(transition)
+		current := transition.DecisionAdmissionProof
+		predecessorAdmissionDigest = current.ReceiptEnvelopeDigest
+		predecessorTransitionDigest = variant.CurrentClaimStateTransitionReceiptDigest
 		wantKind := "challenge_admission"
 		if variant.SourceClaimState == "reviewing_after_nonterminal_response" {
 			wantKind = "nonterminal_response_admission"
 		}
-		if transition.DecisionAdmissionProof.ReceiptEnvelopeDigest != currentDigest ||
+		if !sameClaim(transition.Body.CoverageAgreementBodyDigest, transition.Body.CoverageObligationID, transition.Body.ClaimID) ||
 			transition.Body.TransitionKind != wantKind || transition.Body.ResultingClaimState != "reviewing" ||
 			transition.Body.SuccessorDecisionDueAtUnix == 0 {
 			return errors.New("reviewing fallback transition head is substituted")
 		}
-		wantPriorState, wantSequence, cutoff, ok = "reviewing", current.Body.DecisionSequence+1,
+		wantPriorState, wantSequence, cutoff, ok = "reviewing", current.ReceiptBody.DecisionSequence+1,
 			transition.Body.SuccessorDecisionDueAtUnix, true
-		predecessorDecisionDigest = current.Body.AuthorizedClaimDecisionDigest
+		predecessorDecisionDigest = current.ReceiptBody.AuthorizedClaimDecisionDigest
 		if wantKind == "challenge_admission" {
-			priorPendingToken = current.Body.ResultingApplicationToken
+			priorPendingToken = current.ReceiptBody.ResultingApplicationToken
 			if priorPendingToken == nil || receipt.PriorPendingApplicationToken == nil ||
 				!equalCanonical(*priorPendingToken, *receipt.PriorPendingApplicationToken) {
 				return errors.New("reviewing challenge fallback does not replace the current pending token")
@@ -192,7 +319,7 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	}
 	if lateRecovery {
 		wantPath = "late_recovery_terminal_fallback"
-		cutoff = variant.LateFilingCloseReceipt.Body.ClosedAtUnix
+		cutoff = source.lateFilingClose.Body.ClosedAtUnix
 		ok = cutoff > terms.TerminalResolutionDeadlineUnix && cutoff <= terms.LateIngressRecoveryDeadlineUnix
 	}
 	if !ok || decision.Body.DecisionPath != wantPath || variant.DecisionSequence != wantSequence ||

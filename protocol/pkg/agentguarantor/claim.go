@@ -261,6 +261,18 @@ func isFallbackDecisionPathV1(path string) bool {
 	return path == "initial_terminal_fallback" || path == "terminal_fallback" || path == "late_recovery_terminal_fallback"
 }
 
+// decisionAuthoritySubjectsForPathV1 is the authority set a decision on path
+// must be signed by: the Agreement-fixed fallback set for the three fallback
+// paths and the ordinary Decision Authority set otherwise. Consumers of an
+// already admitted decision (proofs, closure bundles) select by path because
+// either kind of decision can reach them.
+func decisionAuthoritySubjectsForPathV1(terms CoverageTermsV1, path string) []string {
+	if isFallbackDecisionPathV1(path) {
+		return terms.ClaimClosureCapacity.TerminalFallback.FallbackAuthoritySubjects
+	}
+	return terms.DecisionAuthoritySubjects
+}
+
 func validateDeterministicFallbackDecisionV1(decision AuthorizedClaimDecisionV1, claim AuthorizedCoverageClaimV1,
 	terms CoverageTermsV1) error {
 	fallback := terms.ClaimClosureCapacity.TerminalFallback

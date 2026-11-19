@@ -566,7 +566,8 @@ func VerifyTerminalClaimSetV1(value AuthorizedTerminalClaimSetEvidenceV1, offer 
 		}
 		decisionAt := time.Unix(int64(bundle.TerminalAuthorizedDecision.Body.DecidedAtUnix), 0).UTC()
 		if err := ValidateClaimDecision(bundle.TerminalAuthorizedDecision, claim, offer.CoverageTerms,
-			authorityResolver, offer.CoverageTerms.DecisionAuthoritySubjects, decisionAt); err != nil {
+			authorityResolver, decisionAuthoritySubjectsForPathV1(offer.CoverageTerms,
+				bundle.TerminalAuthorizedDecision.Body.DecisionPath), decisionAt); err != nil {
 			return err
 		}
 		payouts := bundle.MaterializedPayoutObligationSet

@@ -37,23 +37,29 @@ type AuthorizedDecisionAdmissionVariantV1 struct {
 	ExpectedNonterminalRoundsUsed                uint64                          `json:"expected_nonterminal_rounds_used"`
 }
 
+// DeterministicFallbackAdmissionVariantV1 names its source head by reference
+// only. It holds at most four references, and no reference is followed past
+// one level: the admission receipt carries the claim admission receipt and the
+// current transition receipt once, the current decision admission travels as
+// its compact proof (directly, or inside that transition receipt), and the
+// late filing-close receipt is resolved from its immutable descriptor.
 type DeterministicFallbackAdmissionVariantV1 struct {
-	CoverageAgreementBodyDigest        string                                     `json:"coverage_agreement_body_digest"`
-	CoverageObligationID               string                                     `json:"coverage_obligation_id"`
-	ClaimID                            string                                     `json:"claim_id"`
-	AuthorizedClaimAdmissionReceipt    AuthorizedClaimAdmissionReceiptV1          `json:"authorized_claim_admission_receipt"`
-	ClaimRevisionEpochExpectation      ClaimRevisionEpochExpectationV1            `json:"claim_revision_epoch_expectation"`
-	CurrentDecisionAdmissionReceipt    *AuthorizedClaimDecisionAdmissionReceiptV1 `json:"current_decision_admission_receipt,omitempty"`
-	CurrentClaimStateTransitionReceipt *AuthorizedClaimStateTransitionReceiptV1   `json:"current_claim_state_transition_receipt,omitempty"`
-	LateFilingCloseReceipt             *AuthorizedClaimFilingCloseReceiptV1       `json:"late_filing_close_receipt,omitempty"`
-	FallbackProfileDigest              string                                     `json:"fallback_profile_digest"`
-	SourceClaimRevision                uint64                                     `json:"source_claim_revision"`
-	SourceClaimStateRevision           uint64                                     `json:"source_claim_state_revision"`
-	SourceClaimState                   string                                     `json:"source_claim_state"`
-	ExpectedChallengeRoundsUsed        uint64                                     `json:"expected_challenge_rounds_used"`
-	ExpectedNonterminalRoundsUsed      uint64                                     `json:"expected_nonterminal_rounds_used"`
-	TriggerCutoffUnix                  uint64                                     `json:"trigger_cutoff_unix"`
-	DecisionSequence                   uint64                                     `json:"decision_sequence"`
+	CoverageAgreementBodyDigest              string                          `json:"coverage_agreement_body_digest"`
+	CoverageObligationID                     string                          `json:"coverage_obligation_id"`
+	ClaimID                                  string                          `json:"claim_id"`
+	AuthorizedClaimAdmissionReceiptDigest    string                          `json:"authorized_claim_admission_receipt_digest"`
+	ClaimRevisionEpochExpectation            ClaimRevisionEpochExpectationV1 `json:"claim_revision_epoch_expectation"`
+	CurrentDecisionAdmissionReceiptDigest    string                          `json:"current_decision_admission_receipt_digest,omitempty"`
+	CurrentClaimStateTransitionReceiptDigest string                          `json:"current_claim_state_transition_receipt_digest,omitempty"`
+	LateFilingCloseReceiptDescriptor         *ImmutableEvidenceDescriptorV1  `json:"late_filing_close_receipt_descriptor,omitempty"`
+	FallbackProfileDigest                    string                          `json:"fallback_profile_digest"`
+	SourceClaimRevision                      uint64                          `json:"source_claim_revision"`
+	SourceClaimStateRevision                 uint64                          `json:"source_claim_state_revision"`
+	SourceClaimState                         string                          `json:"source_claim_state"`
+	ExpectedChallengeRoundsUsed              uint64                          `json:"expected_challenge_rounds_used"`
+	ExpectedNonterminalRoundsUsed            uint64                          `json:"expected_nonterminal_rounds_used"`
+	TriggerCutoffUnix                        uint64                          `json:"trigger_cutoff_unix"`
+	DecisionSequence                         uint64                          `json:"decision_sequence"`
 }
 
 type ClaimDecisionSourceHeadV1 struct {
@@ -144,10 +150,13 @@ type AuthorizedClaimDecisionAdmissionReceiptV1 struct {
 	AuthorizedClaimDecision                AuthorizedClaimDecisionV1                `json:"authorized_claim_decision"`
 	AuthorizedClaimAdmissionReceipt        AuthorizedClaimAdmissionReceiptV1        `json:"authorized_claim_admission_receipt"`
 	ClaimRevisionIngressCutProof           ClaimIngressAdmissionCutProofV1          `json:"claim_revision_ingress_cut_proof"`
-	LateFilingCloseReceipt                 *AuthorizedClaimFilingCloseReceiptV1     `json:"late_filing_close_receipt,omitempty"`
 	CoverageEndCommitment                  CoverageEndCommitmentV1                  `json:"coverage_end_commitment"`
 	PriorPendingApplicationToken           *DecisionApplicationTokenV1              `json:"prior_pending_application_token,omitempty"`
 	PredecessorClaimStateTransitionReceipt *AuthorizedClaimStateTransitionReceiptV1 `json:"predecessor_claim_state_transition_receipt,omitempty"`
-	AuthorityAdmissionEligibilityProofSet  AuthorityAdmissionEligibilityProofSetV1  `json:"authority_admission_eligibility_proof_set"`
-	Authorizations                         []ProfileQualifiedObjectAuthorizationV1  `json:"authorizations"`
+	// CurrentDecisionAdmissionProof is carried only by a deterministic
+	// fallback from evidence_required or disputed: that current decision has
+	// no transition receipt to carry its proof.
+	CurrentDecisionAdmissionProof         *ClaimDecisionAdmissionReceiptProofV1   `json:"current_decision_admission_proof,omitempty"`
+	AuthorityAdmissionEligibilityProofSet AuthorityAdmissionEligibilityProofSetV1 `json:"authority_admission_eligibility_proof_set"`
+	Authorizations                        []ProfileQualifiedObjectAuthorizationV1 `json:"authorizations"`
 }
