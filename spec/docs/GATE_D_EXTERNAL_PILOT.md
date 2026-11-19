@@ -277,6 +277,28 @@ held in its own `tosctl` custody (for an Ed25519 key, `tosctl wallet sign
 - The provider's part comes from its node's status and its withdrawal.
 - The verifier's part comes from the verifier tool's output; nothing in it is
   copied from the other two parts.
+- The verifier tool is `tos-service-verify`, and the buyer's export is
+  `tos-service-buyer evidence` ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md)).
+  The tool's `pass`/`fail` result and check IDs map into this record as
+  follows. The verdict's SHA-256, checkpoint and `result` become
+  `verifier_output`. Check IDs map to acceptance items:
+  - A1: `actor-account` and the verdict's `reads.quorum`.
+  - A4 (verifier side): `bundle-binding`.
+  - A5: `receipt-canonical`, `receipt-response-hash`, `receipt-request-hash`,
+    `receipt-terms`, `receipt-binding`, `artifact-digest` and
+    `artifact-members`.
+  - A6: `actor-code-hash`, `actor-history`, `actor-replay`,
+    `request-selected`, `request-getters`, `bundle-binding`,
+    `bundle-journal`, `bundle-finalized` and `bundle-result`.
+  - A10: `PASS_INDEPENDENT_SERVICE_ACTOR_SOFTWARE_WORK` may be given only
+    when the tool returns `pass` for every purchase of `purchases[]`.
+
+  The tool does not judge A2, A3, A7, A8 or A9. It does not cover A6's
+  `withdraw_revenue` either, and it shows a refund only as the `claim_refund`
+  payout to the buyer wallet, not as the wallet's credit. Those come from the
+  record's other parts. Without a bundle the tool proves a request's caller
+  wallet only, so each purchase in `purchases[]` must have its reported
+  `caller` equal the buyer's declared wallet in `objects`.
 
 ## 9. What a pilot record must not claim
 
@@ -306,24 +328,26 @@ held in its own `tosctl` custody (for an Ed25519 key, `tosctl wallet sign
 
 ## 10. Prerequisites and tooling status
 
-Merged on ai main: the buyer agent, confirmer, refund duties, carriage,
-delivery, result acceptance, `tos-service-buyer agent`, `init plan` and
-`init apply`, and the stdio MCP server with `tos_buyer_prepare`,
-`tos_buyer_request_payment`, `tos_buyer_withdraw`, `tos_buyer_status`,
-`tos_buyer_purchases`, `tos_buyer_refund` and `tos_buyer_result`
-(`ROADMAP.md` section 4).
+Merged on ai main (`ROADMAP.md` section 4):
 
-Not merged, and each required before a pilot record can pass:
+- the buyer agent, confirmer, refund duties, carriage, delivery, result
+  acceptance and `tos-service-buyer agent`;
+- `init plan` and `init apply`, with their follow-ups (ai #80, #84),
+  including the optional gateway and catalog flags;
+- the stdio MCP server with all nine tools, `tos_buyer_search` and
+  `tos_buyer_quote` included (ai #81);
+- the buyer's evidence export `tos-service-buyer evidence` and the
+  third-party verifier `tos-service-verify` (ai #83,
+  [`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md), mapped into the
+  record in section 8.4).
 
-- `tos_buyer_search` and `tos_buyer_quote` with the finalized reads behind
-  them (ai #81). Without a Quote there is no `quote_id` and no purchase.
-- the `init` follow-ups (ai #80);
+Not merged:
+
+- the bound on a Quote's lifetime and the search and quote rate limits
+  (ai #85, in review);
 - the end-to-end test of the MCP buyer against an OpenFox provider on a local
-  chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9);
-- the buyer's evidence export (`tos-service-buyer evidence`, section 15) and
-  a Service Actor verifier for third parties that reconstructs A6 and emits
-  the verdict of A10. Both are being built; their command names and output
-  format are fixed when they merge, and this runbook is updated then.
+  chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9), required before a
+  pilot record can pass.
 
 Operational prerequisites (endpoint access for the buyer and verifier,
 funding, the published global configuration) are decided by the operator and

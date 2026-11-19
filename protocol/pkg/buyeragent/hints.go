@@ -3,6 +3,7 @@ package buyeragent
 import (
 	"context"
 	"errors"
+	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/capabilitycatalog"
@@ -40,15 +41,38 @@ type DiscoveryGateway interface {
 // hintCaller names the agent in the request contexts it sends.
 const hintCaller = "tos-service-buyer"
 
-// GatewayHints lists a gateway's discovery results as hints.
-type GatewayHints struct{ Gateway DiscoveryGateway }
+// GatewayRequestDeadline is the deadline every gateway request states; a
+// gateway refuses a request context without one, and one more than 15
+// minutes ahead.
+const GatewayRequestDeadline = time.Minute
+
+// gatewayContext is the request context of one gateway request: its ID,
+// the caller and a deadline GatewayRequestDeadline from now.
+func gatewayContext(requestID, caller string, now time.Time) *nativev1.RequestContext {
+	return &nativev1.RequestContext{RequestId: requestID, CallerId: caller,
+		DeadlineUnixMillis: now.Add(GatewayRequestDeadline).UnixMilli()}
+}
+
+// GatewayHints lists a gateway's discovery results as hints. Now is the
+// clock of the request deadlines; nil is time.Now.
+type GatewayHints struct {
+	Gateway DiscoveryGateway
+	Now     func() time.Time
+}
+
+func (g GatewayHints) now() time.Time {
+	if g.Now != nil {
+		return g.Now()
+	}
+	return time.Now()
+}
 
 // Hints lists the gateway's Capabilities, or its search results for query.
 func (g GatewayHints) Hints(ctx context.Context, query string, limit int) ([]Hint, error) {
 	if g.Gateway == nil || limit <= 0 {
 		return nil, errors.New("the gateway hint source is not configured")
 	}
-	request := &nativev1.RequestContext{RequestId: "buyer-search", CallerId: hintCaller}
+	request := gatewayContext("buyer-search", hintCaller, g.now())
 	if query == "" {
 		response, err := g.Gateway.ListCapabilities(ctx, &nativev1.ListCapabilitiesRequest{Context: request,
 			PageSize: uint32(limit)})
@@ -71,7 +95,7 @@ func (g GatewayHints) Manifest(ctx context.Context, digest string) ([]byte, erro
 		return nil, errors.New("the gateway hint source is not configured")
 	}
 	response, err := g.Gateway.GetSoftwareWorkManifest(ctx, &nativev1.GetSoftwareWorkManifestRequest{
-		Context: &nativev1.RequestContext{RequestId: "buyer-manifest", CallerId: hintCaller}, ManifestDigest: digest})
+		Context: gatewayContext("buyer-manifest", hintCaller, g.now()), ManifestDigest: digest})
 	if err != nil {
 		return nil, err
 	}

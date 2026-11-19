@@ -348,18 +348,26 @@ Deliver on the Service Actor rail:
   without custody; payment only after a human confirms it from a separate
   custody account; a long-running buyer agent for delivery and refunds);
   partly implemented. Merged on main (the adapter's pull requests from ai #57
-  to #79, through merge `fcddd6bc`): the custody-side agent
-  core, the confirmer (`tos-service-buyer confirm`), the stdio MCP server
-  (`tos-service-buyer-mcp`) with the prepare, request-payment, withdraw,
-  status, purchases, refund and result tools, the refund duties, the
-  Quote-carried provider key card, the relay carriage check, task delivery,
-  relay polling and Receipt acceptance, `tos-service-buyer agent`, and
-  `tos-service-buyer init plan|apply`. Not merged: the search and quote tools
-  with their finalized reads (ai #81), the `init` follow-ups (ai #80), the
-  end-to-end test against an OpenFox provider, and the buyer's evidence export
-  and a third-party Service Actor verifier. The buyer's user guide is
-  `docs/MCP_BUYER_GUIDE.md`. No Gate D acceptance item is met by this work
-  alone.
+  to #84, through merge `09aba122`):
+  - the custody-side agent core, the confirmer (`tos-service-buyer confirm`)
+    and the refund duties;
+  - the stdio MCP server (`tos-service-buyer-mcp`) with all nine tools: search
+    and quote at one finalized checkpoint, from gateway and catalog sources
+    (ai #81), and prepare, request-payment, withdraw, status, purchases,
+    refund and result;
+  - the Quote-carried provider key card, the relay carriage check, task
+    delivery, relay polling and Receipt acceptance;
+  - `tos-service-buyer agent`, and `tos-service-buyer init plan|apply` with
+    its follow-ups (ai #80, #84: send deadlines and their margin, and the
+    gateway and catalog flags);
+  - the buyer's evidence export `tos-service-buyer evidence` and the
+    third-party verifier `tos-service-verify` (ai #83,
+    `docs/PURCHASE_EVIDENCE_V1.md`).
+
+  Not merged: the bound on a Quote's lifetime and the search and quote rate
+  limits (ai #85, in review), and the end-to-end test against an OpenFox
+  provider. The buyer's user guide is `docs/MCP_BUYER_GUIDE.md`. No Gate D
+  acceptance item is met by this work alone.
 
 Delivered earlier:
 

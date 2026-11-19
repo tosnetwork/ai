@@ -23,7 +23,10 @@ const (
 	// not serve: a gateway Quote without a gateway, or a search with
 	// neither a hint source nor a capability_id.
 	CodeNotConfigured = "MCP_BUYER_NOT_CONFIGURED"
-	CodeInternal      = "MCP_BUYER_INTERNAL"
+	// CodeRateLimited refuses a search or quote over the per-minute bound;
+	// the same request may be sent again after a backoff.
+	CodeRateLimited = "MCP_BUYER_RATE_LIMITED"
+	CodeInternal    = "MCP_BUYER_INTERNAL"
 
 	DispositionNever              = "NEVER"
 	DispositionSameAfterBackoff   = "SAME_REQUEST_AFTER_BACKOFF"
@@ -48,7 +51,7 @@ func (e *Error) Unwrap() error { return e.cause }
 func refusal(code, message string, cause error) *Error {
 	disposition := DispositionNever
 	switch code {
-	case CodeDependencyUnavailable, CodeAgentUnavailable, CodeResultNotReady:
+	case CodeDependencyUnavailable, CodeAgentUnavailable, CodeResultNotReady, CodeRateLimited:
 		disposition = DispositionSameAfterBackoff
 	case CodeAmbiguous:
 		disposition = DispositionResolveBeforeRetry

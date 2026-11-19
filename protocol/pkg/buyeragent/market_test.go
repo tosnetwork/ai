@@ -129,12 +129,30 @@ type fakeGateway struct {
 	response *nativev1.RequestQuoteProposalResponse
 	err      error
 	requests int
+	// now is the gateway's clock for the request-context rule.
+	now func() time.Time
 }
 
-func (g *fakeGateway) RequestQuoteProposal(context.Context, *nativev1.RequestQuoteProposalRequest) (*nativev1.RequestQuoteProposalResponse, error) {
+// checkGatewayContext is the reference gateway's rule for a request
+// context: an ID, a caller and a deadline after now, at most 15 minutes on.
+func checkGatewayContext(value *nativev1.RequestContext, now time.Time) error {
+	if value == nil || value.RequestId == "" || value.CallerId == "" ||
+		value.DeadlineUnixMillis > now.Add(15*time.Minute).UnixMilli() {
+		return errors.New("valid bounded discovery request context is required")
+	}
+	if value.DeadlineUnixMillis <= now.UnixMilli() {
+		return errors.New("discovery request deadline expired")
+	}
+	return nil
+}
+
+func (g *fakeGateway) RequestQuoteProposal(_ context.Context, request *nativev1.RequestQuoteProposalRequest) (*nativev1.RequestQuoteProposalResponse, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.requests++
+	if err := checkGatewayContext(request.GetContext(), g.now()); err != nil {
+		return nil, err
+	}
 	return g.response, g.err
 }
 
@@ -200,7 +218,7 @@ func newOffersFixture(t *testing.T) *offersFixture {
 		t.Fatal(err)
 	}
 	hints := &fakeHints{manifests: map[string][]byte{digest: manifest}}
-	gateway := &fakeGateway{}
+	gateway := &fakeGateway{now: carrier.clock.Now}
 	offers, err := NewOffers(OffersConfig{Network: servicefixture.Network(), RegistryCodeHash: fxRegistryHash,
 		ActorCodeHash: fxActorCodeHash, BuyerWallet: fxBuyer, Sessions: chain, Manifests: store,
 		Hints: []HintSource{hints}, Gateway: gateway, Cards: carrier.carrier, Now: carrier.clock.Now, Random: f.random.Read})
@@ -286,12 +304,13 @@ func TestALocalQuoteIsBuiltAtOneFinalizedCheckpointAndStored(t *testing.T) {
 	}
 }
 
-// gatewayPackage is the fixture's Quote as a gateway would serve it, with
-// mutate applied to the proposal.
+// gatewayPackage is the fixture's Quote as a gateway would serve it,
+// expiring in 10 minutes, with mutate applied to the proposal.
 func gatewayPackage(t *testing.T, binding nativecore.TransportBindingV1,
 	mutate func(*nativev1.QuoteProposalV1)) *nativev1.QuoteProposalPackageV1 {
 	t.Helper()
 	_, value := quotePackageWith(t, fxNow, binding)
+	value.Proposal.ExpiresAtUnixSeconds = uint64(fxNow.Add(10 * time.Minute).Unix())
 	if mutate != nil {
 		mutate(value.Proposal)
 	}
