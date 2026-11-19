@@ -472,7 +472,8 @@ def sign_record(record_sha256: str) -> None:
                          ("verifier", lambda: verifier_sign(record_sha256))):
         signed = signer()
         signatures.append({"role": role, "algorithm": signed["algorithm"], "public_key_hex": signed["public_key_hex"],
-                           "message_hex": signed["message_hex"], "signature_hex": signed["signature_hex"]})
+                           "message_hex": signed["message_hex"], "signature_hex": signed["signature_hex"],
+                           "signed_utc": now()})
     (RECORD / "signatures.json").write_text(json.dumps(signatures, indent=2) + "\n")
     event("record signed", roles=[s["role"] for s in signatures])
 

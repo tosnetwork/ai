@@ -142,6 +142,10 @@ class MakeRecordTest(unittest.TestCase):
         self.assertEqual(record["releases"]["service_actor_release"], "test-profile")
         self.assertIn("had only the tos_buyer_* MCP tools", record["buyer_declaration"])
         self.assertIn("deleted before this record was built", record["automation"]["credentials"])
+        keys = {p["role"]: p["declaration_key"] for p in record["participants"]}
+        self.assertFalse(keys["verifier"]["retained"])
+        self.assertIn("after the run", keys["verifier"]["created"])
+        self.assertTrue(keys["buyer"]["retained"] and keys["provider"]["retained"])
         sign_all(self.root, summary["record_sha256"])
         status, signed, out = make(self.root)
         self.assertEqual(status, 0, signed)

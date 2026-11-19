@@ -203,6 +203,30 @@ verdict = "AGENT_OPERATED_PILOT_PASSED" if passed else "AGENT_OPERATED_PILOT_FAI
 
 # --- The record -----------------------------------------------------------------------
 
+run_end = (orchestration.get("credentials_end") or {}).get("at")
+
+
+def declaration_key_statement(role: str) -> dict:
+    """How each role's declaration key is held, and what that means for the
+    signatures: the buyer's and the provider's keys live in their vaults and
+    sign every copy of the record; the verifier's lives only in its
+    container's memory and is created at each signing."""
+    if role != "verifier":
+        return {"algorithm": "Ed25519", "custody": "a tosctl key named declaration in the role's own vault",
+                "retained": True, "public_key": "in signatures[]"}
+    return {"algorithm": "Ed25519",
+            "custody": "a tosctl key created in the verifier container's memory (tmpfs) at the moment of signing",
+            "retained": False,
+            "created": f"after the run, which ended at {run_end} (the verifier's last session and the credential "
+                       "deletion); the creation time of the key that signed this copy is signatures[].signed_utc",
+            "earlier_keys": "the keys that signed earlier copies of this record are unavailable: each lived only in "
+                            "a container memory that no longer exists",
+            "what_the_signature_attests": "only that the verifier role's operator signed this record's digest; the "
+                                          "verdict itself is the run's verifier output, bound by "
+                                          "verifier_output.verdict_sha256 and "
+                                          "automation.verifier_model_client.summary_sha256"}
+
+
 ai_root = HERE.parents[2]
 harness_commits = git(ai_root, "log", "--format=%h %s", f"{build['ai_commit']}..HEAD", "--",
                       "protocol/e2e/mcp-buyer-pilot").splitlines()
@@ -232,8 +256,7 @@ record = {
                           "5: the verifier reads the same project-run validators as the buyer and the provider"]},
     "participants": [{"role": role, "organization": "TOS core development team", "core_development_team": True,
                       "actor": actor, "hosts_and_network": "the team's coordinator host and its Docker bridge",
-                      "declaration_key": "a fresh tosctl Ed25519 key in the role's own custody; its public key is in "
-                                         "signatures[]",
+                      "declaration_key": declaration_key_statement(role),
                       "shares_no_key_with_another_role": True}
                      for role, actor in (("provider", "OpenFox reference seller, operated by the team"),
                                          ("buyer", "Claude Code CLI agent, operated by the team"),
@@ -380,7 +403,7 @@ if signatures:
     record["record_sha256"] = record_sha256
     record["signatures"] = [{"role": s.get("role"), "algorithm": s.get("algorithm"),
                              "public_key_hex": s.get("public_key_hex"), "signature_hex": s.get("signature_hex"),
-                             "verified": ok} for s, ok in zip(signatures, verified)]
+                             "signed_utc": s.get("signed_utc"), "verified": ok} for s, ok in zip(signatures, verified)]
 else:
     record["record_sha256"] = record_sha256
 OUT.write_text(json.dumps(record, indent=2) + "\n")
