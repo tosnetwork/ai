@@ -19,7 +19,6 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/mailbox"
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	"github.com/tosnetwork/ai/messenger/pkg/reachability"
 )
@@ -67,17 +66,16 @@ const (
 // decoders is the wire surface a second implementation has to match. Each
 // returns an error for input it refuses; the corpus asserts every entry does.
 var decoders = map[string]func([]byte) error{
-	"endpoint-delegation":  func(b []byte) error { _, err := identity.DecodeJSON(b); return err },
-	"contact-descriptor":   func(b []byte) error { _, err := directory.DecodeDescriptorJSON(b); return err },
-	"descriptor-policy":    func(b []byte) error { _, err := directory.DecodeDescriptorPolicyJSON(b); return err },
-	"dht-locator":          func(b []byte) error { _, err := directory.DecodeLocator(b); return err },
-	"prekey-bundle":        func(b []byte) error { _, err := e2ee.DecodeBundleJSON(b); return err },
-	"prekey-bundle-set":    func(b []byte) error { _, err := e2ee.DecodeBundleSetJSON(b); return err },
-	"messaging-event":      func(b []byte) error { _, err := envelope.DecodeEventJSON(b); return err },
-	"payload-text":         func(b []byte) error { _, err := payload.Decode("text", b); return err },
-	"negotiation-snapshot": func(b []byte) error { _, err := negotiation.DecodeSnapshotJSON(b); return err },
-	"reachability-trial":   func(b []byte) error { _, err := reachability.DecodeTrialJSON(b); return err },
-	"stored-ack":           func(b []byte) error { _, err := mailbox.DecodeAckJSON(b); return err },
+	"endpoint-delegation": func(b []byte) error { _, err := identity.DecodeJSON(b); return err },
+	"contact-descriptor":  func(b []byte) error { _, err := directory.DecodeDescriptorJSON(b); return err },
+	"descriptor-policy":   func(b []byte) error { _, err := directory.DecodeDescriptorPolicyJSON(b); return err },
+	"dht-locator":         func(b []byte) error { _, err := directory.DecodeLocator(b); return err },
+	"prekey-bundle":       func(b []byte) error { _, err := e2ee.DecodeBundleJSON(b); return err },
+	"prekey-bundle-set":   func(b []byte) error { _, err := e2ee.DecodeBundleSetJSON(b); return err },
+	"messaging-event":     func(b []byte) error { _, err := envelope.DecodeEventJSON(b); return err },
+	"payload-text":        func(b []byte) error { _, err := payload.Decode("text", b); return err },
+	"reachability-trial":  func(b []byte) error { _, err := reachability.DecodeTrialJSON(b); return err },
+	"stored-ack":          func(b []byte) error { _, err := mailbox.DecodeAckJSON(b); return err },
 	"mailbox-capability-grant": func(b []byte) error {
 		_, err := mailbox.DecodeGrantJSON(b)
 		return err
@@ -189,7 +187,6 @@ func generateCorpus(t *testing.T, verifiers map[string]func([]byte) error) []Cor
 		"prekey-bundle":            validBundleJSON(t),
 		"prekey-bundle-set":        validBundleSetJSON(t),
 		"messaging-event":          validEventJSON(t),
-		"negotiation-snapshot":     validSnapshotJSON(t),
 		"stored-ack":               validStoredAckJSON(t),
 		"mailbox-capability-grant": validMailboxGrantJSON(t),
 		"mailbox-access-request":   validMailboxRequestJSON(t),
@@ -242,19 +239,6 @@ func generateCorpus(t *testing.T, verifiers map[string]func([]byte) error) []Cor
 	addBinary("dht-locator/truncated", "dht-locator",
 		hex.EncodeToString(locator[:len(locator)-2]),
 		"a truncated locator is not the locator it was cut from")
-
-	// Snapshot: an approval from a later generation than the negotiation.
-	add("negotiation-snapshot/future-approval", "negotiation-snapshot",
-		futureApprovalSnapshotJSON(t),
-		"an approval from a later version of the negotiation than the snapshot is an approval for terms that do not exist")
-
-	// Snapshot: terms priced on a network other than the exchange's binding.
-	// The terms digest commits the asset's network, so identical terms on two
-	// networks are two digests, and a snapshot carrying the foreign one is
-	// carrying a purchase no commitment this exchange accepts could answer to.
-	add("negotiation-snapshot/terms-on-another-network", "negotiation-snapshot",
-		crossNetworkTermsSnapshotJSON(t),
-		"terms priced on another network digest to a different commitment, so they cannot ride a negotiation bound to this one")
 
 	// Verify layer. Each baseline must itself pass its verifier, or the
 	// mutations prove nothing -- the same discipline the decode baselines get.

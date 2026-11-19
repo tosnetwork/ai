@@ -6,51 +6,27 @@ import (
 	"testing"
 )
 
-func TestMandateDecisionCommitsTheCompleteNetworkIdentity(t *testing.T) {
-	request := Request{
-		Op:        OpPlaceMandate,
-		Challenge: strings.Repeat("a", 64),
-		Mandate: &MandateTerms{
-			Objective: "buy inference", Authority: "agent", CapabilityClass: "inference",
-			Asset: AssetIdentity{
-				NetworkID: "tos-mainnet", GenesisRootHash: strings.Repeat("b", 64),
-				GenesisFileHash: strings.Repeat("c", 64), Workchain: -1,
-				AccountID: strings.Repeat("d", 64), MasterCodeHash: strings.Repeat("e", 64),
-				WalletCodeHash: strings.Repeat("f", 64), Decimals: 9,
-			},
-			MaxTotalAtomic: "100", ApprovalAboveAtomic: "10", MaxCounteroffers: 2, ExpiresAtUnix: 1_900_000_000,
-		},
+// The mandate operations are retired. No principal may perform them, the
+// request validator does not know them, and no owner can sign for them.
+func TestRetiredOperationsAreRefused(t *testing.T) {
+	if len(RetiredOperations) == 0 {
+		t.Fatal("the retired operation list is empty")
 	}
-	original, err := DecisionBytes(request, request.Challenge)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mutations := map[string]func(*AssetIdentity){
-		"network":      func(asset *AssetIdentity) { asset.NetworkID = "tos-testnet" },
-		"genesis root": func(asset *AssetIdentity) { asset.GenesisRootHash = strings.Repeat("0", 64) },
-		"genesis file": func(asset *AssetIdentity) { asset.GenesisFileHash = strings.Repeat("1", 64) },
-	}
-	for name, mutate := range mutations {
-		t.Run(name, func(t *testing.T) {
-			changed := request
-			terms := *request.Mandate
-			changed.Mandate = &terms
-			mutate(&changed.Mandate.Asset)
-			encoded, err := DecisionBytes(changed, changed.Challenge)
-			if err != nil {
-				t.Fatal(err)
+	for _, operation := range RetiredOperations {
+		if _, known := operations[operation]; known {
+			t.Fatalf("retired operation %q is recognised again", operation)
+		}
+		for _, principal := range []Principal{PrincipalRuntime, PrincipalOwner} {
+			if Permits(principal, operation) {
+				t.Fatalf("principal %q may perform retired operation %q", principal, operation)
 			}
-			if bytes.Equal(original, encoded) {
-				t.Fatal("network identity substitution retained the owner signature preimage")
-			}
-		})
-	}
-	bad := request
-	badTerms := *request.Mandate
-	bad.Mandate = &badTerms
-	bad.Mandate.Asset.GenesisRootHash = "sha256:" + strings.Repeat("b", 64)
-	if _, err := DecisionBytes(bad, bad.Challenge); err == nil {
-		t.Fatal("SDK-prefixed genesis hash accepted in an owner preimage")
+		}
+		if Deciding(operation) {
+			t.Fatalf("retired operation %q is an owner decision", operation)
+		}
+		if _, err := DecisionBytes(Request{Op: operation}, strings.Repeat("a", 64)); err == nil {
+			t.Fatalf("an owner preimage was built for retired operation %q", operation)
+		}
 	}
 }
 

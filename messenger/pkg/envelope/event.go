@@ -75,14 +75,6 @@ var eventKinds = map[string]kindSpec{
 	"agent.task.result":         {class: "agent.task"},
 	"agent.task.status.request": {class: "agent.task"},
 
-	// Negotiation is conversation, not commitment. None of these create,
-	// accept, or fund anything; they carry what the parties said they intend.
-	"negotiation.proposal":        {class: "negotiation"},
-	"negotiation.counterproposal": {class: "negotiation"},
-	"negotiation.withdraw":        {class: "negotiation"},
-	"negotiation.intent.accept":   {class: "negotiation"},
-	"negotiation.intent.reject":   {class: "negotiation"},
-
 	// Agreement promotion is explicit and typed. Ordinary negotiation or text
 	// events never inherit this class and cannot create authorization evidence.
 	"agreement.propose":  {class: "agreement"},
@@ -119,10 +111,6 @@ var eventKinds = map[string]kindSpec{
 	"artifact.offer":     {class: "artifact"},
 	"artifact.reference": {class: "artifact"},
 	"artifact.encrypted": {class: "artifact"},
-
-	"service.quote.reference":   {class: "service"},
-	"service.escrow.reference":  {class: "service"},
-	"service.receipt.reference": {class: "service"},
 
 	"delivery.ack":           {class: "delivery"},
 	"application.ack":        {class: "application"},
@@ -520,6 +508,15 @@ func validateEventFields(event Event) error {
 	if len(event.Kind) == 0 || len(event.Kind) > identity.MaxEventClassBytes ||
 		!eventKindPattern.MatchString(event.Kind) {
 		return errors.New("invalid event kind")
+	}
+	// A retired kind or schema is not a future one. It is refused outright,
+	// even on the forward-compatible path, so a body written under the old
+	// meaning is never stored as though it might later be understood.
+	if payload.RetiredKind(event.Kind) {
+		return errors.New("event kind is retired")
+	}
+	if payload.RetiredSchema(event.PayloadSchema) {
+		return errors.New("event payload schema is retired")
 	}
 	// A known kind carries the schema the protocol fixed for it. An unknown
 	// kind may declare its own, which is what makes a forward-compatible event

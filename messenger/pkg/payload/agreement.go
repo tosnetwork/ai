@@ -11,10 +11,9 @@ import (
 
 const MaxAgreementPromotionBytes = 96 << 10
 
-// AgreementPropose carries an exact canonical Agreement body. It is distinct
-// from negotiation.proposal: only this typed promotion can be considered by an
-// Agreement coordinator, and the receiving Agent still has to authorize its
-// own body-bound predicates.
+// AgreementPropose carries an exact canonical Agreement body. Only this typed
+// promotion can be considered by an Agreement coordinator, and the receiving
+// Agent still has to authorize its own body-bound predicates.
 type AgreementPropose struct {
 	AgreementBodyDigest string
 	CanonicalBody       []byte

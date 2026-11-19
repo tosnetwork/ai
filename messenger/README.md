@@ -11,7 +11,7 @@ status, consumes no gate capacity, and cannot be cited as acceptance evidence fo
 any gate. It adds no `tos_service_v1` object and no alternate authority path.
 
 Finalized TOS state remains the sole authority for Agent identity, delegation,
-Capability, Accepted Quote, escrow, Receipt, and settlement. Nothing in this
+Capability, Agreement, and Service Actor settlement. Nothing in this
 repository creates or overrides any of them. A delivery acknowledgement produced
 here is never a Receipt.
 
@@ -42,8 +42,6 @@ decision:
 | `pkg/prekeyapi` | Capability-separated device socket exposing one public generation plan and accepting only exact Endpoint-signed public contributions |
 | `pkg/signerapi` | Strict bounded client for an externally custodied Endpoint Ed25519 signer; every returned signature is checked under the finalized public key |
 | `pkg/daemon` | Assembly: one state directory, separated runtime/owner/device sockets, maintenance and public-generation schedules |
-| `pkg/negotiation` | The layer between what an Agent says and what the system may do: mandates, exact amounts, the intent boundary, and the negotiation state machine |
-| `pkg/eventlog` (mandates, budgets, negotiations) | The owner's standing authorisations, placed and withdrawn on the owner's socket and resolved from the store when a spend is judged |
 | `pkg/e2ee` | The pure-state suite contract, message bindings and published prekeys, plus the approved and implemented default construction awaiting independent review and second-language evidence before wire freeze |
 | `pkg/e2ee/conformance` | Refutes a candidate suite against fourteen black-box properties, including peer-prekey possession |
 | `pkg/e2ee` (devices) | The multi-device model: device-set succession with rollback and revocation defences, deterministic per-pair session identifiers, and the per-event fan-out to every live device of both parties |
@@ -123,18 +121,12 @@ Deliberately absent, with the reason:
 - An installation with no transport queues durably and says so. It does not
   seal for a route that does not exist, and it does not read as one that is
   delivering.
-- Natural language communicates meaning and moves nothing. Agreeing in
-  conversation is not a Quote, a Quote is not funded escrow, and the only
-  signal that means value can move is a commitment read back out of finalized
-  state. A well-formed digest is not one.
-- An asset is a contract, not a ticker, and an amount is an arbitrary-precision
-  count of atomic units. Two contracts may both call themselves USDT, and no
-  fixed-width integer holds eighteen decimals of an ordinary token.
-- An owner's approval names what it approved: the terms digest, the version of
-  the negotiation, and the mandate it was given under. Terms freeze once both
-  parties agree, and bargaining on takes an explicit reopening that drops the
-  approval and the budget hold.
-- Where a structured amount and its rendering disagree, both are shown and
+- Natural language communicates meaning and moves nothing. Commerce is not
+  Messenger's: Agents negotiate through Intent Exchange Agreements and settle
+  on the Service Actor rail, and Messenger carries those objects only as
+  non-authorizing application payloads. The retired escrow-era negotiation and
+  chain-reference kinds stay reserved and are refused.
+- Where structured data and its rendering disagree, both are shown and
   neither is chosen. Letting a model pick would make the text authoritative
   through a side door.
 - Evidence is judged against thresholds that were fixed before it was
@@ -158,10 +150,6 @@ Deliberately absent, with the reason:
   it, and every decision carries the owner's signature over a single-use
   challenge. Separate sockets alone would not be a boundary: peer credentials
   say which Unix user is calling, and the runtime usually is that user.
-- A mandate is the owner's. It is placed on the owner's socket, resolved from
-  the store when a spend is judged, and only named by the runtime: a runtime
-  that could supply the mandate it is measured against would be setting its own
-  ceiling, which is the one thing a mandate exists to prevent.
 - An approval names a deed, not a request. The identifier of a proposed action
   is derived from what the action is and what it came from, so a permission
   cannot be moved to a different action, and it is spent the first time it is

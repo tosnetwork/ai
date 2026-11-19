@@ -15,30 +15,10 @@ const (
 	DomainEndpointDelegation = "tos.messaging.endpoint-delegation.v2\x00"
 	// DomainEndpointID namespaces the endpoint identifier derivation.
 	DomainEndpointID = "tos.messaging.endpoint-id.v2\x00"
-	// DomainNegotiationRecord namespaces the on-disk name of one negotiation,
-	// so an identifier a caller chose cannot name a path.
-	DomainNegotiationRecord = "tos.messaging.negotiation-record.v1\x00"
-	// DomainBudget namespaces the identifier of one asset's budget. This is the
-	// optional global asset-risk ceiling; the per-mandate budget that carries a
-	// mandate's MaxTotal has its own separator below. v2 folded the asset's
-	// network into the preimage; v3 encodes both genesis hashes as raw 32-byte
-	// fields rather than display hex.
-	DomainBudget = "tos.messaging.budget.v3\x00"
-	// DomainMandateBudget namespaces the identifier of one mandate's budget. It
-	// is separate from DomainBudget because a mandate budget's preimage folds in
-	// the mandate the ceiling belongs to, so two mandates over the same asset
-	// derive different budgets and cannot draw on each other's total. v3 uses
-	// the same raw genesis-hash representation as DomainBudget.
-	DomainMandateBudget = "tos.messaging.mandate-budget.v3\x00"
-	// DomainNegotiationTerms namespaces one set of agreed terms. v2 added the
-	// network identity; v3 commits both genesis hashes as raw 32-byte fields.
-	DomainNegotiationTerms = "tos.messaging.negotiation-terms.v3\x00"
 	// DomainOwnerDecision namespaces what an owner signs to authorise one
-	// decision on their own interface.
-	DomainOwnerDecision = "tos.messaging.owner-decision.v1\x00"
-	// DomainMandate namespaces a standing authorisation the owner placed. v2
-	// added the network identity; v3 commits both genesis hashes as raw bytes.
-	DomainMandate = "tos.messaging.mandate.v3\x00"
+	// decision on their own interface. v2 dropped the mandate fields from the
+	// preimage.
+	DomainOwnerDecision = "tos.messaging.owner-decision.v2\x00"
 	// DomainAgentAction namespaces the content-addressed identifier of an
 	// action an Agent proposes to take.
 	DomainAgentAction = "tos.messaging.agent-action.v1\x00"
@@ -107,12 +87,6 @@ const (
 	DomainReachabilityCoordinator = "tos.messaging.reachability-coordinator.v1\x00"
 	// DomainReachabilityObservation namespaces a coordinator attestation.
 	DomainReachabilityObservation = "tos.messaging.reachability-observation.v1\x00"
-	// DomainEconomicExecution namespaces the identity of one economic purchase,
-	// independent of how any single action that would perform it is described.
-	// Two actions that would buy the same thing under the same mandate share
-	// this identity even when their summaries or provenance differ, which is
-	// what makes a re-described purchase a repeat rather than a second spend.
-	DomainEconomicExecution = "tos.messaging.economic-execution.v1\x00"
 	// DomainRoomMembership namespaces the digest a room commits over the members
 	// of one epoch. The epoch is inside the preimage, so two epochs with the
 	// same member set commit different digests and cannot be mistaken for each
@@ -271,7 +245,6 @@ var Domains = []string{
 	DomainReachabilityPairResult,
 	DomainReachabilityCoordinator,
 	DomainReachabilityObservation,
-	DomainEconomicExecution,
 	DomainRoomMembership,
 	DomainRoomAuthorityTransfer,
 	DomainRoomMembershipAuthorization,
@@ -321,11 +294,30 @@ var Domains = []string{
 	DomainPayload,
 	DomainInboxPolicy,
 	DomainAdmissionInvite,
-	DomainNegotiationRecord,
-	DomainBudget,
-	DomainMandateBudget,
-	DomainNegotiationTerms,
 	DomainOwnerDecision,
-	DomainMandate,
 	DomainAgentAction,
+}
+
+// RetiredDomains are separators that once committed an object this build no
+// longer has. They are never reused, under any meaning: a preimage built under
+// one would still verify against whatever an old peer or record signed. They
+// belonged to the escrow-era negotiation, mandate and budget objects, which
+// left Messenger with commerce, and to the owner-decision layout that signed
+// mandate fields.
+var RetiredDomains = []string{
+	"tos.messaging.negotiation-record.v1\x00",
+	"tos.messaging.budget.v1\x00",
+	"tos.messaging.budget.v2\x00",
+	"tos.messaging.budget.v3\x00",
+	"tos.messaging.mandate-budget.v1\x00",
+	"tos.messaging.mandate-budget.v2\x00",
+	"tos.messaging.mandate-budget.v3\x00",
+	"tos.messaging.negotiation-terms.v1\x00",
+	"tos.messaging.negotiation-terms.v2\x00",
+	"tos.messaging.negotiation-terms.v3\x00",
+	"tos.messaging.mandate.v1\x00",
+	"tos.messaging.mandate.v2\x00",
+	"tos.messaging.mandate.v3\x00",
+	"tos.messaging.economic-execution.v1\x00",
+	"tos.messaging.owner-decision.v1\x00",
 }

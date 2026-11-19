@@ -13,7 +13,6 @@ import (
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/pkg/attachments"
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 	protocolcodec "github.com/tosnetwork/ai/protocol/pkg/codec"
 )
@@ -47,16 +46,6 @@ func sample(kind string) Payload {
 			OutputDigest: "sha256:" + strings.Repeat("4", 64)}
 	case "agent.task.status.request":
 		return TaskStatusRequest{TaskID: "task-1"}
-	case "negotiation.proposal":
-		return NegotiationProposal{NegotiationID: "neg-1", Terms: sampleTerms()}
-	case "negotiation.counterproposal":
-		return NegotiationCounterproposal{NegotiationID: "neg-1", Terms: sampleTerms()}
-	case "negotiation.withdraw":
-		return NegotiationWithdraw{NegotiationID: "neg-1", Reason: "found another provider"}
-	case "negotiation.intent.accept":
-		return NegotiationIntentAccept{NegotiationID: "neg-1", Terms: sampleTerms()}
-	case "negotiation.intent.reject":
-		return NegotiationIntentReject{NegotiationID: "neg-1", Reason: "above budget"}
 	case "intent.application":
 		canonical, _ := commerce.CanonicalIntentApplication(commerce.IntentApplication{SchemaVersion: 1,
 			IntentDigest: "sha256:" + strings.Repeat("9", 64), IntentIssuerAgentID: "agent:issuer", ApplicantAgentID: "agent:applicant",
@@ -226,12 +215,6 @@ func sample(kind string) Payload {
 		}
 		return EncryptedAttachment{ManifestDigest: digest, ReferenceJSON: raw, Locator: locator,
 			FetchGrantJSON: grantJSON, FetchCapabilityPrivateKeyHex: hex.EncodeToString(capabilityKey)}
-	case "service.quote.reference":
-		return QuoteReference{ChainReference: sampleChainReference()}
-	case "service.escrow.reference":
-		return EscrowReference{ChainReference: sampleChainReference()}
-	case "service.receipt.reference":
-		return ReceiptReference{ChainReference: sampleChainReference()}
 	case "delivery.ack":
 		return DeliveryAck{EventID: "evt_" + strings.Repeat("8", 64), ReceivedAtUnix: 1_800_000_000}
 	case "application.ack":
@@ -322,39 +305,41 @@ func sampleAgreementBody() (commerce.AgentAgreementBody, []byte) {
 	return body, canonical
 }
 
-func sampleTerms() negotiation.Terms {
-	return negotiation.Terms{
-		CapabilityID:           "cap_" + strings.Repeat("2", 64),
-		CapabilityVersion:      "1.0.0",
-		CapabilityClass:        "transcription.audio",
-		ProviderAgentID:        "agent_" + strings.Repeat("3", 64),
-		ManifestDigest:         "sha256:" + strings.Repeat("4", 64),
-		TransportBindingDigest: "sha256:" + strings.Repeat("5", 64),
-		Price: negotiation.Money{
-			Asset: negotiation.Asset{
-				Network: negotiation.Network{
-					ID:              "tos-local",
-					GenesisRootHash: strings.Repeat("1", 64),
-					GenesisFileHash: strings.Repeat("2", 64),
-				},
-				Workchain:      0,
-				AccountID:      strings.Repeat("a", 64),
-				MasterCodeHash: "tvm-cell-sha256:" + strings.Repeat("b", 64),
-				WalletCodeHash: "tvm-cell-sha256:" + strings.Repeat("c", 64),
-				Decimals:       2,
-			},
-			Atomic: "250",
-		},
-		EscrowTermsDigest:   "sha256:" + strings.Repeat("6", 64),
-		DisputePolicyDigest: "sha256:" + strings.Repeat("7", 64),
-		NotAfterUnix:        1_800_000_000,
+// A retired kind or schema is reserved forever: no codec may claim it, and a
+// body sent under one is refused rather than read with a new meaning.
+func TestRetiredKindsAndSchemasStayUnused(t *testing.T) {
+	if len(RetiredKinds) == 0 || len(RetiredSchemas) == 0 {
+		t.Fatal("the retired kind and schema lists are empty")
 	}
-}
-
-func sampleChainReference() ChainReference {
-	return ChainReference{
-		Account:     "0:" + strings.Repeat("c", 64),
-		StateDigest: "sha256:" + strings.Repeat("d", 64),
+	retiredSchema := make(map[string]struct{}, len(RetiredSchemas))
+	for _, schema := range RetiredSchemas {
+		retiredSchema[schema] = struct{}{}
+	}
+	for kind, spec := range codecs {
+		if _, retired := retiredSchema[spec.schema]; retired {
+			t.Fatalf("kind %q reuses retired schema %q", kind, spec.schema)
+		}
+		for schema := range spec.legacy {
+			if _, retired := retiredSchema[schema]; retired {
+				t.Fatalf("kind %q accepts retired schema %q", kind, schema)
+			}
+		}
+	}
+	for _, kind := range RetiredKinds {
+		if _, known := codecs[kind]; known {
+			t.Fatalf("retired kind %q has a codec again", kind)
+		}
+		if _, known := SchemaFor(kind); known {
+			t.Fatalf("retired kind %q names a schema", kind)
+		}
+		if _, err := Decode(kind, []byte{0}); err == nil {
+			t.Fatalf("a body under retired kind %q was decoded", kind)
+		}
+		for _, schema := range RetiredSchemas {
+			if SupportsSchema(kind, schema) {
+				t.Fatalf("retired kind %q supports retired schema %q", kind, schema)
+			}
+		}
 	}
 }
 

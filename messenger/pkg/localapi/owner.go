@@ -30,7 +30,6 @@ const (
 var deciding = map[Operation]struct{}{
 	OpAdmit: {}, OpRefuse: {}, OpApprove: {}, OpDeny: {},
 	OpGrantAction: {}, OpDenyAction: {},
-	OpPlaceMandate: {}, OpRevokeMandate: {},
 	OpCreateAdmissionInvite: {},
 	OpPresentInvite:         {},
 	OpRemoveContact:         {},
@@ -125,7 +124,6 @@ func DecisionBytes(request Request, challenge string) ([]byte, error) {
 	canon.Text(buffer, challenge)
 	canon.Text(buffer, request.EventID)
 	canon.Text(buffer, request.ActionID)
-	canon.Text(buffer, request.MandateID)
 	canon.Text(buffer, string(request.Code))
 	canon.Text(buffer, request.Reason)
 	canon.Text(buffer, request.InvitedAgentID)
@@ -155,30 +153,6 @@ func DecisionBytes(request Request, challenge string) ([]byte, error) {
 		canon.Uint32(buffer, uint32(request.Limit))
 		canon.Text(buffer, request.IdempotencyKey)
 		canon.Uint64(buffer, request.ExpiresAtUnix)
-	}
-	// A mandate is placed by value, so what is signed is the authorisation
-	// itself rather than a name for it.
-	if request.Mandate != nil {
-		genesisRoot, rootErr := hex.DecodeString(request.Mandate.Asset.GenesisRootHash)
-		genesisFile, fileErr := hex.DecodeString(request.Mandate.Asset.GenesisFileHash)
-		if rootErr != nil || fileErr != nil || len(genesisRoot) != 32 || len(genesisFile) != 32 {
-			return nil, errors.New("invalid mandate network hashes")
-		}
-		canon.Text(buffer, request.Mandate.Objective)
-		canon.Text(buffer, request.Mandate.Authority)
-		canon.Text(buffer, request.Mandate.CapabilityClass)
-		canon.Text(buffer, request.Mandate.Asset.NetworkID)
-		canon.Bytes(buffer, genesisRoot)
-		canon.Bytes(buffer, genesisFile)
-		canon.Uint32(buffer, uint32(request.Mandate.Asset.Workchain))
-		canon.Text(buffer, request.Mandate.Asset.AccountID)
-		canon.Text(buffer, request.Mandate.Asset.MasterCodeHash)
-		canon.Text(buffer, request.Mandate.Asset.WalletCodeHash)
-		canon.Uint32(buffer, request.Mandate.Asset.Decimals)
-		canon.Text(buffer, request.Mandate.MaxTotalAtomic)
-		canon.Text(buffer, request.Mandate.ApprovalAboveAtomic)
-		canon.Uint32(buffer, request.Mandate.MaxCounteroffers)
-		canon.Uint64(buffer, request.Mandate.ExpiresAtUnix)
 	}
 	return buffer.Bytes(), nil
 }

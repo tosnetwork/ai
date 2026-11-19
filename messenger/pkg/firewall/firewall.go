@@ -29,7 +29,6 @@ import (
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/messenger/internal/ids"
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 var idempotencyKeyPattern = regexp.MustCompile(`^idem_[0-9a-f]{64}$`)
@@ -52,7 +51,12 @@ const (
 //
 // Effects are ordered, and the order is what the policy ceilings are stated
 // in. An action with several effects is judged by its strongest one: an action
-// that both reads a file and spends money is a spend.
+// that both reads a file and uses a signing key is a key use.
+//
+// There is no spend effect. Moving value is commerce, which this installation
+// does not authorise: purchases are negotiated as Agreements and settled on the
+// chain under the payer's own custody controls. The retired name stays
+// reserved (see RetiredEffects) and is refused like any unknown effect.
 type Effect string
 
 const (
@@ -73,8 +77,6 @@ const (
 	// It is separate from an ordinary tool call because no configured ceiling
 	// may turn a network-derived instruction into unattended physical I/O.
 	EffectPhysicalIO Effect = "physical-io"
-	// EffectSpend moves value or commits to terms that will.
-	EffectSpend Effect = "spend"
 	// EffectKeyUse uses an identity or signing key.
 	EffectKeyUse Effect = "key-use"
 	// EffectConfiguration changes what this installation is or what it will
@@ -87,8 +89,12 @@ const (
 // invent effects between two of these.
 var rank = map[Effect]int{
 	EffectNone: 0, EffectLocalRead: 1, EffectLocalWrite: 2, EffectMessage: 3,
-	EffectToolCall: 4, EffectSpend: 5, EffectKeyUse: 6, EffectPhysicalIO: 7, EffectConfiguration: 8,
+	EffectToolCall: 4, EffectKeyUse: 6, EffectPhysicalIO: 7, EffectConfiguration: 8,
 }
+
+// RetiredEffects are effect names that once had a meaning and may never be
+// given another. Known refuses them like any other unrecognised effect.
+var RetiredEffects = []Effect{"spend"}
 
 // Known reports whether an effect is one this build recognises. An unknown
 // effect is refused rather than treated as harmless.
@@ -186,7 +192,7 @@ func (p Policy) Validate() error {
 //
 // Received content may cause the Agent to reply and to keep its own notes, and
 // nothing more, until an owner says otherwise. Replying is what a messenger
-// is; a tool call or a payment is where a stranger's message stops being
+// is; a tool call is where a stranger's message stops being
 // conversation and starts being instruction.
 func Default() Policy {
 	return Policy{
@@ -210,12 +216,6 @@ type Action struct {
 	// An empty set is a claim that nothing received contributed, and it is the
 	// runtime's claim to make honestly: this package cannot check it.
 	DerivedFrom []Origin
-	// Terms are the exact purchase, required when the effect is a spend and
-	// refused otherwise. They are part of the action rather than an argument
-	// beside it because the identifier commits them: without that, an approval
-	// for one price could be spent on another that happened to be described
-	// the same way.
-	Terms *negotiation.Terms
 	// Physical is the exact local Capability and invocation shape for physical
 	// I/O. Arguments are represented only by their canonical JSON digest: the
 	// owner can identify the approved operation without copying raw sensor or
@@ -278,12 +278,6 @@ func (a Action) Validate() error {
 	}
 	if len(a.DerivedFrom) > MaxProvenance {
 		return errors.New("action cites more origins than an owner could review")
-	}
-	if a.Effect == EffectSpend && a.Terms == nil {
-		return errors.New("a spend must say what it is buying")
-	}
-	if a.Effect != EffectSpend && a.Terms != nil {
-		return errors.New("only a spend carries terms")
 	}
 	if a.Effect == EffectPhysicalIO {
 		if a.Physical == nil {
@@ -403,7 +397,7 @@ func Evaluate(policy Policy, action Action) (Decision, error) {
 //
 // It commits the effect, the description, and every origin cited, so an
 // approval is an approval of that action and nothing else. Without this an
-// owner could approve a tool call and the runtime could perform a payment
+// owner could approve one tool call and the runtime could perform another
 // under the same permission: the approval would name a request rather than a
 // deed.
 func ActionID(action Action) (string, error) {
@@ -429,19 +423,6 @@ func ActionID(action Action) (string, error) {
 		canon.Text(buffer, origin.ConversationID)
 		canon.Text(buffer, origin.Kind)
 		canon.Uint64(buffer, origin.ReceivedAtUnix)
-	}
-	// The terms are committed, so an approval for one price cannot be spent on
-	// another. A spend with no terms never reaches here: it fails validation.
-	// The terms are committed through their own digest, so every field a
-	// canonical quote carries is part of the action's identity: an approval
-	// for one purchase cannot be spent on another that differs in provider,
-	// manifest, escrow terms, or price.
-	if action.Terms != nil {
-		digest, err := action.Terms.Digest()
-		if err != nil {
-			return "", err
-		}
-		canon.Text(buffer, digest)
 	}
 	if action.Physical != nil {
 		canon.Text(buffer, "physical-operation")

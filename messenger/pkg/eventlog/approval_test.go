@@ -6,58 +6,35 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
+	"github.com/tosnetwork/ai/messenger/pkg/firewall"
 )
 
-func approvalTerms() *negotiation.Terms {
-	return &negotiation.Terms{
-		CapabilityID:           "cap_" + strings.Repeat("9", 64),
-		CapabilityVersion:      "1.0.0",
-		CapabilityClass:        "software.audit",
-		ProviderAgentID:        "agent_" + strings.Repeat("5", 64),
-		ManifestDigest:         "sha256:" + strings.Repeat("d", 64),
-		TransportBindingDigest: "sha256:" + strings.Repeat("e", 64),
-		Price: negotiation.Money{Asset: negotiation.Asset{
-			Network: negotiation.Network{
-				ID:              "tos-local",
-				GenesisRootHash: strings.Repeat("a", 64),
-				GenesisFileHash: strings.Repeat("b", 64),
-			},
-			Workchain: 0, AccountID: strings.Repeat("a", 64),
-			MasterCodeHash: "tvm-cell-sha256:" + strings.Repeat("b", 64),
-			WalletCodeHash: "tvm-cell-sha256:" + strings.Repeat("c", 64), Decimals: 6,
-		}, Atomic: "100"},
-		EscrowTermsDigest:   "sha256:" + strings.Repeat("f", 64),
-		DisputePolicyDigest: "sha256:" + strings.Repeat("1", 64),
-		NotAfterUnix:        1_800_000_000 + 3600,
-	}
-}
-
-// A spend approval must carry the structured purchase, and it persists that
-// purchase along with the full provenance the action identifier commits, so the
-// owner is shown -- and signs over -- typed state, not the runtime's summary.
-func TestSpendApprovalPersistsStructuredPurchase(t *testing.T) {
+// An approval persists the full provenance the action identifier commits, so
+// the owner is shown -- and signs over -- typed state, not the runtime's
+// summary. An approval for an effect this build does not recognise, including
+// a retired one, is never recorded.
+func TestApprovalPersistsProvenanceAndRefusesRetiredEffects(t *testing.T) {
 	journal := approvalJournal(t)
-	request := testRequest("a")
-	request.Effect = "spend"
-	request.MandateID = "mdt_" + strings.Repeat("2", 64)
-	if _, err := journal.RequestApproval(request); err == nil {
-		t.Fatal("a spend approval with no structured terms was accepted")
+	for _, retired := range firewall.RetiredEffects {
+		refused := testRequest("b")
+		refused.Effect = string(retired)
+		if _, err := journal.RequestApproval(refused); err == nil {
+			t.Fatalf("an approval for retired effect %q was recorded", retired)
+		}
+		if _, err := journal.RecordAutoAuthorization(refused); err == nil {
+			t.Fatalf("an automatic grant for retired effect %q was recorded", retired)
+		}
 	}
 
-	request.Terms = approvalTerms()
+	request := testRequest("a")
 	request.Origins[0].DeviceID = "dev_" + strings.Repeat("6", 64)
 	request.Origins[0].ReceivedAtUnix = 1_800_000_000
 	if _, err := journal.RequestApproval(request); err != nil {
-		t.Fatalf("a complete spend approval was refused: %v", err)
+		t.Fatalf("a complete approval was refused: %v", err)
 	}
 	stored, found, err := journal.LookupApproval(request.ActionID)
 	if err != nil || !found {
 		t.Fatalf("lookup: found=%v err=%v", found, err)
-	}
-	if stored.Terms == nil || stored.Terms.Price.Atomic != "100" ||
-		stored.Terms.ProviderAgentID != request.Terms.ProviderAgentID {
-		t.Fatalf("the structured purchase was not persisted: %+v", stored.Terms)
 	}
 	if len(stored.Origins) != 1 || stored.Origins[0].DeviceID != request.Origins[0].DeviceID ||
 		stored.Origins[0].ReceivedAtUnix != 1_800_000_000 {

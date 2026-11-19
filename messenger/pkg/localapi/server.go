@@ -25,7 +25,6 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/firewall"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
@@ -352,12 +351,6 @@ func (s *Server) handle(ctx context.Context, principal Principal, raw []byte) Re
 		return s.grantAction(request, now)
 	case OpDenyAction:
 		return s.denyAction(request, now)
-	case OpPlaceMandate:
-		return s.placeMandate(request, now)
-	case OpRevokeMandate:
-		return s.revokeMandate(request, now)
-	case OpListMandates:
-		return s.listMandates()
 	case OpChallenge:
 		return s.challenge(now)
 	case OpCreateAdmissionInvite:
@@ -1362,18 +1355,7 @@ func (s *Server) requestAction(request Request, now time.Time) Response {
 	if err != nil {
 		return refuse(fault.CodeInternal, err)
 	}
-	var decision firewall.Decision
-	var mandate negotiation.Mandate
-	if action.Effect == firewall.EffectSpend {
-		resolved, resolveErr := s.spendMandate(request, now)
-		if resolveErr != nil {
-			return refuse(fault.CodeInternal, resolveErr)
-		}
-		mandate = resolved
-		decision, err = firewall.EvaluateSpend(s.config.Policy, mandate, action, now)
-	} else {
-		decision, err = firewall.Evaluate(s.config.Policy, action)
-	}
+	decision, err := firewall.Evaluate(s.config.Policy, action)
 	if err != nil {
 		return refuse(fault.CodeInternal, err)
 	}
@@ -1387,68 +1369,13 @@ func (s *Server) requestAction(request Request, now time.Time) Response {
 		return refuse(fault.CodeInternal, err)
 	}
 	if decision.Outcome == firewall.Allow {
-		// An allowed spend or tool call is authorised once, not indefinitely. The grant is
-		// recorded the way an owner's would be and consumed by ClaimAction, so
-		// one decision -- human or policy -- backs one execution. The action
-		// identifier commits the terms, which is what makes a second identical
-		// purchase a replay rather than a coincidence. Tool calls use the
-		// runtime's explicit idempotency key for the same distinction. Weaker
-		// effects remain inline: a repeated reply is a nuisance, while a repeated
-		// external invocation or payment is an uncontrolled side effect.
-		if action.Effect == firewall.EffectSpend {
-			// One purchase is authorised once, keyed on the economic execution --
-			// the mandate and the terms -- not on the action identifier, which a
-			// re-described replay of the same purchase would change. A purchase
-			// already bound to another action is not authorised a second time.
-			executionID, err := negotiation.ExecutionID(request.MandateID, *action.Terms)
-			if err != nil {
-				return refuse(fault.CodeInternal, err)
-			}
-			bound, fresh, err := s.config.Journal.ClaimEconomicExecution(executionID, actionID, now)
-			if err != nil {
-				return refuse(fault.CodeInternal, err)
-			}
-			if !fresh && bound != actionID {
-				return Response{Schema: ResponseSchema, OK: true, ActionID: actionID,
-					Decision: string(firewall.Refuse),
-					Detail:   "this purchase is already authorised under another action"}
-			}
-			// Bound the sum of distinct purchases under this mandate against its
-			// MaxTotal. The per-spend ceiling the firewall already applied stops
-			// one oversized purchase; without a durable cross-action total,
-			// several purchases each inside that ceiling could still commit more
-			// than the mandate allows. The reservation is keyed by the economic
-			// execution, so it is idempotent across a re-described same purchase
-			// and accumulates once per distinct purchase. It is written durably
-			// BEFORE the auto-authorization, so a crash between the two can only
-			// leave a hold with no authorization -- an over-count, the safe
-			// direction -- never an authorization the budget never counted. The
-			// hold becomes a spend when the grant is claimed, and is freed if the
-			// purchase is later denied or abandoned.
-			if err := s.reserveMandateBudget(request.MandateID, mandate, executionID, action.Terms.Price); err != nil {
-				if !errors.Is(err, negotiation.ErrBudgetExceeded) {
-					return refuse(fault.CodeInternal, err)
-				}
-				// The purchase does not fit the mandate's durable total, so it is
-				// not auto-authorised. The owner may still decide, so this
-				// escalates rather than refusing, and holds no budget until they
-				// approve it.
-				return s.escalateSpend(request, action, actionID, decision.Provenance,
-					"would exceed the mandate's remaining budget", now)
-			}
-			approval, err := s.config.Journal.RecordAutoAuthorization(eventlog.ApprovalRequest{
-				ActionID: actionID, Effect: string(action.Effect), Summary: action.Summary,
-				Reason:  "allowed by policy, inside the owner's mandate",
-				Origins: toApprovalOrigins(decision.Provenance), Terms: action.Terms,
-				MandateID: request.MandateID, AskedAt: uint64(now.Unix()),
-			})
-			if err != nil {
-				return refuse(fault.CodeInternal, err)
-			}
-			return Response{Schema: ResponseSchema, OK: true, ActionID: actionID,
-				Decision: string(decision.Outcome), Detail: decision.Reason,
-				State: string(approval.State)}
-		}
+		// An allowed tool call is authorised once, not indefinitely. The grant
+		// is recorded the way an owner's would be and consumed by ClaimAction,
+		// so one decision -- human or policy -- backs one execution. Tool calls
+		// use the runtime's explicit idempotency key to tell a retry from a
+		// second invocation. Weaker effects remain inline: a repeated reply is
+		// a nuisance, while a repeated external invocation is an uncontrolled
+		// side effect.
 		if action.Effect == firewall.EffectToolCall || action.Effect == firewall.EffectPhysicalIO {
 			bound, _, err := s.config.Journal.ClaimToolExecution(action.IdempotencyKey, actionID, now)
 			if err != nil {
@@ -1474,22 +1401,7 @@ func (s *Server) requestAction(request Request, now time.Time) Response {
 		return Response{Schema: ResponseSchema, OK: true, ActionID: actionID,
 			Decision: string(decision.Outcome), Detail: decision.Reason, Authorised: true}
 	}
-	// The decision requires an owner. A spend that still fits its mandate holds
-	// its slice of the budget while it waits, so concurrent spends cannot
-	// oversubscribe MaxTotal behind a pending one; a spend that will not fit is
-	// put to the owner without a hold, who may approve it over budget.
-	if action.Effect == firewall.EffectSpend {
-		executionID, err := negotiation.ExecutionID(request.MandateID, *action.Terms)
-		if err != nil {
-			return refuse(fault.CodeInternal, err)
-		}
-		if err := s.reserveMandateBudget(request.MandateID, mandate, executionID, action.Terms.Price); err != nil {
-			if !errors.Is(err, negotiation.ErrBudgetExceeded) {
-				return refuse(fault.CodeInternal, err)
-			}
-		}
-		return s.escalateSpend(request, action, actionID, decision.Provenance, decision.Reason, now)
-	}
+	// The decision requires an owner.
 	if action.Effect == firewall.EffectToolCall || action.Effect == firewall.EffectPhysicalIO {
 		bound, _, err := s.config.Journal.ClaimToolExecution(action.IdempotencyKey, actionID, now)
 		if err != nil {
@@ -1504,49 +1416,13 @@ func (s *Server) requestAction(request Request, now time.Time) Response {
 		ActionID: actionID, Effect: string(action.Effect), Summary: action.Summary,
 		IdempotencyKey: action.IdempotencyKey,
 		Reason:         decision.Reason, Origins: toApprovalOrigins(decision.Provenance),
-		Terms: action.Terms, Physical: toApprovalPhysical(action.Physical), AskedAt: uint64(now.Unix()),
+		Physical: toApprovalPhysical(action.Physical), AskedAt: uint64(now.Unix()),
 	})
 	if err != nil {
 		return refuse(fault.CodeInternal, err)
 	}
 	return Response{Schema: ResponseSchema, OK: true, ActionID: actionID,
 		Decision: string(decision.Outcome), Detail: decision.Reason,
-		State: string(approval.State)}
-}
-
-// reserveMandateBudget holds a purchase's price against its mandate's durable
-// total, keyed by the economic execution so it is idempotent across a
-// re-described same purchase. It returns negotiation.ErrBudgetExceeded when the
-// hold would carry the mandate past MaxTotal, which the caller escalates rather
-// than treating as a failure.
-func (s *Server) reserveMandateBudget(mandateID string, mandate negotiation.Mandate,
-	executionID string, price negotiation.Money) error {
-	ledger, err := s.config.Journal.OpenMandateBudgetLedger(mandateID, mandate.MaxTotal.Asset)
-	if err != nil {
-		return err
-	}
-	budget, err := negotiation.OpenBudget(mandate.MaxTotal, ledger)
-	if err != nil {
-		return err
-	}
-	return budget.Reserve(executionID, price)
-}
-
-// escalateSpend puts a spend to the owner. The reservation, if any, was taken by
-// the caller before this record is written, so the durable hold always precedes
-// the owner-visible question a crash could otherwise strand.
-func (s *Server) escalateSpend(request Request, action firewall.Action, actionID string,
-	provenance []firewall.Origin, reason string, now time.Time) Response {
-	approval, err := s.config.Journal.RequestApproval(eventlog.ApprovalRequest{
-		ActionID: actionID, Effect: string(action.Effect), Summary: action.Summary,
-		Reason: reason, Origins: toApprovalOrigins(provenance), Terms: action.Terms,
-		MandateID: request.MandateID, AskedAt: uint64(now.Unix()),
-	})
-	if err != nil {
-		return refuse(fault.CodeInternal, err)
-	}
-	return Response{Schema: ResponseSchema, OK: true, ActionID: actionID,
-		Decision: string(firewall.RequireOwnerApproval), Detail: reason,
 		State: string(approval.State)}
 }
 
@@ -1580,15 +1456,6 @@ func (s *Server) claimAction(request Request, now time.Time) Response {
 		}
 		return refuse(fault.CodeInternal, err)
 	}
-	// A spent purchase turns its standing budget hold into a committed amount, so
-	// the mandate records it as spent rather than a reservation that could still
-	// be released. This runs after the durable spend, so a crash between them
-	// leaves an uncommitted hold -- an over-count, the safe direction -- not an
-	// executed spend the budget forgot. It is a no-op for anything holding no
-	// reservation.
-	if err := s.config.Journal.CommitMandateReservation(approval); err != nil {
-		return refuse(fault.CodeInternal, err)
-	}
 	return Response{Schema: ResponseSchema, OK: true, ActionID: request.ActionID,
 		State: string(approval.State), Authorised: true}
 }
@@ -1613,7 +1480,7 @@ func (s *Server) pendingActions(request Request, now time.Time) Response {
 			ActionID: approval.ActionID, Effect: approval.Effect, Summary: approval.Summary,
 			IdempotencyKey: approval.IdempotencyKey,
 			Reason:         approval.Reason, Origins: fromApprovalOrigins(approval.Origins),
-			Terms: approval.Terms, Physical: fromApprovalPhysical(approval.Physical), AskedAtUnix: approval.AskedAtUnix,
+			Physical: fromApprovalPhysical(approval.Physical), AskedAtUnix: approval.AskedAtUnix,
 		})
 	}
 	return Response{Schema: ResponseSchema, OK: true, Actions: actions}
@@ -1633,13 +1500,6 @@ func (s *Server) denyAction(request Request, now time.Time) Response {
 	if err != nil {
 		return refuse(fault.CodeInternal, err)
 	}
-	// A refused purchase frees the hold it was holding, so the mandate can spend
-	// that amount on something the owner does approve. The release follows the
-	// durable denial and is idempotent, so a crash between them leaves a hold the
-	// next release would clear -- an over-count, the safe direction.
-	if err := s.config.Journal.ReleaseMandateReservation(approval); err != nil {
-		return refuse(fault.CodeInternal, err)
-	}
 	return Response{Schema: ResponseSchema, OK: true, ActionID: request.ActionID,
 		State: string(approval.State)}
 }
@@ -1656,7 +1516,7 @@ func toAction(proposed ProposedAction) (firewall.Action, error) {
 	action := firewall.Action{
 		Effect: firewall.Effect(proposed.Effect), Summary: proposed.Summary,
 		IdempotencyKey: proposed.IdempotencyKey,
-		DerivedFrom:    origins, Terms: toTerms(proposed.Terms), Physical: toPhysical(proposed.Physical),
+		DerivedFrom:    origins, Physical: toPhysical(proposed.Physical),
 	}
 	return action, nil
 }
@@ -1734,7 +1594,6 @@ func approvalReproducesID(approval eventlog.Approval) bool {
 		Summary:        approval.Summary,
 		IdempotencyKey: approval.IdempotencyKey,
 		DerivedFrom:    firewallOrigins(approval.Origins),
-		Terms:          approval.Terms,
 		Physical:       toPhysical(fromApprovalPhysical(approval.Physical)),
 	}
 	recomputed, err := firewall.ActionID(action)
@@ -1742,141 +1601,4 @@ func approvalReproducesID(approval eventlog.Approval) bool {
 		return false
 	}
 	return recomputed == approval.ActionID
-}
-
-func (s *Server) placeMandate(request Request, now time.Time) Response {
-	stored, err := s.config.Journal.PlaceMandate(eventlog.StoredMandate{
-		Objective: request.Mandate.Objective, Authority: request.Mandate.Authority,
-		CapabilityClass:      request.Mandate.CapabilityClass,
-		AssetNetworkID:       request.Mandate.Asset.NetworkID,
-		AssetGenesisRootHash: request.Mandate.Asset.GenesisRootHash,
-		AssetGenesisFileHash: request.Mandate.Asset.GenesisFileHash,
-		Workchain:            request.Mandate.Asset.Workchain,
-		AssetAccountID:       request.Mandate.Asset.AccountID,
-		AssetMasterCodeHash:  request.Mandate.Asset.MasterCodeHash,
-		AssetWalletCodeHash:  request.Mandate.Asset.WalletCodeHash,
-		AssetDecimals:        request.Mandate.Asset.Decimals,
-		MaxTotalAtomic:       request.Mandate.MaxTotalAtomic,
-		ApprovalAboveAtomic:  request.Mandate.ApprovalAboveAtomic,
-		MaxCounteroffers:     request.Mandate.MaxCounteroffers,
-		ExpiresAtUnix:        request.Mandate.ExpiresAtUnix,
-	}, now)
-	if err != nil {
-		return refuse(fault.CodeInternal, err)
-	}
-	// A mandate that does not describe a usable authorisation is refused here
-	// rather than at the moment a spend is judged, so the owner learns about it
-	// while they are the one holding it.
-	if _, err := toMandate(stored); err != nil {
-		return refuse(fault.CodeInternal, err)
-	}
-	return Response{Schema: ResponseSchema, OK: true, MandateID: stored.MandateID}
-}
-
-func (s *Server) revokeMandate(request Request, now time.Time) Response {
-	stored, err := s.config.Journal.RevokeMandate(request.MandateID, now)
-	if err != nil {
-		return refuse(fault.CodeInternal, err)
-	}
-	return Response{Schema: ResponseSchema, OK: true, MandateID: stored.MandateID}
-}
-
-func (s *Server) listMandates() Response {
-	stored, err := s.config.Journal.ListMandates()
-	if err != nil {
-		return refuse(fault.CodeInternal, err)
-	}
-	held := make([]HeldMandate, 0, len(stored))
-	for _, mandate := range stored {
-		held = append(held, HeldMandate{
-			MandateID: mandate.MandateID, Objective: mandate.Objective,
-			Authority: mandate.Authority, CapabilityClass: mandate.CapabilityClass,
-			Asset:               assetIdentityOf(mandate),
-			MaxTotalAtomic:      mandate.MaxTotalAtomic,
-			ApprovalAboveAtomic: mandate.ApprovalAboveAtomic,
-			MaxCounteroffers:    mandate.MaxCounteroffers, ExpiresAtUnix: mandate.ExpiresAtUnix,
-			PlacedAtUnix: mandate.PlacedAtUnix, RevokedAtUnix: mandate.RevokedAtUnix,
-		})
-	}
-	return Response{Schema: ResponseSchema, OK: true, Mandates: held}
-}
-
-// spendMandate resolves the standing authorisation a proposed spend names.
-//
-// The mandate comes from the store, never from the request. A runtime that
-// could supply the mandate it is judged against would be setting its own
-// ceiling, which is the one thing a mandate exists to prevent.
-func (s *Server) spendMandate(request Request, now time.Time) (negotiation.Mandate, error) {
-	stored, found, err := s.config.Journal.LookupMandate(request.MandateID)
-	if err != nil {
-		return negotiation.Mandate{}, err
-	}
-	if !found {
-		return negotiation.Mandate{}, eventlog.ErrMandateUnknown
-	}
-	if stored.RevokedAtUnix != 0 {
-		return negotiation.Mandate{}, eventlog.ErrMandateRevoked
-	}
-	_ = now
-	return toMandate(stored)
-}
-
-func assetIdentityOf(stored eventlog.StoredMandate) AssetIdentity {
-	return AssetIdentity{
-		NetworkID:       stored.AssetNetworkID,
-		GenesisRootHash: stored.AssetGenesisRootHash,
-		GenesisFileHash: stored.AssetGenesisFileHash,
-		Workchain:       stored.Workchain, AccountID: stored.AssetAccountID,
-		MasterCodeHash: stored.AssetMasterCodeHash,
-		WalletCodeHash: stored.AssetWalletCodeHash,
-		Decimals:       stored.AssetDecimals,
-	}
-}
-
-func toAsset(identity AssetIdentity) negotiation.Asset {
-	return negotiation.Asset{
-		Network: negotiation.Network{
-			ID:              identity.NetworkID,
-			GenesisRootHash: identity.GenesisRootHash,
-			GenesisFileHash: identity.GenesisFileHash,
-		},
-		Workchain: identity.Workchain, AccountID: identity.AccountID,
-		MasterCodeHash: identity.MasterCodeHash, WalletCodeHash: identity.WalletCodeHash,
-		Decimals: identity.Decimals,
-	}
-}
-
-func toMandate(stored eventlog.StoredMandate) (negotiation.Mandate, error) {
-	asset := toAsset(assetIdentityOf(stored))
-	mandate := negotiation.Mandate{
-		Objective:        stored.Objective,
-		Authority:        negotiation.Authority(stored.Authority),
-		CapabilityClass:  stored.CapabilityClass,
-		MaxTotal:         negotiation.Money{Asset: asset, Atomic: stored.MaxTotalAtomic},
-		ApprovalAbove:    negotiation.Money{Asset: asset, Atomic: stored.ApprovalAboveAtomic},
-		MaxCounteroffers: stored.MaxCounteroffers,
-		ExpiresAtUnix:    stored.ExpiresAtUnix,
-	}
-	if err := mandate.Validate(); err != nil {
-		return negotiation.Mandate{}, err
-	}
-	return mandate, nil
-}
-
-func toTerms(terms *PurchaseTerms) *negotiation.Terms {
-	if terms == nil {
-		return nil
-	}
-	return &negotiation.Terms{
-		CapabilityID:           terms.CapabilityID,
-		CapabilityVersion:      terms.CapabilityVersion,
-		CapabilityClass:        terms.CapabilityClass,
-		ProviderAgentID:        terms.ProviderAgentID,
-		ManifestDigest:         terms.ManifestDigest,
-		TransportBindingDigest: terms.TransportBindingDigest,
-		Price:                  negotiation.Money{Asset: toAsset(terms.Asset), Atomic: terms.PriceAtomic},
-		EscrowTermsDigest:      terms.EscrowTermsDigest,
-		DisputePolicyDigest:    terms.DisputePolicyDigest,
-		NotAfterUnix:           terms.NotAfterUnix,
-	}
 }

@@ -24,7 +24,6 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/firewall"
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
@@ -442,9 +441,6 @@ func TestContactResolutionFailsClosed(t *testing.T) {
 			Op: OpResolveContact, Recipient: "alice.tos", RecipientEndpointID: peerMEP,
 		},
 		"expiry": {Op: OpResolveContact, Recipient: "alice.tos", ExpiresAtUnix: baseUnix + 1},
-		"mandate": {
-			Op: OpResolveContact, Recipient: "alice.tos", Mandate: &MandateTerms{Objective: "retarget"},
-		},
 		"action": {
 			Op: OpResolveContact, Recipient: "alice.tos", Action: &ProposedAction{Effect: "message"},
 		},
@@ -1654,72 +1650,6 @@ func sendAttempt(t *testing.T, h *harness, eventID string, seed byte) string {
 	return id
 }
 
-func testAssetIdentity() AssetIdentity {
-	return AssetIdentity{
-		NetworkID:       "tos-local",
-		GenesisRootHash: strings.Repeat("1", 64),
-		GenesisFileHash: strings.Repeat("2", 64),
-		Workchain:       0,
-		AccountID:       strings.Repeat("a", 64),
-		MasterCodeHash:  "tvm-cell-sha256:" + strings.Repeat("b", 64),
-		WalletCodeHash:  "tvm-cell-sha256:" + strings.Repeat("c", 64),
-		Decimals:        2,
-	}
-}
-
-func testPurchase(units uint64) *PurchaseTerms {
-	return &PurchaseTerms{
-		CapabilityID:           "cap_" + strings.Repeat("9", 64),
-		CapabilityVersion:      "1.0.0",
-		CapabilityClass:        "transcription.audio",
-		ProviderAgentID:        senderID,
-		ManifestDigest:         "sha256:" + strings.Repeat("4", 64),
-		TransportBindingDigest: "sha256:" + strings.Repeat("5", 64),
-		Asset:                  testAssetIdentity(),
-		PriceAtomic:            strconv.FormatUint(units, 10),
-		EscrowTermsDigest:      "sha256:" + strings.Repeat("6", 64),
-		DisputePolicyDigest:    "sha256:" + strings.Repeat("7", 64),
-		NotAfterUnix:           baseUnix + 600,
-	}
-}
-
-// The owner places a standing authorisation. The runtime never supplies one.
-func (h *harness) placeMandate(t *testing.T) string {
-	t.Helper()
-	return h.placeMandateWithTotal(t, "1000", "500")
-}
-
-// placeMandateWithTotal places a mandate with a chosen ceiling, so a test can
-// make the sum of a few purchases cross MaxTotal without needing large amounts.
-func (h *harness) placeMandateWithTotal(t *testing.T, maxTotal, approvalAbove string) string {
-	t.Helper()
-	return h.placeMandateNamed(t, "buy transcription", maxTotal, approvalAbove)
-}
-
-// placeMandateNamed places a mandate under a chosen objective, so two calls
-// produce two distinct mandate identifiers rather than the same one.
-func (h *harness) placeMandateNamed(t *testing.T, objective, maxTotal, approvalAbove string) string {
-	t.Helper()
-	placed := h.owner(t, Request{Op: OpPlaceMandate, Mandate: &MandateTerms{
-		Objective: objective, Authority: "commit",
-		CapabilityClass: "transcription.audio", Asset: testAssetIdentity(),
-		MaxTotalAtomic: maxTotal, ApprovalAboveAtomic: approvalAbove, MaxCounteroffers: 4,
-		ExpiresAtUnix: baseUnix + 86_400,
-	}})
-	if !placed.OK || placed.MandateID == "" {
-		t.Fatalf("place mandate: %+v", placed)
-	}
-	return placed.MandateID
-}
-
-// testPurchaseCap builds a purchase whose capability identifier is distinct, so
-// two calls describe two different economic executions even at the same price.
-func testPurchaseCap(capSeed string, units uint64) *PurchaseTerms {
-	terms := testPurchase(units)
-	terms.CapabilityID = "cap_" + strings.Repeat(capSeed, 64)
-	return terms
-}
-
 func testProposal(effect string, origins ...ActionOrigin) *ProposedAction {
 	proposal := &ProposedAction{Effect: effect, Summary: "call the payments tool", Derived: origins}
 	if effect == "tool-call" {
@@ -1888,287 +1818,6 @@ func TestToolCallRequiresCanonicalIdempotencyKey(t *testing.T) {
 	}
 }
 
-// One purchase is authorised once even when it is re-described. The economic
-// one-shot is keyed on the mandate and the terms, not on the action identifier
-// that a changed summary would move, so a second, gentler-worded attempt at the
-// same purchase is refused rather than granted a second auto-authorisation.
-func TestReDescribedPurchaseIsNotAuthorisedTwice(t *testing.T) {
-	h := newHarnessWithPolicy(t, firewall.Policy{
-		UnattendedCeiling: firewall.EffectSpend, OwnInitiativeCeiling: firewall.EffectSpend,
-	})
-	mandateID := h.placeMandate(t)
-
-	first := &ProposedAction{Effect: "spend", Summary: "pay 100 for transcription", Terms: testPurchase(100)}
-	a := h.call(t, Request{Op: OpRequestAction, Action: first, MandateID: mandateID})
-	if a.Decision != string(firewall.Allow) {
-		t.Fatalf("the first spend was not auto-authorised: %+v", a)
-	}
-
-	// The same purchase -- same mandate, same terms -- described more gently.
-	// A different action identifier, the same economic execution.
-	second := &ProposedAction{Effect: "spend", Summary: "start the transcription", Terms: testPurchase(100)}
-	b := h.call(t, Request{Op: OpRequestAction, Action: second, MandateID: mandateID})
-	if b.ActionID == a.ActionID {
-		t.Fatal("two descriptions of one purchase shared an action identifier")
-	}
-	if b.Decision != string(firewall.Refuse) {
-		t.Fatalf("a re-described purchase was authorised a second time: %+v", b)
-	}
-}
-
-// Distinct purchases under one mandate are auto-authorised until their running
-// sum would cross the mandate's MaxTotal, at which point the next is sent to the
-// owner rather than auto-authorised. The per-spend ceiling alone would let three
-// 90s through under a 250 ceiling; the durable per-mandate budget does not.
-func TestDistinctPurchasesAreBoundedByTheMandateTotal(t *testing.T) {
-	h := newHarnessWithPolicy(t, firewall.Policy{
-		UnattendedCeiling: firewall.EffectSpend, OwnInitiativeCeiling: firewall.EffectSpend,
-	})
-	mandateID := h.placeMandateWithTotal(t, "250", "250")
-
-	// 90 fits (90 <= 250).
-	first := &ProposedAction{Effect: "spend", Summary: "first transcription", Terms: testPurchaseCap("1", 90)}
-	a := h.call(t, Request{Op: OpRequestAction, Action: first, MandateID: mandateID})
-	if a.Decision != string(firewall.Allow) {
-		t.Fatalf("the first purchase was not auto-authorised: %+v", a)
-	}
-
-	// 90 + 90 = 180 still fits.
-	second := &ProposedAction{Effect: "spend", Summary: "second transcription", Terms: testPurchaseCap("2", 90)}
-	b := h.call(t, Request{Op: OpRequestAction, Action: second, MandateID: mandateID})
-	if b.Decision != string(firewall.Allow) {
-		t.Fatalf("the second purchase was not auto-authorised: %+v", b)
-	}
-	if b.ActionID == a.ActionID {
-		t.Fatal("two distinct purchases shared an action identifier")
-	}
-
-	// 180 + 90 = 270 crosses the 250 ceiling: the owner has to decide.
-	third := &ProposedAction{Effect: "spend", Summary: "third transcription", Terms: testPurchaseCap("3", 90)}
-	c := h.call(t, Request{Op: OpRequestAction, Action: third, MandateID: mandateID})
-	if c.Decision != string(firewall.RequireOwnerApproval) {
-		t.Fatalf("a purchase past the mandate's total was auto-authorised: %+v", c)
-	}
-	if c.State != "pending" {
-		t.Fatalf("the escalated purchase was not put to the owner: %+v", c)
-	}
-	// It cannot be claimed unattended -- it is waiting for a person.
-	if claimed := h.call(t, Request{Op: OpClaimAction, ActionID: c.ActionID}); claimed.Authorised {
-		t.Fatal("a purchase past the mandate's total was executed without the owner")
-	}
-	// The owner is the one holding the question.
-	waiting := h.owner(t, Request{Op: OpPendingActions})
-	if len(waiting.Actions) != 1 || waiting.Actions[0].ActionID != c.ActionID {
-		t.Fatalf("the owner was not asked about the over-budget purchase: %+v", waiting)
-	}
-
-	// A second mandate over the same asset has its own untouched budget: the
-	// first mandate's spending did not draw it down.
-	other := h.placeMandateNamed(t, "a separate objective", "250", "250")
-	fresh := &ProposedAction{Effect: "spend", Summary: "under a fresh mandate", Terms: testPurchaseCap("1", 90)}
-	d := h.call(t, Request{Op: OpRequestAction, Action: fresh, MandateID: other})
-	if d.Decision != string(firewall.Allow) {
-		t.Fatalf("a fresh mandate's budget was drawn down by another mandate: %+v", d)
-	}
-}
-
-// mandateBudget reopens one mandate's durable budget so a test can see what a
-// spend is holding. The total is the ceiling the mandate was placed with; the
-// asset is the one every purchase in these tests names.
-func (h *harness) mandateBudget(t *testing.T, mandateID, total string) *negotiation.Budget {
-	t.Helper()
-	ledger, err := h.journal.OpenMandateBudgetLedger(mandateID, toAsset(testAssetIdentity()))
-	if err != nil {
-		t.Fatalf("open mandate budget ledger: %v", err)
-	}
-	budget, err := negotiation.OpenBudget(
-		negotiation.Money{Asset: toAsset(testAssetIdentity()), Atomic: total}, ledger)
-	if err != nil {
-		t.Fatalf("open mandate budget: %v", err)
-	}
-	return budget
-}
-
-func executionOf(t *testing.T, mandateID string, terms *PurchaseTerms) string {
-	t.Helper()
-	id, err := negotiation.ExecutionID(mandateID, *toTerms(terms))
-	if err != nil {
-		t.Fatalf("execution id: %v", err)
-	}
-	return id
-}
-
-func remainingAtomic(t *testing.T, budget *negotiation.Budget) string {
-	t.Helper()
-	remaining, err := budget.Remaining()
-	if err != nil {
-		t.Fatalf("remaining: %v", err)
-	}
-	return remaining.Atomic
-}
-
-// A spend the owner refuses frees the budget it was holding, so the mandate can
-// spend that amount on something the owner does approve.
-func TestDeniedSpendReleasesItsMandateHold(t *testing.T) {
-	h := newHarness(t)
-	mandateID := h.placeMandateWithTotal(t, "250", "250")
-	purchase := testPurchase(200)
-	spend := testProposal("spend")
-	spend.Terms = purchase
-
-	asked := h.call(t, Request{Op: OpRequestAction, Action: spend, MandateID: mandateID})
-	if asked.Decision != string(firewall.RequireOwnerApproval) || asked.State != "pending" {
-		t.Fatalf("a spend inside the mandate did not wait for the owner: %+v", asked)
-	}
-	// The pending spend holds its slice of the budget while it waits.
-	if amount, held := h.mandateBudget(t, mandateID, "250").Reserved(executionOf(t, mandateID, purchase)); !held || amount.Atomic != "200" {
-		t.Fatalf("a pending spend did not hold its budget: held=%v amount=%+v", held, amount)
-	}
-	if left := remainingAtomic(t, h.mandateBudget(t, mandateID, "250")); left != "50" {
-		t.Fatalf("the hold was not counted against the mandate: remaining=%s", left)
-	}
-
-	// The owner refuses it, and the hold is freed.
-	if denied := h.owner(t, Request{Op: OpDenyAction, ActionID: asked.ActionID, Reason: "not this one"}); !denied.OK {
-		t.Fatalf("deny: %+v", denied)
-	}
-	if _, held := h.mandateBudget(t, mandateID, "250").Reserved(executionOf(t, mandateID, purchase)); held {
-		t.Fatal("a denied spend kept its hold")
-	}
-	if left := remainingAtomic(t, h.mandateBudget(t, mandateID, "250")); left != "250" {
-		t.Fatalf("the mandate's full ceiling did not return: remaining=%s", left)
-	}
-
-	// The freed amount is available again: a distinct purchase of the same size
-	// now fits where the mandate's ceiling would otherwise have been spent.
-	againTerms := testPurchaseCap("8", 200)
-	again := &ProposedAction{Effect: "spend", Summary: "a different purchase", Terms: againTerms}
-	retry := h.call(t, Request{Op: OpRequestAction, Action: again, MandateID: mandateID})
-	if retry.Decision != string(firewall.RequireOwnerApproval) {
-		t.Fatalf("the freed budget could not be reserved again: %+v", retry)
-	}
-	if left := remainingAtomic(t, h.mandateBudget(t, mandateID, "250")); left != "50" {
-		t.Fatalf("re-reserving the freed amount did not take: remaining=%s", left)
-	}
-}
-
-// A spend the owner grants and the runtime claims turns its standing hold into a
-// committed amount, so the mandate records it as spent rather than a reservation
-// that could still be released.
-func TestClaimedSpendCommitsItsMandateHold(t *testing.T) {
-	h := newHarness(t)
-	mandateID := h.placeMandateWithTotal(t, "250", "250")
-	purchase := testPurchase(200)
-	spend := testProposal("spend")
-	spend.Terms = purchase
-
-	asked := h.call(t, Request{Op: OpRequestAction, Action: spend, MandateID: mandateID})
-	if asked.Decision != string(firewall.RequireOwnerApproval) {
-		t.Fatalf("unexpected decision: %+v", asked)
-	}
-	if granted := h.owner(t, Request{Op: OpGrantAction, ActionID: asked.ActionID}); !granted.OK {
-		t.Fatalf("grant: %+v", granted)
-	}
-	claimed := h.call(t, Request{Op: OpClaimAction, ActionID: asked.ActionID})
-	if !claimed.Authorised {
-		t.Fatalf("a granted spend could not proceed: %+v", claimed)
-	}
-
-	budget := h.mandateBudget(t, mandateID, "250")
-	// The hold is gone -- it became a spend.
-	if _, held := budget.Reserved(executionOf(t, mandateID, purchase)); held {
-		t.Fatal("a committed spend was still a standing hold")
-	}
-	if budget.Spent().Atomic != "200" {
-		t.Fatalf("the spend was not committed: spent=%+v", budget.Spent())
-	}
-	if left := remainingAtomic(t, budget); left != "50" {
-		t.Fatalf("the committed spend was not counted: remaining=%s", left)
-	}
-}
-
-// A spend nobody decides within the window is retired, and its hold is freed
-// rather than consuming the mandate's ceiling forever.
-func TestExpiredSpendReleasesItsMandateHold(t *testing.T) {
-	h := newHarness(t)
-	mandateID := h.placeMandateWithTotal(t, "250", "250")
-	purchase := testPurchase(200)
-	spend := testProposal("spend")
-	spend.Terms = purchase
-
-	asked := h.call(t, Request{Op: OpRequestAction, Action: spend, MandateID: mandateID})
-	if asked.State != "pending" {
-		t.Fatalf("the spend did not wait for the owner: %+v", asked)
-	}
-	if _, held := h.mandateBudget(t, mandateID, "250").Reserved(executionOf(t, mandateID, purchase)); !held {
-		t.Fatal("a pending spend held no budget")
-	}
-
-	later := h.clock.Add(eventlog.DefaultMaxPendingAge + time.Hour)
-	if count, err := h.journal.ExpirePendingApprovals(later); err != nil || count != 1 {
-		t.Fatalf("expire: count=%d err=%v", count, err)
-	}
-	if _, held := h.mandateBudget(t, mandateID, "250").Reserved(executionOf(t, mandateID, purchase)); held {
-		t.Fatal("an expired spend kept its hold")
-	}
-	if left := remainingAtomic(t, h.mandateBudget(t, mandateID, "250")); left != "250" {
-		t.Fatalf("the expired hold was not freed: remaining=%s", left)
-	}
-	status := h.call(t, Request{Op: OpActionStatus, ActionID: asked.ActionID})
-	if status.State != string(eventlog.ApprovalDenied) {
-		t.Fatalf("the expired request was not retired: %+v", status)
-	}
-}
-
-// MaxTotal is enforced across the owner-approval path: a within-budget spend
-// awaiting the owner holds its slice, and a second spend that would cross the
-// ceiling while the first is pending takes no hold until budget is freed.
-func TestMandateTotalEnforcedAcrossTheOwnerApprovalPath(t *testing.T) {
-	h := newHarness(t)
-	mandateID := h.placeMandateWithTotal(t, "250", "250")
-
-	firstTerms := testPurchaseCap("1", 200)
-	first := &ProposedAction{Effect: "spend", Summary: "first", Terms: firstTerms}
-	a := h.call(t, Request{Op: OpRequestAction, Action: first, MandateID: mandateID})
-	if a.Decision != string(firewall.RequireOwnerApproval) {
-		t.Fatalf("the first spend did not wait for the owner: %+v", a)
-	}
-	if _, held := h.mandateBudget(t, mandateID, "250").Reserved(executionOf(t, mandateID, firstTerms)); !held {
-		t.Fatal("a within-budget pending spend held no budget")
-	}
-
-	// 200 + 100 > 250, so the second spend is put to the owner without a hold
-	// while the first is still pending.
-	secondTerms := testPurchaseCap("2", 100)
-	second := &ProposedAction{Effect: "spend", Summary: "second", Terms: secondTerms}
-	b := h.call(t, Request{Op: OpRequestAction, Action: second, MandateID: mandateID})
-	if b.Decision != string(firewall.RequireOwnerApproval) {
-		t.Fatalf("the second spend was not put to the owner: %+v", b)
-	}
-	if _, held := h.mandateBudget(t, mandateID, "250").Reserved(executionOf(t, mandateID, secondTerms)); held {
-		t.Fatal("an over-budget pending spend took a hold it should not have")
-	}
-	if left := remainingAtomic(t, h.mandateBudget(t, mandateID, "250")); left != "50" {
-		t.Fatalf("only the first spend should be held: remaining=%s", left)
-	}
-
-	// Refusing the first frees its 200, and the second's 100 fits once re-asked.
-	if denied := h.owner(t, Request{Op: OpDenyAction, ActionID: a.ActionID, Reason: "no"}); !denied.OK {
-		t.Fatalf("deny: %+v", denied)
-	}
-	if left := remainingAtomic(t, h.mandateBudget(t, mandateID, "250")); left != "250" {
-		t.Fatalf("the first hold was not freed: remaining=%s", left)
-	}
-	third := &ProposedAction{Effect: "spend", Summary: "second again", Terms: testPurchaseCap("2", 100)}
-	c := h.call(t, Request{Op: OpRequestAction, Action: third, MandateID: mandateID})
-	if c.Decision != string(firewall.RequireOwnerApproval) {
-		t.Fatalf("the freed budget could not admit the second spend: %+v", c)
-	}
-	if left := remainingAtomic(t, h.mandateBudget(t, mandateID, "250")); left != "150" {
-		t.Fatalf("the second spend's hold did not take after the first was freed: remaining=%s", left)
-	}
-}
-
 // The identifier is derived from the action, so an approval cannot be spent on
 // a different one.
 func TestApprovalCannotBeSpentOnAnotherAction(t *testing.T) {
@@ -2185,10 +1834,7 @@ func TestApprovalCannotBeSpentOnAnotherAction(t *testing.T) {
 
 	// The same words, a stronger effect. A different action, and so a
 	// different identifier with no approval behind it.
-	mandateID := h.placeMandate(t)
-	spend := testProposal("spend", origin)
-	spend.Terms = testPurchase(200)
-	stronger := h.call(t, Request{Op: OpRequestAction, Action: spend, MandateID: mandateID})
+	stronger := h.call(t, Request{Op: OpRequestAction, Action: testProposal("key-use", origin)})
 	if stronger.ActionID == harmless.ActionID {
 		t.Fatal("two different actions shared one identifier")
 	}
@@ -2257,92 +1903,30 @@ func TestMalformedProposalIsRefusedNotAsked(t *testing.T) {
 	}
 }
 
-// The mandate is the owner's. A runtime that could supply the mandate it is
-// judged against would be setting its own ceiling.
-func TestSpendIsJudgedAgainstTheOwnersMandate(t *testing.T) {
+// Spending is not this interface's to authorise. A proposal naming the
+// retired spend effect is refused as a result, never put to the owner, and the
+// retired mandate operations are refused on both sockets.
+func TestRetiredSpendSurfaceIsRefused(t *testing.T) {
 	h := newHarness(t)
-	mandateID := h.placeMandate(t)
-
-	// Inside the mandate, but received content drove it, and the default
-	// ceiling does not let received content reach a spend.
-	prompted := testProposal("spend", testActionOrigin())
-	prompted.Terms = testPurchase(200)
-	driven := h.call(t, Request{Op: OpRequestAction, Action: prompted, MandateID: mandateID})
-	if driven.Decision != "require-owner-approval" {
-		t.Fatalf("a stranger's message reached a payment: %+v", driven)
-	}
-
-	// The Agent's own initiative, inside the mandate, still stops: the default
-	// own-initiative ceiling is a tool call.
-	own := testProposal("spend")
-	own.Terms = testPurchase(200)
-	unprompted := h.call(t, Request{Op: OpRequestAction, Action: own, MandateID: mandateID})
-	if unprompted.Decision != "require-owner-approval" {
-		t.Fatalf("a payment ran unattended under the default ceiling: %+v", unprompted)
-	}
-
-	// A mandate nobody placed authorises nothing.
-	unknown := h.call(t, Request{Op: OpRequestAction, Action: own,
-		MandateID: "mdt_" + strings.Repeat("e", 64)})
-	if unknown.OK {
-		t.Fatalf("a spend was judged against a mandate nobody placed: %+v", unknown)
-	}
-
-	// Withdrawing it stops further spends under it, and the record survives.
-	if revoked := h.owner(t, Request{Op: OpRevokeMandate, MandateID: mandateID}); !revoked.OK {
-		t.Fatalf("revoke: %+v", revoked)
-	}
-	after := h.call(t, Request{Op: OpRequestAction, Action: own, MandateID: mandateID})
-	if after.OK {
-		t.Fatalf("a withdrawn mandate still authorised a spend: %+v", after)
-	}
-	held := h.owner(t, Request{Op: OpListMandates})
-	if len(held.Mandates) != 1 || held.Mandates[0].RevokedAtUnix == 0 {
-		t.Fatalf("the withdrawal did not survive as a record: %+v", held)
-	}
-}
-
-// Only the owner writes mandates. Both sides may read them, because an Agent
-// has to know what it may spend before it negotiates.
-func TestOnlyTheOwnerWritesMandates(t *testing.T) {
-	h := newHarness(t)
-	h.placeMandate(t)
-
-	writes := []Request{
-		{Op: OpPlaceMandate, Mandate: &MandateTerms{
-			Objective: "spend freely", Authority: "commit", CapabilityClass: "anything",
-			Asset: testAssetIdentity(), MaxTotalAtomic: "1", ApprovalAboveAtomic: "1",
-			MaxCounteroffers: 1, ExpiresAtUnix: baseUnix + 10,
-		}},
-		{Op: OpRevokeMandate, MandateID: "mdt_" + strings.Repeat("a", 64)},
-	}
-	for _, request := range writes {
-		if response := h.runtimeAttempt(t, request); response.OK {
-			t.Fatalf("the runtime performed %q", request.Op)
+	for _, effect := range firewall.RetiredEffects {
+		for _, proposal := range []*ProposedAction{testProposal(string(effect)), testProposal(string(effect), testActionOrigin())} {
+			response := h.call(t, Request{Op: OpRequestAction, Action: proposal})
+			if !response.OK || response.Decision != string(firewall.Refuse) {
+				t.Fatalf("retired effect %q was not refused: %+v", effect, response)
+			}
 		}
 	}
-	if listing := h.call(t, Request{Op: OpListMandates}); !listing.OK || len(listing.Mandates) != 1 {
-		t.Fatalf("the runtime could not read what it may spend: %+v", listing)
+	if waiting := h.owner(t, Request{Op: OpPendingActions}); len(waiting.Actions) != 0 {
+		t.Fatalf("a retired effect was put to the owner: %+v", waiting)
 	}
-}
-
-// A spend that names no mandate, and a non-spend that carries terms, are both
-// refused before anything is judged.
-func TestSpendShapeIsEnforced(t *testing.T) {
-	spend := testProposal("spend", testActionOrigin())
-	spend.Terms = testPurchase(200)
-	if _, err := EncodeRequest(Request{Op: OpRequestAction, Action: spend}); err == nil {
-		t.Fatal("a spend with no mandate was accepted")
-	}
-	noTerms := testProposal("spend", testActionOrigin())
-	if _, err := EncodeRequest(Request{Op: OpRequestAction, Action: noTerms,
-		MandateID: "mdt_" + strings.Repeat("a", 64)}); err == nil {
-		t.Fatal("a spend with no terms was accepted")
-	}
-	message := testProposal("message", testActionOrigin())
-	message.Terms = testPurchase(200)
-	if _, err := EncodeRequest(Request{Op: OpRequestAction, Action: message}); err == nil {
-		t.Fatal("a message carried purchase terms")
+	for _, operation := range RetiredOperations {
+		if _, err := EncodeRequest(Request{Op: operation}); err == nil {
+			t.Fatalf("retired operation %q was encoded", operation)
+		}
+		raw := []byte(`{"schema":"` + RequestSchema + `","op":"` + string(operation) + `"}`)
+		if _, err := DecodeRequest(raw); err == nil {
+			t.Fatalf("retired operation %q was decoded", operation)
+		}
 	}
 }
 
@@ -2446,25 +2030,20 @@ func TestAFailedAttemptDoesNotConsumeTheChallenge(t *testing.T) {
 	}
 }
 
-// A spend the policy allows is authorised once. One decision -- the owner's or
-// the policy's -- backs one execution, and the second occurrence of the same
-// purchase finds its grant already spent.
-func TestAllowedSpendIsAuthorisedOnce(t *testing.T) {
-	h := newHarnessWithPolicy(t, firewall.Policy{
-		UnattendedCeiling:    firewall.EffectSpend,
-		OwnInitiativeCeiling: firewall.EffectSpend,
-	})
-	mandateID := h.placeMandate(t)
-	spend := testProposal("spend", testActionOrigin())
-	spend.Terms = testPurchase(200)
+// A tool call the policy allows is authorised once. One decision -- the
+// owner's or the policy's -- backs one execution, and asking again for the
+// same invocation finds its grant already spent.
+func TestAllowedToolCallIsAuthorisedOnce(t *testing.T) {
+	h := newHarness(t)
+	tool := testProposal("tool-call")
 
-	asked := h.call(t, Request{Op: OpRequestAction, Action: spend, MandateID: mandateID})
+	asked := h.call(t, Request{Op: OpRequestAction, Action: tool})
 	if !asked.OK || asked.Decision != "allow" {
-		t.Fatalf("a spend inside the mandate was not allowed: %+v", asked)
+		t.Fatalf("an own-initiative tool call was not allowed: %+v", asked)
 	}
 	// Allowed is not yet authorised: the grant has to be claimed.
 	if asked.Authorised {
-		t.Fatalf("an allowed spend was authorised without a claim: %+v", asked)
+		t.Fatalf("an allowed tool call was authorised without a claim: %+v", asked)
 	}
 	if asked.State != "granted" {
 		t.Fatalf("the policy's grant was not recorded: %+v", asked)
@@ -2472,19 +2051,19 @@ func TestAllowedSpendIsAuthorisedOnce(t *testing.T) {
 
 	first := h.call(t, Request{Op: OpClaimAction, ActionID: asked.ActionID})
 	if !first.Authorised {
-		t.Fatalf("a granted spend could not proceed: %+v", first)
+		t.Fatalf("a granted tool call could not proceed: %+v", first)
 	}
 	second := h.call(t, Request{Op: OpClaimAction, ActionID: asked.ActionID})
 	if second.Authorised {
 		t.Fatal("one policy decision backed two executions")
 	}
 	// Asking again does not mint a second execution either.
-	again := h.call(t, Request{Op: OpRequestAction, Action: spend, MandateID: mandateID})
+	again := h.call(t, Request{Op: OpRequestAction, Action: tool})
 	if again.State != "spent" {
 		t.Fatalf("re-asking reopened a spent grant: %+v", again)
 	}
 	if claimed := h.call(t, Request{Op: OpClaimAction, ActionID: again.ActionID}); claimed.Authorised {
-		t.Fatal("a replayed purchase was executed")
+		t.Fatal("a replayed invocation was executed")
 	}
 
 	// A reply stays inline: the machinery is spent where the damage is.

@@ -22,11 +22,6 @@ var codecs = map[string]codec{
 	"agent.task.result":         {schema: TaskResult{}.Schema(), decode: decodeTaskResult},
 	"agent.task.status.request": {schema: TaskStatusRequest{}.Schema(), decode: decodeTaskStatusRequest},
 
-	"negotiation.proposal":            {schema: NegotiationProposal{}.Schema(), decode: decodeNegotiationProposal},
-	"negotiation.counterproposal":     {schema: NegotiationCounterproposal{}.Schema(), decode: decodeNegotiationCounterproposal},
-	"negotiation.withdraw":            {schema: NegotiationWithdraw{}.Schema(), decode: decodeNegotiationWithdraw},
-	"negotiation.intent.accept":       {schema: NegotiationIntentAccept{}.Schema(), decode: decodeNegotiationIntentAccept},
-	"negotiation.intent.reject":       {schema: NegotiationIntentReject{}.Schema(), decode: decodeNegotiationIntentReject},
 	"intent.application":              {schema: IntentApplication{}.Schema(), decode: decodeIntentApplication},
 	"agreement.propose":               {schema: AgreementPropose{}.Schema(), decode: decodeAgreementPropose},
 	"agreement.accept":                {schema: AgreementAccept{}.Schema(), decode: decodeAgreementAccept},
@@ -58,10 +53,6 @@ var codecs = map[string]codec{
 	"artifact.encrypted": {schema: EncryptedAttachment{}.Schema(), decode: decodeEncryptedAttachment,
 		legacy: map[string]func(*canon.Reader) Payload{encryptedAttachmentV1Schema: decodeEncryptedAttachmentV1,
 			encryptedAttachmentV2Schema: decodeEncryptedAttachmentV2}},
-
-	"service.quote.reference":   {schema: QuoteReference{}.Schema(), decode: decodeQuoteReference},
-	"service.escrow.reference":  {schema: EscrowReference{}.Schema(), decode: decodeEscrowReference},
-	"service.receipt.reference": {schema: ReceiptReference{}.Schema(), decode: decodeReceiptReference},
 
 	"delivery.ack":           {schema: DeliveryAck{}.Schema(), decode: decodeDeliveryAck},
 	"application.ack":        {schema: ApplicationAck{}.Schema(), decode: decodeApplicationAck},
