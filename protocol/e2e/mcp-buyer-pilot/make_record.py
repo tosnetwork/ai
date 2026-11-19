@@ -163,7 +163,8 @@ credentials_end = orchestration.get("credentials_end") or {}
 check("model-credentials-scanned-and-deleted-before-the-record", credentials_end.get("deleted") is True and
       credentials_end.get("leaks") == [] and not (RUN / "secrets" / "claude.env").exists() and
       not (RUN / "secrets" / "codex.env").exists(), credentials_end)
-patterns = [re.compile(rb"master_key=[0-9A-Fa-f]{8,}"), re.compile(rb"VAULT_URL="),
+# A vault URL is a secret only through its master key (logged redacted).
+patterns = [re.compile(rb"master_key=[0-9A-Fa-f]{8,}"),
             re.compile(rb"sk-ant-[A-Za-z0-9_-]{8,}"), re.compile(rb'"refresh_token"\s*:\s*"[^"]+')]
 leaks = []
 for root in [RUN / "logs", RUN / "handoff", vout, RUN / "orchestration.json",

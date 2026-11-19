@@ -53,6 +53,15 @@ fi
 install -m 0755 "$TOSCTL" "$bin/tosctl"
 install -m 0755 "$CLAUDE_BINARY" "$bin/claude"
 install -m 0755 "$CODEX_BINARY" "$bin/codex"
+# The Codex CLI runs its shell tool through companion executables that sit
+# beside it in its package; without them every command fails closed.
+for companion in codex-code-mode-host codex-exec-server; do
+  if [ ! -x "$(dirname "$CODEX_BINARY")/$companion" ]; then
+    echo "the Codex package lacks $companion; give CODEX_BINARY as the package's bin/codex" >&2
+    exit 2
+  fi
+  install -m 0755 "$(dirname "$CODEX_BINARY")/$companion" "$bin/$companion"
+done
 chmod 0755 "$bin"/*
 claude_version=$("$bin/claude" --version | head -n 1)
 codex_version=$("$bin/codex" --version 2>/dev/null | tail -n 1)

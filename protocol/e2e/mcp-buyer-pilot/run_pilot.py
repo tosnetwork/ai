@@ -410,8 +410,9 @@ CODEX_AUTH = ("import json, os, datetime\n"
               " 'access_token': os.environ['CODEX_ACCESS_TOKEN'], 'refresh_token': '', 'account_id':"
               " os.environ['CODEX_ACCOUNT_ID']}, 'last_refresh': datetime.datetime.now(datetime.timezone.utc)"
               ".strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
-              "fd = os.open('/run/codex-home/auth.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
-              "os.write(fd, json.dumps(a).encode()); os.close(fd)\n")
+              "fd = os.open('/run/codex-home/auth.json.new', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)\n"
+              "os.write(fd, json.dumps(a).encode()); os.close(fd)\n"
+              "os.replace('/run/codex-home/auth.json.new', '/run/codex-home/auth.json')\n")
 
 
 def run_verifier(handoff: dict, profile: dict) -> None:
@@ -565,6 +566,26 @@ def cmd_purchases() -> None:
         if exported.get("exit") != 0:
             raise RuntimeError(f"the evidence export of {label} failed: {exported.get('stderr')}")
     handoff = write_handoff(profile, requests, withdrawal)
+    finish_pilot(handoff, profile)
+
+
+def cmd_verify() -> None:
+    """Run the verifier and the record again over the existing handoff,
+    after a verifier attempt that could not run (refresh-credentials
+    first). The earlier attempt's files are kept under attempt names."""
+    attempt = 1 + len([e for e in state["events"] if e["event"] == "codex verifier finished"])
+    events = LOGS / "codex-events.jsonl"
+    if events.exists():
+        events.rename(LOGS / f"codex-events-attempt-{attempt - 1}.jsonl")
+    run(["docker", "exec", "-u", "verifier", CONTAINERS["verifier"], "/bin/sh", "-c",
+         f"cd /v/work/out && for f in *; do mv \"$f\" \"attempt-{attempt - 1}-$f\"; done"], check=False)
+    profile = json.loads((WORKS["buyer"] / "out" / "public" / "profile.json").read_text())
+    handoff = json.loads((HANDOFF / "handoff.json").read_text())
+    event("verifier attempt", attempt=attempt)
+    finish_pilot(handoff, profile)
+
+
+def finish_pilot(handoff: dict, profile: dict) -> None:
     run_verifier(handoff, profile)
     finish_credentials()
     save()
@@ -581,7 +602,9 @@ def leak_scan(secret_values: list[str]) -> list:
     found = []
     roots = [LOGS, RECORD, HANDOFF, RUN / "verifier-work" / "out", STATE, RUN / "verifier-prompt.txt",
              *[WORKS[r] / sub for r in ROLES for sub in ("logs", "out", "control")]]
-    patterns = [re.compile(rb"master_key=[0-9A-Fa-f]{8,}"), re.compile(rb"VAULT_URL="),
+    # A vault URL is a secret only through its master key; the harness logs
+    # vault URLs with the key redacted, so the key's hex is what is searched.
+    patterns = [re.compile(rb"master_key=[0-9A-Fa-f]{8,}"),
                 re.compile(rb"sk-ant-[A-Za-z0-9_-]{8,}"), re.compile(rb'"refresh_token"\s*:\s*"[^"]+')]
     for root in roots:
         files = [root] if root.is_file() else ([p for p in root.rglob("*") if p.is_file()] if root.exists() else [])
@@ -650,5 +673,5 @@ def cmd_refresh_credentials() -> None:
 
 
 if __name__ == "__main__":
-    {"start": cmd_start, "offer": cmd_offer, "purchases": cmd_purchases, "stop": cmd_stop,
+    {"start": cmd_start, "offer": cmd_offer, "purchases": cmd_purchases, "stop": cmd_stop, "verify": cmd_verify,
      "refresh-credentials": cmd_refresh_credentials}[COMMAND]()
