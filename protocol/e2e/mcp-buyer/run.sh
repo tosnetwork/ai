@@ -58,6 +58,13 @@ docker run --detach --name "$name" --network "$network" --cpus "${E2E_CPUS:-8}" 
 "$here/container-thermal-guard.sh" "$name" "$E2E_WORKDIR/thermal.jsonl" &
 guard=$!
 status=$(docker wait "$name")
+# The harness returns the work directory when it ends; if it was killed
+# first, a one-shot container with only CHOWN (and DAC_READ_SEARCH, to walk
+# the run's private directories) returns it.
+if [ ! -w "$E2E_WORKDIR" ]; then
+  docker run --rm --network none --cap-drop ALL --cap-add CHOWN --cap-add DAC_READ_SEARCH --security-opt no-new-privileges \
+    --mount "type=bind,src=$E2E_WORKDIR,dst=/w" --entrypoint /bin/chown "$image" -R "$(id -u):$(id -g)" /w
+fi
 docker logs "$name" > "$E2E_WORKDIR/run.log" 2>&1 || true
 wait "$guard" || true
 # No artifact may hold the run's vault master key or any master_key value.

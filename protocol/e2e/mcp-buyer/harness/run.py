@@ -626,18 +626,29 @@ async def main() -> int:
     passed = bool(steps) and all(step["pass"] for step in steps)
     evidence["result"] = "ALL PASS" if passed else "FAIL"
     (WORK / "evidence.json").write_text(json.dumps(redact_value(evidence), indent=2) + "\n")
-    # Everything the host reads back belongs to the host account.
-    host_uid, host_gid = int(os.environ["HOST_UID"]), int(os.environ["HOST_GID"])
-    # The work directory itself last: once it is the host's again, root can
-    # no longer enter it.
-    for path in [*sorted(WORK.rglob("*"), key=lambda p: len(p.parts), reverse=True), WORK]:
-        if path.is_symlink():
-            continue
-        os.chown(path, host_uid, host_gid)
     print(f"evidence: {WORK / 'evidence.json'}")
     print("ALL PASS" if passed else "FAIL")
     return 0 if passed else 1
 
 
+def give_back() -> None:
+    """Everything the host reads back belongs to the host account again; the
+    work directory itself last, since root cannot enter it after that."""
+    host_uid, host_gid = int(os.environ["HOST_UID"]), int(os.environ["HOST_GID"])
+    for path in [*sorted(WORK.rglob("*"), key=lambda p: len(p.parts), reverse=True), WORK]:
+        if path.is_symlink():
+            continue
+        try:
+            os.chown(path, host_uid, host_gid)
+        except OSError as error:
+            print(f"could not return {path}: {error}", flush=True)
+
+
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    status = 1
+    try:
+        status = asyncio.run(main())
+    finally:
+        # Whatever ends the run, the host gets its work directory back.
+        give_back()
+    sys.exit(status)
