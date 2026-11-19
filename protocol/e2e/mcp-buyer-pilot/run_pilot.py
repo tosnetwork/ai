@@ -471,6 +471,28 @@ def sign_record(record_sha256: str) -> None:
     event("record signed", roles=[s["role"] for s in signatures])
 
 
+def in_switch_window(unix: float) -> bool:
+    """xx:20-xx:40 of an odd UTC hour: the validator-set switches at :30."""
+    moment = datetime.datetime.fromtimestamp(unix, datetime.timezone.utc)
+    return moment.hour % 2 == 1 and 20 <= moment.minute < 40
+
+
+def next_clear(start: int, spans: list[tuple[int, int]]) -> int:
+    """The first time >= start at which every span (offsets in seconds) of
+    the sends it starts stays outside every switch window."""
+    candidate = start
+    while any(in_switch_window(candidate + offset) for low, high in spans for offset in range(low, high + 1, 30)):
+        candidate += 60
+    return candidate
+
+
+def hold_until_clear(what: str, spans: list[tuple[int, int]]) -> None:
+    start = next_clear(int(time.time()), spans)
+    if start > time.time():
+        event(f"holding {what} so its sends clear the set switches", until_unix=start)
+        time.sleep(start - time.time())
+
+
 def cmd_purchases() -> None:
     buyer_out = WORKS["buyer"] / "out"
     if not (buyer_out / "ready.json").exists():
@@ -480,6 +502,7 @@ def cmd_purchases() -> None:
     # R: the provider answers it. F follows as soon as the provider holds
     # R, with admission paused, so F runs alongside R and its response
     # deadline (the run's floor) starts minutes after R's call.
+    hold_until_clear("R (call, execution and respond)", [(0, 1500)])
     r_hash = buy("R", profile)
     state["R"] = r_hash
     held = None
@@ -493,10 +516,12 @@ def cmd_purchases() -> None:
     # claim_refund, must not fall inside a validator-set switch window
     # (xx:20-xx:40 of odd UTC hours); PILOT_F_NOT_BEFORE (Unix seconds)
     # holds F's payment until a time the operator chose for that.
-    not_before = int(os.environ.get("PILOT_F_NOT_BEFORE", "0"))
-    if not_before > time.time():
-        event("holding F until its deadline clears the set switch", until_unix=not_before)
-        time.sleep(not_before - time.time())
+    sla = int(profile["terms"]["response_sla_seconds"])
+    not_before = max(int(os.environ.get("PILOT_F_NOT_BEFORE", "0")), int(time.time()))
+    start_f = next_clear(not_before, [(0, 180), (sla, sla + 900)])
+    if start_f > time.time():
+        event("holding F so its call, deadline and refund sends clear the set switches", until_unix=start_f)
+        time.sleep(start_f - time.time())
     f_hash = buy("F", profile, "The provider may not answer this purchase; that is expected. Do not withdraw it "
                                "and do not request a refund.\n")
     state["F"] = f_hash
@@ -519,6 +544,7 @@ def cmd_purchases() -> None:
     claude("refund-F", "refund.prompt", {"REQUEST_HASH": f_hash, "LABEL": "F"}, profile)
     claude("purchases", "purchases.prompt", {}, profile)
     provider("resume")
+    hold_until_clear("the provider's withdrawal", [(0, 600)])
     withdrawal = withdraw_and_wait()
     event("provider withdrawal finalized", transaction=withdrawal.get("transaction_hash"))
     for label, request_hash in (("R", r_hash), ("F", f_hash)):
