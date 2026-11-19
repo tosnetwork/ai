@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "reasons", "ai_commit", "verifier_sha256", "checkpoint_seqno", "verdict_files", "checks"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["AGENT_OPERATED_PILOT_PASSED", "AGENT_OPERATED_PILOT_FAILED"]},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "ai_commit": {"type": "string"},
+    "verifier_sha256": {"type": "string"},
+    "checkpoint_seqno": {"type": "integer"},
+    "verdict_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "sha256", "result", "exit_status", "failing_checks"],
+        "properties": {
+          "file": {"type": "string"},
+          "sha256": {"type": "string"},
+          "result": {"type": "string"},
+          "exit_status": {"type": "integer"},
+          "failing_checks": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "ok", "detail"],
+        "properties": {
+          "id": {"type": "string"},
+          "ok": {"type": "boolean"},
+          "detail": {"type": "string"}
+        }
+      }
+    }
+  }
+}

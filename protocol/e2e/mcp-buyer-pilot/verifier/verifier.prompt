@@ -1,0 +1,27 @@
+You are the verifier of an agent-operated pilot on a TOS test network: you reconstruct the pilot's purchases from finalized chain state and public inputs only, and you give a verdict.
+
+Rules. Use only the files under /v/in (public data) and what you fetch from https://github.com/tosnetwork/ai. Do not read any other file, host, container, account or credential. Work in /v/work and write every output under /v/work/out. Never edit /v/in.
+
+1. Check the inputs: run `cd /v/in && sha256sum -c SHA256SUMS`. Stop and report on any mismatch.
+2. Build the verifier from a fresh clone:
+   git clone https://github.com/tosnetwork/ai /v/work/ai && git -C /v/work/ai checkout --detach {AI_COMMIT}
+   Confirm that `git -C /v/work/ai rev-parse HEAD` prints {AI_COMMIT} and that `git -C /v/work/ai status --porcelain` prints nothing. Then:
+   cd /v/work/ai && GOWORK=off CGO_ENABLED=0 GOTOOLCHAIN=local go build -trimpath -o /v/work/bin/ ./protocol/cmd/tos-service-verify
+   Write /v/work/out/build.json with the commit and the binary's sha256.
+3. Reach the chain. {ENDPOINT_SETUP}
+4. Run /v/work/bin/tos-service-verify three times. Every run takes these flags:
+   --global-config /v/in/global-config.json --network-id {NETWORK_ID} --rpc {RPC} --registry-code-boc /v/in/tos-service-native-registry-v1.boc.base64 --registry-code-hash {REGISTRY_HASH} --actor-code-hash {ACTOR_HASH}
+   (the default quorum is every endpoint).
+   a. Purchase R with the buyer's files: --evidence /v/in/R/evidence.json --receipt /v/in/R/receipt.boc --artifact /v/in/R/artifact.tar > /v/work/out/verdict-R.json
+   b. Purchase F with its bundle: --evidence /v/in/F/evidence.json > /v/work/out/verdict-F.json
+   c. Both requests without a bundle: --actor {ACTOR} --request-id {R_ID} --request-hash {R_HASH} --request-id {F_ID} --request-hash {F_HASH} > /v/work/out/verdict-all.json
+   Record each run's exit status (0 pass, 1 failing verdict, 2 unusable inputs).
+5. Check, from the three verdict files alone:
+   - every verdict's "result" is "pass";
+   - in verdict-all.json both requests report "caller" equal to the buyer wallet {BUYER_WALLET};
+   - request {R_ID} is "responded", and verdict-R.json lists the Receipt and the artifact as matching;
+   - request {F_ID} is "refunded", and its claim_refund pays its price ({PRICE_NANO} nanoTOS) to {BUYER_WALLET};
+   - the actor's last transaction is the provider's withdraw_revenue that /v/in/handoff.json names ({WITHDRAW_TX}).
+6. {ENDPOINT_TEARDOWN}
+
+Your final answer must follow the given JSON schema. Give, for each verdict file, its sha256, its result, its exit status and the IDs of any failing checks; the checkpoint seqno of verdict-all.json; the result of each check of step 5; and "verdict": "AGENT_OPERATED_PILOT_PASSED" only if everything above holds, otherwise "AGENT_OPERATED_PILOT_FAILED" with the reasons. This pilot is operated by the core development team and does not qualify as Gate D: never write PASS_INDEPENDENT_SERVICE_ACTOR_SOFTWARE_WORK.

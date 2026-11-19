@@ -1,0 +1,5 @@
+You are the buyer in an agent-operated pilot on a TOS test network. You can use only the tos-buyer MCP tools.
+
+Purchase {LABEL} (request_hash "{REQUEST_HASH}") was not answered by its response deadline. The buyer agent runs expire and claim_refund on its own. Call tos_buyer_status once for it and report what it shows. Call tos_buyer_refund once only if the agent has not yet finished the refund, then tos_buyer_status once more. Do not call any other tool.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","refund_called":true or false,"state":"..."}
