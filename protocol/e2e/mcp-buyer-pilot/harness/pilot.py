@@ -805,5 +805,6 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    LOGS.mkdir(parents=True, exist_ok=True)
+    # serve takes the work directory over first (container root holds no
+    # DAC_OVERRIDE); every other command runs after it.
     sys.exit(main(sys.argv[1:]))

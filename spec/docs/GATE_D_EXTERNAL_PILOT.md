@@ -300,6 +300,34 @@ held in its own `tosctl` custody (for an Ed25519 key, `tosctl wallet sign
   wallet only, so each purchase in `purchases[]` must have its reported
   `caller` equal the buyer's declared wallet in `objects`.
 
+### 8.5 Agent-operated pilot record
+
+A pilot whose three roles are all held by the core development team, with
+agents in the buyer and verifier roles, is recorded under a distinct schema
+so that no reader or tool can take it for Gate D evidence:
+`tos.service.gate-d-agent-operated-pilot-record.v1`, in
+`spec/deployments/public-testnet-<epoch>-gate-d-agent-pilot-<yyyymmdd>.json`.
+
+- It carries the fields of section 8.2 and, in addition,
+  `qualifies_as_gate_d: false`, `qualifies_as_public_acceptance: false`,
+  `operation_mode: "agent-operated"`, an `independence` block listing each
+  rule of section 3 the pilot does not meet, and an `automation` block that
+  names the model clients, their binaries, prompts and transcripts by
+  SHA-256, and states that payment confirmation was automated, with no
+  human.
+- Its verdict is `AGENT_OPERATED_PILOT_PASSED` or
+  `AGENT_OPERATED_PILOT_FAILED` (status `agent-pilot-passed` or
+  `agent-pilot-failed`), never `PASS_INDEPENDENT_SERVICE_ACTOR_SOFTWARE_WORK`.
+- It names the Service Actor code hash the provider used and whether that
+  is the production release.
+- It is built by script from the run's files
+  (`protocol/e2e/mcp-buyer-pilot/make_record.py`); its `checks` list every
+  condition the verdict rests on, including the verifier tool's results
+  mapped as in section 8.4.
+
+Such a record shows that the paid loop runs end to end on the public
+network with agent clients. It does not close Gate D.
+
 ## 9. What a pilot record must not claim
 
 - **Gate F.** No public HTTPS gateway, no two independently operated

@@ -149,8 +149,11 @@ def write_secret(path: Path, lines: dict) -> None:
 def prepare_credentials() -> None:
     """The operator's current access tokens, and nothing that can refresh
     them. Refused when either would expire before the run can end."""
-    SECRETS.mkdir(mode=0o700)
-    claude = json.loads((Path.home() / ".claude" / ".credentials.json").read_text())["claudeAiOauth"]
+    SECRETS.mkdir(mode=0o700, exist_ok=True)
+    for name in ("claude.env", "codex.env"):
+        if (SECRETS / name).exists():
+            (SECRETS / name).unlink()
+    claude =json.loads((Path.home() / ".claude" / ".credentials.json").read_text())["claudeAiOauth"]
     codex = json.loads((Path.home() / ".codex" / "auth.json").read_text())["tokens"]
     claude_end, codex_end = claude["expiresAt"] / 1000, jwt_expiry(codex["access_token"])
     state["credentials"] = {
