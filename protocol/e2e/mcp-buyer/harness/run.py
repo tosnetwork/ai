@@ -526,12 +526,23 @@ def confirm_payment(request_hash: str) -> dict:
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, user=ACCOUNTS["developer"][0],
         group=ACCOUNTS["developer"][1], extra_groups=[SOCKET_GROUP],
         env={"PATH": "/usr/bin:/bin", "HOME": str(HOME["developer"])})
+    # The confirmer shows only purchases a client has asked a decision for;
+    # one opened before request_payment reaches the agent finds none and
+    # exits. Open it once the purchase is marked requested.
+    requested = poll(lambda: structured(mcp("tos_buyer_status", {"request_hash": request_hash}))
+                     .get("purchase", {}).get("payment_requested"), 120, 2)
+    record("request_payment made the purchase visible to the confirmer", bool(requested))
     confirmer = Confirmer(str(BIN / "tos-service-buyer"), str(SOCKET_DIR / "agent.sock"), *ACCOUNTS["custody"],
                           {"PATH": "/usr/bin:/bin", "HOME": str(HOME["custody"]), "TERM": "dumb"})
     confirmer.start()
     try:
         code = confirmer.confirm(timeout=180)
         record("the human confirmed in the real confirmer on custody's terminal", bool(code), {"code_length": len(code)})
+    except (EOFError, TimeoutError) as error:
+        # What the confirmer showed, for the record.
+        record("the human confirmed in the real confirmer on custody's terminal", False,
+               {"error": repr(error), "screen": confirmer.screen.decode(errors="replace")[-2000:]})
+        raise
     finally:
         status = confirmer.finish()
     stdout, stderr = waiting.communicate(timeout=300)
