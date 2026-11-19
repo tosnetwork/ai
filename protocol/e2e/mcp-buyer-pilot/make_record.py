@@ -249,6 +249,8 @@ record = {
                  "actor_code_hash_on_every_endpoint":
                      ((verdicts["all"] or {}).get("actor") or {}).get("code_hash_matches")},
     "source_commits": {"ai": build["ai_commit"], "openfox": build["openfox_commit"],
+                       "operator_driver": git(ai_root, "rev-parse", "HEAD"),
+                       "operator_driver_tree_clean": git(ai_root, "status", "--porcelain") == "",
                        "tosctl": build.get("tosctl_source"), "verifier_clone": verifier_build.get("commit")
                        or verifier_build.get("ai_commit")},
     "binaries": {"built_by_operator": build["binaries"], "tosctl_sha256": build["tosctl_sha256"],
