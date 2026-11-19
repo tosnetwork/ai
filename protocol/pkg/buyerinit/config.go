@@ -36,10 +36,20 @@ type AgentConfig struct {
 	BuyerAgentID      string        `json:"buyer_agent_id"`
 	Tosctl            TosctlConfig  `json:"tosctl"`
 	// PacketControllerKeyID is mldsa44:<hex>.
-	PacketControllerKeyID string       `json:"packet_controller_key_id"`
-	Relays                []string     `json:"relays"`
-	RelayCAFile           string       `json:"relay_ca_file"`
-	Budget                BudgetConfig `json:"budget"`
+	PacketControllerKeyID string   `json:"packet_controller_key_id"`
+	Relays                []string `json:"relays"`
+	RelayCAFile           string   `json:"relay_ca_file"`
+	// GatewayURL, when set, names a gateway the agent uses as a search
+	// hint source and for gateway Quotes; an https gateway is verified
+	// against GatewayCAFile only, and the bearer token is read from the
+	// owner-private GatewayTokenFile.
+	GatewayURL       string `json:"gateway_url,omitempty"`
+	GatewayCAFile    string `json:"gateway_ca_file,omitempty"`
+	GatewayTokenFile string `json:"gateway_token_file,omitempty"`
+	// CatalogDir, when set, is an owner-private capability catalog the
+	// agent uses as a search hint source.
+	CatalogDir string       `json:"catalog_dir,omitempty"`
+	Budget     BudgetConfig `json:"budget"`
 }
 
 // NetworkConfig is the network tuple.

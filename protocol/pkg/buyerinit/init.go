@@ -40,13 +40,17 @@ const (
 // Send timing. tosctl signs a wallet message valid for walletMessageLifetime
 // from the moment it signs, which is at most maxSendTime after the step is
 // stamped: every send runs under that deadline and tosctl is killed at it.
-// So sendResolutionWindow after the stamp, an absent message can no longer
-// be included, and a slow tosctl cannot sign later than the window allows.
+// The stamp is taken slightly after the deadline starts and truncated to
+// whole seconds, so it can lie up to about a second before the deadline's
+// real start; stampMargin covers that with room to spare. So
+// sendResolutionWindow after the stamp, an absent message can no longer be
+// included, and a slow tosctl cannot sign later than the window allows.
 // tosctl's wallet send reports no valid_until of its own to use instead.
 const (
 	maxSendTime           = 3 * time.Minute
 	walletMessageLifetime = 2 * time.Minute
-	sendResolutionWindow  = maxSendTime + walletMessageLifetime
+	stampMargin           = 10 * time.Second
+	sendResolutionWindow  = maxSendTime + walletMessageLifetime + stampMargin
 )
 
 var (
@@ -117,6 +121,12 @@ type Input struct {
 	Relays           []string
 	RelayCAFile      string
 	Budget           BudgetConfig
+	// The optional gateway and catalog the agent uses as search hint
+	// sources and, for the gateway, as a Quote source.
+	GatewayURL       string
+	GatewayCAFile    string
+	GatewayTokenFile string
+	CatalogDir       string
 }
 
 // Env is what init needs from its surroundings.
@@ -174,7 +184,10 @@ func Check(in Input, uid int) error {
 	if err := checkAccount(uid, in.ClientUID); err != nil {
 		return err
 	}
-	return checkInput(in)
+	if err := checkInput(in); err != nil {
+		return err
+	}
+	return checkGatewayFiles(in)
 }
 
 // checkInput validates every input before anything runs.
@@ -220,6 +233,7 @@ func checkInput(in Input) error {
 	if err := checkBudget(in.Budget); err != nil {
 		problems = append(problems, err.Error())
 	}
+	problems = append(problems, gatewayProblems(in)...)
 	// The agent verifies relays against the pinned CA only, so an https
 	// relay without one could never be reached.
 	for _, relay := range in.Relays {
@@ -388,6 +402,9 @@ func execute(ctx context.Context, in Input, env Env, apply bool) (*Report, error
 	if err := checkInput(in); err != nil {
 		return report, err
 	}
+	if err := checkGatewayFiles(in); err != nil {
+		return report, err
+	}
 	relays, err := canonicalRelays(in.Relays)
 	if err != nil {
 		return report, err
@@ -516,7 +533,9 @@ func (r *run) establish(relays []string) (*AgentConfig, error) {
 		BuyerWallet: wallet.Address, BuyerAgentID: agentID,
 		Tosctl: TosctlConfig{Binary: in.TOSCTLBinary, SHA256: in.TOSCTLSHA256, ConfigPath: in.TOSCTLConfig,
 			Wallet: in.Wallet, Controller: in.Controller},
-		PacketControllerKeyID: controller.Text(), Relays: relays, RelayCAFile: in.RelayCAFile, Budget: in.Budget}, nil
+		PacketControllerKeyID: controller.Text(), Relays: relays, RelayCAFile: in.RelayCAFile, Budget: in.Budget,
+		GatewayURL: in.GatewayURL, GatewayCAFile: in.GatewayCAFile, GatewayTokenFile: in.GatewayTokenFile,
+		CatalogDir: in.CatalogDir}, nil
 }
 
 // checkEndpoints requires every configured endpoint to serve the network's

@@ -290,7 +290,13 @@ file outside the state directory, `tosctl` names for the wallet and
 controller, a 64-hex `tosctl` pin, 3 to 8 endpoints with a strict-majority
 quorum, 1 to 4 distinct canonical relay URLs, a relay CA file whenever a
 relay is `https` (the agent verifies relays against that pinned CA only, never
-the system pool), and the budget bounds of section 6. The steps are:
+the system pool), and the budget bounds of section 6. The optional gateway
+and catalog follow the agent's own rules. `--gateway-url` must be a bare
+`https` base URL with `--gateway-ca-file`, or an `http` one on a loopback
+address with no CA file. It also needs `--gateway-token-file`: a custody-owned
+`0600` file holding one printable token of at most 4096 bytes, and the CA file
+must hold a PEM certificate. `--catalog-dir` must be an absolute clean path.
+The steps are:
 
 1. pin the `tosctl` binary by SHA-256; derive the identity domain with
    `tosctl agent native-registry domain`; require the registry code file to
@@ -325,7 +331,9 @@ the system pool), and the budget bounds of section 6. The steps are:
    quorum, registry code file and hash, actor code hash, manifest directory,
    wallet address, Agent ID, the pinned `tosctl` with its configuration,
    wallet name and controller name, the controller's key ID, relays, relay CA
-   file and budget policy. It holds no key and no vault credential; the vault
+   file, the optional gateway (URL, CA file, token file) and catalog
+   directory, and the budget policy. It names the gateway token file but never
+   holds the token. It holds no key and no vault credential; the vault
    URL is read from `VAULT_URL` and passed to `tosctl` only in its
    environment.
 
@@ -338,10 +346,11 @@ chain step (activation, registration) is marked as sending before `tosctl`
 runs. On a re-run, a step whose effect is in finalized state is never sent
 again. A step still marked as sending is waited on until it lands or its
 inclusion window has passed on finalized chain time, and only then sent again.
-The window is 5 minutes from the step's stamp. Every send runs under a
-3-minute deadline that kills `tosctl`, and a wallet message is valid for
-2 minutes from when `tosctl` signs it, so no message signed for the step can
-land after the window. `tosctl wallet send` reports no `valid_until` of its
+The window is 5 minutes and 10 seconds from the step's stamp. Every send runs
+under a 3-minute deadline that kills `tosctl`, and a wallet message is valid
+for 2 minutes from when `tosctl` signs it. The 10 seconds cover a stamp that is
+truncated to whole seconds and taken just after the deadline starts. So no
+message signed for the step can land after the window. `tosctl wallet send` reports no `valid_until` of its
 own; the stamp and that expiry both come from the host clock. Only the wallet
 checks `tosctl` makes before it builds the message (an amount the balance
 cannot cover, an uninitialized or frozen wallet) return the step to pending.
