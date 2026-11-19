@@ -1444,7 +1444,8 @@ refusals, crash recovery and the confirmation boundary:
   `toschain.ServiceActorSession.Account`), `agent`, `confirm` (with the
   terminal checks of 5.1 and the rendering rules of 5.2) and `evidence`;
 - the user guide, written as the Service Actor rewrite of
-  [`GATE_E_BUYER_ONBOARDING.md`](GATE_E_BUYER_ONBOARDING.md).
+  [`GATE_E_BUYER_ONBOARDING.md`](GATE_E_BUYER_ONBOARDING.md); its first
+  version is [`MCP_BUYER_GUIDE.md`](MCP_BUYER_GUIDE.md).
 
 `protocol/` keeps its import boundary: it imports none of `gateway/`,
 `execution/` or `messenger/`.
