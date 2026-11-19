@@ -195,6 +195,9 @@ func checkSocketDir(dir, stateDir string) error {
 	if !info.IsDir() || !osguard.CurrentUserOwns(info) || info.Mode().Perm()&0o027 != 0 {
 		return errors.New("the socket directory must be the agent's own, unwritable by group and closed to others")
 	}
+	if err := checkSocketGroup(info); err != nil {
+		return err
+	}
 	relative, err := filepath.Rel(stateDir, dir)
 	if err != nil {
 		return err

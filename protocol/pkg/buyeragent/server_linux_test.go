@@ -21,14 +21,40 @@ import (
 )
 
 // socketDir returns a directory a socket server accepts: the test
-// account's own, mode 0750, outside the state directory.
+// account's own, setgid, mode 2750, outside the state directory. A test
+// runs as one account, so the directory's group stands for the shared
+// group and the agent's private group is taken to be another one.
 func socketDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o750); err != nil {
+	if err := os.Chmod(dir, 0o750|os.ModeSetgid); err != nil {
 		t.Fatal(err)
 	}
+	actual := privateGroup
+	privateGroup = func() uint32 { return uint32(os.Getegid()) + 1 }
+	t.Cleanup(func() { privateGroup = actual })
 	return dir
+}
+
+// The socket directory must be setgid and belong to the shared group, not
+// the agent's own, or the client account could never reach the socket.
+func TestTheSocketDirectoryMustCarryTheSharedGroup(t *testing.T) {
+	f := newFixture(t)
+	self := uint32(os.Getuid())
+	plain := socketDir(t)
+	if err := os.Chmod(plain, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Listen(ServerConfig{Agent: f.agent, SocketDir: plain, CustodyUID: self, ClientUID: self + 1}); err == nil ||
+		!strings.Contains(err.Error(), "setgid") {
+		t.Fatalf("a socket directory without setgid: %v", err)
+	}
+	private := socketDir(t)
+	privateGroup = func() uint32 { return uint32(os.Getegid()) }
+	if _, err := Listen(ServerConfig{Agent: f.agent, SocketDir: private, CustodyUID: self, ClientUID: self + 1}); err == nil ||
+		!strings.Contains(err.Error(), "shares") {
+		t.Fatalf("a socket directory of the agent's own group: %v", err)
+	}
 }
 
 // serve starts a server whose custody and client uids are chosen so the
