@@ -383,7 +383,13 @@ def start_gateway(provider_agent_id: str) -> None:
     registry = GATEWAY_DIR / "registry-code.boc"
     write_private("provider", registry, REGISTRY_BOC.read_text())
     state = private_dir(GATEWAY_DIR / "quote-state", "provider")
-    private_dir(GATEWAY_DIR / "catalog", "provider")
+    catalog = private_dir(GATEWAY_DIR / "catalog", "provider")
+    # The gateway serves the provider's manifest by digest
+    # (GetSoftwareWorkManifest): a buyer with no offer file takes the
+    # manifest from there and checks it against the finalized digest.
+    manifest_hex = as_account("provider", ["/usr/bin/sha256sum", rail["provider"]["manifest_file"]]).stdout.split()[0]
+    as_account("provider", ["/bin/cp", rail["provider"]["manifest_file"], str(catalog / f"manifest-{manifest_hex}.cbor")])
+    as_account("provider", ["/bin/chmod", "0600", str(catalog / f"manifest-{manifest_hex}.cbor")])
     profile = GATEWAY_DIR / "quote-profile.json"
     write_private("provider", profile, json.dumps({
         "schema": "tos.service.provider-quote-profile.v2", "provider_agent_id": provider_agent_id,
