@@ -1,0 +1,693 @@
+{
+  "schema": "tos.service.gate-d-agent-operated-pilot-record.v1",
+  "protocol": "tos_service_v1",
+  "status": "agent-pilot-passed",
+  "verdict": "AGENT_OPERATED_PILOT_PASSED",
+  "qualifies_as_gate_d": false,
+  "qualifies_as_public_acceptance": false,
+  "operation_mode": "agent-operated",
+  "qualification_note": "an agent-operated pilot: the buyer is a Claude Code agent and the verifier a Codex agent, both run by the core development team, and the provider is the team's OpenFox reference seller. It does not meet GATE_D_EXTERNAL_PILOT section 3 and is not Gate D evidence; an independent external pilot remains open.",
+  "independence": {
+    "meets_gate_d_section_3": false,
+    "rules_not_met": [
+      "1: all three roles run on one host under one operator",
+      "2 and 3: one organization, the core development team, holds all three roles",
+      "4: the buyer's machine is a container on the provider's host, created by the operator",
+      "5: the verifier reads the same project-run validators as the buyer and the provider"
+    ]
+  },
+  "participants": [
+    {
+      "role": "provider",
+      "organization": "TOS core development team",
+      "core_development_team": true,
+      "actor": "OpenFox reference seller, operated by the team",
+      "hosts_and_network": "the team's coordinator host and its Docker bridge",
+      "declaration_key": {
+        "algorithm": "Ed25519",
+        "custody": "a tosctl key named declaration in the role's own vault",
+        "retained": true,
+        "public_key": "in signatures[]"
+      },
+      "shares_no_key_with_another_role": true
+    },
+    {
+      "role": "buyer",
+      "organization": "TOS core development team",
+      "core_development_team": true,
+      "actor": "Claude Code CLI agent, operated by the team",
+      "hosts_and_network": "the team's coordinator host and its Docker bridge",
+      "declaration_key": {
+        "algorithm": "Ed25519",
+        "custody": "a tosctl key named declaration in the role's own vault",
+        "retained": true,
+        "public_key": "in signatures[]"
+      },
+      "shares_no_key_with_another_role": true
+    },
+    {
+      "role": "verifier",
+      "organization": "TOS core development team",
+      "core_development_team": true,
+      "actor": "Codex CLI agent, operated by the team",
+      "hosts_and_network": "the team's coordinator host and its Docker bridge",
+      "declaration_key": {
+        "algorithm": "Ed25519",
+        "custody": "a tosctl key created in the verifier container's memory (tmpfs) at the moment of signing",
+        "retained": false,
+        "created": "after the run, which ended at 2026-11-19T07:28:55.033536+00:00 (the verifier's last session and the credential deletion); the creation time of the key that signed this copy is signatures[].signed_utc",
+        "earlier_keys": "the keys that signed earlier copies of this record are unavailable: each lived only in a container memory that no longer exists",
+        "what_the_signature_attests": "only that the verifier role's operator signed this record's digest; the verdict itself is the run's verifier output, bound by verifier_output.verdict_sha256 and automation.verifier_model_client.summary_sha256"
+      },
+      "shares_no_key_with_another_role": true
+    }
+  ],
+  "buyer_declaration": "the buyer wallet and packet controller were created by tos-service-buyer init through tosctl in the custody account of a container the team operates; the model (Claude Code) had only the tos_buyer_* MCP tools and no shell, file or web tool; every payment was confirmed by the automated pty confirmer under its policy, which no model process could reach; no human confirmed any payment; the container's host also runs the provider",
+  "automation": {
+    "buyer_model_client": {
+      "cli": "2.1.328 (Claude Code)",
+      "binary_sha256": "a982d38030b97e750848add2cbb2df6d9a70d5544a22ca9b216a349ba25865e8",
+      "models": [
+        "claude-sonnet-5-5"
+      ],
+      "tools": [
+        "mcp__tos-buyer__tos_buyer_prepare",
+        "mcp__tos-buyer__tos_buyer_purchases",
+        "mcp__tos-buyer__tos_buyer_quote",
+        "mcp__tos-buyer__tos_buyer_refund",
+        "mcp__tos-buyer__tos_buyer_request_payment",
+        "mcp__tos-buyer__tos_buyer_result",
+        "mcp__tos-buyer__tos_buyer_search",
+        "mcp__tos-buyer__tos_buyer_status",
+        "mcp__tos-buyer__tos_buyer_withdraw"
+      ],
+      "sessions": [
+        {
+          "name": "buy-R",
+          "prompt_sha256": "b7e81614ab7056a3c717b8f22e213d9e894e128ee7fb33460f193e66fba226da",
+          "transcript_sha256": "38a59d0a77ff3491a7689677c1b4eafbfc7d882ca127400ed337aa3ce4ef3384",
+          "started_utc": "2026-11-19T06:18:24.003418+00:00",
+          "finished_utc": "2026-11-19T06:18:46.771905+00:00",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_quote",
+            "mcp__tos-buyer__tos_buyer_prepare",
+            "mcp__tos-buyer__tos_buyer_request_payment"
+          ]
+        },
+        {
+          "name": "buy-F",
+          "prompt_sha256": "0bbd123ff737452364f0a60f18f817c86dbe51b25a422257d96b7bf925d62d5d",
+          "transcript_sha256": "c62fb39417659a18b7092e4fb6370706445b7dcf2b05206c78da2585755ce86d",
+          "started_utc": "2026-11-19T06:19:08.343177+00:00",
+          "finished_utc": "2026-11-19T06:19:29.974279+00:00",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_quote",
+            "mcp__tos-buyer__tos_buyer_prepare",
+            "mcp__tos-buyer__tos_buyer_request_payment"
+          ]
+        },
+        {
+          "name": "result-R-1",
+          "prompt_sha256": "cbd55cde90b4796796462c62fca642ecf167d1d7776557aa06ca79aa39fd7cec",
+          "transcript_sha256": "09a271728df59790023b482423509226f12deb2730235755722ccb74d7b6e140",
+          "started_utc": "2026-11-19T06:20:01.350388+00:00",
+          "finished_utc": "2026-11-19T06:20:06.525824+00:00",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_result"
+          ]
+        },
+        {
+          "name": "result-R-2",
+          "prompt_sha256": "cbd55cde90b4796796462c62fca642ecf167d1d7776557aa06ca79aa39fd7cec",
+          "transcript_sha256": "e620ccfcd1f2a45e5fbe5f48239451b9a1e838465a22376c211c12f87ed21c20",
+          "started_utc": "2026-11-19T06:21:36.528008+00:00",
+          "finished_utc": "2026-11-19T06:21:48.406546+00:00",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_result"
+          ]
+        },
+        {
+          "name": "refund-F",
+          "prompt_sha256": "16e0564ecbe69e73986725f8cfef0db86e5c9b8445bd667683f41e4845d37e68",
+          "transcript_sha256": "0ad4d0e072d772ef56dfb8bbca132c112b7d42f6d7870363d1feebe85ffad2a0",
+          "started_utc": "2026-11-19T07:20:25.008605+00:00",
+          "finished_utc": "2026-11-19T07:20:35.773871+00:00",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_status",
+            "mcp__tos-buyer__tos_buyer_refund",
+            "mcp__tos-buyer__tos_buyer_status"
+          ]
+        },
+        {
+          "name": "purchases",
+          "prompt_sha256": "658431fab529e62ac15add9ad59fe874756f2f1b2a5afaebbe744d73b6541971",
+          "transcript_sha256": "11011d8f50412bcba79ee9ad1e26a10f08f2edd0d0727bd3c29c8a05755df818",
+          "started_utc": "2026-11-19T07:20:35.775301+00:00",
+          "finished_utc": "2026-11-19T07:20:43.689187+00:00",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_purchases"
+          ]
+        }
+      ]
+    },
+    "verifier_model_client": {
+      "cli": "codex-cli 0.170.0",
+      "binary_sha256": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971",
+      "events_sha256": "865c69c5525b0e9ef6963f4ec4c18a281045fdd738e5e449984c314f6b7accc9",
+      "prompt_sha256": "df30e8a2a68bf101524d820f1b81d4dde24360fd7ed67b7f5d59ef42025257ae",
+      "summary_sha256": "2cef444f4538c12907da2d3f068333bc50edaf7456201141b98de8437591aab4",
+      "verdict": "AGENT_OPERATED_PILOT_PASSED",
+      "earlier_attempts": [
+        {
+          "summary_file": "attempt-2-attempt-1-codex-summary.json",
+          "summary_sha256": "3e7a03cac090e7d180567b381c864302a03a8843802e1d1c1316a6f4c0ea3156",
+          "verdict": "AGENT_OPERATED_PILOT_FAILED",
+          "reasons": [
+            "The execution tool failed on both attempts because its configured host executable was missing. The input checksum command could not run, so verification stopped before the build and chain checks.",
+            "The empty commit and binary hash and the checkpoint sequence number of -1 represent unavailable values. No verifier runs produced verdict files or exit statuses."
+          ]
+        },
+        {
+          "summary_file": "attempt-2-codex-summary.json",
+          "summary_sha256": "4c99494f28534975e014eb0413e02a3d4db5eb81a81f884d67b2b504f2140f71",
+          "verdict": "AGENT_OPERATED_PILOT_FAILED",
+          "reasons": [
+            "The required build failed. The pinned commit requires Go 1.26.11 or newer, and the local toolchain is Go 1.26.6. The build requires GOTOOLCHAIN=local, and the source restrictions preclude fetching a toolchain elsewhere.",
+            "The build produced no verifier binary or build.json. No RPC calls or verifier runs were made, so there are no verdict files, file hashes, run exit statuses, or observed checkpoint. The empty verifier hash and checkpoint sequence number 0 represent unavailable values."
+          ]
+        },
+        {
+          "summary_file": "attempt-3-codex-summary.json",
+          "summary_sha256": "df7a6c988ae7ca5f5272faa6ddb24902ed500f00f5570b83c50d21154c758bcb",
+          "verdict": "AGENT_OPERATED_PILOT_FAILED",
+          "reasons": [
+            "The required bundle-free run selected request 0 twice through its ID and hash. The verifier exited 1 and emitted an empty requests array, so verdict-all.json cannot establish either caller.",
+            "The requested clone path /v/work/ai was already occupied. The verifier was built from a fresh, clean checkout of the pinned commit at /v/work/ai-verification."
+          ]
+        }
+      ]
+    },
+    "payment_confirmation": "automated: the harness (container root) drove the real tos-service-buyer confirm --watch on a pty owned by the custody account and typed the code only when the confirmation policy held (harness/confirm_policy.py); no human read the screen or typed the code",
+    "init_sends": "tos-service-buyer init apply and OpenFox init and offer ran with --yes, approved by the harness",
+    "credentials": "the buyer and verifier agents authenticated with the operator's own Claude and ChatGPT accounts, with short-lived access tokens only (no refresh token), passed to the CLI process alone; the evidence was scanned for every token value and the token files were deleted before this record was built"
+  },
+  "network": {
+    "network_id": "tos:global-id:2",
+    "genesis_root_hash": "sha256:4b603859f97177d1a0274a145d842cdb0c16cc28fd46f67043f6f71b44334f6a",
+    "genesis_file_hash": "sha256:475e754da6b2cf6264ce87236580e71e51f634e5380ab92b343141f7b5f16d08",
+    "global_config_sha256": "sha256:ee1cd3d72002ea3acd85ba6b34f5a8d2cc6c74b39f8dba1173602e2e254b38ba"
+  },
+  "releases": {
+    "native_registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+    "service_actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+    "service_actor_release": "production",
+    "actor_code_hash_on_every_endpoint": true
+  },
+  "source_commits": {
+    "ai": "ca2cd4d566ec0bf51651507b5b79e9a881f07e26",
+    "openfox": "a73a5ed52098f85476052e6165e7a5aa7f9b43e8",
+    "operator_driver": "6d8bf31589cf0e44586bd4c6ec44f2cb43c731a4",
+    "operator_driver_tree_clean": true,
+    "harness_commits_after_the_containers_started": [
+      "6d8bf315 e2e: agent pilot record states how each declaration key is held; the verifier's is created at signing",
+      "720f7083 e2e: agent pilot record carries build.json's added_after_start and marks those binaries",
+      "187af1c3 e2e: agent pilot record lists the verifier's earlier attempts and why they failed",
+      "77502906 e2e: agent pilot record names no relay address",
+      "aa7eafe7 e2e: agent pilot builds the unsigned record without an earlier attempt's signatures",
+      "beedf499 e2e: agent pilot: select each request once in the bundle-free verify run; fresh verifier declaration key per signing; keep earlier clones",
+      "a699fe7e e2e: agent pilot verifier builds with the Go toolchain the module pins",
+      "a83676bc e2e: agent pilot: refresh-credentials also after the token files were deleted",
+      "a39a42b2 e2e: agent pilot: stage the Codex companions, resumable verifier attempt, vault scan on the key only",
+      "d8f1c19b e2e: agent pilot quiet windows from ConfigParam 34/36 on chain (switch +-10 min)",
+      "0af1159f e2e: agent pilot holds R, F and the withdrawal so their sends clear every set switch",
+      "954d6a94 e2e: agent pilot driver can replace the access tokens after a long wait",
+      "9af11851 e2e: agent pilot review fixes: endpoints from the operator's profile, conditioned statements, failing signatures fail the written record",
+      "905c681d e2e: agent pilot verifier writes its build record in a fixed shape",
+      "388040f1 e2e: agent pilot record names the operator driver's commit",
+      "9128f8dd e2e: agent pilot: hold purchase F so its deadline clears a set switch"
+    ],
+    "harness_commit_count_after_the_containers_started": 16,
+    "harness_commit_range": "ca2cd4d5..6d8bf315",
+    "tosctl": {
+      "repository": "tosnetwork/tos",
+      "release_tag": "v2026.11-1",
+      "tag_commit": "804112c06eebc948012e6ddc59344c0ad2b8ebb9",
+      "asset": "tosctl-linux-x86_64",
+      "listed_in_release_sha256sums": true
+    },
+    "verifier_clone": "ca2cd4d566ec0bf51651507b5b79e9a881f07e26"
+  },
+  "binaries": {
+    "built_by_operator": {
+      "claude": {
+        "sha256": "a982d38030b97e750848add2cbb2df6d9a70d5544a22ca9b216a349ba25865e8",
+        "added_after_start": false
+      },
+      "codex": {
+        "sha256": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971",
+        "added_after_start": false
+      },
+      "openfox": {
+        "sha256": "6353fa53b7360d04ec3a8aed5e85816839b350c214741041ed0f0ef400f8808d",
+        "added_after_start": false
+      },
+      "service-actor-e2e-fixture": {
+        "sha256": "548cbc3888228c904cf2627c5c1f01150de15cfe60ecb3d0209571b8790b21fc",
+        "added_after_start": false
+      },
+      "tos-service-buyer": {
+        "sha256": "927ce7c1b1d6b2ce6532782c98176a5d9599453ea6375f47f3ee8c9390ac126d",
+        "added_after_start": false
+      },
+      "tos-service-buyer-mcp": {
+        "sha256": "4626cbdfa051b9ce7b5edabe8cc3fc429bd13107a2ca2589d86390dfea51fe3f",
+        "added_after_start": false
+      },
+      "tos-service-packet-relay": {
+        "sha256": "f8e1d1eab18acca7329dc5831feee496cce98211ec8c967f27ef88c53f498e01",
+        "added_after_start": false
+      },
+      "tos-service-verify": {
+        "sha256": "82c1b5d668591f3fad68eb2cd5ae465ff2459a7335b2c59380898eba3cf8baa4",
+        "added_after_start": false
+      },
+      "tosctl": {
+        "sha256": "73b00c7d4a3ce6449d232c161722281ba189bd545a61cb8d99904b1d3e8fed7c",
+        "added_after_start": false
+      },
+      "codex-code-mode-host": {
+        "sha256": "ffc1ad7023864bfc209c408887d6834a8f644201eff4432fb9558b7f1c40e9dc",
+        "added_after_start": true
+      },
+      "codex-exec-server": {
+        "sha256": "4cb5c1c1fcfe4cd28450a9f559dc23c17b7e29dd1ce21fdd4dfb380a32a7605c",
+        "added_after_start": true
+      }
+    },
+    "tosctl_sha256": "73b00c7d4a3ce6449d232c161722281ba189bd545a61cb8d99904b1d3e8fed7c",
+    "added_after_start": [
+      {
+        "at": "2026-11-19T07:22:40.860513+00:00",
+        "binaries": {
+          "codex-code-mode-host": "ffc1ad7023864bfc209c408887d6834a8f644201eff4432fb9558b7f1c40e9dc",
+          "codex-exec-server": "4cb5c1c1fcfe4cd28450a9f559dc23c17b7e29dd1ce21fdd4dfb380a32a7605c"
+        },
+        "reason": "the Codex CLI's companion executables, missing from the first staging; same Codex 0.170.0 package"
+      }
+    ],
+    "verifier_tos_service_verify_sha256": "a6f3c724745b799276faccbc055776049f64846cc49d5ba2e20ab4bca93a4155",
+    "verifier_built_by": "the Codex verifier, from a fresh clone"
+  },
+  "endpoints": [
+    {
+      "role": "buyer",
+      "form": "SSH local forward through the restricted pilot-rpc account, with the role's own key, to each validator's loopback JSON-RPC (127.0.0.1:8081)",
+      "validators": [
+        "V1",
+        "V2",
+        "V3"
+      ],
+      "operator": "TOS core development team (project operator of every epoch-7 validator)",
+      "quorum": 2
+    },
+    {
+      "role": "provider",
+      "form": "SSH local forward through the restricted pilot-rpc account, with the role's own key, to each validator's loopback JSON-RPC (127.0.0.1:8081)",
+      "validators": [
+        "V1",
+        "V2",
+        "V3"
+      ],
+      "operator": "TOS core development team (project operator of every epoch-7 validator)",
+      "quorum": 2
+    },
+    {
+      "role": "verifier",
+      "form": "SSH local forward through the restricted pilot-rpc account, with the role's own key, to each validator's loopback JSON-RPC (127.0.0.1:8081)",
+      "validators": [
+        "V1",
+        "V2",
+        "V3"
+      ],
+      "operator": "TOS core development team (project operator of every epoch-7 validator)",
+      "quorum": 3
+    }
+  ],
+  "relays": {
+    "count": 2,
+    "form": "the installed Agent Packet Relays over HTTPS with their private CA pinned",
+    "operator": "TOS core development team (test relays, private CA)"
+  },
+  "objects": {
+    "capability_id": "cap_01f678f0d2484aefca7383fcb134080bfadc6327dd389cccc3624f260ab87385",
+    "capability_version": "1.0.0",
+    "provider_agent_id": "agent_6c48013944fde34d494ca9f2de6fa97741696aa4245b4b16949bf44d98d1d775",
+    "actor": "0:20ad91a1c246c3215993ae4d3928e29d0853122c1f64ab0cfde53677a580f22c",
+    "manifest_digest": "sha256:9736a821e5779be00f3685875056cd0dcee6553260fdd6a344e4b86827fdafe8",
+    "metadata_hash": "9bf648f011157455d7320dfe48921c388bcb7d154aa53ac4e9fae20f58ec1d4c",
+    "attestor_key_id": "mldsa44:411bd3f1d4e4997bc9391d2892f181763f76853c866628319d83f799c714692e",
+    "capability_address": "0:165bf4c838ffdcdc5032d5a698219c0d7ca940e86123b2c87ea2749fa5390cc4",
+    "provider_wallet": "0:58407720e1452ff3e35515d6bee925c47f271a2022aec3acf369bd6570f30cdb",
+    "buyer_agent_id": "agent_caf96807de8e3b83f227852f0fee6fb0e8e2f74c167c9aacde34841ee066b499",
+    "offer_sha256": "d686aedc2fca20a7cfd9f91954b903329651d51ea37fcb682d2ca950d2644f88",
+    "buyer_wallet": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+    "terms_hash": "20027a0624ac719989d6930224da17868b9e9add6ace7689dbe707f68ad7117f"
+  },
+  "terms": {
+    "price_nanotos": "100000000",
+    "storage_fee_nanotos": "200000000",
+    "cleanup_bounty_nanotos": "100000000",
+    "response_sla_seconds": 3600,
+    "refund_claim_window_seconds": 3600,
+    "execution_allowance_nanotos": "200000000"
+  },
+  "dry_check": {
+    "quote_carriable": true,
+    "dry_request_hash": "8e46fbcccaa3f1d982f5303abbdb0bffd9ee6418ac569216410050358f0e4f35",
+    "withdrawn": "withdrawn"
+  },
+  "purchases": [
+    {
+      "label": "R",
+      "outcome": "responded",
+      "quote_source": "offer file, built locally by the buyer agent",
+      "quote_package_sha256": "c4d6db38e00f57a5b7bf8ce898e5e002184e6a2f22526c3d87f1a06395387dce",
+      "quote_commitment": "tvm-cell-sha256:2e297cd4689b72c6baefaf5f1be0bd9bf1441c1e1924471940e0771d276d3185",
+      "request_hash": "9ce183dfc5c9643ff11f5dcbb0ddeb9d735857e5ac499874e9de53f65a9f9f46",
+      "request_id": 0,
+      "caller": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+      "call": {
+        "hash": "ce0a732c8b095b70f4c6df3344b7e59e06cd9bc5a985ea6d7e2d105d5600d50c",
+        "lt": 255315000003,
+        "now": 1795069120,
+        "value_nanotos": "500000000",
+        "query_id": "3830198123017760498"
+      },
+      "confirmed_utc": "2026-11-19T06:18:42.757676+00:00",
+      "confirmation_by": "automated policy (container root); no human",
+      "confirmation_screen_sha256": "94dc9f450bb67f07b9ad79f2f4ccc6973493581008fe226b9c0f75bf748f8899",
+      "respond": {
+        "hash": "10c8d58795ae83b8e0f2f038f7b2000cdaf2cc2d981e57e597d5c1bcfd0ce377",
+        "lt": 255473000003,
+        "sender": "0:58407720e1452ff3e35515d6bee925c47f271a2022aec3acf369bd6570f30cdb"
+      },
+      "response_hash": "eadb134ecaf690ef4597d782c6ef05006b38d0b4cfff85def7334f17e8363fae",
+      "receipt": {
+        "file_sha256": "sha256:94971506dd77227c049f92712e2dcc6b3500f3a6b2a4d98479c9de63ced94f7a",
+        "cell_hash": "eadb134ecaf690ef4597d782c6ef05006b38d0b4cfff85def7334f17e8363fae",
+        "exit_code": 0,
+        "artifact_digest": "sha256:2950a261b760c774fd1502ca6a22fc8ca367aa4625ec1adf075a7b1a9e131b79"
+      },
+      "artifact": {
+        "file_sha256": "sha256:2950a261b760c774fd1502ca6a22fc8ca367aa4625ec1adf075a7b1a9e131b79",
+        "members": [
+          {
+            "name": "output.log",
+            "sha256": "sha256:909735fad1abba82c5a88bfa83132b6e1210ebd261743486cee65161e7929b42",
+            "bytes": 34
+          },
+          {
+            "name": "report.json",
+            "sha256": "sha256:fafac5035cc393355271e9741a1246afd4449b70eafc6a914204b1dbb70430bf",
+            "bytes": 362
+          }
+        ]
+      }
+    },
+    {
+      "label": "F",
+      "outcome": "refunded",
+      "quote_source": "offer file, built locally by the buyer agent",
+      "quote_package_sha256": "a032a3836da600158cf690ea25392c2a91ebaf5355ca035dcf2e12708c194176",
+      "quote_commitment": "tvm-cell-sha256:7e4b8ac10fc2a8951f928ec83a633efec4ccd679de42f8177d7c0a706e0168de",
+      "request_hash": "2efab39ec2d8a15b29ef095e512a8500ec33d177aee7f7e321b332db7b93ecaf",
+      "request_id": 1,
+      "caller": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+      "call": {
+        "hash": "02f760213a6841cf2b79911dd1a6a4b6cd63786fddf6f8eb32925076360df334",
+        "lt": 255421000003,
+        "now": 1795069164,
+        "value_nanotos": "500000000",
+        "query_id": "4460920588335511762"
+      },
+      "confirmed_utc": "2026-11-19T06:19:26.716794+00:00",
+      "confirmation_by": "automated policy (container root); no human",
+      "confirmation_screen_sha256": "13748568684b6f02e4c47c8a2452450ab94d29560a33bf88e2b9491788c48e1d",
+      "expire": {
+        "hash": "bbb14ff9f3fa9d253d4787e4dd2a429bb0bfa7fd48905e0d30c04d53932dd278",
+        "lt": 264335000003,
+        "sender": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+        "destination": null,
+        "payouts": null
+      },
+      "claim_refund": {
+        "hash": "b9e64edf85f6ed08fd6dace5db4954fd7e38a6c06bcc8ab9323cb3d7e84e438e",
+        "lt": 264409000003,
+        "sender": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+        "destination": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+        "payouts": [
+          {
+            "destination": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+            "amount_nanotos": "100000000",
+            "bounce": false,
+            "empty_body": true
+          },
+          {
+            "destination": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+            "amount_nanotos": "199738092",
+            "bounce": false,
+            "empty_body": true
+          }
+        ]
+      }
+    }
+  ],
+  "provider_withdrawals": [
+    {
+      "transaction_hash": "c8b6740afaec44f1d0397b75d724d5b0cc028f4e60f5ae61f547b4e0555f95fc",
+      "query_id": "4518741556626871767",
+      "amount_nanotos": "500000000",
+      "state": "finalized",
+      "finalized_checkpoint": 261162
+    }
+  ],
+  "funding": {
+    "source": "epoch-7 node-1 pool-owner wallet -1:0012e434c50e1d486188c37dae9f9201492e4f43ed8016b0a4c0266c0c562342 (refilled from pool-1 rewards, operation gated-pilot-reward-withdraw-20261119), sent by the testnet operator from its operations journal",
+    "settled_utc": "2026-11-19T06:17Z",
+    "operations": [
+      {
+        "id": "gated-agent-fund-provider-20261119",
+        "to": "0:58407720e1452ff3e35515d6bee925c47f271a2022aec3acf369bd6570f30cdb",
+        "nanotos": 5600000000,
+        "wallet_tx": "aaa95afefab877ea0b11d2e9d3e366b746cc980a24706c3b1530a497f3246880",
+        "wallet_lt": 255142000001,
+        "destination_tx": "054a76afc7b84c0fd6fdcff8faf7d871108a3a270d12e9c9c4851cf236cb2e97",
+        "destination_lt": 255144000001
+      },
+      {
+        "id": "gated-agent-fund-buyer-20261119",
+        "to": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+        "nanotos": 4000000000,
+        "wallet_tx": "e4ef5125753079c3ecb48a644c2389600b40d967a2b3714d119275f4427726c5",
+        "wallet_lt": 255162000001,
+        "destination_tx": "42ec51417fd7fbb912397d822ba4080a208b15e73e108b100145b8ff24d67ce2",
+        "destination_lt": 255164000001
+      }
+    ]
+  },
+  "verifier_output": {
+    "tool_commit": "ca2cd4d566ec0bf51651507b5b79e9a881f07e26",
+    "verdict_sha256": {
+      "R": "ffed929aef86525577682cbb40eb0a60d6608fcf1843fae4d051e9b4e4a600b0",
+      "F": "e40f33c7a3da6ad8202c638b678cb4bda3ce4ea8bf26a0b410149e6e5b6fd352",
+      "all": "a8869a068cbaa4da266ee34913e80b8c5eea63a0155dc0c5ea98052d9573a06d"
+    },
+    "checkpoint": {
+      "seqno": 262250,
+      "chain_time": 1795073295,
+      "block_root_hash": "sha256:4701f3a487c07fffbd8899ed691379d4bb3bd6f797a59a9f019e42c76ef044b5",
+      "block_file_hash": "sha256:9129e45405a067dc7f34a105f35ca294c1cb12bc5afd21c07c421b0be24ba582"
+    },
+    "results": {
+      "R": "pass",
+      "F": "pass",
+      "all": "pass"
+    }
+  },
+  "checks": [
+    {
+      "id": "verifier-tool-pass-R",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "id": "verifier-tool-pass-F",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "id": "verifier-tool-pass-all",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "id": "callers-are-the-buyer-wallet",
+      "ok": true,
+      "detail": [
+        "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+        "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e"
+      ]
+    },
+    {
+      "id": "R-responded-and-accepted",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "id": "F-refunded-to-the-buyer",
+      "ok": true,
+      "detail": [
+        {
+          "destination": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+          "amount_nanotos": "100000000",
+          "bounce": false,
+          "empty_body": true
+        },
+        {
+          "destination": "0:e1e38f156367da89a1e79518c742c8df12da7448212d5d7b224a0aaab41f9e2e",
+          "amount_nanotos": "199738092",
+          "bounce": false,
+          "empty_body": true
+        }
+      ]
+    },
+    {
+      "id": "F-expire-and-claim-by-the-buyer-agent",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "id": "provider-withdrawal-finalized-and-last",
+      "ok": true,
+      "detail": {
+        "withdrawal": "c8b6740afaec44f1d0397b75d724d5b0cc028f4e60f5ae61f547b4e0555f95fc",
+        "actor_last": "c8b6740afaec44f1d0397b75d724d5b0cc028f4e60f5ae61f547b4e0555f95fc"
+      }
+    },
+    {
+      "id": "two-automated-confirmations-each-passing-its-policy",
+      "ok": true,
+      "detail": [
+        {
+          "request_hash": "9ce183dfc5c9643ff11f5dcbb0ddeb9d735857e5ac499874e9de53f65a9f9f46",
+          "outcome": "Purchase 9ce1-83df-c5c9-643f is now submitted."
+        },
+        {
+          "request_hash": "2efab39ec2d8a15b29ef095e512a8500ec33d177aee7f7e321b332db7b93ecaf",
+          "outcome": "Purchase 2efa-b39e-c2d8-a15b is now submitted."
+        }
+      ]
+    },
+    {
+      "id": "the-model-had-only-the-tos-buyer-mcp-tools",
+      "ok": true,
+      "detail": [
+        "mcp__tos-buyer__tos_buyer_prepare",
+        "mcp__tos-buyer__tos_buyer_purchases",
+        "mcp__tos-buyer__tos_buyer_quote",
+        "mcp__tos-buyer__tos_buyer_refund",
+        "mcp__tos-buyer__tos_buyer_request_payment",
+        "mcp__tos-buyer__tos_buyer_result",
+        "mcp__tos-buyer__tos_buyer_search",
+        "mcp__tos-buyer__tos_buyer_status",
+        "mcp__tos-buyer__tos_buyer_withdraw"
+      ]
+    },
+    {
+      "id": "dry-check-passed-before-payment",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "id": "actor-code-hash-on-every-endpoint",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "id": "funding-journal-present",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "id": "model-credentials-scanned-and-deleted-before-the-record",
+      "ok": true,
+      "detail": {
+        "at": "2026-11-19T07:28:55.033536+00:00",
+        "token_values_scanned": 3,
+        "leaks": [],
+        "deleted": true
+      }
+    },
+    {
+      "id": "no-vault-or-credential-pattern-in-the-evidence",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "id": "tosctl-is-the-released-binary",
+      "ok": true,
+      "detail": "v2026.11-1"
+    },
+    {
+      "id": "binaries-added-after-start-are-in-build-json",
+      "ok": true,
+      "detail": [
+        "codex-code-mode-host",
+        "codex-exec-server"
+      ]
+    },
+    {
+      "id": "codex-verdict-agrees",
+      "ok": true,
+      "detail": "AGENT_OPERATED_PILOT_PASSED"
+    }
+  ],
+  "known_limitations": [
+    "no outside party took part: the core development team operated the provider, the buyer agent and the verifier agent",
+    "the payment confirmer is code under a fixed policy, not a human",
+    "every chain endpoint is a project-run validator reached through the project's pilot-rpc accounts; endpoint independence is not claimed",
+    "the packet relays are the team's test relays with a private CA; relay independence and production readiness are not claimed",
+    "the job source and the offer file were placed in the developer workspace by the operator, not by the model",
+    "a model's tool calls follow its prompt; the prompts and transcripts are kept and named by SHA-256, not published",
+    "a Receipt is the provider's attested statement of the digests it binds, not proof the computation was correct",
+    "no Gate E or Gate F claim: no public HTTPS gateway, no gateway was used at all",
+    "the provider used the production Service Actor, whose minimum windows are 3600 s"
+  ],
+  "record_sha256": "1b1e7bf4491cc586982feb40a7b55135748d60843470021827417724d7af4eb2",
+  "signatures": [
+    {
+      "role": "buyer",
+      "algorithm": "Ed25519",
+      "public_key_hex": "503c2743b9ade7011d277e32c5abc0fcf275e279dc58201df7ebe91ab8944ba7",
+      "signature_hex": "7921186c02f85c731d928bc1c6354fd7eb9663f426a6af90febde3f5036518cf83e0253abe5b1b690f4f70203999b4b519221197f6f1e0d145d453c5dacef206",
+      "signed_utc": "2026-11-19T07:42:00.624928+00:00",
+      "verified": true
+    },
+    {
+      "role": "provider",
+      "algorithm": "Ed25519",
+      "public_key_hex": "a5dbfef46628cb62bfb3f00cd015f07474459a16cecc7b1bf8515ed7beca0c46",
+      "signature_hex": "699e432186a34cd1c0b1a6ef80116482b9e655cd536dd979a8df08d9353b2841a043d92b9f192dc1b10fee5550ba4d73379b5592b73f9e46435a938055df1207",
+      "signed_utc": "2026-11-19T07:42:01.063711+00:00",
+      "verified": true
+    },
+    {
+      "role": "verifier",
+      "algorithm": "Ed25519",
+      "public_key_hex": "9434f2cc2aac25b81a57088b704317ffb37c97efe2ff13cb34486f00715ccef7",
+      "signature_hex": "0323163d2686ef14f01d3118c21bc58d39248c10444134efde16b35a052e2485410b7752b0cab03eb39b838d12e53301225a63068e8dc277d690262f67cf5c08",
+      "signed_utc": "2026-11-19T07:42:01.251945+00:00",
+      "verified": true
+    }
+  ]
+}
