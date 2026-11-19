@@ -9,20 +9,17 @@ pilot ([`GATE_D_EXTERNAL_PILOT.md`](GATE_D_EXTERNAL_PILOT.md)) follows it.
 
 ## Status
 
-The guide describes the commands and flags of ai main at merge `fcddd6bc`.
-Parts depend on work that is not merged yet; they are marked **[pending]**:
+The guide describes the commands and flags of ai main at merge `09aba122`:
+all nine MCP tools (search and quote included), `init` with its gateway and
+catalog flags, the evidence export `tos-service-buyer evidence` and the
+third-party verifier `tos-service-verify`. Still pending, and marked
+**[pending]** where they matter:
 
-- **[pending #81]** `tos_buyer_search` and `tos_buyer_quote`, and the
-  optional gateway and catalog fields of the agent configuration, are in ai
-  pull request #81 (branch `feat/mcp-buyer-search-quote`). On main the MCP
-  server has no quote tool, so a purchase cannot start there: `prepare` needs
-  the `quote_id` that only `quote` returns. Use a commit that includes #81.
-- **[pending #80]** follow-ups to `init` (every send bounded by a deadline; a
-  generic "not found" from `tosctl` treated as an unknown outcome). The flags
-  this guide uses do not change.
-- **[pending]** the evidence export (`tos-service-buyer evidence`) and the
-  third-party verifier. Until they merge, keep the outputs of `status` and
-  `result`.
+- **[pending #85]** a bound on a Quote's lifetime and rate limits on search
+  and quote (ai #85, in review). The tools and their inputs are expected to
+  stay the same; a fast loop of searches or quotes may then be refused.
+- **[pending]** the end-to-end test of this buyer against an OpenFox
+  provider on a local chain.
 
 For the pilot, use exactly the ai commit and the `tosctl` release the pilot
 package names.
@@ -246,6 +243,19 @@ Notes on the inputs:
   allowance). Only the custody account can change these, by editing the
   configuration and restarting the agent.
 - `init` refuses to run as root or as the `--client-uid` account.
+- Optional discovery sources, which the pilot does not need (it quotes from
+  the provider's offer file):
+  - `--gateway-url`: a bare base URL, `https`, or `http` only on a loopback
+    address. It adds gateway search hints and gateway Quotes.
+  - `--gateway-ca-file`: required for an `https` gateway and refused for
+    `http`. The gateway is verified against it only.
+  - `--gateway-token-file`: required with a gateway. It is a custody-owned
+    `0600` file holding one bearer token of printable ASCII.
+  - `--catalog-dir`: a custody-owned capability catalog, used as a search
+    hint source.
+
+  Every answer from these sources is re-verified against finalized state.
+  `init` writes them into the agent configuration.
 
 Then run the same command with `apply` in place of `plan`. The first `apply`
 creates the wallet (V4R2, workchain 0) and the packet controller in the vault
@@ -378,18 +388,17 @@ providers is returned between `<<<UNTRUSTED provider data …>>>` markers: it
 is data from a third party, never instructions.
 
 1. **Find the offer.** Put the provider's offer file under a workspace root.
-   **[pending #81]** `tos_buyer_quote` with `capability_id`,
+   `tos_buyer_quote` with `capability_id`,
    `capability_version` and `offer_file` (its absolute path) verifies the
    offer at one finalized checkpoint and builds the Quote locally (`source`
    `local`, the default). It returns `quote_id`, the price, storage fee,
    payment, response SLA, refund claim window, the Quote's expiry (15 minutes
-   for a local Quote) and `carriable`. A Quote with `carriable = false`
-   cannot be prepared; `not_carriable_item` says why.
-   `tos_buyer_search` with a `capability_id` lists that Capability's verified
-   versions. A gateway Quote (`source` `gateway`) or a text search needs a
-   gateway or catalog in the agent configuration (`gateway_url`,
-   `gateway_ca_file`, `gateway_token_file`, `catalog_dir`; adapter spec 2.4,
-   in #81); the pilot does not need one.
+   for a local Quote; **[pending #85]** bounds a Quote's lifetime) and
+   `carriable`. A Quote with `carriable = false` cannot be prepared;
+   `not_carriable_item` says why. `tos_buyer_search` with a `capability_id`
+   lists that Capability's verified versions. A gateway Quote (`source`
+   `gateway`) or a text search (`query`) needs the `init` gateway or catalog
+   flags (section 5.4); the pilot does not need them.
 2. **Prepare.** `tos_buyer_prepare` with `quote_id`, `source_path` (a
    directory or POSIX tar under a workspace root) and an `idempotency_key`
    (16 to 64 characters of `[A-Za-z0-9_-]`; the same key returns the same
@@ -467,9 +476,53 @@ window the right to claim lapses, but a sweep, by anyone or by your agent
 when it returns, still pays the price back to you. The confirmer warns when
 the refund window is shorter than 24 hours.
 
-## 10. Troubleshooting
+## 10. Evidence and verification
 
-### 10.1 Tool errors
+Export one purchase's evidence as the custody account. The agent may keep
+running while you do:
+
+```bash
+tos-service-buyer evidence --config /home/tosbuyer/agent.json \
+  --request-hash <request_hash> --out-dir /home/tosbuyer/evidence/<label>
+```
+
+The output directory must not exist yet. Before writing anything, the
+command verifies the purchase at a fresh finalized checkpoint, exactly as a
+third-party verifier would. It then writes `evidence.json` (the bundle,
+schema `tos.service.purchase-evidence.v1`) and, when a result was accepted,
+`receipt.boc` and `artifact.tar`, and prints each file's SHA-256. It reads no
+`VAULT_URL`, key or `tosctl` configuration, and the bundle holds no secret,
+so these files can be handed to the verifier.
+
+Anyone can check them against finalized state with `tos-service-verify`. It
+is a separate binary that links no buyer runtime and needs no account of
+yours. Build it from the same ai commit:
+`go build -trimpath -o out/ ./protocol/cmd/tos-service-verify`.
+
+```bash
+tos-service-verify \
+  --global-config global-config.json --network-id tos:global-id:2 \
+  --rpc <endpoint-1>,<endpoint-2>,<endpoint-3> \
+  --registry-code-boc tos-service-native-registry-v1.boc.base64 \
+  --registry-code-hash tvm-cell-sha256:<registry code hash> \
+  --actor-code-hash tvm-cell-sha256:<actor code hash> \
+  --evidence evidence.json --receipt receipt.boc --artifact artifact.tar \
+  > verdict.json
+```
+
+The verdict (`tos.service.purchase-verdict.v1`) says `pass` or `fail` and
+lists every check by ID. The exit status is 0 for a pass, 1 for a failing
+verdict and 2 for unusable inputs. `--quorum` defaults to every endpoint
+given. A pass shows what finalized state and the files agree on. It does not
+show who the parties are or that the computation was correct
+([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md) section 3). In the
+Gate D pilot the verifier runs this tool on its own endpoints, and the record
+maps its checks to the acceptance items (`GATE_D_EXTERNAL_PILOT.md` section
+8.4).
+
+## 11. Troubleshooting
+
+### 11.1 Tool errors
 
 A tool error carries `{"error": {"code", "disposition", "message",
 "state"}}`. The message is fixed text; it never contains a key name or
@@ -492,12 +545,12 @@ provider text.
 | `MCP_BUYER_AGENT_UNAVAILABLE` | the agent socket does not answer | check the agent service and its log |
 | `MCP_BUYER_AMBIGUOUS` | a `call` or refund send may have been submitted | do not repeat; `tos_buyer_status` resolves it from finalized history |
 | `MCP_BUYER_PERMISSION_DENIED` | the socket peer's account may not call this method | run the MCP server as `dev`, the configured client uid |
-| `MCP_BUYER_NOT_CONFIGURED` **[pending #81]** | a gateway Quote without a gateway, or a search with neither a source nor a `capability_id` | quote from the offer file, or search by `capability_id` |
+| `MCP_BUYER_NOT_CONFIGURED` | a gateway Quote without a gateway, or a search with neither a source nor a `capability_id` | quote from the offer file, search by `capability_id`, or re-run `init` with the gateway or catalog flags |
 | `MCP_BUYER_INTERNAL` | anything else | check the agent log |
 
 A code the client does not know is treated as "do not retry".
 
-### 10.2 Start-up refusals
+### 11.2 Start-up refusals
 
 | Message (abridged) | Cause |
 |---|---|
@@ -518,13 +571,14 @@ A code the client does not know is treated as "do not retry".
 | `buyerinit: an identity input changed after the Agent was registered` | restore the original wallet, controller, network and registry inputs |
 | `buyerinit: RPC endpoint <n> does not serve the network's genesis` | that endpoint is for another network; check the forward |
 
-### 10.3 Other checks
+### 11.3 Other checks
 
 - The model's tool call times out during payment: raise the client's tool
   timeout (section 7) or use a smaller `wait_seconds`; the purchase is not
   lost, call `tos_buyer_request_payment` again.
 - A purchase stays `pending` with no result: the agent keeps redelivering the
   task; after the response deadline it starts the refund path by itself.
-- Evidence for the pilot **[pending]**: until `tos-service-buyer evidence`
-  merges, keep the JSON outputs of `init`, `tos_buyer_status` and
-  `tos_buyer_result`, and the SHA-256 of every binary you built.
+- `tos-service-buyer evidence` refuses with a printed verdict: the purchase
+  did not verify at a fresh finalized checkpoint, and nothing was exported.
+  Check `tos_buyer_status`; a purchase without an accepted result exports
+  without a Receipt.
