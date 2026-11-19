@@ -64,7 +64,8 @@ NATIVECORE = "protocol/pkg/nativecore/"
 SERVICEACTOR = "protocol/pkg/serviceactor/"
 
 # (name, file from the repository root, original text, mutated text, test
-# that must fail). The test runs in the mutated file's package.
+# that must fail[, build tags]). The test runs in the mutated file's
+# package, built with the entry's tags when it names any.
 MUTANTS = [
     # Provider key card shape check a gateway runs before serving a card
     # next to a Quote (API.md, "Provider key card").
@@ -2426,6 +2427,19 @@ MUTANTS = [
      "\treturn jsonstrict.Decode(raw, value)",
      "\t_ = jsonstrict.Decode\n\treturn json.Unmarshal(raw, value)",
      "TestTheAgentConfigurationIsReadStrictly"),
+    # Every gateway request states a deadline the gateway accepts.
+    ("gateway-quote-deadline", AGENT + "market.go",
+     '\tstamped.Context = gatewayContext("buyer-"+hex.EncodeToString(nonce[:]), quoteCaller, o.config.Now())',
+     '\tstamped.Context = &nativev1.RequestContext{RequestId: "buyer-" + hex.EncodeToString(nonce[:]), CallerId: quoteCaller}',
+     "TestAGatewayQuoteIsCrossCheckedAgainstTheFinalizedOffer"),
+    ("gateway-hint-deadline", AGENT + "hints.go",
+     '\trequest := gatewayContext("buyer-search", hintCaller, g.now())',
+     '\trequest := &nativev1.RequestContext{RequestId: "buyer-search", CallerId: hintCaller}',
+     "TestGatewayAndCatalogHintsYieldIdentifiersWithinTheLimit"),
+    ("gateway-deadline-ahead", AGENT + "hints.go",
+     "\t\tDeadlineUnixMillis: now.Add(GatewayRequestDeadline).UnixMilli()}",
+     "\t\tDeadlineUnixMillis: now.UnixMilli()}",
+     "TestAGatewayQuoteIsCrossCheckedAgainstTheFinalizedOffer"),
     # The socket directory carries the shared group (section 2.3).
     ("socket-dir-setgid", AGENT + "peer_linux.go",
      "\tif info.Mode()&os.ModeSetgid == 0 {",
@@ -2608,6 +2622,18 @@ MUTANTS = [
      "\tinterval := time.Duration(r.config.Budget.DutyIntervalSecond) * time.Second",
      "\tinterval := time.Duration(r.config.Budget.DutyIntervalSecond) * time.Millisecond",
      "TestTheAgentRunsDutiesAndThePollerUntilItStops"),
+    # The e2e stand-in executor, built only with its tag: it never starts
+    # unnamed and never executes what the archive holds.
+    ("standin-named", "execution/cmd/software-work-executord-e2e/main.go",
+     "\tif !*standInFlag {",
+     "\tif false && !*standInFlag {",
+     "TestTheStandInRefusesToStartUnnamed", "e2eexec"),
+    ("standin-executes-nothing", "execution/cmd/software-work-executord-e2e/main.go",
+     "\t\tif _, err := io.Copy(sum, io.LimitReader(reader, header.Size)); err != nil {",
+     "\t\tbody, _ := io.ReadAll(io.LimitReader(reader, header.Size))\n\t\tsum.Write(body)\n"
+     "\t\tif process, startErr := os.StartProcess(\"/bin/sh\", []string{\"sh\", \"-c\", string(body)}, &os.ProcAttr{}); startErr == nil {\n"
+     "\t\t\t_, _ = process.Wait()\n\t\t}\n\t\tif false {",
+     "TestTheStandInReadsTheArchiveAndRunsNothing", "e2eexec"),
     # The third-party verifier: finalized actor, history and getters.
     ("ev-actor-code-hash", EVIDENCE + "verify.go",
      "if account.Address != v.input.Actor || account.CodeHash != v.input.ActorCodeHash {",
@@ -3354,6 +3380,15 @@ def package_of(file_name):
     return "./" + str(Path(file_name).parent)
 
 
+def tags_of(entry):
+    """The build tags of a mutant: its optional sixth element, else none."""
+    return entry[5] if len(entry) > 5 else ""
+
+
+def tag_flags(tags):
+    return ["-tags", tags] if tags else []
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", action="append", default=[], help="run only the named mutants")
@@ -3370,20 +3405,23 @@ def main():
     selected = [m for m in MUTANTS if not options.only or m[0] in options.only]
     redundant = [r for r in REDUNDANT if not options.only or r[0] in options.only]
 
-    packages = sorted({package_of(m[1]) for m in selected} | {package_of(r[1]) for r in redundant})
+    # A package is tested once per build-tag set its entries name.
+    packages = sorted({(package_of(m[1]), tags_of(m)) for m in selected} | {(package_of(r[1]), "") for r in redundant})
     tests = {}
-    for package in packages:
-        baseline = run(["go", "test", "-count=1", package], env)
+    for package, tags in packages:
+        baseline = run(["go", "test", "-count=1", *tag_flags(tags), package], env)
         if baseline.returncode != 0:
             print(f"script error: the unmutated package {package} does not pass\n" + baseline.stdout + baseline.stderr,
                   file=sys.stderr)
             return 2
-        tests[package] = set(run(["go", "test", "-list", ".", package], env).stdout.split())
+        tests[(package, tags)] = set(run(["go", "test", "-list", ".", *tag_flags(tags), package], env).stdout.split())
     survivors, errors = [], []
     with tempfile.TemporaryDirectory(prefix="buyeragent-mutants-") as scratch:
-        for name, file_name, original, mutated, test in selected:
+        for entry in selected:
+            name, file_name, original, mutated, test = entry[:5]
+            tags = tags_of(entry)
             package = package_of(file_name)
-            if test not in tests[package]:
+            if test not in tests[(package, tags)]:
                 errors.append(f"{name}: no test named {test} in {package}")
                 continue
             source = ROOT / file_name
@@ -3395,11 +3433,11 @@ def main():
             target.write_text(text.replace(original, mutated))
             overlay = Path(scratch) / f"{name}.json"
             overlay.write_text(json.dumps({"Replace": {str(source): str(target)}}))
-            build = run(["go", "test", "-c", "-o", os.devnull, f"-overlay={overlay}", package], env)
+            build = run(["go", "test", "-c", "-o", os.devnull, *tag_flags(tags), f"-overlay={overlay}", package], env)
             if build.returncode != 0:
                 errors.append(f"{name}: the mutant does not build:\n{build.stdout}{build.stderr}")
                 continue
-            result = run(["go", "test", "-count=1", f"-overlay={overlay}", "-run", f"^{test}$", package], env)
+            result = run(["go", "test", "-count=1", *tag_flags(tags), f"-overlay={overlay}", "-run", f"^{test}$", package], env)
             if result.returncode != 0 and f"--- FAIL: {test} " not in result.stdout:
                 # A failure that is not the named test failing (a panic
                 # elsewhere, a timeout, a build or init failure) proves

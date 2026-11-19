@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/capabilitycatalog"
@@ -26,16 +27,27 @@ var hintResults = []*nativev1.CapabilitySearchResultV1{
 
 type fakeDiscovery struct{ query string }
 
-func (d *fakeDiscovery) ListCapabilities(context.Context, *nativev1.ListCapabilitiesRequest) (*nativev1.ListCapabilitiesResponse, error) {
+// The fake discovery gateway applies the reference gateway's request
+// context rule at the wall clock GatewayHints uses by default.
+func (d *fakeDiscovery) ListCapabilities(_ context.Context, request *nativev1.ListCapabilitiesRequest) (*nativev1.ListCapabilitiesResponse, error) {
+	if err := checkGatewayContext(request.GetContext(), time.Now()); err != nil {
+		return nil, err
+	}
 	return &nativev1.ListCapabilitiesResponse{Capabilities: hintStates}, nil
 }
 
 func (d *fakeDiscovery) SearchCapabilities(_ context.Context, request *nativev1.SearchCapabilitiesRequest) (*nativev1.SearchCapabilitiesResponse, error) {
+	if err := checkGatewayContext(request.GetContext(), time.Now()); err != nil {
+		return nil, err
+	}
 	d.query = request.Query
 	return &nativev1.SearchCapabilitiesResponse{Results: hintResults}, nil
 }
 
-func (d *fakeDiscovery) GetSoftwareWorkManifest(context.Context, *nativev1.GetSoftwareWorkManifestRequest) (*nativev1.GetSoftwareWorkManifestResponse, error) {
+func (d *fakeDiscovery) GetSoftwareWorkManifest(_ context.Context, request *nativev1.GetSoftwareWorkManifestRequest) (*nativev1.GetSoftwareWorkManifestResponse, error) {
+	if err := checkGatewayContext(request.GetContext(), time.Now()); err != nil {
+		return nil, err
+	}
 	return &nativev1.GetSoftwareWorkManifestResponse{CanonicalCbor: []byte{1}}, nil
 }
 

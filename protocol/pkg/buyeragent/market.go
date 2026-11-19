@@ -595,7 +595,7 @@ func (o *Offers) stamped(request *nativev1.RequestQuoteProposalRequest) (*native
 		return nil, err
 	}
 	stamped := proto.Clone(request).(*nativev1.RequestQuoteProposalRequest)
-	stamped.Context = &nativev1.RequestContext{RequestId: "buyer-" + hex.EncodeToString(nonce[:]), CallerId: quoteCaller}
+	stamped.Context = gatewayContext("buyer-"+hex.EncodeToString(nonce[:]), quoteCaller, o.config.Now())
 	return stamped, nil
 }
 
