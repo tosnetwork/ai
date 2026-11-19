@@ -36,10 +36,17 @@ const (
 	MaxCandidates = 400
 	// MaxHintSources bounds the configured hint sources.
 	MaxHintSources = 8
-	// LocalQuoteTTL is how long a locally built Quote is valid, and the
-	// longest a gateway Quote may run: a later expiry would hold a budget
-	// reservation longer and widen the buyer card's window.
+	// LocalQuoteTTL is how long a locally built Quote is valid. With
+	// QuoteClockSkew it bounds how long any Quote may run: a later expiry
+	// would hold a budget reservation longer and widen the buyer card's
+	// window.
 	LocalQuoteTTL = 15 * time.Minute
+	// QuoteClockSkew is how far a gateway's clock may run ahead of the
+	// agent's. A gateway stamps its own clock plus the 15-minute lifetime,
+	// so without a margin a second of drift would refuse every gateway
+	// Quote. Five minutes is the clock skew the lifecycle sends already
+	// allow (section 11.2).
+	QuoteClockSkew = 5 * time.Minute
 	// SearchesPerMinute and QuotesPerMinute bound the searches and quotes
 	// the agent serves in any minute: each one costs quorum reads, and a
 	// search several per candidate.
@@ -542,8 +549,9 @@ func (o *Offers) Quote(ctx context.Context, params QuoteParams) (*nativev1.Reque
 	if err != nil {
 		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid, "the Quote does not validate", err)
 	}
-	if validated.Proposal.ExpiresAtUnixSeconds > uint64(now.Add(LocalQuoteTTL).Unix()) {
-		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid, "the Quote expires later than the 15-minute Quote lifetime", nil)
+	if validated.Proposal.ExpiresAtUnixSeconds > uint64(now.Add(LocalQuoteTTL+QuoteClockSkew).Unix()) {
+		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid,
+			"the Quote expires later than the 15-minute Quote lifetime and 5 minutes of clock skew", nil)
 	}
 	if err := crossCheckQuote(validated, offer); err != nil {
 		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid, "the Quote differs from the finalized offer", err)

@@ -525,8 +525,11 @@ finalized checkpoint**, the agent:
    version, provider, manifest digest, actor, actor code hash, attestor,
    policy version, `terms_hash`, price, storage fee, and a mode-2 transport.
    A Quote that differs in any field is refused (`MCP_BUYER_OFFER_INVALID`),
-   and so is a Quote expiring later than 15 minutes from now, the local
-   Quote lifetime. A longer expiry would hold the prepared call's budget
+   and so is a Quote expiring later than 20 minutes from now: the 15-minute
+   local Quote lifetime plus 5 minutes for a gateway clock that runs ahead
+   of the agent's (the clock skew 11.2 also allows). A gateway stamps its
+   own clock plus the lifetime, so without the margin any drift would
+   refuse its Quotes. A longer expiry would hold the prepared call's budget
    reservation longer and widen the buyer card's window (3.3).
    A gateway Quote may come with the provider's key card, which is how a
    buyer with no offer file reaches a provider it can contact only through a

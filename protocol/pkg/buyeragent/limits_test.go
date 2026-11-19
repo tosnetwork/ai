@@ -12,25 +12,34 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
-// A gateway Quote may run at most the local Quote lifetime: a later expiry
-// would hold the budget reservation longer and widen the buyer card.
+// A gateway Quote may run at most the local Quote lifetime plus the clock
+// skew a gateway may have: a later expiry would hold the budget reservation
+// longer and widen the buyer card. A gateway whose clock leads by up to the
+// skew stamps an expiry within it and is served.
 func TestAGatewayQuoteExpiringAfterTheQuoteLifetimeIsRefused(t *testing.T) {
 	f := newOffersFixture(t)
 	f.carrier.learn(t, f.providerCard(t, fxProvider))
 	binding := agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes)
-	at := uint64(fxNow.Add(LocalQuoteTTL).Unix())
-	f.gateway.response = &nativev1.RequestQuoteProposalResponse{Package: gatewayPackage(t, binding,
-		func(p *nativev1.QuoteProposalV1) { p.ExpiresAtUnixSeconds = at })}
-	if view := f.quote(t, gatewayParams()); view.QuoteExpiresUnix != at {
-		t.Fatalf("a Quote expiring at the lifetime: %+v", view)
+	expiring := func(lead time.Duration) {
+		at := uint64(fxNow.Add(LocalQuoteTTL + lead).Unix())
+		f.gateway.response = &nativev1.RequestQuoteProposalResponse{Package: gatewayPackage(t, binding,
+			func(p *nativev1.QuoteProposalV1) { p.ExpiresAtUnixSeconds = at })}
 	}
-	f.gateway.response = &nativev1.RequestQuoteProposalResponse{Package: gatewayPackage(t, binding,
-		func(p *nativev1.QuoteProposalV1) { p.ExpiresAtUnixSeconds = at + 1 })}
-	if _, err := f.agent.Quote(context.Background(), gatewayParams()); err == nil || codeOf(t, err) != CodeOfferInvalid {
-		t.Fatalf("a Quote expiring after the lifetime: %v", err)
+	for _, lead := range []time.Duration{0, time.Second, 4 * time.Minute, QuoteClockSkew} {
+		expiring(lead)
+		if view, err := f.agent.Quote(context.Background(), gatewayParams()); err != nil ||
+			view.QuoteExpiresUnix != uint64(fxNow.Add(LocalQuoteTTL+lead).Unix()) {
+			t.Fatalf("a gateway clock %v ahead: %+v %v", lead, view, err)
+		}
 	}
-	if quotes, err := os.ReadDir(f.agent.store.dir("quotes")); err != nil || len(quotes) != 2 {
-		t.Fatalf("the refused Quote was stored: %d %v", len(quotes), err)
+	for _, lead := range []time.Duration{QuoteClockSkew + time.Second, 6 * time.Minute} {
+		expiring(lead)
+		if _, err := f.agent.Quote(context.Background(), gatewayParams()); err == nil || codeOf(t, err) != CodeOfferInvalid {
+			t.Fatalf("a Quote expiring %v past the lifetime: %v", lead, err)
+		}
+	}
+	if quotes, err := os.ReadDir(f.agent.store.dir("quotes")); err != nil || len(quotes) != 5 {
+		t.Fatalf("a refused Quote was stored: %d %v", len(quotes), err)
 	}
 }
 
