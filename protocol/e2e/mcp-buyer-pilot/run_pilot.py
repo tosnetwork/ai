@@ -471,23 +471,35 @@ def sign_record(record_sha256: str) -> None:
     event("record signed", roles=[s["role"] for s in signatures])
 
 
-def in_switch_window(unix: float) -> bool:
-    """xx:20-xx:40 of an odd UTC hour: the validator-set switches at :30."""
-    moment = datetime.datetime.fromtimestamp(unix, datetime.timezone.utc)
-    return moment.hour % 2 == 1 and 20 <= moment.minute < 40
+SWITCH_QUIET_SECONDS = 600
 
 
-def next_clear(start: int, spans: list[tuple[int, int]]) -> int:
+def switch_times() -> list[int]:
+    """Validator-set switch times read from the chain: ConfigParam 34's
+    utime_until and 36's utime_since and utime_until, continued on their
+    period. Read fresh at every hold, since a late election shifts them."""
+    times = harness("buyer", "validator-set-times", timeout=120)
+    known = sorted({t for param in times.values() if param for t in (param["utime_since"], param["utime_until"])})
+    current = times["34"]
+    period = current["utime_until"] - current["utime_since"]
+    last = known[-1]
+    state.setdefault("validator_set_times", []).append({"at": now(), **times})
+    return known + [last + k * period for k in range(1, 6)]
+
+
+def next_clear(start: int, spans: list[tuple[int, int]], switches: list[int]) -> int:
     """The first time >= start at which every span (offsets in seconds) of
-    the sends it starts stays outside every switch window."""
+    the sends it starts stays more than SWITCH_QUIET_SECONDS from every
+    switch."""
     candidate = start
-    while any(in_switch_window(candidate + offset) for low, high in spans for offset in range(low, high + 1, 30)):
+    while any(abs(candidate + offset - switch) < SWITCH_QUIET_SECONDS for low, high in spans
+              for offset in range(low, high + 1, 30) for switch in switches):
         candidate += 60
     return candidate
 
 
 def hold_until_clear(what: str, spans: list[tuple[int, int]]) -> None:
-    start = next_clear(int(time.time()), spans)
+    start = next_clear(int(time.time()), spans, switch_times())
     if start > time.time():
         event(f"holding {what} so its sends clear the set switches", until_unix=start)
         time.sleep(start - time.time())
@@ -513,12 +525,12 @@ def cmd_purchases() -> None:
     event("the provider holds R", operator_state=held)
     provider("pause")
     # F's response deadline, when the buyer agent sends expire and
-    # claim_refund, must not fall inside a validator-set switch window
-    # (xx:20-xx:40 of odd UTC hours); PILOT_F_NOT_BEFORE (Unix seconds)
-    # holds F's payment until a time the operator chose for that.
+    # claim_refund, must stay 10 minutes clear of every validator-set switch
+    # (read from ConfigParam 34 and 36); PILOT_F_NOT_BEFORE (Unix seconds)
+    # can hold F's payment later still.
     sla = int(profile["terms"]["response_sla_seconds"])
     not_before = max(int(os.environ.get("PILOT_F_NOT_BEFORE", "0")), int(time.time()))
-    start_f = next_clear(not_before, [(0, 180), (sla, sla + 900)])
+    start_f = next_clear(not_before, [(0, 180), (sla, sla + 900)], switch_times())
     if start_f > time.time():
         event("holding F so its call, deadline and refund sends clear the set switches", until_unix=start_f)
         time.sleep(start_f - time.time())

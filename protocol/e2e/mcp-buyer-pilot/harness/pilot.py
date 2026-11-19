@@ -692,6 +692,51 @@ def chain_state(hashes: list[str]) -> dict:
                          for request in verdict.get("requests", [])]}
 
 
+def boc_root_data(boc: bytes) -> bytes:
+    """The data bytes of a BOC's root cell (enough for a config param's
+    leading fields)."""
+    if boc[:4] != bytes.fromhex("b5ee9c72"):
+        raise ValueError("not a BOC")
+    flags, offset_bytes = boc[4], boc[5]
+    size = flags & 7
+    field = lambda at: int.from_bytes(boc[at:at + size], "big")  # noqa: E731
+    cells, roots = field(6), field(6 + size)
+    position = 6 + 3 * size + offset_bytes
+    root = field(position)
+    position += size * roots
+    if flags & 0x80:
+        position += cells * offset_bytes
+    for index in range(cells):
+        descriptor1, descriptor2 = boc[position], boc[position + 1]
+        length = (descriptor2 + 1) // 2
+        if index == root:
+            return boc[position + 2:position + 2 + length]
+        position += 2 + length + (descriptor1 & 7) * size
+    raise ValueError("no root cell")
+
+
+def validator_set_times() -> dict:
+    """utime_since and utime_until of ConfigParam 34 (current set) and 36
+    (next set, when one is elected), at each endpoint; the set switches at
+    these times."""
+    result = {}
+    for config_id in (34, 36):
+        seen = set()
+        for _, _, port in VALIDATORS:
+            answer = rpc(port, "getConfigParam", config_id=config_id).get("result") or {}
+            cell = ((answer.get("config") or {}).get("bytes")) or ""
+            if not cell:
+                seen.add(None)
+                continue
+            data = boc_root_data(base64.b64decode(cell))
+            seen.add((int.from_bytes(data[1:5], "big"), int.from_bytes(data[5:9], "big")))
+        if len(seen) != 1:
+            raise RuntimeError(f"the endpoints disagree on ConfigParam {config_id}")
+        value = seen.pop()
+        result[str(config_id)] = None if value is None else {"utime_since": value[0], "utime_until": value[1]}
+    return result
+
+
 def export(label: str, request_hash: str) -> dict:
     custody = HOME["custody"]
     account_dir(custody / "exports", "custody")
@@ -791,6 +836,9 @@ def main(argv: list[str]) -> int:
     command, args = argv[0], argv[1:]
     if command == "serve" and len(args) == 1:
         return serve(args[0])
+    if command == "validator-set-times":
+        print(json.dumps(validator_set_times()))
+        return 0
     if command == "chain-state":
         print(json.dumps(chain_state(args)))
         return 0
