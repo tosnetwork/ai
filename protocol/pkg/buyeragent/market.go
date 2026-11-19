@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -35,9 +36,44 @@ const (
 	MaxCandidates = 400
 	// MaxHintSources bounds the configured hint sources.
 	MaxHintSources = 8
-	// LocalQuoteTTL is how long a locally built Quote is valid.
+	// LocalQuoteTTL is how long a locally built Quote is valid, and the
+	// longest a gateway Quote may run: a later expiry would hold a budget
+	// reservation longer and widen the buyer card's window.
 	LocalQuoteTTL = 15 * time.Minute
+	// SearchesPerMinute and QuotesPerMinute bound the searches and quotes
+	// the agent serves in any minute: each one costs quorum reads, and a
+	// search several per candidate.
+	SearchesPerMinute = 30
+	QuotesPerMinute   = 20
 )
+
+// rateWindow admits at most limit events in any window.
+type rateWindow struct {
+	mu     sync.Mutex
+	limit  int
+	window time.Duration
+	times  []time.Time
+}
+
+// admit records an event at now unless limit events already fall within
+// the window before it. An event stamped after now (a clock stepped back)
+// still counts.
+func (r *rateWindow) admit(now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.times[:0]
+	for _, at := range r.times {
+		if now.Sub(at) < r.window {
+			kept = append(kept, at)
+		}
+	}
+	r.times = kept
+	if len(r.times) >= r.limit {
+		return false
+	}
+	r.times = append(r.times, now)
+	return true
+}
 
 // Quote sources.
 const (
@@ -86,7 +122,11 @@ type OffersConfig struct {
 // Offers runs search and quote. Every fact it returns is read at one
 // finalized checkpoint; hint sources, offer files and gateways only name
 // candidates and supply bytes the finalized digests check.
-type Offers struct{ config OffersConfig }
+type Offers struct {
+	config   OffersConfig
+	searches *rateWindow
+	quotes   *rateWindow
+}
 
 // NewOffers refuses an incomplete configuration.
 func NewOffers(config OffersConfig) (*Offers, error) {
@@ -113,7 +153,8 @@ func NewOffers(config OffersConfig) (*Offers, error) {
 	}
 	config.Network = proto.Clone(config.Network).(*nativev1.NetworkDomain)
 	config.Hints = append([]HintSource(nil), config.Hints...)
-	return &Offers{config: config}, nil
+	return &Offers{config: config, searches: &rateWindow{limit: SearchesPerMinute, window: time.Minute},
+		quotes: &rateWindow{limit: QuotesPerMinute, window: time.Minute}}, nil
 }
 
 func pinnedCellHash(value string) bool {
@@ -254,6 +295,9 @@ func (o *Offers) Search(ctx context.Context, params SearchParams) (SearchView, e
 	after, err := params.check()
 	if err != nil {
 		return SearchView{}, err
+	}
+	if !o.searches.admit(o.config.Now()) {
+		return SearchView{}, refusal(CodeRateLimited, "too many searches in the last minute", nil)
 	}
 	view := SearchView{Offers: []OfferView{}}
 	seen := map[serviceactorindex.Candidate]bool{}
@@ -442,6 +486,9 @@ func (o *Offers) Quote(ctx context.Context, params QuoteParams) (*nativev1.Reque
 	if err != nil {
 		return nil, nil, QuoteView{}, err
 	}
+	if !o.quotes.admit(o.config.Now()) {
+		return nil, nil, QuoteView{}, refusal(CodeRateLimited, "too many quotes in the last minute", nil)
+	}
 	request := &nativev1.RequestQuoteProposalRequest{CapabilityId: params.CapabilityID,
 		CapabilityVersion: params.CapabilityVersion, BuyerAddress: o.config.BuyerWallet}
 	var value *nativev1.QuoteProposalPackageV1
@@ -494,6 +541,9 @@ func (o *Offers) Quote(ctx context.Context, params QuoteParams) (*nativev1.Reque
 	validated, err := quoteexchange.Validate(o.config.Network, request, value, now)
 	if err != nil {
 		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid, "the Quote does not validate", err)
+	}
+	if validated.Proposal.ExpiresAtUnixSeconds > uint64(now.Add(LocalQuoteTTL).Unix()) {
+		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid, "the Quote expires later than the 15-minute Quote lifetime", nil)
 	}
 	if err := crossCheckQuote(validated, offer); err != nil {
 		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid, "the Quote differs from the finalized offer", err)
