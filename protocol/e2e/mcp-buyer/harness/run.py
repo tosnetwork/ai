@@ -617,12 +617,22 @@ def scenario_gateway_purchase(offer: dict) -> None:
     record("the agent's result round after acceptance (ack sent or due)", bool((duty.get("result") or {}).get("accepted")),
            duty.get("result"))
 
-    def provider_entry() -> dict:
-        status = json.loads(openfox("status", "--rail-config", str(PROVIDER_RAIL / "rail.json")).stdout)
-        return next((r for r in status.get("requests", []) if r.get("request_hash") == request_hash), {})
-    acked = poll(lambda: provider_entry().get("operator_state") == "acked", 600, 15)
-    entry = provider_entry()
-    record("OpenFox recorded the buyer's ack", acked is not None, entry)
+    # OpenFox's status is chain-first: delivering and acked both project to
+    # operator_state "responded". The ack is visible only in the provider's
+    # local record, whose state moves from "delivering" to "acked" when the
+    # buyer's ack for this request and result arrives.
+    def provider_record() -> dict:
+        records = PROVIDER_RAIL / "provider"
+        names = as_account("provider", ["/usr/bin/find", str(records), "-maxdepth", "1", "-name", "*.json"]).stdout
+        for name in names.split():
+            entry = json.loads(as_account("provider", ["/bin/cat", name]).stdout)
+            if entry.get("request_hash") == request_hash:
+                return entry
+        return {}
+    acked = poll(lambda: provider_record().get("state") == "acked", 600, 15)
+    entry = provider_record()
+    record("OpenFox recorded the buyer's ack (its local request record is acked)", acked is not None,
+           {"state": entry.get("state"), "detail": entry.get("detail")})
 
 
 # --- Negatives that need no purchase --------------------------------------------
