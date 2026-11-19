@@ -64,7 +64,9 @@ func TestTheAgentReadsTheConfigurationInitWrites(t *testing.T) {
 		PacketControllerKeyID: "mldsa44:" + strings.Repeat("88", 32), Relays: []string{"https://relay.example"},
 		RelayCAFile: "/srv/buyer/ca.pem", Budget: buyerinit.BudgetConfig{WindowSeconds: 86_400, MaxCalls: 100,
 			MaxPerCallNanoTOS: "1000000000", MaxWindowNanoTOS: "10000000000", MaxUnconfirmed: 4, MaxLifecycleSends: 9,
-			DutyIntervalSecond: 30}}
+			DutyIntervalSecond: 30},
+		GatewayURL: "https://gateway.example", GatewayCAFile: "/srv/buyer/gateway-ca.pem",
+		GatewayTokenFile: "/srv/buyer/gateway.token", CatalogDir: "/srv/buyer/catalog"}
 	raw, err := json.Marshal(written)
 	if err != nil {
 		t.Fatal(err)
