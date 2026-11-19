@@ -82,17 +82,29 @@ type receivedRecord struct {
 const receivedSchema = "tos.service.mcp-buyer.received.v1"
 
 func (c *Carrier) receivedPath(requestHash string) string {
-	return filepath.Join(c.config.StateDir, "received", requestHash+".json")
+	return receivedPathAt(c.config.StateDir, requestHash)
+}
+
+func receivedPathAt(stateDir, requestHash string) string {
+	return filepath.Join(stateDir, "received", requestHash+".json")
 }
 
 // ArtifactPath is where an accepted result's artifact is kept.
 func (c *Carrier) ArtifactPath(requestHash string) string {
-	return filepath.Join(c.config.StateDir, "received", requestHash+".artifact")
+	return artifactPathAt(c.config.StateDir, requestHash)
+}
+
+func artifactPathAt(stateDir, requestHash string) string {
+	return filepath.Join(stateDir, "received", requestHash+".artifact")
 }
 
 func (c *Carrier) readReceived(requestHash string) (receivedRecord, error) {
+	return readReceivedAt(c.config.StateDir, requestHash)
+}
+
+func readReceivedAt(stateDir, requestHash string) (receivedRecord, error) {
 	record := receivedRecord{Schema: receivedSchema, RequestHash: requestHash}
-	err := readJSON(c.receivedPath(requestHash), &record)
+	err := readJSON(receivedPathAt(stateDir, requestHash), &record)
 	if errors.Is(err, os.ErrNotExist) {
 		return receivedRecord{Schema: receivedSchema, RequestHash: requestHash}, nil
 	}
