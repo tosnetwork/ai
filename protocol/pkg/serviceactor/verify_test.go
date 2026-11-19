@@ -54,8 +54,15 @@ func msgAddress(t *testing.T, raw string) nativecore.MsgAddressV1 {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureFor(t, testCode, 3600, 3600)
+}
+
+// newFixtureFor builds the bound offer of an actor running code with these
+// windows.
+func newFixtureFor(t *testing.T, code [32]byte, responseSLA, refundClaimWindow uint32) *fixture {
+	t.Helper()
 	network := servicefixture.Network()
-	settlement := servicefixture.Settlement{ActorAccount: bytes.Repeat([]byte{0x77}, 32), ActorCodeHash: testCode[:],
+	settlement := servicefixture.Settlement{ActorAccount: bytes.Repeat([]byte{0x77}, 32), ActorCodeHash: code[:],
 		AttestorKey: mldsa44.KeyIDText(testKeyID)}
 	manifest := servicefixture.Manifest("1.0.0", settlement)
 	_, digest, err := nativecore.CanonicalSoftwareWorkManifest(manifest)
@@ -76,7 +83,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	policy := nativecore.ServiceActorPolicyV1{PolicyVersion: 2, PricePerCall: big.NewInt(300_000_000), StorageFee: big.NewInt(200_000_000),
-		CleanupBounty: big.NewInt(100_000_000), ResponseSLA: 3600, RefundClaimWindow: 3600, OpenAccess: true,
+		CleanupBounty: big.NewInt(100_000_000), ResponseSLA: responseSLA, RefundClaimWindow: refundClaimWindow, OpenAccess: true,
 		AuthorizedCaller: msgAddress(t, testOwner), MetadataHash: metadata, ProofSchemeHash: nativecore.ServiceActorSoftwareWorkProofScheme,
 		HasAttestor: true, AttestorKeyID: testKeyID, AttestorKey: testKey}
 	data := &nativecore.ServiceActorDataV1{Owner: msgAddress(t, testOwner), Active: true, Policy: policy,
@@ -86,7 +93,7 @@ func newFixture(t *testing.T) *fixture {
 		CallerLiveCounts: map[[32]byte]uint32{}}
 	evidence := &Evidence{Checkpoint: 42, ChainTime: time.Unix(1_000_100, 0), Network: network, Capability: capability, Agent: agent,
 		Version: "1.0.0", ManifestDigest: digest, Manifest: manifest,
-		Actor: &toschain.ActorAccount{Address: testActor, CodeHash: "tvm-cell-sha256:" + hex.EncodeToString(testCode[:]), Data: data}}
+		Actor: &toschain.ActorAccount{Address: testActor, CodeHash: "tvm-cell-sha256:" + hex.EncodeToString(code[:]), Data: data}}
 	termsHash, err := nativecore.ServiceActorTermsHash(nativecore.TermsOfPolicy(policy))
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +101,7 @@ func newFixture(t *testing.T) *fixture {
 	proposal := &nativev1.QuoteProposalV1{ProposalId: "p", CapabilityId: testCapability, CapabilityVersion: "1.0.0",
 		ProviderAgentId: testOwnerAgent, ManifestDigest: digest, TransportBindingDigest: "sha256:" + strings.Repeat("66", 32),
 		ExpiresAtUnixSeconds: 2_000_000, Actor: &nativev1.TOSAccountAddressV1{AccountId: bytes.Repeat([]byte{0x77}, 32)},
-		ActorCodeHash: "tvm-cell-sha256:" + hex.EncodeToString(testCode[:]), PolicyVersion: 2, TermsHash: hex.EncodeToString(termsHash[:]),
+		ActorCodeHash: "tvm-cell-sha256:" + hex.EncodeToString(code[:]), PolicyVersion: 2, TermsHash: hex.EncodeToString(termsHash[:]),
 		PriceNanotos: "300000000", StorageFeeNanotos: "200000000", AttestorKeyId: mldsa44.KeyIDText(testKeyID)}
 	f := &fixture{evidence: evidence, proposal: proposal}
 	f.reparse(t)

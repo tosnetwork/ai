@@ -47,6 +47,39 @@ const (
 	serviceRequestMagic       = 0x4e535231 // NSR1
 )
 
+// ServiceActorTestProfileMinimumWindowSeconds is the response_sla and
+// refund_claim_window lower bound of the TEST-NETWORK-ONLY Service Actor
+// build (tos crypto/smartcont/tos-service-actor-v1-test.release.json).
+const ServiceActorTestProfileMinimumWindowSeconds = 600
+
+// ServiceActorReleaseCodeHash is the code hash of the released Service Actor
+// (tos crypto/smartcont/tos-service-actor-v1.release.json).
+var ServiceActorReleaseCodeHash = [32]byte{
+	0x05, 0x94, 0xf9, 0xa5, 0x74, 0x34, 0x40, 0xf9, 0xc5, 0xf6, 0x39, 0x13, 0xab, 0x79, 0x0c, 0x0e,
+	0xa6, 0xf4, 0xfd, 0x5c, 0x62, 0x7d, 0x99, 0x62, 0xd6, 0x3e, 0x09, 0x42, 0x8e, 0x42, 0xaa, 0x0c,
+}
+
+// ServiceActorTestProfileCodeHash is the code hash of the TEST-NETWORK-ONLY
+// Service Actor build: the release source with only MIN_RESPONSE_SLA and
+// MIN_REFUND_CLAIM_WINDOW lowered to 600 seconds. It must never be pinned on
+// a production network.
+var ServiceActorTestProfileCodeHash = [32]byte{
+	0x79, 0xa5, 0x66, 0xf5, 0xf4, 0x28, 0x1f, 0x7a, 0xbe, 0x59, 0xcd, 0x1c, 0x16, 0xa7, 0xbc, 0x3b,
+	0x2d, 0x99, 0x0e, 0x84, 0x0f, 0x42, 0xb0, 0x0d, 0x55, 0xcb, 0x0a, 0xe4, 0xb0, 0x54, 0x59, 0x60,
+}
+
+// ServiceActorMinimumWindowSecondsFor is the response_sla and
+// refund_claim_window lower bound enforced by the actor code with this code
+// hash. Only the pinned test-profile code hash lowers it; every other code,
+// the release included, gets ServiceActorMinimumWindowSeconds. The bound
+// follows the code a policy runs under and is never configurable.
+func ServiceActorMinimumWindowSecondsFor(codeHash [32]byte) uint32 {
+	if codeHash == ServiceActorTestProfileCodeHash {
+		return ServiceActorTestProfileMinimumWindowSeconds
+	}
+	return ServiceActorMinimumWindowSeconds
+}
+
 // ServiceActorSoftwareWorkProofScheme is the proof_scheme_hash of the
 // software-work profile: SHA-256 of its ASCII scheme name.
 var ServiceActorSoftwareWorkProofScheme = sha256.Sum256([]byte("tos.service.service-actor.receipt.software-work-v1"))

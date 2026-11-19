@@ -26,6 +26,23 @@ Clients pin this code hash and refuse an actor with any other code
 (`SERVICE_ACTOR_SETTLEMENT_DESIGN.md` section 2.4 step 3). Changing the
 contract requires a new release manifest and new vectors.
 
+**Test-only build.** tos `crypto/smartcont/tos-service-actor-v1-test.release.json`
+pins a second build of the same source, for test networks only. It sets
+`MIN_RESPONSE_SLA` and `MIN_REFUND_CLAIM_WINDOW` to 600 seconds, and nothing
+else changes:
+
+```text
+code hash   tvm-cell-sha256:79a566f5f4281f7abe59cd1c16a7bc3b2d990e840f42b00d55cb0ae4b0545960
+BOC sha256  sha256:c77cfda33feca51c26c991f48575fa54c30b988731a37a5b5148c50148c2435c
+BOC size    4,590 bytes
+```
+
+It is not a release. Production clients pin the release code hash above and
+refuse it. A test deployment pins this hash in place of the release hash.
+`nativecore.ServiceActorMinimumWindowSecondsFor` gives 600 seconds only for this
+exact code hash and 3,600 seconds for any other code; it is not a
+configuration setting.
+
 **Vectors.** Cross-language conformance vectors come from executing the
 release code. They are tos
 `tosctl/src/node-control/contracts/tests/fixtures/service_actor/conformance-vectors.json`
@@ -81,7 +98,7 @@ SA:133, SA:171-203:
 | `MINIMUM_STORAGE_FEE` | 0.1 TOS; `storage_fee >= MINIMUM_STORAGE_FEE + cleanup_bounty` |
 | `MINIMUM_OPERATING_RESERVE` | 1 TOS |
 | `ADMISSION_GAS_ALLOWANCE` / `PAYOUT_GAS_ALLOWANCE` | 0.2 TOS each, unused value returned |
-| `response_sla`, `refund_claim_window` | 3,600 to 2,592,000 seconds each |
+| `response_sla`, `refund_claim_window` | 3,600 to 2,592,000 seconds each (600 to 2,592,000 in the test-only build) |
 | `MAX_LIVE_GLOBAL` / `MAX_LIVE_PER_CALLER` | 100,000 / 1,000 |
 
 The 0.2 TOS allowances must be confirmed by the gas gates on the changed

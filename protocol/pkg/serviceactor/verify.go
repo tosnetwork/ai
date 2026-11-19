@@ -369,7 +369,7 @@ func VerifyAdmission(evidence *Evidence, pinnedCodeHash [32]byte, rail *nativeco
 	if policy.ProofSchemeHash != nativecore.ServiceActorSoftwareWorkProofScheme {
 		return nil, stepError(procedure, 6, "the actor's proof_scheme_hash is not the software-work Receipt scheme")
 	}
-	if err := checkPolicyBounds(policy); err != nil {
+	if err := checkPolicyBounds(policy, binding.ActorCodeHash); err != nil {
 		return nil, stepError(procedure, 7, "%v", err)
 	}
 	if buyer != "" {
@@ -398,16 +398,19 @@ func VerifyAdmission(evidence *Evidence, pinnedCodeHash [32]byte, rail *nativeco
 }
 
 // CheckPolicyBounds reports whether a policy's windows, bounty, storage fee
-// and price are inside the contract bounds admission step 7 enforces.
-func CheckPolicyBounds(policy nativecore.ServiceActorPolicyV1) error {
-	return checkPolicyBounds(policy)
+// and price are inside the contract bounds admission step 7 enforces for the
+// actor code with codeHash: the window lower bound is 600 seconds for the
+// test-profile code and 3,600 seconds for any other code.
+func CheckPolicyBounds(policy nativecore.ServiceActorPolicyV1, codeHash [32]byte) error {
+	return checkPolicyBounds(policy, codeHash)
 }
 
-func checkPolicyBounds(policy nativecore.ServiceActorPolicyV1) error {
-	if policy.ResponseSLA < nativecore.ServiceActorMinimumWindowSeconds || policy.ResponseSLA > nativecore.ServiceActorMaximumWindowSeconds {
+func checkPolicyBounds(policy nativecore.ServiceActorPolicyV1, codeHash [32]byte) error {
+	window := nativecore.ServiceActorMinimumWindowSecondsFor(codeHash)
+	if policy.ResponseSLA < window || policy.ResponseSLA > nativecore.ServiceActorMaximumWindowSeconds {
 		return errors.New("response_sla is outside the contract bounds")
 	}
-	if policy.RefundClaimWindow < nativecore.ServiceActorMinimumWindowSeconds || policy.RefundClaimWindow > nativecore.ServiceActorMaximumWindowSeconds {
+	if policy.RefundClaimWindow < window || policy.RefundClaimWindow > nativecore.ServiceActorMaximumWindowSeconds {
 		return errors.New("refund_claim_window is outside the contract bounds")
 	}
 	if policy.CleanupBounty.Cmp(big.NewInt(nativecore.ServiceActorMinimumCleanupBounty)) < 0 ||

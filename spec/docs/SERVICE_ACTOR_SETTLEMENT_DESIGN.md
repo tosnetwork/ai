@@ -166,7 +166,10 @@ the request to the Capability.
    (`get_attestor_key` or the decoded data);
 6. current `metadata_hash` equals `NSM1` recomputed from step 1 and the network;
    `proof_scheme_hash` equals the section 2.3 value;
-7. policy bounds (SA:518-526) and admission: `open_access = 1`, or both
+7. policy bounds (SA:518-526) of the code verified in step 3: the window lower
+   bound is 3,600 seconds, or 600 seconds only when that code is the
+   test-only build (`SERVICE_ACTOR_TVM_V1.md`, "Test-only build"); and
+   admission: `open_access = 1`, or both
    `has_authorized_caller = 1` and `authorized_caller` equals the buyer wallet
    (SAP:607-608); otherwise `call` aborts with 1923;
 8. `terms_hash` computed from the decoded current policy (SAP:263-291) equals the

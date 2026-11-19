@@ -13,7 +13,8 @@ search and quote checks: input re-validation, one finalized checkpoint per
 call and the cross-check of a gateway Quote against the finalized offer. It
 covers the purchase evidence path as well: the third-party verifier's checks
 (protocol/pkg/purchaseevidence, tos-service-verify) and the buyer's
-read-only `evidence` export. A mutant is applied through `go test
+read-only `evidence` export, and the Service Actor window lower bound,
+which follows the code the actor runs. A mutant is applied through `go test
 -overlay`, so the working tree is never modified.
 
 A mutant is caught only when its named test reports `--- FAIL: <test>`.
@@ -59,6 +60,8 @@ CHAIN = "protocol/pkg/toschain/"
 INIT = "protocol/pkg/buyerinit/"
 EVIDENCE = "protocol/pkg/purchaseevidence/"
 VERIFYCMD = "protocol/cmd/tos-service-verify/"
+NATIVECORE = "protocol/pkg/nativecore/"
+SERVICEACTOR = "protocol/pkg/serviceactor/"
 
 # (name, file from the repository root, original text, mutated text, test
 # that must fail[, build tags]). The test runs in the mutated file's
@@ -2893,6 +2896,36 @@ MUTANTS = [
      "\tif err := checkPrivateDir(stateDir); err != nil {\n\t\treturn AcceptedResult{}, false, err\n\t}\n",
      "",
      "TestReadAcceptedResultNeedsAPrivateCarrierDirectory"),
+    # The Service Actor window lower bound follows the actor code: 600 s
+    # only for the pinned test-profile code, 3,600 s for every other code.
+    ("sa-window-any-code", NATIVECORE + "service_actor.go",
+     "\tif codeHash == ServiceActorTestProfileCodeHash {\n",
+     "\tif true {\n",
+     "TestServiceActorMinimumWindowFollowsTheCode"),
+    ("sa-window-test-code-not-lowered", NATIVECORE + "service_actor.go",
+     "\t\treturn ServiceActorTestProfileMinimumWindowSeconds\n",
+     "\t\treturn ServiceActorMinimumWindowSeconds\n",
+     "TestServiceActorMinimumWindowFollowsTheCode"),
+    ("sa-bounds-ignore-code", SERVICEACTOR + "verify.go",
+     "\twindow := nativecore.ServiceActorMinimumWindowSecondsFor(codeHash)\n",
+     "\twindow := uint32(nativecore.ServiceActorTestProfileMinimumWindowSeconds)\n",
+     "TestTenMinuteWindowsFollowTheActorCode"),
+    ("sa-admission-test-code", SERVICEACTOR + "verify.go",
+     "checkPolicyBounds(policy, binding.ActorCodeHash)",
+     "checkPolicyBounds(policy, nativecore.ServiceActorTestProfileCodeHash)",
+     "TestTenMinuteWindowsFollowTheActorCode"),
+    ("sa-admission-release-code", SERVICEACTOR + "verify.go",
+     "checkPolicyBounds(policy, binding.ActorCodeHash)",
+     "checkPolicyBounds(policy, nativecore.ServiceActorReleaseCodeHash)",
+     "TestTenMinuteWindowsFollowTheActorCode"),
+    ("sa-window-sla-bound", SERVICEACTOR + "verify.go",
+     "\tif policy.ResponseSLA < window ||",
+     "\tif policy.ResponseSLA < window-1 ||",
+     "TestTenMinuteWindowsFollowTheActorCode"),
+    ("sa-window-refund-bound", SERVICEACTOR + "verify.go",
+     "\tif policy.RefundClaimWindow < window ||",
+     "\tif policy.RefundClaimWindow < window-1 ||",
+     "TestTenMinuteWindowsFollowTheActorCode"),
 ]
 
 # (name, file, original text, text after deleting the check, why it is

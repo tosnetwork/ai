@@ -407,7 +407,14 @@ func actorFields(preview *PublicationPreview, input previewInput, manifest nativ
 	default:
 		preview.CallerAccess = field(PreviewMismatch, "closed", SourceFinalizedState, "the actor admits no caller")
 	}
-	if err := serviceactor.CheckPolicyBounds(policy); err != nil {
+	// The bounds are those of the code the account runs; a code hash that
+	// does not parse gets the release bounds.
+	var accountCode [32]byte
+	if raw, err := hex.DecodeString(strings.TrimPrefix(account.CodeHash, "tvm-cell-sha256:")); err == nil &&
+		len(raw) == len(accountCode) && strings.HasPrefix(account.CodeHash, "tvm-cell-sha256:") {
+		copy(accountCode[:], raw)
+	}
+	if err := serviceactor.CheckPolicyBounds(policy, accountCode); err != nil {
 		preview.PolicyBounds = field(PreviewMismatch, "", SourceFinalizedState, err.Error())
 	} else {
 		preview.PolicyBounds = field(PreviewVerified, "within contract bounds", SourceFinalizedState, "")
