@@ -145,6 +145,33 @@ func TestDomainSeparatorsAreUnique(t *testing.T) {
 	}
 }
 
+// A retired separator is never registered again. Code that uses one is
+// already refused by the registration walk, because retired separators are not
+// in the registry.
+func TestRetiredDomainSeparatorsStayRetired(t *testing.T) {
+	if len(RetiredDomains) == 0 {
+		t.Fatal("the retired separator list is empty")
+	}
+	live := make(map[string]struct{}, len(Domains))
+	for _, domain := range Domains {
+		live[domain] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(RetiredDomains))
+	for _, domain := range RetiredDomains {
+		if _, reused := live[domain]; reused {
+			t.Fatalf("retired domain separator %q is in use again", domain)
+		}
+		if _, duplicate := seen[domain]; duplicate {
+			t.Fatalf("retired domain separator %q is listed twice", domain)
+		}
+		seen[domain] = struct{}{}
+		if !strings.HasPrefix(domain, "tos.messaging.") || strings.Count(domain, "\x00") != 1 ||
+			!strings.HasSuffix(domain, "\x00") {
+			t.Fatalf("retired domain separator %q is malformed", domain)
+		}
+	}
+}
+
 func TestDomainSeparatorsAreWellFormed(t *testing.T) {
 	for _, domain := range Domains {
 		if !strings.HasPrefix(domain, "tos.messaging.") {

@@ -44,8 +44,8 @@ const (
 	Schema = "tos.messaging.event-journal.v1"
 	// canonicalStateMarker prevents a binary whose content-addressed network
 	// preimages changed from silently treating an older state tree as empty.
-	// There is deliberately no automatic upgrade: events, mandates, budgets,
-	// approvals and sessions must migrate as one reviewed transaction.
+	// There is deliberately no automatic upgrade: events, approvals and
+	// sessions must migrate as one reviewed transaction.
 	canonicalStateMarkerName = ".canonical-network-preimages"
 	canonicalStateMarker     = "tos.messaging.canonical-network-preimages.v2\n"
 
@@ -345,7 +345,7 @@ func openJournalAt(root string, quota Quota) (*Journal, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, errors.New("read legacy MLS ledger directory")
 	}
-	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, mandateDir, budgetDir, mandateBudgetDir, negotiationDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, roomMLSDir, roomStateDir, roomBlobDir, roomObjectChunkDir, roomOutboxDir, roomStagedDir, roomPartDir, roomBufferDir, roomAppliedDir, roomReceivedDir, roomSequenceDir, roomGapDir, roomJoinDir, roomRemovedDir, roomAddDir, roomSendDir, roomApplicationDir, roomCardDir, roomStopDir, presentedInviteDir, invitedContactDir, invitedContactTombstoneDir, executionDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayFloorDir, relayPullDir} {
+	for _, name := range []string{inboundDir, outboundDir, compositionDir, moderationDir, historySyncDir, directConversationDir, sessionDir, approvalDir, devicePrekeyDir, prekeyContributionDir, prekeyPublicationDir, deviceDir, roomDir, roomMLSDir, roomStateDir, roomBlobDir, roomObjectChunkDir, roomOutboxDir, roomStagedDir, roomPartDir, roomBufferDir, roomAppliedDir, roomReceivedDir, roomSequenceDir, roomGapDir, roomJoinDir, roomRemovedDir, roomAddDir, roomSendDir, roomApplicationDir, roomCardDir, roomStopDir, presentedInviteDir, invitedContactDir, invitedContactTombstoneDir, toolExecutionDir, agentPacketDir, admissionInviteDir, relayEvidenceDir, relayFloorDir, relayPullDir} {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
 			return nil, errors.New("create event journal directory")
 		}
@@ -362,13 +362,6 @@ func openJournalAt(root string, quota Quota) (*Journal, error) {
 	// left a decision nobody made. Finishing it here means recovery does not
 	// depend on the sender noticing and trying again.
 	if err := journal.recoverStaged(); err != nil {
-		_ = ownership.Close()
-		return nil, err
-	}
-	// The seam between budgets and negotiations is repaired the same way, for
-	// the same reason: a decision a crash interrupted is finished by the
-	// process that owns the records, not left for a person to notice.
-	if err := journal.reconcileCommerce(); err != nil {
 		_ = ownership.Close()
 		return nil, err
 	}

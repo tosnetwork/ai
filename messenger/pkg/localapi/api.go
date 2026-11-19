@@ -27,7 +27,6 @@ import (
 	"github.com/tosnetwork/ai/messenger/internal/localwire"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/firewall"
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 	"github.com/tosnetwork/ai/messenger/pkg/payload"
 	commerce "github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
@@ -173,20 +172,10 @@ const (
 	// OpDenyAction is the owner refusing one.
 	OpDenyAction Operation = "actions.deny"
 
-	// OpPlaceMandate is the owner placing a standing authorisation. Only the
-	// owner may: a runtime that could write its own mandate would be choosing
-	// its own bounds, which is the one thing a mandate exists to prevent.
-	OpPlaceMandate Operation = "mandates.place"
-	// OpRevokeMandate is the owner withdrawing one.
-	OpRevokeMandate Operation = "mandates.revoke"
 	// OpChallenge issues a single-use nonce for one owner decision. It is the
 	// first half of proving the decision came from the owner rather than from
 	// whatever else happens to run under the same Unix user.
 	OpChallenge Operation = "owner.challenge"
-	// OpListMandates reads what this installation holds. Both sides may: the
-	// Agent has to know what it may spend before it negotiates, and reading is
-	// not deciding.
-	OpListMandates Operation = "mandates.list"
 	// OpCreateAdmissionInvite creates one random, expiring first-contact
 	// bearer. It is an owner decision because it grants an unknown sender the
 	// ability to place exactly one authenticated event in this inbox.
@@ -256,14 +245,14 @@ var permitted = map[Principal]map[Operation]struct{}{
 		OpSendDirect: {}, OpSendDirectApplication: {}, OpEconomicSendDirect: {}, OpEconomicActionStatus: {}, OpReplyDirect: {},
 		OpPendingAttachments: {}, OpClaimAttachment: {},
 		OpBeginOutboundAttachment: {}, OpAppendOutboundAttachment: {}, OpCommitOutboundAttachment: {},
-		OpRequestAction: {}, OpActionStatus: {}, OpClaimAction: {}, OpListMandates: {},
+		OpRequestAction: {}, OpActionStatus: {}, OpClaimAction: {},
 		OpListRooms: {}, OpRoomGaps: {},
 	},
 	PrincipalOwner: {
 		OpAwaitingAdmission: {}, OpAdmit: {}, OpRefuse: {},
 		OpApprove: {}, OpDeny: {},
 		OpPendingActions: {}, OpGrantAction: {}, OpDenyAction: {},
-		OpPlaceMandate: {}, OpRevokeMandate: {}, OpListMandates: {}, OpChallenge: {},
+		OpChallenge:             {},
 		OpCreateAdmissionInvite: {},
 		OpPresentInvite:         {},
 		OpRemoveContact:         {},
@@ -277,6 +266,12 @@ var permitted = map[Principal]map[Operation]struct{}{
 		OpRoomGaps:              {},
 	},
 }
+
+// RetiredOperations are operation names that once placed, revoked and listed
+// spending mandates. Spending is not this interface's to authorise, and the
+// names are reserved so no later operation takes one with another meaning; a
+// request that names one is refused as unknown.
+var RetiredOperations = []Operation{"mandates.place", "mandates.revoke", "mandates.list"}
 
 // Permits reports whether a principal may perform an operation.
 func Permits(principal Principal, operation Operation) bool {
@@ -298,7 +293,7 @@ var operations = map[Operation]struct{}{
 	OpApprove: {}, OpDeny: {},
 	OpRequestAction: {}, OpActionStatus: {}, OpClaimAction: {}, OpPendingActions: {},
 	OpGrantAction: {}, OpDenyAction: {},
-	OpPlaceMandate: {}, OpRevokeMandate: {}, OpListMandates: {}, OpChallenge: {},
+	OpChallenge:             {},
 	OpCreateAdmissionInvite: {},
 	OpPresentInvite:         {},
 	OpRemoveContact:         {},
@@ -321,7 +316,6 @@ var (
 	idempotencyPattern     = regexp.MustCompile(`^idem_[0-9a-f]{64}$`)
 	conversationPattern    = regexp.MustCompile(`^conv_[0-9a-f]{64}$`)
 	roomPattern            = regexp.MustCompile(`^room_[0-9a-f]{64}$`)
-	mandatePattern         = regexp.MustCompile(`^mdt_[0-9a-f]{64}$`)
 	agentPattern           = regexp.MustCompile(`^agent_[0-9a-f]{64}$`)
 	devicePattern          = regexp.MustCompile(`^dev_[0-9a-f]{64}$`)
 	challengePattern       = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -390,18 +384,12 @@ type Request struct {
 	// Reason is why the owner refused.
 	Reason string `json:"reason,omitempty"`
 
-	// Mandate is a standing authorisation the owner is placing.
-	Mandate *MandateTerms `json:"mandate,omitempty"`
 	// Challenge and OwnerSignature carry the owner's authorisation for a
 	// decision. They are required on every operation that decides something,
 	// because the socket the request arrived on proves only which Unix user
 	// sent it, and the Agent runtime usually is that user.
 	Challenge      string `json:"challenge,omitempty"`
 	OwnerSignature string `json:"owner_signature,omitempty"`
-
-	// MandateID names one already placed. A runtime proposing a spend names
-	// the mandate; it never supplies one.
-	MandateID string `json:"mandate_id,omitempty"`
 
 	// InvitedAgentID optionally scopes a new admission bearer to one Agent.
 	// InviteExpiresAtUnix is always explicit and owner-signed.
@@ -439,86 +427,12 @@ type Request struct {
 	Chunk           []byte `json:"chunk_base64,omitempty"`
 }
 
-// AssetIdentity names an asset the way the chain does.
-//
-// A ticker is not carried, because a ticker is not an identity: two contracts
-// may both call themselves USDT, and an authorisation that named one by ticker
-// could be satisfied with the other. The network -- id and both genesis
-// hashes, bare hex -- is part of the identity for the same reason: the same
-// contract tuple exists on other TOS networks, and an authorisation or a
-// purchase that omitted it could be satisfied elsewhere.
-type AssetIdentity struct {
-	NetworkID       string `json:"network_id"`
-	GenesisRootHash string `json:"genesis_root_hash"`
-	GenesisFileHash string `json:"genesis_file_hash"`
-	Workchain       int32  `json:"workchain"`
-	AccountID       string `json:"master_account_id"`
-	MasterCodeHash  string `json:"master_code_hash"`
-	WalletCodeHash  string `json:"wallet_code_hash"`
-	Decimals        uint32 `json:"decimals"`
-}
-
-// MandateTerms is what an owner authorises in advance.
-type MandateTerms struct {
-	Objective       string        `json:"objective"`
-	Authority       string        `json:"authority"`
-	CapabilityClass string        `json:"capability_class"`
-	Asset           AssetIdentity `json:"asset"`
-	// MaxTotalAtomic and ApprovalAboveAtomic are counts of atomic units as
-	// canonical decimal strings, which is what the chain carries. A fixed-width
-	// integer cannot express eighteen decimal places of an ordinary token.
-	MaxTotalAtomic      string `json:"max_total_atomic"`
-	ApprovalAboveAtomic string `json:"approval_above_atomic"`
-	MaxCounteroffers    uint32 `json:"max_counteroffers"`
-	ExpiresAtUnix       uint64 `json:"expires_at_unix"`
-}
-
-// PurchaseTerms is the exact purchase a proposed spend would commit to.
-//
-// It carries every field a canonical Quote Proposal carries. Terms that named
-// only the capability and the price would let the canonical form differ from
-// what was approved in provider, manifest, escrow conditions, dispute policy
-// or transport binding -- each of which changes what was bought while the
-// number stays the same.
-type PurchaseTerms struct {
-	CapabilityID           string        `json:"capability_id"`
-	CapabilityVersion      string        `json:"capability_version"`
-	CapabilityClass        string        `json:"capability_class"`
-	ProviderAgentID        string        `json:"provider_agent_id"`
-	ManifestDigest         string        `json:"manifest_digest"`
-	TransportBindingDigest string        `json:"transport_binding_digest"`
-	Asset                  AssetIdentity `json:"asset"`
-	PriceAtomic            string        `json:"price_atomic"`
-	EscrowTermsDigest      string        `json:"escrow_terms_digest"`
-	DisputePolicyDigest    string        `json:"dispute_policy_digest"`
-	NotAfterUnix           uint64        `json:"not_after_unix"`
-}
-
-// HeldMandate is one standing authorisation as it is read back.
-type HeldMandate struct {
-	MandateID           string        `json:"mandate_id"`
-	Objective           string        `json:"objective"`
-	Authority           string        `json:"authority"`
-	CapabilityClass     string        `json:"capability_class"`
-	Asset               AssetIdentity `json:"asset"`
-	MaxTotalAtomic      string        `json:"max_total_atomic"`
-	ApprovalAboveAtomic string        `json:"approval_above_atomic"`
-	MaxCounteroffers    uint32        `json:"max_counteroffers"`
-	ExpiresAtUnix       uint64        `json:"expires_at_unix"`
-	PlacedAtUnix        uint64        `json:"placed_at_unix"`
-	RevokedAtUnix       uint64        `json:"revoked_at_unix,omitempty"`
-}
-
 // ProposedAction is what a runtime says it intends to do.
 type ProposedAction struct {
 	Effect         string         `json:"effect"`
 	Summary        string         `json:"summary"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	Derived        []ActionOrigin `json:"derived_from,omitempty"`
-	// Terms is what a spend would buy. It is part of the action, so the
-	// identifier commits it and an approval for one price cannot be spent on
-	// another.
-	Terms *PurchaseTerms `json:"terms,omitempty"`
 	// Physical is present only for physical-io. It binds the separately
 	// configured local Capability and exact canonical argument digest that the
 	// owner is being asked to authorize.
@@ -631,10 +545,6 @@ type Response struct {
 	Authorised bool   `json:"authorised,omitempty"`
 	// State is where an approval request has got to.
 	State string `json:"approval_state,omitempty"`
-	// Mandates lists what this installation holds.
-	Mandates []HeldMandate `json:"mandates,omitempty"`
-	// MandateID is the identifier derived from a placed mandate.
-	MandateID string `json:"mandate_id,omitempty"`
 	// Challenge is a freshly issued single-use decision nonce.
 	Challenge string `json:"challenge,omitempty"`
 	// AdmissionToken is returned exactly once when an owner creates an invite.
@@ -680,19 +590,14 @@ type RoomGap struct {
 
 // WaitingAction is one decision the owner has not made yet.
 type WaitingAction struct {
-	ActionID       string         `json:"action_id"`
-	Effect         string         `json:"effect"`
-	Summary        string         `json:"summary"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	Reason         string         `json:"reason"`
-	Origins        []ActionOrigin `json:"origins,omitempty"`
-	// Terms is the structured purchase, present for a spend. The owner renders
-	// the amount, asset, provider, and expiry from this rather than from the
-	// summary, and recomputes the action identifier from it to confirm the
-	// signature commits the purchase actually shown.
-	Terms       *negotiation.Terms `json:"terms,omitempty"`
-	Physical    *PhysicalOperation `json:"physical,omitempty"`
-	AskedAtUnix uint64             `json:"asked_at_unix"`
+	ActionID       string             `json:"action_id"`
+	Effect         string             `json:"effect"`
+	Summary        string             `json:"summary"`
+	IdempotencyKey string             `json:"idempotency_key,omitempty"`
+	Reason         string             `json:"reason"`
+	Origins        []ActionOrigin     `json:"origins,omitempty"`
+	Physical       *PhysicalOperation `json:"physical,omitempty"`
+	AskedAtUnix    uint64             `json:"asked_at_unix"`
 }
 
 // EncodeRequest returns one framed request.
@@ -957,7 +862,7 @@ func ValidateRequest(request Request) error {
 		}
 		if request.Limit != 0 || request.Code != "" || request.RecipientEndpointID != "" ||
 			request.ExpiresAtUnix != 0 || request.LeaseSeconds != 0 || request.Action != nil ||
-			request.ActionID != "" || request.Reason != "" || request.Mandate != nil || request.MandateID != "" {
+			request.ActionID != "" || request.Reason != "" {
 			return errors.New("recipient resolution cannot carry route or control fields")
 		}
 		return requireEmpty(request, "recipient resolution", request.EventID, request.LeaseID, request.SessionID)
@@ -1111,31 +1016,8 @@ func ValidateRequest(request Request) error {
 		} else if request.Action.Physical != nil {
 			return errors.New("only physical I/O carries a physical operation")
 		}
-		if request.Action.Effect == "spend" {
-			if request.Action.Terms == nil {
-				return errors.New("a spend must say what it is buying")
-			}
-			if !mandatePattern.MatchString(request.MandateID) {
-				return errors.New("a spend must name the mandate it is made under")
-			}
-		} else if request.Action.Terms != nil || request.MandateID != "" {
-			return errors.New("only a spend carries terms and a mandate")
-		}
 		return nil
-	case OpPlaceMandate:
-		if request.Mandate == nil {
-			return errors.New("placing a mandate needs the mandate")
-		}
-		if request.MandateID != "" {
-			return errors.New("the mandate identifier is derived, not declared")
-		}
-		return nil
-	case OpRevokeMandate:
-		if !mandatePattern.MatchString(request.MandateID) {
-			return errors.New("withdrawing a mandate needs the mandate")
-		}
-		return requireEmpty(request, "an owner decision", request.EventID, request.LeaseID, request.SessionID)
-	case OpListMandates, OpChallenge:
+	case OpChallenge:
 		return requireEmpty(request, "a listing", request.EventID, request.LeaseID, request.SessionID)
 	case OpCreateAdmissionInvite:
 		if request.InvitedAgentID != "" && !agentPattern.MatchString(request.InvitedAgentID) {
@@ -1167,25 +1049,25 @@ func ValidateRequest(request Request) error {
 			return errors.New("joining a room names the accepted authority, and only joining does")
 		}
 		return requireEmpty(request, "a room operation", request.EventID, request.LeaseID, request.SessionID,
-			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason)
 	case OpAddRoomMember, OpRemoveRoomMember:
 		if !roomPattern.MatchString(request.RoomID) || !agentPattern.MatchString(request.RoomMemberAgentID) {
 			return errors.New("changing a room member needs a canonical room and member Agent")
 		}
 		return requireEmpty(request, "a room membership change", request.EventID, request.LeaseID, request.SessionID,
-			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason)
 	case OpListRooms:
 		if request.Limit != 0 || request.RoomID != "" {
 			return errors.New("a room listing takes no terms")
 		}
 		return requireEmpty(request, "a room listing", request.EventID, request.LeaseID, request.SessionID,
-			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason)
 	case OpRoomGaps:
 		if !roomPattern.MatchString(request.RoomID) || request.Limit < 0 || request.Limit > MaxRoomGapsPerResponse {
 			return errors.New("a room gap listing needs a canonical room and a bounded limit")
 		}
 		return requireEmpty(request, "a room gap listing", request.EventID, request.LeaseID, request.SessionID,
-			request.RecipientEndpointID, request.Recipient, request.ActionID, request.MandateID, request.Reason)
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason)
 	case OpExportDeviceHistory:
 		validCursor := (request.HistorySequence == 1 && request.PreviousSegmentDigest == "" &&
 			request.AfterCreatedAtUnix == 0 && request.AfterEventID == "") ||

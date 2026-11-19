@@ -600,25 +600,43 @@ func TestOwnerApprovalIsNotExpressibleOnTheWire(t *testing.T) {
 	}
 }
 
-// Negotiation is conversation. None of its kinds create or accept anything.
-func TestNegotiationKindsExistAndCommitNothing(t *testing.T) {
-	for _, kind := range []string{
-		"negotiation.proposal", "negotiation.counterproposal", "negotiation.withdraw",
-		"negotiation.intent.accept", "negotiation.intent.reject",
-	} {
-		class, known := ClassOf(kind)
-		if !known {
-			t.Fatalf("%q is not a recognised kind", kind)
+// Commerce is not Messenger's vocabulary. The retired negotiation and chain
+// reference kinds stay reserved: none has a class, so no delegation can admit
+// one, and an event that names one is refused.
+func TestRetiredKindsAreNotRecognised(t *testing.T) {
+	if len(payload.RetiredKinds) == 0 {
+		t.Fatal("the retired kind list is empty")
+	}
+	for _, kind := range payload.RetiredKinds {
+		if _, known := ClassOf(kind); known {
+			t.Fatalf("retired kind %q is recognised again", kind)
 		}
-		if class != "negotiation" {
-			t.Fatalf("%q has class %q", kind, class)
+		if _, known := PayloadSchemaOf(kind); known {
+			t.Fatalf("retired kind %q names a payload schema", kind)
 		}
-		if LocalOnly(kind) {
-			t.Fatalf("%q cannot travel", kind)
+		// Not even as a forward-compatible event: the body would carry the old
+		// meaning, so it is not stored as though a later build might read it.
+		event := testEvent(t)
+		event.Kind = kind
+		event.PayloadSchema = "tos.messaging.payload.vendor-custom.v1"
+		event.EventID = ""
+		if _, err := NewEvent(event); err == nil || !strings.Contains(err.Error(), "retired") {
+			t.Fatalf("an event of retired kind %q was built: %v", kind, err)
 		}
 	}
-	// Accepting an intent is not accepting a Quote, and the vocabulary must not
-	// let the two be confused.
+	for _, schema := range payload.RetiredSchemas {
+		event := testEvent(t)
+		event.Kind = "vendor.custom"
+		event.PayloadSchema = schema
+		event.EventID = ""
+		if _, err := NewEvent(event); err == nil || !strings.Contains(err.Error(), "retired") {
+			t.Fatalf("an event under retired schema %q was built: %v", schema, err)
+		}
+	}
+	// Agreement work is carried by the Intent Exchange kinds, which remain.
+	if class, known := ClassOf("intent.application"); !known || class != "negotiation" {
+		t.Fatalf("intent.application lost its class: %q %v", class, known)
+	}
 	if _, known := ClassOf("service.quote.accept"); known {
 		t.Fatal("the event vocabulary can accept a Quote")
 	}

@@ -11,7 +11,6 @@ import (
 
 	"github.com/tosnetwork/ai/messenger/internal/ids"
 	"github.com/tosnetwork/ai/messenger/pkg/firewall"
-	"github.com/tosnetwork/ai/messenger/pkg/negotiation"
 )
 
 var approvalIdempotencyPattern = regexp.MustCompile(`^idem_[0-9a-f]{64}$`)
@@ -96,19 +95,8 @@ type ApprovalRequest struct {
 	IdempotencyKey string
 	Reason         string
 	Origins        []ApprovalOrigin
-	// Terms are the exact structured purchase, present for a spend. They are
-	// persisted so the owner is shown the real amount, asset, provider, and
-	// expiry from typed state rather than the runtime's summary, and so the
-	// identifier can be recomputed and checked against what is being signed.
-	Terms    *negotiation.Terms
-	Physical *ApprovalPhysicalOperation
-	// MandateID names the standing authorisation a spend draws on. It is stored
-	// so the per-mandate budget can be reopened and the reservation named --
-	// the reservation key is ExecutionID(MandateID, Terms) -- when the spend is
-	// committed, released, or expired. It is required for a spend and empty for
-	// anything else, which holds no budget.
-	MandateID string
-	AskedAt   uint64
+	Physical       *ApprovalPhysicalOperation
+	AskedAt        uint64
 }
 
 // Approval is the durable state of one request.
@@ -120,9 +108,7 @@ type Approval struct {
 	IdempotencyKey string                     `json:"idempotency_key,omitempty"`
 	Reason         string                     `json:"reason"`
 	Origins        []ApprovalOrigin           `json:"origins,omitempty"`
-	Terms          *negotiation.Terms         `json:"terms,omitempty"`
 	Physical       *ApprovalPhysicalOperation `json:"physical,omitempty"`
-	MandateID      string                     `json:"mandate_id,omitempty"`
 	State          ApprovalState              `json:"state"`
 	AskedAtUnix    uint64                     `json:"asked_at_unix"`
 	DecidedAtUnix  uint64                     `json:"decided_at_unix,omitempty"`
@@ -174,7 +160,7 @@ func (j *Journal) RequestApproval(request ApprovalRequest) (Approval, error) {
 		Schema: ApprovalSchema, ActionID: request.ActionID, Effect: request.Effect,
 		Summary: request.Summary, IdempotencyKey: request.IdempotencyKey,
 		Reason: request.Reason, Origins: request.Origins,
-		Terms: request.Terms, Physical: request.Physical, MandateID: request.MandateID, State: ApprovalPending,
+		Physical: request.Physical, State: ApprovalPending,
 		AskedAtUnix: request.AskedAt,
 	}
 	return j.commitApproval(approval)
@@ -391,17 +377,8 @@ func validateApprovalRequest(request ApprovalRequest) error {
 			return errors.New("an approval request cites content with no kind")
 		}
 	}
-	// A spend is a purchase, and a purchase the owner cannot see in structured
-	// form is one they cannot verify. The terms are required for a spend and are
-	// validated whenever they are present, so a stored purchase is always a
-	// complete one.
-	if request.Effect == "spend" && request.Terms == nil {
-		return errors.New("a spend approval must carry the structured purchase it is for")
-	}
-	if request.Terms != nil {
-		if err := request.Terms.Validate(); err != nil {
-			return err
-		}
+	if !firewall.Known(firewall.Effect(request.Effect)) {
+		return errors.New("an approval request names an effect this build does not recognise")
 	}
 	if request.Effect == "physical-io" && request.Physical == nil {
 		return errors.New("a physical I/O approval must carry its local Capability and operation")
@@ -416,19 +393,6 @@ func validateApprovalRequest(request ApprovalRequest) error {
 	}
 	if request.Effect != "physical-io" && request.Physical != nil {
 		return errors.New("only physical I/O approval carries a physical operation")
-	}
-	// A spend draws on a mandate's budget, so it must name the mandate that
-	// bounds it: the reservation the spend lifecycle commits or releases is keyed
-	// by that mandate. Anything else holds no budget and names none, so a mandate
-	// on a non-spend is a record that would never be reconciled.
-	if request.MandateID != "" && !mandatePattern.MatchString(request.MandateID) {
-		return errors.New("invalid mandate identifier")
-	}
-	if request.Effect == "spend" && request.MandateID == "" {
-		return errors.New("a spend approval must name the mandate it draws on")
-	}
-	if request.Effect != "spend" && request.MandateID != "" {
-		return errors.New("only a spend approval names a mandate")
 	}
 	return nil
 }
@@ -475,33 +439,15 @@ func (j *Journal) ExpirePendingApprovals(now time.Time) (int, error) {
 	if now.IsZero() || now.Unix() < 0 {
 		return 0, errors.New("invalid expiry time")
 	}
-	// The records are retired under the journal lock; the budget holds they back
-	// are freed afterwards, because reopening a per-mandate budget takes the same
-	// lock and it is not re-entrant. Freeing after the record is durably denied
-	// keeps the safe ordering: a crash in between leaves a hold with no live
-	// approval -- an over-count -- never a spend the budget forgot.
-	expired, err := j.expirePendingApprovalsLocked(now)
-	if err != nil {
-		return 0, err
-	}
-	for _, approval := range expired {
-		if err := j.ReleaseMandateReservation(approval); err != nil {
-			return len(expired), err
-		}
-	}
-	return len(expired), nil
-}
-
-func (j *Journal) expirePendingApprovalsLocked(now time.Time) ([]Approval, error) {
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 
 	entries, err := os.ReadDir(j.approvalRoot())
 	if err != nil {
-		return nil, errors.New("read approval directory")
+		return 0, errors.New("read approval directory")
 	}
 	seconds := uint64(now.Unix())
-	expired := make([]Approval, 0, len(entries))
+	expired := 0
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -517,11 +463,10 @@ func (j *Journal) expirePendingApprovalsLocked(now time.Time) ([]Approval, error
 		approval.State = ApprovalDenied
 		approval.DecidedAtUnix = seconds
 		approval.DenialReason = "nobody decided within the window this installation keeps requests for"
-		stored, err := j.commitApproval(approval)
-		if err != nil {
-			return nil, err
+		if _, err := j.commitApproval(approval); err != nil {
+			return expired, err
 		}
-		expired = append(expired, stored)
+		expired++
 	}
 	return expired, nil
 }
@@ -529,13 +474,14 @@ func (j *Journal) expirePendingApprovalsLocked(now time.Time) ([]Approval, error
 // RecordAutoAuthorization records a policy decision the way an owner decision
 // is recorded: durably, and spendable once.
 //
-// It exists for actions the policy allows without a person -- today, a spend
-// inside the owner's mandate. Returning a bare "yes" for those would make the
-// one automatic case weaker than the human one: an approval an owner grants is
-// consumed by the action it authorises, and a policy's grant has to be too, or
-// a runtime could execute the same authorised spend as many times as it asked.
-// The identifier commits the terms, so a second occurrence of the same
-// purchase is a replay by definition and finds its grant already spent.
+// It exists for one-shot actions the policy allows without a person, such as a
+// tool call inside the configured ceiling. Returning a bare "yes" for those
+// would make the automatic case weaker than the human one: an approval an
+// owner grants is consumed by the action it authorises, and a policy's grant
+// has to be too, or a runtime could execute the same invocation as many times
+// as it asked. The identifier commits the invocation key, so a second
+// occurrence of the same invocation is a replay by definition and finds its
+// grant already spent.
 func (j *Journal) RecordAutoAuthorization(request ApprovalRequest) (Approval, error) {
 	if err := j.usable(); err != nil {
 		return Approval{}, err
@@ -559,87 +505,8 @@ func (j *Journal) RecordAutoAuthorization(request ApprovalRequest) (Approval, er
 		Schema: ApprovalSchema, ActionID: request.ActionID, Effect: request.Effect,
 		Summary: request.Summary, IdempotencyKey: request.IdempotencyKey,
 		Reason: request.Reason, Origins: request.Origins,
-		Terms: request.Terms, Physical: request.Physical, MandateID: request.MandateID, State: ApprovalGranted,
+		Physical: request.Physical, State: ApprovalGranted,
 		AskedAtUnix: request.AskedAt, DecidedAtUnix: request.AskedAt,
 	}
 	return j.commitApproval(approval)
-}
-
-// CommitMandateReservation turns the budget hold behind a spent spend approval
-// into a committed amount, so the mandate records it as spent rather than a
-// reservation that could still be released. It must be called with the journal
-// lock free. It is idempotent and a no-op for anything that holds no hold: a
-// non-spend, an owner-approved over-budget spend that never took one, or a
-// reservation already committed.
-func (j *Journal) CommitMandateReservation(approval Approval) error {
-	budget, executionID, err := j.mandateBudgetFor(approval)
-	if err != nil {
-		return err
-	}
-	if budget == nil {
-		return nil
-	}
-	if _, held := budget.Reserved(executionID); !held {
-		return nil
-	}
-	return budget.Commit(executionID)
-}
-
-// ReleaseMandateReservation frees the budget hold behind a denied or abandoned
-// spend approval, so the mandate can spend that amount on something the owner
-// does approve. It must be called with the journal lock free. It is idempotent
-// -- releasing twice, or releasing a hold already committed to a spend, changes
-// nothing -- and a no-op for anything that holds no reservation.
-func (j *Journal) ReleaseMandateReservation(approval Approval) error {
-	budget, executionID, err := j.mandateBudgetFor(approval)
-	if err != nil {
-		return err
-	}
-	if budget == nil {
-		return nil
-	}
-	return budget.Release(executionID)
-}
-
-// mandateBudgetFor reopens the per-mandate budget one spend approval draws on
-// and derives the reservation key that names its hold. It returns a nil budget
-// for anything that holds no budget -- a non-spend, or a record missing the
-// mandate or terms a spend carries -- so its callers no-op cleanly. It takes the
-// journal lock (via the mandate lookup and the ledger), so it must not be called
-// while that lock is held.
-func (j *Journal) mandateBudgetFor(approval Approval) (*negotiation.Budget, string, error) {
-	if approval.Effect != "spend" || approval.Terms == nil || approval.MandateID == "" {
-		return nil, "", nil
-	}
-	stored, found, err := j.LookupMandate(approval.MandateID)
-	if err != nil {
-		return nil, "", err
-	}
-	if !found {
-		return nil, "", ErrMandateUnknown
-	}
-	asset := negotiation.Asset{
-		Network: negotiation.Network{
-			ID:              stored.AssetNetworkID,
-			GenesisRootHash: stored.AssetGenesisRootHash,
-			GenesisFileHash: stored.AssetGenesisFileHash,
-		},
-		Workchain: stored.Workchain, AccountID: stored.AssetAccountID,
-		MasterCodeHash: stored.AssetMasterCodeHash, WalletCodeHash: stored.AssetWalletCodeHash,
-		Decimals: stored.AssetDecimals,
-	}
-	ledger, err := j.OpenMandateBudgetLedger(approval.MandateID, asset)
-	if err != nil {
-		return nil, "", err
-	}
-	total := negotiation.Money{Asset: asset, Atomic: stored.MaxTotalAtomic}
-	budget, err := negotiation.OpenBudget(total, ledger)
-	if err != nil {
-		return nil, "", err
-	}
-	executionID, err := negotiation.ExecutionID(approval.MandateID, *approval.Terms)
-	if err != nil {
-		return nil, "", err
-	}
-	return budget, executionID, nil
 }

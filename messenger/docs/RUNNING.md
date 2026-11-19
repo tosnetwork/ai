@@ -128,11 +128,11 @@ relay; the token is then deleted. The HTTPS route cannot tell `accepted` from
 safe because it is single use and the claim has already made the sender a
 contact.
 
-The escrow funding locator and runtime `quotes.verify` were removed with
-stablecoin escrow: software work settles on the Service Actor rail, and the
-daemon no longer resolves Accepted Quotes. The legacy negotiation Terms and
-escrow-shaped payload kinds remain non-authorizing conversation semantics;
-no production code supplies them a Quote resolver.
+The daemon does not resolve Accepted Quotes, place spending mandates or
+authorise spends: software work settles on the Service Actor rail, and
+Agreements are negotiated through Intent Exchange V1. The escrow-era
+negotiation and chain-reference event kinds, the `mandates.*` operations and
+the `spend` action effect are retired and refused.
 
 `economic_authorities` pins the ML-DSA-44 Action Authority keys allowed to
 issue OpenFox writer fences, sorted by `authority_id`, each with its
