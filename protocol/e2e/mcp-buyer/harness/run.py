@@ -288,31 +288,6 @@ def rpc_endpoints() -> list[str]:
     return [f"http://127.0.0.1:{port}/jsonRPC" for port in RPC_PORTS]
 
 
-def registry_show(account: str, address: str) -> dict:
-    return tosctl_json(account, "agent", "native-registry", "show", "--global-config", str(PUBLIC / "global.json"),
-                       "--network-label", NETWORK_LABEL, "--address", address)
-
-
-def register_agent(account: str, wallet: str, controller: str) -> tuple[str, str]:
-    """Register an Agent whose one controller is `controller`; returns the
-    Agent ID and the controller's key ID text."""
-    created = tosctl_json(account, "agent", "native-registry", "new-controller", "--name", controller)
-    policy = HOME[account] / "private" / f"{controller}-policy.json"
-    as_account(account, ["/usr/bin/tee", str(policy)], input_text=json.dumps(
-        {"threshold": 1, "recovery_threshold": 1, "recovery_timelock": 3600,
-         "controllers": [{"public_key": created["public_key"], "weight": 1, "purposes": 15}]}))
-    view = tosctl_json(account, "agent", "native-registry", "register-agent", "--global-config", str(PUBLIC / "global.json"),
-                       "--network-label", NETWORK_LABEL, "--policy", str(policy), "--nonce", secrets.token_hex(32),
-                       "--signer", controller)
-    args = ["wallet", "send", "--from", wallet, "--to", view["destination"], "--amount", "2", "--body-boc",
-            view["body_boc"], "--yes"]
-    if view.get("state_init_boc"):
-        args += ["--state-init-boc", view["state_init_boc"]]
-    tosctl(account, *args)
-    registered = poll(lambda: registry_show(account, view["destination"]).get("registered"), 240, 3)
-    agent_id = "agent_" + view["object_id"]
-    record(f"{account} Agent registered with its packet controller", bool(registered), agent_id)
-    return agent_id, "mldsa44:" + created["key_id"]
 
 
 # --- The OpenFox provider -----------------------------------------------------------
@@ -404,31 +379,35 @@ AGENT_CONFIG = HOME["custody"] / "private" / "agent.json"
 
 
 def setup_buyer(wallet: str, tosctl_sha256: str) -> dict:
-    agent_id, key_id = register_agent("custody", "buyer", "buyer-packet")
+    """The buyer's identity without OpenFox: `tos-service-buyer init` plans,
+    then applies (packet controller, Agent registration, configuration);
+    the harness then names the loopback gateway in the configuration."""
     private_dir(AGENT_STATE, "custody")
     private_dir(HOME["custody"] / "manifests", "custody")
     for directory in ("work", "results"):
         private_dir(HOME["developer"] / directory, "developer")
-    code_hash = evidence["registry_code_hash"]
-    config = {
-        "schema": "tos.service.mcp-buyer.agent-config.v1", "state_dir": str(AGENT_STATE), "socket_dir": str(SOCKET_DIR),
-        "client_uid": ACCOUNTS["developer"][0], "network": {key: evidence["network"][key] for key in
-                                                          ("network_id", "genesis_root_hash", "genesis_file_hash")},
-        "rpc_endpoints": rpc_endpoints(), "quorum": 2, "registry_code_boc_file": str(REGISTRY_BOC),
-        "registry_code_hash": code_hash, "registry_workchain": 0, "actor_code_hash": ACTOR_CODE_HASH,
-        "manifest_dir": str(HOME["custody"] / "manifests"), "buyer_wallet": wallet, "buyer_agent_id": agent_id,
-        "tosctl": {"binary": str(BIN / "tosctl"), "sha256": tosctl_sha256,
-                   "config_path": str(HOME["custody"] / "private" / "tosctl-config.json"), "wallet": "buyer",
-                   "packet_controller": "buyer-packet"},
-        "packet_controller_key_id": key_id, "relays": [RELAY_URL],
-        "relay_ca_file": str(HOME["custody"] / "private" / "relay-ca.pem"),
-        # The gateway on loopback, quoting with the read token.
-        "gateway_url": GATEWAY_URL, "gateway_token_file": str(HOME["custody"] / "private" / "gateway-token"),
-        "budget": {"window_seconds": 86400, "max_calls": 10, "max_per_call_nanotos": "2000000000",
-                   "max_window_nanotos": "10000000000", "max_unconfirmed": 4, "max_lifecycle_sends_per_window": 28,
-                   "duty_interval_seconds": 30}}
-    as_account("custody", ["/usr/bin/tee", str(AGENT_CONFIG)], input_text=json.dumps(config, indent=2))
-    as_account("custody", ["/bin/chmod", "0600", str(AGENT_CONFIG)])
+    flags = ["--config", str(AGENT_CONFIG), "--state-dir", str(AGENT_STATE), "--socket-dir", str(SOCKET_DIR),
+             "--client-uid", str(ACCOUNTS["developer"][0]), "--network-label", NETWORK_LABEL,
+             "--global-config", str(PUBLIC / "global.json"), "--rpc", ",".join(rpc_endpoints()), "--quorum", "2",
+             "--registry-code-boc", str(REGISTRY_BOC), "--actor-code-hash", ACTOR_CODE_HASH,
+             "--manifest-dir", str(HOME["custody"] / "manifests"), "--tosctl", str(BIN / "tosctl"),
+             "--tosctl-sha256", tosctl_sha256, "--tosctl-config", str(HOME["custody"] / "private" / "tosctl-config.json"),
+             "--wallet", "buyer", "--packet-controller", "buyer-packet", "--relay", RELAY_URL,
+             "--relay-ca-file", str(HOME["custody"] / "private" / "relay-ca.pem"), "--budget-window", "24h",
+             "--max-calls", "10", "--max-per-call-nanotos", "2000000000", "--max-window-nanotos", "10000000000",
+             "--max-unconfirmed", "4", "--duty-interval-seconds", "30"]
+    plan = as_account("custody", [str(BIN / "tos-service-buyer"), "init", "plan", *flags], timeout=600)
+    record("init plan prints the changes and sends nothing", bool(plan.stdout.strip()), plan.stdout[-1500:])
+    as_account("custody", [str(BIN / "tos-service-buyer"), "init", "apply", *flags, "--yes"], timeout=900)
+    config = json.loads(as_account("custody", ["/bin/cat", str(AGENT_CONFIG)]).stdout)
+    agent_id, key_id = config["buyer_agent_id"], config["packet_controller_key_id"]
+    registered = config.get("buyer_wallet") == wallet and agent_id.startswith("agent_")
+    record("init apply registered the buyer Agent and wrote the configuration", registered,
+           {"agent_id": agent_id, "wallet": config.get("buyer_wallet")})
+    # The gateway on loopback, quoting with the read token.
+    config["gateway_url"] = GATEWAY_URL
+    config["gateway_token_file"] = str(HOME["custody"] / "private" / "gateway-token")
+    write_private("custody", AGENT_CONFIG, json.dumps(config, indent=2))
     start("custody", [str(BIN / "tos-service-buyer"), "agent", "--config", str(AGENT_CONFIG)], "agent.log")
     # Root cannot search the 0750 socket directory; the developer account,
     # in its group, checks for the socket.
