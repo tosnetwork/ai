@@ -64,6 +64,9 @@ status=$(docker wait "$name")
 if [ ! -w "$E2E_WORKDIR" ]; then
   docker run --rm --network none --cap-drop ALL --cap-add CHOWN --cap-add DAC_READ_SEARCH --security-opt no-new-privileges \
     --mount "type=bind,src=$E2E_WORKDIR,dst=/w" --entrypoint /bin/chown "$image" -R "$(id -u):$(id -g)" /w
+  # The evidence records that the run did not hand its directory back itself.
+  printf '{"recovery_container_ran":true,"utc":"%s","harness_exit":%s}\n' "$(date -u +%FT%TZ)" "$status" \
+    > "$E2E_WORKDIR/recovery.json"
 fi
 docker logs "$name" > "$E2E_WORKDIR/run.log" 2>&1 || true
 wait "$guard" || true
