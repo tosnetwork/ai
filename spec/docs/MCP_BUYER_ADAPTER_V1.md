@@ -315,9 +315,16 @@ a configuration file that already names an Agent with no journal beside it. A
 chain step (activation, registration) is marked as sending before `tosctl`
 runs. On a re-run, a step whose effect is in finalized state is never sent
 again. A step still marked as sending is waited on until it lands or its
-inclusion window (5 minutes) has passed on finalized chain time, and only then
-sent again. A send that `tosctl` refused before broadcasting returns the step
-to pending.
+inclusion window has passed on finalized chain time, and only then sent again.
+The window is 5 minutes from the step's stamp. Every send runs under a
+3-minute deadline that kills `tosctl`, and a wallet message is valid for
+2 minutes from when `tosctl` signs it, so no message signed for the step can
+land after the window. `tosctl wallet send` reports no `valid_until` of its
+own; the stamp and that expiry both come from the host clock. Only the wallet
+checks `tosctl` makes before it builds the message (an amount the balance
+cannot cover, an uninitialized or frozen wallet) return the step to pending.
+Any other failure, including a generic "not found" that can follow the
+broadcast, leaves the step sending and is resolved from finalized state.
 
 **Confirmation.** Every chain send (the activation and the value-carrying
 registration) is confirmed on the custody account's terminal by typing `yes`,

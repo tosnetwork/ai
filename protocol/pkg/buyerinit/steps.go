@@ -1,6 +1,7 @@
 package buyerinit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -14,7 +15,7 @@ import (
 // time; only then is a message sent, after the step is durably marked as
 // sending. A plan reports what it would send and stops there.
 func (r *run) chainStep(id, what string, step *ChainStep, valueNano uint64, effect func(Session) (bool, error),
-	send func() error) error {
+	send func(ctx context.Context) error) error {
 	session, err := r.begin()
 	if err != nil {
 		return err
@@ -68,13 +69,19 @@ func (r *run) chainStep(id, what string, step *ChainStep, valueNano uint64, effe
 			return ErrConfirmationRequired
 		}
 	}
+	// The send's deadline starts before the stamp, so tosctl cannot sign
+	// later than maxSendTime after it (sendResolutionWindow). The stamp and
+	// tosctl's own expiry both come from this host's clock, so a host clock
+	// off the chain's moves both alike.
+	sendCtx, cancel := context.WithTimeout(r.ctx, maxSendTime)
+	defer cancel()
 	// The record says a message may be in flight before tosctl runs.
 	step.State, step.StartedUnix = stepSending, r.env.Now().Unix()
 	step.Attempts++
 	if err := r.save(); err != nil {
 		return err
 	}
-	if err := send(); err != nil {
+	if err := send(sendCtx); err != nil {
 		if errors.Is(err, buyersdk.ErrCallNotStarted) {
 			step.State = stepPending
 			return errors.Join(err, r.save())
