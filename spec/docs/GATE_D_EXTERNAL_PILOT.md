@@ -328,24 +328,26 @@ held in its own `tosctl` custody (for an Ed25519 key, `tosctl wallet sign
 
 ## 10. Prerequisites and tooling status
 
-Merged on ai main: the buyer agent, confirmer, refund duties, carriage,
-delivery, result acceptance, `tos-service-buyer agent`, `init plan` and
-`init apply`, and the stdio MCP server with `tos_buyer_prepare`,
-`tos_buyer_request_payment`, `tos_buyer_withdraw`, `tos_buyer_status`,
-`tos_buyer_purchases`, `tos_buyer_refund` and `tos_buyer_result`
-(`ROADMAP.md` section 4).
+Merged on ai main (`ROADMAP.md` section 4):
 
-Not merged, and each required before a pilot record can pass:
-
-- `tos_buyer_search` and `tos_buyer_quote` with the finalized reads behind
-  them (ai #81). Without a Quote there is no `quote_id` and no purchase.
-- the `init` follow-ups (ai #80);
-- the end-to-end test of the MCP buyer against an OpenFox provider on a local
-  chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9);
-- the buyer's evidence export (`tos-service-buyer evidence`, section 15) and
-  the third-party verifier `tos-service-verify`
-  ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md), mapped into the
+- the buyer agent, confirmer, refund duties, carriage, delivery, result
+  acceptance and `tos-service-buyer agent`;
+- `init plan` and `init apply`, with their follow-ups (ai #80, #84),
+  including the optional gateway and catalog flags;
+- the stdio MCP server with all nine tools, `tos_buyer_search` and
+  `tos_buyer_quote` included (ai #81);
+- the buyer's evidence export `tos-service-buyer evidence` and the
+  third-party verifier `tos-service-verify` (ai #83,
+  [`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md), mapped into the
   record in section 8.4).
+
+Not merged:
+
+- the bound on a Quote's lifetime and the search and quote rate limits
+  (ai #85, in review);
+- the end-to-end test of the MCP buyer against an OpenFox provider on a local
+  chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9), required before a
+  pilot record can pass.
 
 Operational prerequisites (endpoint access for the buyer and verifier,
 funding, the published global configuration) are decided by the operator and
