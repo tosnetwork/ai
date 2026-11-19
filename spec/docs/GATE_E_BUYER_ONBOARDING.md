@@ -21,8 +21,9 @@ describes the escrow rail and cannot produce Gate E evidence:
   responses are observations only; the owner-private budget directory and the
   never-pay-twice journal rules.
 - **Next:** a Service Actor rewrite of this runbook follows in a separate
-  change. Where this document conflicts with the Service Actor documents, they
-  govern.
+  change. For a buyer using an MCP client, the Service Actor guide is
+  [`MCP_BUYER_GUIDE.md`](MCP_BUYER_GUIDE.md). Where this document conflicts
+  with the Service Actor documents, they govern.
 
 ## Status
 

@@ -1,201 +1,330 @@
 # Gate D External Pilot
 
-**Escrow-rail runbook; not current (rail change 2026-11-07).** Stablecoin
-escrow v2 is retired and the software-work profile settles in native TOS on the
-Service Actor ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
-[`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)).
-This runbook still describes the escrow rail and cannot produce Gate D
-evidence:
+**Status:** the runbook for the Gate D external acceptance task on the
+Service Actor rail. It replaces the escrow-rail version of this document
+(rail change 2026-11-07); that version is git history and none of its
+escrow, stablecoin, two-stage Receipt signing or checker steps applies.
+Gate D is **not accepted**: no pilot under this runbook has run. Its
+prerequisites are listed in section 10; until every one of them is merged
+and recorded, no record under this runbook can carry the passing verdict.
 
-- **Void:** "Frozen profile" (stablecoin identity, release/refund, Receipt and
-  settlement-intent cells); "Execution sequence" steps 1 (stablecoin
-  identity), 3-4 (escrow StateInit and funding) and 6 (settlement-intent
-  signature and stablecoin transfer); "Custody-safe Receipt signing"
-  (`native-receipt-release` was removed in `protocol/` commit `b9ad8e17`);
-  "Independent verification" (`scripts/tos-service-software-work-paid-evidence.py`
-  was removed from tos in `bc57ab010`); and the escrow, stablecoin and
-  settlement fields and the `PASS_INDEPENDENT_PAID_SOFTWARE_WORK_SETTLEMENT`
-  verdict of "Acceptance record".
-- **Still binding:** the purpose, the three-role independence rules, the
-  custody rules for test identities, execution steps 2 and 5 apart from their
-  escrow wording, and of step 7 only its requirement that the verifier obtain
-  a quorum from a clean environment without gateway data; the "strict evidence
-  checker" step 7 runs is the removed script of "Independent verification",
-  so that part of step 7 is void until the rewrite names a Service Actor
-  verifier.
-- **Next:** a Service Actor rewrite of this runbook (native-TOS `call`,
-  attestor-signed `respond`, `expire`/`claim_refund`, and a verifier for the
-  responded, refunded and swept outcomes) follows in a separate change, after
-  the open Gate D items in `ROADMAP.md`. Where this document conflicts with
-  the Service Actor documents, they govern.
+Where this runbook conflicts with the Service Actor documents
+([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
+[`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md),
+[`SERVICE_ACTOR_RAIL_WORK_FRAMES_V1.md`](SERVICE_ACTOR_RAIL_WORK_FRAMES_V1.md))
+or the MCP buyer adapter ([`MCP_BUYER_ADAPTER_V1.md`](MCP_BUYER_ADAPTER_V1.md)),
+they govern. [`ROADMAP.md`](ROADMAP.md) is authoritative for Gate D status.
+The buyer's step-by-step instructions are in
+[`MCP_BUYER_GUIDE.md`](MCP_BUYER_GUIDE.md).
 
-## Purpose
+## 1. Purpose
 
-This runbook closes the only remaining Gate D acceptance condition. The local
-public-testnet transaction proves that the implementation works; it does not
-prove that unrelated parties can use it. Gate D is accepted only after one
-buyer outside the core development team pays one independently operated
-provider and a third party reconstructs the result from finalized TOS state.
+The acceptance condition is the one of `ROADMAP.md` section 4:
 
-The three roles must not share private keys, a gateway database, a filesystem,
-or an operator-controlled source of protocol truth. One organization may not
-claim multiple roles under different test identities.
+> Accept when a buyer outside the core development team pays an independent
+> provider on a public TOS network and another resolver reconstructs the
+> complete history without a private gateway database.
 
-## Required roles
+The same-operator rehearsal on the epoch-7 public testnet
+(`deployments/public-testnet-epoch7-gate-d-rehearsal-20261118.json`) shows
+that the paid loop works on a public network. It does not show that
+unrelated parties can use it, and it is not Gate D evidence. This pilot
+closes that difference: an outside buyer pays with one native-TOS `call`, the
+provider answers with an attested `respond`, and a third party reconstructs
+the purchase from finalized TOS state alone.
 
-1. The provider generates and retains its Agent controller and execution
-   signer keys, publishes the software-work Capability, runs the pinned
-   executor, and returns the immutable artifact, report, and Receipt.
-2. The buyer generates and retains its wallet and Agent keys, independently
-   resolves the Capability and Quote terms, funds the escrow with the exact
-   TOS-network stablecoin, checks the returned objects, and authorizes release.
-3. The verifier uses independently operated HTTPS JSON-RPC endpoints and a
-   clean checkout to reconstruct the Capability, Accepted Quote, escrow,
-   Receipt, settlement transaction, and provider-wallet credit.
+## 2. Roles
 
-All test identities must be freshly generated through `tosctl` or another
-reviewed custody boundary; ML-DSA-44 Agent controller keys stay in `tosctl`
-custody (vault). The plaintext identities under
-`test-vectors/` are local test fixtures and are forbidden in the external
-pilot. No seed, mnemonic, private key, vault export, or signing credential may
-appear in the evidence bundle.
+| Role | Holds | Does |
+|---|---|---|
+| **Provider** | its Agent controller, its wallet and the actor's ML-DSA-44 attestor key, in its own `tosctl` custody; its executor host | publishes the Agent, the software-work Capability (manifest key 21) and a Service Actor from the pinned release code; hands the buyer an offer file (`tos.openfox.rail-offer.v2`); runs the pinned executor; answers each admitted request with `respond`; withdraws its revenue |
+| **External buyer** | its wallet and buyer Agent (packet controller), in its own `tosctl` custody under a custody OS account | resolves the Capability and terms itself from finalized state; builds the Quote locally; pays with one `call` after confirming on its own custody terminal; delivers the task over the relays; checks the returned Receipt and artifact; runs the refund duties; exports its evidence |
+| **Verifier** | a clean checkout of this repository at the pilot commit; its own resolver and endpoint list | reconstructs every purchase of the pilot from finalized state and public inputs only, without gateway data or files a gateway supplied; issues the verdict |
 
-## Frozen profile
+The reference provider is an OpenFox node on the Service Actor rail
+(openfox `docs/guides/service-actor-rail.md`). The reference buyer is the
+MCP buyer adapter (`tos-service-buyer` and `tos-service-buyer-mcp`), driven
+from an MCP client such as Claude Code or Codex. Another implementation may
+take either role if it produces the same on-chain facts and the evidence of
+section 8.
 
-The pilot uses only the V1 software-work profile:
+The packet relays and, where one is used, a gateway are carriers and hint
+sources. They hold no authority (`AGENT_PACKET_RELAY_V1.md` section 1;
+`MCP_BUYER_ADAPTER_V1.md` O3): a relay cannot create, change or authorize any
+protocol fact, and every packet it carries is verified against finalized
+state. A team-operated relay therefore takes no role and does not affect the
+independence of the roles.
 
-- canonical manifest and Accepted Quote encodings from this repository;
-- one exact TOS-network stablecoin master and wallet-code hash;
-- fixed-price full release or timeout refund;
-- the pinned OCI image and fail-closed containerd isolation policy;
-- canonical Receipt and settlement-intent cells; and
-- finalized TOS state as the sole payment authority.
+## 3. Independence rules
 
-Changing the provider Agent, execution signer, endpoint, price, buyer, or
-deadline requires a newly encoded Quote and a newly derived escrow StateInit.
-Editing a gateway record is never a substitute.
+1. The three roles must not share a private key, a gateway database, a
+   filesystem, a host or an operator-controlled source of protocol truth.
+2. **One organization may not claim multiple roles**, under the same or
+   different test identities. A person acting for an organization counts as
+   that organization.
+3. The core development team may hold at most one role. The buyer is outside
+   the core development team.
+4. The buyer runs on a machine it controls, under accounts it created. It
+   uses no machine, account, key, vault or configuration file of another
+   role. The operator may hand it public data only (section 6 step 3).
+5. The verifier's resolver is operated by the verifier, from a clean
+   checkout, with no state carried over from the provider, the buyer or a
+   gateway.
+6. Endpoints. The verifier records, for every JSON-RPC endpoint it reads, the
+   legal or organizational operator. Several URLs, processes, containers or
+   hosts run by one operator are one operator and do not establish
+   independence. `ROADMAP.md` section 10 asks for "an independently operated
+   resolver or endpoint set"; the earlier runbook asked the verifier to use
+   independently operated endpoints. Which of the two this pilot requires is
+   an open owner decision. Until it is taken, a record states each
+   endpoint's operator and claims endpoint independence only where it holds
+   (section 9).
 
-## Execution sequence
+## 4. Custody of identities
 
-1. Record the network ID, genesis hashes, release commits, Registry code hash,
-   stablecoin identity, and independently operated endpoint URLs.
-2. The provider registers its Agent and Capability, then publishes the exact
-   manifest and content digests. The buyer and verifier independently resolve
-   the finalized version before payment.
-3. The buyer and provider agree on a non-canonical Quote Proposal. Both inspect
-   the complete typed Accepted Quote before its escrow StateInit is deployed.
-4. The buyer funds the derived escrow wallet with the exact quoted amount.
-   Both parties resolve the funded state before execution begins.
-5. The provider executes the bound source under the pinned image and retains
-   the content-addressed artifact and report. A crash-ambiguous execution is
-   not retried under the same execution ID. A privileged private containerd
-   socket remains owned by the executor identity and is never shared with the
-   gateway: raw containerd access is host-root authority. The executor accepts
-   only privately staged, executor-owned source and state paths and holds no
-   signing key.
-6. The execution signer signs only the displayed settlement-intent hash. The
-   escrow validates the full Receipt and initiates the stablecoin transfer.
-7. The verifier waits for finality and runs the strict evidence checker
-   (void: that checker was removed; see the banner) from a clean environment. It must obtain a quorum without a private gateway
-   database or files supplied by the gateway.
+- Every identity of the pilot is freshly generated through `tosctl`: wallets,
+  Agent controllers, packet controllers, attestor keys and the declaration
+  keys of section 8.3. The plaintext identities under `test-vectors/` are
+  local test fixtures and are forbidden in the pilot.
+- The buyer creates its wallet and packet controller with
+  `tos-service-buyer init` in its custody account
+  (`MCP_BUYER_ADAPTER_V1.md` 3.2). The developer account in which the MCP
+  client and the model run cannot read the vault, the agent configuration or
+  the journal, and cannot act as the custody account (5.1). Every payment is
+  confirmed by the human on a terminal of the custody account that no process
+  of the developer account reaches.
+- No seed, mnemonic, private key, vault URL, vault export, master key, bearer
+  token or other signing credential may appear in the evidence or in any
+  message between the roles.
 
-### Custody-safe Receipt signing
+## 5. Frozen profile
 
-The Receipt tool is deliberately two-stage and never reads a private key. The
-provider first builds the canonical Receipt and settlement payload:
+The pilot uses one software-work profile and pins, before it starts:
 
-```bash
-native-receipt-release \
-  --outcome OUTCOME.json \
-  --quote-vector ACCEPTED_QUOTE.json \
-  --escrow ESCROW_ADDRESS \
-  --query-id NON_ZERO_RELEASE_QUERY_ID \
-  > settlement-prepare.json
-```
+- the network tuple: network label, genesis root hash and genesis file hash,
+  and the SHA-256 of the global configuration file;
+- the Native Registry code file and code hash, and the Service Actor release
+  code hash (`crypto/smartcont/tos-service-actor-v1.release.json` in tos);
+- the tos release tag and commit, and the SHA-256 of the `tosctl` binary each
+  role runs (each role pins its own and records it);
+- the ai commit the buyer and verifier build from, and the SHA-256 of every
+  binary each role builds;
+- the provider implementation's commit and binary SHA-256;
+- the offer: Capability ID and version, provider Agent, actor address,
+  manifest digest, price, storage fee, cleanup bounty, response SLA and
+  refund claim window (the contract allows 3,600 to 2,592,000 seconds; a
+  window of at least two hours gives an outside buyer room to act).
 
-After inspecting the Receipt, Quote, escrow, amount, query ID, and displayed
-execution-signer public key, sign the exact 32-byte payload inside the `tosctl`
-vault boundary:
+A change to the provider Agent, the actor, the attestor, the terms or the
+manifest is a new offer. The buyer quotes it again; a Quote is never edited.
 
-```bash
-jq -r .signing_payload_hex settlement-prepare.json \
-  | xxd -r -p > settlement-payload.bin
-tosctl wallet sign \
-  --name EXECUTION_SIGNER_WALLET \
-  --message-file settlement-payload.bin \
-  > settlement-signature.json
-```
+## 6. Execution sequence
 
-Finalize the release body only after the tool verifies that the `tosctl`
-signature JSON contains the exact Quote-bound public key and payload:
+1. **Freeze.** The operator records the profile of section 5 in a draft
+   record and publishes the pilot commit set. No role starts before the
+   prerequisites of section 10 are merged at those commits.
+2. **Provider setup.** The provider publishes its Agent, Capability and a
+   Service Actor for the pilot, so the pilot's request IDs start at 0 and do
+   not mix with earlier evidence. It runs its preflight and its long-running
+   node, and writes the offer file.
+3. **Pilot package.** The buyer and the verifier receive public data only:
+   the network tuple and global configuration with its SHA-256, the registry
+   code file's source (tos tag and path), the actor code hash, the relay base
+   URLs and the relay CA certificate (its SHA-256 sent over a second
+   channel), the endpoint access instructions, and the offer file with its
+   SHA-256.
+4. **Buyer setup.** The buyer builds the binaries at the pilot commit and
+   runs `tos-service-buyer init plan`, then `init apply`, which creates the
+   wallet and packet controller in custody and stops until the wallet is
+   funded. The buyer sends the wallet address (public) to whoever funds the
+   pilot and, once funded, runs `init apply` again to activate the wallet and
+   register the buyer Agent. It starts
+   `tos-service-buyer agent` in the custody account and configures its MCP
+   client (`MCP_BUYER_GUIDE.md`).
+5. **Independent resolution.** The buyer resolves the offer with
+   `tos_buyer_quote` (offer-file source, local Quote) and the verifier
+   resolves the same Capability version, actor policy and `terms_hash` with
+   its own resolver, both at finalized checkpoints and before payment.
+6. **Purchase.** The buyer prepares the purchase, requests payment and
+   confirms it on its custody terminal with the code shown there. The agent
+   sends one `call` with the quoted `expected_terms_hash`.
+7. **Execution.** The provider executes the bound source under the pinned
+   image and fail-closed isolation. A crash-ambiguous execution is not
+   retried under the same execution ID. The executor's private containerd
+   socket is never shared with a gateway, and the executor holds no signing
+   key. The provider attests the result with `respond`.
+8. **Result.** The buyer's agent accepts the result only after the Receipt's
+   cell hash equals the finalized `response_hash` and every bound digest
+   matches (`MCP_BUYER_ADAPTER_V1.md` 7.3); `tos_buyer_result` writes the
+   files.
+9. **Refund path (recommended).** The provider pauses intake, the buyer makes
+   a second purchase, and after the response deadline the buyer's agent runs
+   `expire` and `claim_refund`. The purchase ends `refunded` and the price
+   returns to the buyer wallet.
+10. **Provider withdrawal.** The provider withdraws its revenue with
+    `withdraw_revenue`.
+11. **Evidence.** The buyer exports its evidence as the custody account. The
+    provider exports its own. The verifier waits for finality and
+    reconstructs every purchase from a clean environment (section 7, A6),
+    then issues its verdict.
+12. **Record.** The operator assembles the record of section 8. Every party
+    checks it and signs its digest. The record is committed under
+    `spec/deployments/` through a pull request reviewed by someone other than
+    its author.
 
-```bash
-native-receipt-release \
-  --outcome OUTCOME.json \
-  --quote-vector ACCEPTED_QUOTE.json \
-  --escrow ESCROW_ADDRESS \
-  --query-id NON_ZERO_RELEASE_QUERY_ID \
-  --signature-file settlement-signature.json \
-  > settlement-release.json
-```
+## 7. Acceptance items
 
-The provider must compare the unsigned and signed outputs before broadcasting.
-The signing payload is public, but the private key, mnemonic, and vault export
-must never be passed to `native-receipt-release`, the gateway, or the buyer.
+Gate D is accepted only when every item holds and is shown by the record:
 
-## Independent verification
+- **A1. Public network.** Every transaction is on the pinned public TOS
+  network, read at finalized checkpoints by a strict-majority quorum of at
+  least three endpoints.
+- **A2. Roles.** Three declared parties hold the three roles under the rules
+  of section 3; the buyer is outside the core development team; no
+  organization holds two roles.
+- **A3. Fresh custody.** Every identity was generated through `tosctl` for
+  the pilot; none comes from `test-vectors/`; the evidence holds no secret.
+- **A4. Independent resolution.** The buyer and the verifier each resolved
+  the Capability version, manifest digest, actor code hash, policy, attestor
+  and `terms_hash` from finalized state before payment, without a private
+  gateway database.
+- **A5. Responded purchase.** At least one purchase was paid with one `call`
+  carrying the quoted `expected_terms_hash`, confirmed by the buyer's human on
+  the custody terminal, answered by `respond`, and accepted by the buyer: the
+  Receipt's cell hash equals the finalized `response_hash`, the Receipt binds
+  the purchase's `quote_commitment`, execution ID, input, source, price,
+  provider, toolchain and manifest digests, `exit_code` is 0, and the artifact
+  matches the digests the Receipt binds.
+- **A6. Reconstruction.** The verifier reconstructed from finalized state and
+  public inputs only: the Capability and manifest digest; the actor's code
+  hash, policy and `terms_hash`; the `call` transaction and the request's
+  state; the `respond` transaction and its `response_hash`, compared with the
+  Receipt's cell hash; the artifact digest; for a refunded purchase the
+  `expire` and `claim_refund` transactions and the refund credited to the
+  buyer wallet; and the provider's `withdraw_revenue`.
+- **A7. No gateway dependency.** No role relied on gateway-held data for any
+  fact the record states. A gateway, if used at all, was a hint source whose
+  every answer was re-verified.
+- **A8. Endpoint observations.** Every endpoint each role used is listed with
+  its operator.
+- **A9. Agreement.** All three parties signed the same record digest with the
+  keys their declarations name.
+- **A10. Verdict.** The verifier returned
+  `PASS_INDEPENDENT_SERVICE_ACTOR_SOFTWARE_WORK` over that record.
 
-Run the verifier with the Python environment frozen by `tos/test/tostester`.
-Every placeholder is supplied by the independent parties' pilot, not copied
-from the local rehearsal:
+The refunded purchase of step 9 is recommended, not required: A6 covers it
+when it runs. Any missing object, ambiguous chain outcome, quorum failure or
+private gateway dependency leaves Gate D open.
 
-```bash
-uv run --project test/tostester python \
-  scripts/tos-service-software-work-paid-evidence.py \
-  --outcome OUTCOME.json \
-  --release RELEASE.json \
-  --quote-vector ACCEPTED_QUOTE.json \
-  --artifact-root CONTENT_ADDRESSED_OBJECTS \
-  --escrow ESCROW_ADDRESS \
-  --buyer-wallet BUYER_STABLECOIN_WALLET \
-  --provider-wallet PROVIDER_STABLECOIN_WALLET \
-  --endpoint https://operator-a.example/jsonRPC \
-  --endpoint https://operator-b.example/jsonRPC \
-  --endpoint https://operator-c.example/jsonRPC \
-  --quorum 2 \
-  --funding-query-id NON_ZERO_QUERY_ID \
-  --funded-checkpoint FINALIZED_PRE_RELEASE_CHECKPOINT \
-  --evidence paid-software-work-evidence.json
-```
+## 8. Pilot evidence record
 
-The checker fails closed unless it can:
+### 8.1 File and schema
 
-- decode the canonical Receipt and match every field to the Quote and outcome;
-- rehash the Receipt BOC, artifact, and report;
-- match the report to the execution result;
-- obtain the required endpoint quorum at one finalized checkpoint;
-- prove the escrow was funded but unsettled at the supplied finalized
-  pre-release checkpoint;
-- match funded and settled amounts to the exact Quote and prove that the
-  provider-wallet balance increased by that amount between the funded and
-  settlement checkpoints;
-- match the on-chain Receipt commitment and release query ID; and
-- derive escrow and provider-wallet transaction identities from endpoint
-  responses.
+One JSON file,
+`spec/deployments/public-testnet-<epoch>-gate-d-external-pilot-<yyyymmdd>.json`,
+schema `tos.service.gate-d-external-pilot-record.v1`. Hashes are lowercase
+hex with the prefix the source uses (`sha256:`, `tvm-cell-sha256:`) or bare
+64-hex where the protocol object is bare (`request_hash`,
+`response_hash`, transaction hashes). Amounts are decimal nanoTOS strings.
+Times are UTC ISO 8601. Logs, archives and BOC files stay outside Git; the
+record names each by SHA-256 and says who retains it.
 
-The verifier must separately record the legal or organizational operator of
-each endpoint. Multiple URLs, processes, containers, or hosts controlled by
-one operator do not establish independence.
+### 8.2 Fields
 
-## Acceptance record
+| Field | Content |
+|---|---|
+| `schema`, `protocol` | `tos.service.gate-d-external-pilot-record.v1`, `tos_service_v1` |
+| `status`, `verdict` | `pilot-passed` with `PASS_INDEPENDENT_SERVICE_ACTOR_SOFTWARE_WORK`, or `pilot-failed` with `FAIL` and the failing acceptance items |
+| `participants[]` | per role: `role` (`provider`, `buyer`, `verifier`), the organization or person (at least a publishable identifier), the statement that it is or is not part of the core development team, who controls its hosts and network, its declaration public key and algorithm, and the statement that it shares no key with another party |
+| `buyer_declaration` | the independent buyer statement: the wallet and buyer Agent were freshly generated by the buyer through `tosctl`; every payment was confirmed by the buyer on its own custody terminal; no machine, account or key of another role was used |
+| `network` | network label, genesis root hash, genesis file hash, global configuration SHA-256 |
+| `releases` | Native Registry code hash, Service Actor code hash, and whether every endpoint served that actor code hash |
+| `source_commits` | the ai commit (buyer and verifier), the provider implementation's commit, the tos tag and commit |
+| `binaries` | per role, the SHA-256 of every binary it ran, `tosctl` included; who built each |
+| `endpoints[]` | per role, each endpoint's form (for example "loopback forward to a validator's JSON-RPC" or "own full node"), its operator, and the quorum used |
+| `objects` | provider Agent ID, actor address, Capability ID and version, manifest digest, metadata hash, attestor key ID, `terms_hash`, policy version; buyer Agent ID and wallet address; offer file SHA-256 |
+| `terms` | price, storage fee, cleanup bounty, response SLA, refund claim window, retention |
+| `purchases[]` | per purchase: label, outcome (`responded`, `refunded`, `swept`), Quote source, Quote package SHA-256 and `quote_commitment`, `request_hash`, `request_id`, the `call` transaction (hash, lt), the `respond` transaction (hash, lt) and `response_hash`, or the `expire` and `claim_refund` (or sweep) transactions (hash, lt) and the refunded amount; the Receipt BOC SHA-256 and its cell hash; the artifact digest and its member digests; the confirmation time on the custody terminal |
+| `provider_withdrawals[]` | `withdraw_revenue` transaction (hash, lt), query ID, amount |
+| `funding` | each funding operation's ID, destination, amount and transaction (hash, lt), and the SHA-256 of the operations journal |
+| `verifier_output` | the verifier tool's commit and binary SHA-256, the SHA-256 of its output, the finalized checkpoint it read at, and its verdict |
+| `known_limitations[]` | every limitation that applies, in words, including each item of section 9 the pilot cannot exclude |
+| `record_sha256` | the digest of section 8.3 |
+| `signatures[]` | per participant: role, declaration public key, signature over `record_sha256` |
 
-The final immutable record must include participant declarations, release
-commits, network and contract identities, the canonical Quote and Receipt,
-content-addressed objects, endpoint observations, transaction identities, and
-the strict verifier output. Each participant signs the digest of that record
-with the public key declared for its role.
+### 8.3 What binds the record
 
-Mark Gate D accepted only when all three parties confirm the same record and
-the verifier returns `PASS_INDEPENDENT_PAID_SOFTWARE_WORK_SETTLEMENT`. Any
-missing object, ambiguous chain outcome, endpoint quorum failure, or private
-gateway dependency leaves Gate D open.
+`record_sha256` is the SHA-256 of the record with the `record_sha256` and
+`signatures` fields removed, encoded as canonical JSON (RFC 8785). Each
+participant signs those 32 bytes with the declaration key its entry names,
+held in its own `tosctl` custody (for an Ed25519 key, `tosctl wallet sign
+--name <key> --message-hex <record_sha256 hex>`). The record is bound by:
+
+- the commits and binary SHA-256s each role ran, so the code is fixed;
+- the network tuple, the registry code hash and the actor code hash, so the
+  chain and contracts are fixed;
+- the request IDs, `request_hash` values and transaction hashes and logical
+  times, which anyone can look up in finalized state;
+- the Receipt BOC and artifact digests, which tie the delivered files to the
+  attested `response_hash`;
+- the verifier's verdict and the hash of its output, and the three
+  signatures over one digest.
+
+### 8.4 Who produces which part
+
+- The buyer's part comes from its evidence export, run as the custody
+  account, and contains no secret (`MCP_BUYER_ADAPTER_V1.md` section 15).
+- The provider's part comes from its node's status and its withdrawal.
+- The verifier's part comes from the verifier tool's output; nothing in it is
+  copied from the other two parts.
+
+## 9. What a pilot record must not claim
+
+- **Gate F.** No public HTTPS gateway, no two independently operated
+  gateways, no three providers or ten Capabilities, no recurring paid use and
+  no safe handoff. A gateway on loopback or behind a private CA proves none of
+  these.
+- **Gate E acceptance.** It is claimed only if a buyer completes a purchase
+  from the public documentation alone in one working session and an
+  independently operated provider onboards fresh; otherwise the pilot is at
+  most supporting evidence for the buyer side of Gate E.
+- **Endpoint independence** where it does not hold: if every endpoint is run
+  by the project, the record says so, and independence refers to the roles
+  only.
+- **Public-HTTPS chain endpoints.** Validator JSON-RPC reached through a
+  forward to a loopback listener is not a public endpoint.
+- **Production relays.** The test relays are run by the team, use a private
+  CA and a short TTL; the record claims neither relay independence nor
+  production readiness.
+- **Computation correctness.** A Receipt is an attested statement of the
+  digests it binds (`SERVICE_ACTOR_SETTLEMENT_DESIGN.md` section 4). It
+  proves that the provider's attestor committed to those digests, not that
+  the computation was correct.
+- **Readiness beyond the pilot.** No production readiness, mainnet, real
+  money, Messenger carriage, independent security review of the Service Actor
+  or both-VM replay, unless separately recorded.
+
+## 10. Prerequisites and tooling status
+
+Merged on ai main: the buyer agent, confirmer, refund duties, carriage,
+delivery, result acceptance, `tos-service-buyer agent`, `init plan` and
+`init apply`, and the stdio MCP server with `tos_buyer_prepare`,
+`tos_buyer_request_payment`, `tos_buyer_withdraw`, `tos_buyer_status`,
+`tos_buyer_purchases`, `tos_buyer_refund` and `tos_buyer_result`
+(`ROADMAP.md` section 4).
+
+Not merged, and each required before a pilot record can pass:
+
+- `tos_buyer_search` and `tos_buyer_quote` with the finalized reads behind
+  them (ai #81). Without a Quote there is no `quote_id` and no purchase.
+- the `init` follow-ups (ai #80);
+- the end-to-end test of the MCP buyer against an OpenFox provider on a local
+  chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9);
+- the buyer's evidence export (`tos-service-buyer evidence`, section 15) and
+  a Service Actor verifier for third parties that reconstructs A6 and emits
+  the verdict of A10. Both are being built; their command names and output
+  format are fixed when they merge, and this runbook is updated then.
+
+Operational prerequisites (endpoint access for the buyer and verifier,
+funding, the published global configuration) are decided by the operator and
+the owner and recorded in the pilot record, not here.

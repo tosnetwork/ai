@@ -18,10 +18,11 @@ evidence:
 - **Still binding:** the §2 independence rules and the rail-independent rows
   and items of §3-§5 and §8 (Registry code hash, executor toolchain, Agent and
   Capability registration, executor isolation, endpoint independence).
-- **Next:** a Service Actor rewrite of this packet follows in a separate
-  change, together with that of `GATE_D_EXTERNAL_PILOT.md`, which remains
-  authoritative. Where this packet conflicts with the Service Actor
-  documents, they govern.
+- **Next:** `GATE_D_EXTERNAL_PILOT.md` now holds the Service Actor runbook,
+  including its roles, acceptance items and evidence record, and is
+  authoritative; a Service Actor rewrite of this packet follows in a
+  separate change. Where this packet conflicts with that runbook or the
+  Service Actor documents, they govern.
 
 **Status:** operational readiness companion to `GATE_D_EXTERNAL_PILOT.md`, which
 is authoritative. This packet only assembles the fixed inputs, per-role
