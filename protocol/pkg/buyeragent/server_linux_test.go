@@ -362,13 +362,23 @@ func TestTheSocketDecodesRequestsStrictly(t *testing.T) {
 func TestListenRefusesUnsafeDeployments(t *testing.T) {
 	f := newFixture(t)
 	self := uint32(os.Geteuid())
-	open := t.TempDir()
-	if err := os.Chmod(open, 0o777); err != nil {
+	// The world-open and in-state directories satisfy every other check
+	// (setgid, shared group), so the check each case names is the one that
+	// refuses it.
+	open := socketDir(t)
+	if err := os.Chmod(open, 0o777|os.ModeSetgid); err != nil {
 		t.Fatal(err)
 	}
 	inside := filepath.Join(f.state, "socket")
 	if err := os.Mkdir(inside, 0o750); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.Chmod(inside, 0o750|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	named := map[string]string{
+		"world-open socket dir":   "unwritable by group and closed to others",
+		"socket dir in the state": "must not be the state directory or inside it",
 	}
 	cases := map[string]ServerConfig{
 		"client equals custody":   {Agent: f.agent, SocketDir: socketDir(t), CustodyUID: self, ClientUID: self},
@@ -379,9 +389,14 @@ func TestListenRefusesUnsafeDeployments(t *testing.T) {
 		"relative socket dir":     {Agent: f.agent, SocketDir: "relative", CustodyUID: self, ClientUID: self + 1},
 	}
 	for name, config := range cases {
-		if server, err := Listen(config); err == nil {
+		server, err := Listen(config)
+		if err == nil {
 			server.Close()
 			t.Errorf("%s was accepted", name)
+			continue
+		}
+		if want, ok := named[name]; ok && !strings.Contains(err.Error(), want) {
+			t.Errorf("%s was refused by another check: %v", name, err)
 		}
 	}
 	notSocket := socketDir(t)
