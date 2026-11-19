@@ -213,6 +213,20 @@ func writeJSON(path string, value any, exclusive bool) error {
 	return writePrivate(path, append(raw, '\n'), exclusive)
 }
 
+// ReadPurchaseRecord reads, without opening the agent, one purchase record
+// from the agent state directory stateDir. It takes no lock and writes
+// nothing, so it is safe while the agent runs: every record is replaced by
+// an atomic rename, never written in place.
+func ReadPurchaseRecord(stateDir, requestHash string) (PurchaseRecord, error) {
+	if !filepath.IsAbs(stateDir) || filepath.Clean(stateDir) != stateDir {
+		return PurchaseRecord{}, errors.New("the agent state directory must be absolute and clean")
+	}
+	if err := checkPrivateDir(stateDir); err != nil {
+		return PurchaseRecord{}, err
+	}
+	return store{root: stateDir}.readPurchase(requestHash)
+}
+
 func (s store) readPurchase(requestHash string) (PurchaseRecord, error) {
 	var record PurchaseRecord
 	if !hex64Pattern.MatchString(requestHash) {

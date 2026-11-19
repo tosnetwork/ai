@@ -116,6 +116,9 @@ contradict them.
   Actor rail, with payment confirmed by a human outside the model (design;
   it supersedes the retired provider-side
   [MCP tool](docs/MCP_ADAPTER_V1.md)).
+- [Purchase Evidence V1](docs/PURCHASE_EVIDENCE_V1.md) defines the buyer's
+  evidence bundle and the third-party verifier that checks a Service Actor
+  purchase, its Receipt and artifact against quorum-finalized state.
 - [x402 Adapter Decision](docs/X402_ADAPTER_DECISION.md) explains why x402 is
   deferred and constrains any future integration to negotiation over the
   existing canonical TOS escrow lifecycle.

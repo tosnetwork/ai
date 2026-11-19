@@ -116,6 +116,7 @@ business-category opcodes.
 - [Software Work Execution V1](SOFTWARE_WORK_EXECUTION_V1.md)
 - [A2A Adapter V1](A2A_ADAPTER_V1.md)
 - [MCP Buyer Adapter V1](MCP_BUYER_ADAPTER_V1.md) (design)
+- [Purchase Evidence V1](PURCHASE_EVIDENCE_V1.md) (the buyer's evidence export and the third-party verifier)
 - [MCP Adapter V1](MCP_ADAPTER_V1.md) (superseded)
 - [A2A Use Cases](A2A_USE_CASES.md)
 

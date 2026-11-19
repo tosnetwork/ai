@@ -34,6 +34,10 @@ the relay poller over pinned-CA HTTPS relay clients.
 `tos-service-buyer init` (3.2, `protocol/pkg/buyerinit`) is implemented and
 writes the configuration `tos-service-buyer agent` reads.
 
+`tos-service-buyer evidence` (section 15) and the third-party verifier
+`tos-service-verify` are implemented (`protocol/pkg/purchaseevidence`,
+[`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md)).
+
 Not yet implemented are the finalized-state reads behind search and quote;
 section 16 lists that work. It supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
@@ -1412,13 +1416,16 @@ covers the buyer role:
 | deliver the work and check the returned objects | relay carriage and Receipt acceptance (section 7) |
 | refund duties | the agent (section 11) |
 | no private gateway dependency | gateways are optional hints; Quotes are built locally |
-| evidence | `tos-service-buyer evidence <request_hash>`, run as the custody account, exports the release commits, network tuple, Capability and version, manifest digest, Quote package and commitment, `request_hash`, call transaction, `request_id`, respond or refund transactions, `response_hash`, Receipt BOC, artifact digests and budget policy, and no secret |
+| evidence | `tos-service-buyer evidence --config <agent config> --request-hash <request_hash> --out-dir <new dir>`, run as the custody account, exports the build's VCS revision, network tuple, Capability and version, manifest digest, Quote package and commitment, `request_hash`, the journal record, call transaction, `request_id`, respond or refund transactions, `response_hash`, Receipt BOC, artifact and member digests and budget policy, and no secret ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md) section 2). It exports only a purchase that verifies at a finalized checkpoint as a third party would verify it. |
 
 The verifier role stays independent: it reconstructs the purchase with its own
-resolver (`tos-service-buyer requests` from a clean checkout, or another
-implementation) against independently operated endpoints. Plan item 9 tests
-the adapter first against an OpenFox provider on a local chain and then on the
-public testnet.
+resolver against independently operated endpoints. `tos-service-verify`
+([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md) section 1), built from a
+clean checkout, is one such resolver. It reads only public inputs and the
+buyer's exported files at a quorum of every endpoint given, signs nothing and
+links no buyer runtime. Another implementation may take its place. Plan item 9
+tests the adapter first against an OpenFox provider on a local chain and then
+on the public testnet.
 
 ## 16. Implementation work
 
@@ -1442,7 +1449,8 @@ refusals, crash recovery and the confirmation boundary:
 - `tos-service-buyer` subcommands `init` (implemented: `protocol/pkg/buyerinit`
   over `buyersdk.TOSCTLInitCustody` and the finalized account read
   `toschain.ServiceActorSession.Account`), `agent`, `confirm` (with the
-  terminal checks of 5.1 and the rendering rules of 5.2) and `evidence`;
+  terminal checks of 5.1 and the rendering rules of 5.2) and `evidence`
+  (implemented: [`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md));
 - the user guide, written as the Service Actor rewrite of
   [`GATE_E_BUYER_ONBOARDING.md`](GATE_E_BUYER_ONBOARDING.md).
 

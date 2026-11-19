@@ -171,6 +171,22 @@ func OpenServiceActorJournal(directory string, now time.Time) (*ServiceActorJour
 	return journal, nil
 }
 
+// ReadServiceActorCallRecord reads one record of the journal in directory
+// without opening the journal: unlike OpenServiceActorJournal it recovers
+// nothing and writes no record, so it is safe while the agent that owns the
+// journal runs. It holds the journal lock for the read, so it never sees a
+// record half way through a transition.
+func ReadServiceActorCallRecord(directory, requestHash string) (CallRecord, error) {
+	if !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
+		return CallRecord{}, errors.New("buyer journal directory must be absolute and clean")
+	}
+	info, err := os.Lstat(directory)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info) {
+		return CallRecord{}, errors.New("buyer journal directory must be owner-private")
+	}
+	return (&ServiceActorJournal{directory: directory}).Read(requestHash)
+}
+
 func (j *ServiceActorJournal) withLock(fn func() error) error {
 	return osguard.WithExclusiveFileLock(filepath.Join(j.directory, "journal.lock"), 0o600, fn)
 }

@@ -23,11 +23,16 @@ evidence:
   checker" step 7 runs is the removed script of "Independent verification",
   so that part of step 7 is void until the rewrite names a Service Actor
   verifier.
+- **Service Actor tools:** the verifier for the responded, refunded and swept
+  outcomes is `protocol/cmd/tos-service-verify`, and the buyer's evidence
+  export is `tos-service-buyer evidence`
+  ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md)). Their verdict is
+  evidence for the verifier role only, not the acceptance verdict; this
+  runbook's rewrite names that verdict and the record schema.
 - **Next:** a Service Actor rewrite of this runbook (native-TOS `call`,
-  attestor-signed `respond`, `expire`/`claim_refund`, and a verifier for the
-  responded, refunded and swept outcomes) follows in a separate change, after
-  the open Gate D items in `ROADMAP.md`. Where this document conflicts with
-  the Service Actor documents, they govern.
+  attestor-signed `respond`, `expire`/`claim_refund`, and the verifier above)
+  follows in a separate change, after the open Gate D items in `ROADMAP.md`.
+  Where this document conflicts with the Service Actor documents, they govern.
 
 ## Purpose
 
