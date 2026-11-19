@@ -277,6 +277,28 @@ held in its own `tosctl` custody (for an Ed25519 key, `tosctl wallet sign
 - The provider's part comes from its node's status and its withdrawal.
 - The verifier's part comes from the verifier tool's output; nothing in it is
   copied from the other two parts.
+- The verifier tool is `tos-service-verify`, and the buyer's export is
+  `tos-service-buyer evidence` ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md)).
+  The tool's `pass`/`fail` result and check IDs map into this record as
+  follows. The verdict's SHA-256, checkpoint and `result` become
+  `verifier_output`. Check IDs map to acceptance items:
+  - A1: `actor-account` and the verdict's `reads.quorum`.
+  - A4 (verifier side): `bundle-binding`.
+  - A5: `receipt-canonical`, `receipt-response-hash`, `receipt-request-hash`,
+    `receipt-terms`, `receipt-binding`, `artifact-digest` and
+    `artifact-members`.
+  - A6: `actor-code-hash`, `actor-history`, `actor-replay`,
+    `request-selected`, `request-getters`, `bundle-binding`,
+    `bundle-journal`, `bundle-finalized` and `bundle-result`.
+  - A10: `PASS_INDEPENDENT_SERVICE_ACTOR_SOFTWARE_WORK` may be given only
+    when the tool returns `pass` for every purchase of `purchases[]`.
+
+  The tool does not judge A2, A3, A7, A8 or A9. It does not cover A6's
+  `withdraw_revenue` either, and it shows a refund only as the `claim_refund`
+  payout to the buyer wallet, not as the wallet's credit. Those come from the
+  record's other parts. Without a bundle the tool proves a request's caller
+  wallet only, so each purchase in `purchases[]` must have its reported
+  `caller` equal the buyer's declared wallet in `objects`.
 
 ## 9. What a pilot record must not claim
 
@@ -321,9 +343,9 @@ Not merged, and each required before a pilot record can pass:
 - the end-to-end test of the MCP buyer against an OpenFox provider on a local
   chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9);
 - the buyer's evidence export (`tos-service-buyer evidence`, section 15) and
-  a Service Actor verifier for third parties that reconstructs A6 and emits
-  the verdict of A10. Both are being built; their command names and output
-  format are fixed when they merge, and this runbook is updated then.
+  the third-party verifier `tos-service-verify`
+  ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md), mapped into the
+  record in section 8.4).
 
 Operational prerequisites (endpoint access for the buyer and verifier,
 funding, the published global configuration) are decided by the operator and

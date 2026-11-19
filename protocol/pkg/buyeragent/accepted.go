@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"path/filepath"
 
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
@@ -31,10 +32,28 @@ type AcceptedResults interface {
 // stored artifact to the Receipt's artifact digest, so a damaged store is
 // an error, never a result.
 func (c *Carrier) AcceptedResult(requestHash string) (AcceptedResult, bool, error) {
+	return acceptedResultAt(c.config.StateDir, requestHash)
+}
+
+// ReadAcceptedResult reads, without opening a carrier, the result accepted
+// for a purchase from the carrier state directory stateDir, under the same
+// checks as Carrier.AcceptedResult. It writes nothing, so it is safe while
+// the agent that owns the directory runs.
+func ReadAcceptedResult(stateDir, requestHash string) (AcceptedResult, bool, error) {
+	if !filepath.IsAbs(stateDir) || filepath.Clean(stateDir) != stateDir {
+		return AcceptedResult{}, false, errors.New("the carrier state directory must be absolute and clean")
+	}
+	if err := checkPrivateDir(stateDir); err != nil {
+		return AcceptedResult{}, false, err
+	}
+	return acceptedResultAt(stateDir, requestHash)
+}
+
+func acceptedResultAt(stateDir, requestHash string) (AcceptedResult, bool, error) {
 	if !hex64Pattern.MatchString(requestHash) {
 		return AcceptedResult{}, false, errors.New("invalid request hash")
 	}
-	state, err := c.readReceived(requestHash)
+	state, err := readReceivedAt(stateDir, requestHash)
 	if err != nil {
 		return AcceptedResult{}, false, err
 	}
@@ -49,7 +68,7 @@ func (c *Carrier) AcceptedResult(requestHash string) (AcceptedResult, bool, erro
 	if err != nil || hex.EncodeToString(hash[:]) != state.AcceptedResponseHash {
 		return AcceptedResult{}, false, errors.New("the stored Receipt does not hash to the accepted response hash")
 	}
-	artifact, err := readPrivate(c.ArtifactPath(requestHash))
+	artifact, err := readPrivate(artifactPathAt(stateDir, requestHash))
 	if err != nil {
 		return AcceptedResult{}, false, err
 	}

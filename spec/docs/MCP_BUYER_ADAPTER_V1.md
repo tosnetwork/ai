@@ -37,6 +37,10 @@ the relay poller over pinned-CA HTTPS relay clients.
 `tos-service-buyer init` (3.2, `protocol/pkg/buyerinit`) is implemented and
 writes the configuration `tos-service-buyer agent` reads.
 
+`tos-service-buyer evidence` (section 15) and the third-party verifier
+`tos-service-verify` are implemented (`protocol/pkg/purchaseevidence`,
+[`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md)).
+
 The agent subcommand serves search and quote by `capability_id` and offer
 file with local Quotes, and, with a configured gateway or catalog (2.4), by
 search hints and gateway Quotes. Section 16 lists the implementation work.
@@ -290,7 +294,13 @@ file outside the state directory, `tosctl` names for the wallet and
 controller, a 64-hex `tosctl` pin, 3 to 8 endpoints with a strict-majority
 quorum, 1 to 4 distinct canonical relay URLs, a relay CA file whenever a
 relay is `https` (the agent verifies relays against that pinned CA only, never
-the system pool), and the budget bounds of section 6. The steps are:
+the system pool), and the budget bounds of section 6. The optional gateway
+and catalog follow the agent's own rules. `--gateway-url` must be a bare
+`https` base URL with `--gateway-ca-file`, or an `http` one on a loopback
+address with no CA file. It also needs `--gateway-token-file`: a custody-owned
+`0600` file holding one printable token of at most 4096 bytes, and the CA file
+must hold a PEM certificate. `--catalog-dir` must be an absolute clean path.
+The steps are:
 
 1. pin the `tosctl` binary by SHA-256; derive the identity domain with
    `tosctl agent native-registry domain`; require the registry code file to
@@ -325,7 +335,9 @@ the system pool), and the budget bounds of section 6. The steps are:
    quorum, registry code file and hash, actor code hash, manifest directory,
    wallet address, Agent ID, the pinned `tosctl` with its configuration,
    wallet name and controller name, the controller's key ID, relays, relay CA
-   file and budget policy. It holds no key and no vault credential; the vault
+   file, the optional gateway (URL, CA file, token file) and catalog
+   directory, and the budget policy. It names the gateway token file but never
+   holds the token. It holds no key and no vault credential; the vault
    URL is read from `VAULT_URL` and passed to `tosctl` only in its
    environment.
 
@@ -338,10 +350,11 @@ chain step (activation, registration) is marked as sending before `tosctl`
 runs. On a re-run, a step whose effect is in finalized state is never sent
 again. A step still marked as sending is waited on until it lands or its
 inclusion window has passed on finalized chain time, and only then sent again.
-The window is 5 minutes from the step's stamp. Every send runs under a
-3-minute deadline that kills `tosctl`, and a wallet message is valid for
-2 minutes from when `tosctl` signs it, so no message signed for the step can
-land after the window. `tosctl wallet send` reports no `valid_until` of its
+The window is 5 minutes and 10 seconds from the step's stamp. Every send runs
+under a 3-minute deadline that kills `tosctl`, and a wallet message is valid
+for 2 minutes from when `tosctl` signs it. The 10 seconds cover a stamp that is
+truncated to whole seconds and taken just after the deadline starts. So no
+message signed for the step can land after the window. `tosctl wallet send` reports no `valid_until` of its
 own; the stamp and that expiry both come from the host clock. Only the wallet
 checks `tosctl` makes before it builds the message (an amount the balance
 cannot cover, an uninitialized or frozen wallet) return the step to pending.
@@ -1512,13 +1525,16 @@ covers the buyer role:
 | deliver the work and check the returned objects | relay carriage and Receipt acceptance (section 7) |
 | refund duties | the agent (section 11) |
 | no private gateway dependency | gateways are optional hints; Quotes are built locally |
-| evidence | `tos-service-buyer evidence <request_hash>`, run as the custody account, exports the release commits, network tuple, Capability and version, manifest digest, Quote package and commitment, `request_hash`, call transaction, `request_id`, respond or refund transactions, `response_hash`, Receipt BOC, artifact digests and budget policy, and no secret |
+| evidence | `tos-service-buyer evidence --config <agent config> --request-hash <request_hash> --out-dir <new dir>`, run as the custody account, exports the build's VCS revision, network tuple, Capability and version, manifest digest, Quote package and commitment, `request_hash`, the journal record, call transaction, `request_id`, respond or refund transactions, `response_hash`, Receipt BOC, artifact and member digests and budget policy, and no secret ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md) section 2). It exports only a purchase that verifies at a finalized checkpoint as a third party would verify it. |
 
 The verifier role stays independent: it reconstructs the purchase with its own
-resolver (`tos-service-buyer requests` from a clean checkout, or another
-implementation) against independently operated endpoints. Plan item 9 tests
-the adapter first against an OpenFox provider on a local chain and then on the
-public testnet.
+resolver against independently operated endpoints. `tos-service-verify`
+([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md) section 1), built from a
+clean checkout, is one such resolver. It reads only public inputs and the
+buyer's exported files at a quorum of every endpoint given, signs nothing and
+links no buyer runtime. Another implementation may take its place. Plan item 9
+tests the adapter first against an OpenFox provider on a local chain and then
+on the public testnet.
 
 ## 16. Implementation work
 
@@ -1542,7 +1558,8 @@ refusals, crash recovery and the confirmation boundary:
 - `tos-service-buyer` subcommands `init` (implemented: `protocol/pkg/buyerinit`
   over `buyersdk.TOSCTLInitCustody` and the finalized account read
   `toschain.ServiceActorSession.Account`), `agent`, `confirm` (with the
-  terminal checks of 5.1 and the rendering rules of 5.2) and `evidence`;
+  terminal checks of 5.1 and the rendering rules of 5.2) and `evidence`
+  (implemented: [`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md));
 - the user guide, written as the Service Actor rewrite of
   [`GATE_E_BUYER_ONBOARDING.md`](GATE_E_BUYER_ONBOARDING.md); its first
   version is [`MCP_BUYER_GUIDE.md`](MCP_BUYER_GUIDE.md).
