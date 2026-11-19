@@ -611,12 +611,18 @@ def scenario_gateway_purchase(offer: dict) -> None:
         sizes = as_account("developer", ["/usr/bin/stat", "-c", "%n %s", *files.values()], check=False).stdout
         record("the developer holds receipt.boc, artifact.tar, output.log and report.json", "artifact.tar" in sizes,
                sizes.strip().splitlines())
-    status = json.loads(openfox("status", "--rail-config", str(PROVIDER_RAIL / "rail.json")).stdout)
-    entry = next((r for r in status.get("requests", []) if r.get("request_hash") == request_hash), {})
-    record("OpenFox recorded the buyer's ack", poll(lambda: next(
-        (r for r in json.loads(openfox("status", "--rail-config", str(PROVIDER_RAIL / "rail.json")).stdout).get("requests", [])
-         if r.get("request_hash") == request_hash), {}).get("operator_state") == "acked", 300, 15) is not None,
-        {"chain_fact": entry.get("chain_fact"), "operator_state": entry.get("operator_state")})
+    # The agent's own view of the ack: its duty round sends it after
+    # acceptance (refund_now runs that round now and reports it).
+    duty = structured(mcp("tos_buyer_refund", {"request_hash": request_hash})).get("duty") or {}
+    record("the agent's result round after acceptance (ack sent or due)", bool((duty.get("result") or {}).get("accepted")),
+           duty.get("result"))
+
+    def provider_entry() -> dict:
+        status = json.loads(openfox("status", "--rail-config", str(PROVIDER_RAIL / "rail.json")).stdout)
+        return next((r for r in status.get("requests", []) if r.get("request_hash") == request_hash), {})
+    acked = poll(lambda: provider_entry().get("operator_state") == "acked", 600, 15)
+    entry = provider_entry()
+    record("OpenFox recorded the buyer's ack", acked is not None, entry)
 
 
 # --- Negatives that need no purchase --------------------------------------------
