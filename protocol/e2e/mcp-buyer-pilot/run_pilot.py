@@ -601,5 +601,16 @@ def cmd_stop() -> None:
         raise SystemExit(f"secrets found in {leaks}")
 
 
+def cmd_refresh_credentials() -> None:
+    """Replace the token files with the operator's current access tokens
+    (again never a refresh token), when the run waited long enough for the
+    first ones to near their end. Each replacement is an event."""
+    if not SECRETS.exists():
+        raise SystemExit("no credentials to refresh")
+    prepare_credentials()
+    event("credentials replaced with the operator's current access tokens", **state["credentials"])
+
+
 if __name__ == "__main__":
-    {"start": cmd_start, "offer": cmd_offer, "purchases": cmd_purchases, "stop": cmd_stop}[COMMAND]()
+    {"start": cmd_start, "offer": cmd_offer, "purchases": cmd_purchases, "stop": cmd_stop,
+     "refresh-credentials": cmd_refresh_credentials}[COMMAND]()
