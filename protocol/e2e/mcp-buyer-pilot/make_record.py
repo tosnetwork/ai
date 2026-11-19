@@ -249,7 +249,12 @@ record = {
         "verifier_model_client": {"cli": build.get("codex_version"), "binary_sha256": build["binaries"].get("codex"),
                                   "events_sha256": (orchestration.get("verifier") or {}).get("events_sha256"),
                                   "prompt_sha256": (orchestration.get("verifier") or {}).get("prompt_sha256"),
-                                  "summary_sha256": sha(vout / "codex-summary.json"), "verdict": codex_verdict},
+                                  "summary_sha256": sha(vout / "codex-summary.json"), "verdict": codex_verdict,
+                                  "earlier_attempts": [
+                                      {"summary_file": path.name, "summary_sha256": sha(path),
+                                       "verdict": (load(path) or {}).get("verdict"),
+                                       "reasons": (load(path) or {}).get("reasons")}
+                                      for path in sorted(vout.glob("attempt-*codex-summary.json"))]},
         "payment_confirmation": "automated: the harness (container root) drove the real tos-service-buyer confirm "
                                 "--watch on a pty owned by the custody account and typed the code only when the "
                                 "confirmation policy held (harness/confirm_policy.py); no human read the screen or "
