@@ -11,11 +11,14 @@ decision) is implemented in `protocol/pkg/buyeragent` and
 `tos-service-buyer confirm`) is implemented.
 
 The stdio MCP server (`protocol/pkg/mcpbuyer`, `tos-service-buyer-mcp`) is
-implemented with `tos_buyer_prepare`, `tos_buyer_request_payment`,
-`tos_buyer_withdraw`, `tos_buyer_status`, `tos_buyer_purchases`,
-`tos_buyer_refund` and `tos_buyer_result` (4.9, with the agent's `result`
-method). Its search and quote tools come with the agent methods behind
-them. The gateway's Quote-carried provider key card and the buyer's
+implemented with `tos_buyer_search`, `tos_buyer_quote`, `tos_buyer_prepare`,
+`tos_buyer_request_payment`, `tos_buyer_withdraw`, `tos_buyer_status`,
+`tos_buyer_purchases`, `tos_buyer_refund` and `tos_buyer_result` (4.9, with
+the agent's `result` method). Search and quote (4.3, 4.4) run in the agent
+(`buyeragent.Offers`): every offer is verified at one finalized checkpoint,
+the Quote is built there or a gateway's Quote is cross-checked against it,
+and the agent keeps the Quote and its manifest for prepare. The gateway's
+Quote-carried provider key card and the buyer's
 verification of a provider card from any source
 (`buyersdk.ServiceActorBuyer.VerifyProviderCard`, 3.3) are implemented.
 
@@ -34,8 +37,10 @@ the relay poller over pinned-CA HTTPS relay clients.
 `tos-service-buyer init` (3.2, `protocol/pkg/buyerinit`) is implemented and
 writes the configuration `tos-service-buyer agent` reads.
 
-Not yet implemented are the finalized-state reads behind search and quote;
-section 16 lists that work. It supersedes the retired
+The agent subcommand serves search and quote by `capability_id` and offer
+file with local Quotes, and, with a configured gateway or catalog (2.4), by
+search hints and gateway Quotes. Section 16 lists the implementation work.
+This document supersedes the retired
 provider-side tool of [`MCP_ADAPTER_V1.md`](MCP_ADAPTER_V1.md), which remains
 only as a pointer to history.
 
@@ -203,7 +208,22 @@ refused. It names:
 - the pinned `tosctl` (path and SHA-256), its configuration, the wallet name,
   and the packet controller's name and key ID;
 - the buyer's relays and the relay CA file;
-- the budget of section 6, plus the duty interval, at most 60 seconds.
+- the budget of section 6, plus the duty interval, at most 60 seconds;
+- optionally a gateway, a search hint source and the source of gateway
+  Quotes (4.3, 4.4):
+  - `gateway_url`, a bare base URL (no user, path, query or fragment):
+    `https`, or `http` only on a loopback address;
+  - `gateway_ca_file`, required for `https` and refused for `http`. The
+    gateway is verified against it only, never the system pool, with TLS 1.2
+    at least;
+  - `gateway_token_file`, required with a gateway: an owner-private regular
+    file holding one bearer token of visible ASCII. The token is read anew for
+    every call and never logged;
+- optionally `catalog_dir`, an owner-private capability catalog used as a
+  search hint source, its Capabilities read from finalized state.
+
+Without a gateway or catalog, search works by `capability_id` only, and a
+gateway Quote is refused with `MCP_BUYER_NOT_CONFIGURED`.
 
 The vault credential is read only from `VAULT_URL`. The agent refuses to
 start without it, and when the `tosctl` configuration is readable by group
@@ -212,8 +232,10 @@ Such a relay could never be reached, so the agent would otherwise poll
 nothing.
 
 It keeps the chain checkpoints, the call journal, the carrier's keys and
-inbox, and the purchase records in owner-private subdirectories of the state
-directory. It serves the socket (2.3), and until it stops it also runs:
+inbox, the purchase records and the manifests of the Quotes it accepted
+(4.4) in owner-private subdirectories of the state directory. Admission at
+prepare reads a manifest from the configured manifest directory, then from
+that store. It serves the socket (2.3), and until it stops it also runs:
 
 - the duty round (sections 7.2, 7.3 and 11);
 - the relay poller (`Carrier.RunPoll`, 7.3), with the agent's own purchase
@@ -423,49 +445,104 @@ configuration.
 
 ### 4.3 `tos_buyer_search`
 
-Input: optional `query` (at most 256 bytes), optional `capability_id`,
-`page_size` (1 to 50), optional `page_token`.
+Input: optional `query` (valid UTF-8, at most 256 bytes), optional
+`capability_id`, `page_size` (1 to 50; the MCP server's default is 20),
+optional `page_token`.
 
 Sources, all hints: the configured gateways' `CapabilityDiscoveryService`
 (`List`, `Search`; [`GATEWAY_FEDERATION_V1.md`](GATEWAY_FEDERATION_V1.md) for
-several gateways) and offer files in a configured directory. For each
-candidate the agent runs `serviceactorindex` `ListOffers` at one finalized
-checkpoint and returns only candidates whose offer verifies for this buyer
-wallet. A candidate a hint source lists but finalized state does not confirm
-is dropped, and the count of dropped candidates is reported.
+several gateways) and capability catalogs (`capabilitycatalog`), at most 8
+sources. A hint is a Capability ID and version and nothing else: the agent
+takes no text, price or provider from a hint source. With a `query` the
+sources' search results are the candidates, without one their listings
+(every unrevoked version of each listed Capability). With a
+`capability_id` no source is asked: the candidates are that Capability's
+unrevoked versions in finalized state. Offer files are not a search source;
+an offer file is handed to `tos_buyer_quote` (4.4).
 
-Output per offer: `capability_id`, `capability_version`, `provider_agent_id`,
-`manifest_digest`, `actor`, `price_nanotos`, `storage_fee_nanotos`,
-`response_sla_seconds`, `refund_claim_window_seconds`, `open_access`, whether
-a verified provider key card is held, and the manifest's human-readable
-fields as untrusted text.
+Bounds: at most 100 candidates from one source, and at most 400 per search,
+the first 400 in (Capability ID, version) order, so the pages of one search
+walk one bounded set. A malformed hint (an ID or version outside its
+pattern) is dropped. The agent then runs `serviceactorindex` `ListOffers`
+over the page at one finalized checkpoint and returns only candidates whose
+offer verifies for this buyer wallet. A candidate a hint source lists but
+finalized state does not confirm is dropped. The result counts the dropped
+candidates of the page and the sources that did not answer.
+
+Output per offer: the `checkpoint`, `capability_id`, `capability_version`,
+`provider_agent_id`, `manifest_digest`, `actor`, `attestor_key_id`,
+`policy_version`, `terms_hash`, `price_nanotos`, `storage_fee_nanotos`, the
+attached `payment_nanotos` and its execution allowance,
+`cleanup_bounty_nanotos`, `response_sla_seconds`,
+`refund_claim_window_seconds`, the manifest's `retention_seconds`,
+`open_access`, whether a verified provider key card is held, and the
+manifest's name and description as untrusted text. The text is read from
+the manifest bytes that hash to the finalized digest, never from a hint.
+The page also carries `dropped_candidates`, `failed_sources` and, when more
+candidates follow, `next_page_token`.
+
+Refusals: no source configured and no `capability_id`
+(`MCP_BUYER_NOT_CONFIGURED`); every source failed
+(`MCP_BUYER_DEPENDENCY_UNAVAILABLE`); a `capability_id` finalized state does
+not hold (`MCP_BUYER_NOT_FOUND`).
 
 ### 4.4 `tos_buyer_quote`
 
-Input: `capability_id`, `capability_version`, optional `offer_file` (a path
-under a workspace root).
+Input: `capability_id`, `capability_version` (1 to 128 bytes of `0x21` to
+`0x7e`), optional `offer_file` (a path under a workspace root), optional
+`source`: `local` (the default) or `gateway`.
 
-The agent:
+The MCP server reads the offer file (a regular file of at most 256 KiB whose
+real path lies under a workspace root) and sends its bytes; the agent never
+sees the path. The agent decodes them strictly: schema
+`tos.openfox.rail-offer.v2`, no unknown field or trailing data, canonical
+standard Base64, the manifest at most 1 MiB and the card at most 16 KiB.
+The file must name the requested Capability and version. Its provider
+and digest are checked for shape only: the provider is the Capability's
+finalized owner and the manifest must hash to the finalized digest. A
+gateway Quote is requested before the checkpoint is opened. Then, at **one
+finalized checkpoint**, the agent:
 
-1. obtains the manifest bytes by digest (offer file, a gateway's
-   `GetSoftwareWorkManifest`, or the local manifest store) and checks them
-   against the finalized manifest digest;
-2. runs `ServiceActorBuyer.Discover` (finalized Capability, owner, manifest
-   key 21, actor code hash, policy, attestor, `terms_hash`);
+1. obtains the manifest bytes by digest (offer file, the agent's own
+   manifest store, then each configured source's manifest lookup, such as a
+   gateway's `GetSoftwareWorkManifest`), takes the first bytes that hash to
+   the finalized manifest digest, and checks them against it;
+2. verifies the offer for this buyer wallet (`serviceactorindex`
+   discovery: finalized Capability, owner, manifest key 21, actor code hash,
+   policy, attestor, `terms_hash`);
 3. builds the Quote Proposal **locally** with `quoteprovider` from the same
-   finalized checkpoint, so no gateway Quote is needed; a gateway Quote MAY be
-   used instead and is then validated by `quoteexchange.Validate` and
-   cross-checked field by field against the finalized offer. A gateway
-   Quote may come with the provider's key card, which is how a buyer with no
-   offer file reaches a provider it can contact only through a relay. The
-   agent verifies that card under 3.3 like a card from any other source;
-4. runs the source-independent items of the carriability check (7.1 items 1
-   and 3 to 5, and item 2 for the package and version).
+   checkpoint, with the mode-2 transport binding to the Capability's
+   finalized owner (`max_request_bytes` 1 MiB) and a 15-minute expiry, so no
+   gateway Quote is needed. With `source = gateway` the gateway's Quote is
+   used instead. It is validated by `quoteexchange.Validate`, and then
+   cross-checked field by field against the finalized offer: Capability and
+   version, provider, manifest digest, actor, actor code hash, attestor,
+   policy version, `terms_hash`, price, storage fee, and a mode-2 transport.
+   A Quote that differs in any field is refused (`MCP_BUYER_OFFER_INVALID`).
+   A gateway Quote may come with the provider's key card, which is how a
+   buyer with no offer file reaches a provider it can contact only through a
+   relay. The agent verifies that card under 3.3
+   (`Carrier.LearnProviderCard`), like a card from an offer file. A card
+   that does not verify is not kept, and the result reports
+   `provider_card_refused`;
+4. keeps the manifest in its manifest store, where the buyer's admission at
+   prepare reads it, and runs the source-independent items of the
+   carriability check (`Carrier.CheckQuoteCarriage`: the card window, 7.1
+   items 1 and 3 to 5, and item 2 for the package; the version is checked at
+   input).
 
-Output: a `quote_id` (SHA-256 of the canonical Quote package, which the agent
-stores), the offer fields of 4.3, the Quote's `expires_at`, the transport
-binding's `max_request_bytes`, `retention_seconds`, the attestor key ID, the
-economics of section 8, and `carriable` with the failing item when false.
+A Quote that cannot be carried is still stored and returned with
+`carriable = false`; prepare refuses it. The run reads one checkpoint for
+the offer and the Quote; card verification and carriage read their own, as
+3.3 and 7.1 require.
+
+Output: a `quote_id` (SHA-256 of the deterministic encoding of the Quote
+package, which the agent stores), `quote_source`, the offer fields of 4.3
+(including the checkpoint, `retention_seconds`, the attestor key ID and the
+payment of section 8), the Quote's `quote_expires_at_unix`, the transport
+binding's `max_request_bytes`, `provider_card_refused`, and `carriable` with
+`not_carriable_item` when false: `card_window`, `item_1` to `item_5`, or
+`other`.
 
 ### 4.5 `tos_buyer_prepare`
 
@@ -951,7 +1028,9 @@ a purchase paid without it could only end in a timeout refund that keeps the
 storage fee.
 
 `buyeragent.Carrier` implements the check, at prepare and again before the
-call:
+call (`CheckCarriage`). At quote time `CheckQuoteCarriage` runs the same
+check without the archive bound and the task encoding, which need the
+source (4.4):
 
 - **Order.** The checks that cannot sign anything run first:
   1. the card window (3.3); a window over 30 days is refused before
@@ -1362,6 +1441,7 @@ request the SDK rejects against the input schema is a JSON-RPC error
 | `MCP_BUYER_AGENT_UNAVAILABLE` | the agent socket does not answer | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_BUYER_AMBIGUOUS` | a `call` or lifecycle send may have been submitted | `RESOLVE_BEFORE_RETRY` |
 | `MCP_BUYER_PERMISSION_DENIED` | the socket peer's account may not call this method (2.3) | `NEVER` |
+| `MCP_BUYER_NOT_CONFIGURED` | the agent's configuration does not serve the request: a gateway Quote without a gateway, a search with neither a source nor a `capability_id` (2.4) | `NEVER` |
 | `MCP_BUYER_INTERNAL` | anything else | `NEVER` |
 
 `awaiting_confirmation`, `submitted` and `ambiguous` are states, not errors,
@@ -1381,7 +1461,7 @@ returned by tools that were asked to act. The frames' refusal labels (frames
 | The model exhausts the budget or the human's attention by preparing | `max_unconfirmed`; prepared records expire with their Quote; `withdraw` | nuisance only |
 | Other code in the developer account (malware) | same position as the model: it cannot reach custody | it can read the source before it is packed |
 | The custody account is compromised | out of scope; equivalent to losing the wallet | loss bounded by the wallet balance |
-| A fake listing, manifest or Quote from a gateway or offer file | discovery and Quote re-verified at a finalized checkpoint; manifest bytes checked against the finalized digest; Quote built locally | a wasted search |
+| A fake listing, manifest, Quote or key card from a gateway, catalog or offer file | hints carry IDs only; discovery and Quote re-verified at one finalized checkpoint; manifest bytes checked against the finalized digest; Quote built locally, or a gateway Quote cross-checked field by field against the finalized offer; a card kept only once verified (3.3) | a wasted search |
 | A provider changes terms between preview and send | `expected_terms_hash` pins the quoted terms; the call fails with 1926 and costs only fees | fees |
 | A provider takes payment with a useless but attested result | the Receipt binds digests and `exit_code`; the human is told what a Receipt does not prove | inherent to the rail: no on-chain remedy (settlement design section 4) |
 | A provider never answers or silently refuses the task | timeout refund by the agent (section 11) | storage fee and fees lost (less the bounty if the buyer sweeps, section 8); no prompt refusal signal (frames Q7) |

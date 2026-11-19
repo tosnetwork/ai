@@ -24,7 +24,10 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
+	"github.com/tosnetwork/ai/protocol/pkg/capabilitycatalog"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
+	"github.com/tosnetwork/ai/protocol/pkg/serviceactorindex"
 )
 
 // AgentConfigSchema names the agent's configuration file.
@@ -65,7 +68,17 @@ type agentConfig struct {
 	PacketControllerKeyID string   `json:"packet_controller_key_id"`
 	Relays                []string `json:"relays"`
 	RelayCAFile           string   `json:"relay_ca_file"`
-	Budget                struct {
+	// GatewayURL, when set, names a gateway used as a search hint source
+	// and for gateway Quotes (sections 4.3 and 4.4). An https gateway is
+	// verified against GatewayCAFile only; the bearer token is read from
+	// GatewayTokenFile, owner-private, for every call.
+	GatewayURL       string `json:"gateway_url,omitempty"`
+	GatewayCAFile    string `json:"gateway_ca_file,omitempty"`
+	GatewayTokenFile string `json:"gateway_token_file,omitempty"`
+	// CatalogDir, when set, is an owner-private capability catalog used as
+	// a search hint source.
+	CatalogDir string `json:"catalog_dir,omitempty"`
+	Budget     struct {
 		WindowSeconds      int64  `json:"window_seconds"`
 		MaxCalls           int    `json:"max_calls"`
 		MaxPerCallNanoTOS  string `json:"max_per_call_nanotos"`
@@ -136,6 +149,9 @@ func readAgentConfig(path string) (agentConfig, error) {
 			return config, errors.New("an https relay is configured but relay_ca_file pins no CA")
 		}
 	}
+	if err := checkGatewayConfig(config); err != nil {
+		return config, err
+	}
 	return config, nil
 }
 
@@ -200,6 +216,22 @@ func (r *relayClients) client(base string) (buyeragent.RelayClient, error) {
 	}
 	r.clients[base] = client
 	return client, nil
+}
+
+// manifestSources asks each source in order for a manifest; the buyer
+// checks whatever bytes come back against the finalized digest.
+type manifestSources []serviceactor.ManifestSource
+
+func (m manifestSources) Manifest(ctx context.Context, digest string) ([]byte, error) {
+	err := errors.New("no manifest source holds the manifest")
+	for _, source := range m {
+		raw, sourceErr := source.Manifest(ctx, digest)
+		if sourceErr == nil {
+			return raw, nil
+		}
+		err = sourceErr
+	}
+	return nil, err
 }
 
 // agentRuntime is everything the agent subcommand opened: the agent with
@@ -288,8 +320,19 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 	if unconfirmed == 0 {
 		unconfirmed = 4
 	}
+	// The agent keeps the manifest of every Quote it accepts in its own
+	// store; admission at prepare reads the configured directory, then that
+	// store.
+	manifestsDir, err := privateSubdir(config.StateDir, "manifests")
+	if err != nil {
+		return nil, err
+	}
+	quoted, err := buyeragent.NewManifestStore(manifestsDir)
+	if err != nil {
+		return nil, err
+	}
 	buyer, err := buyersdk.NewServiceActorBuyer(buyersdk.ServiceActorBuyerConfig{Reader: buyersdk.BuyerReaderFromChain(reader),
-		Manifests: manifestDirectory(config.ManifestDir), Network: network, ActorCodeHash: config.ActorCodeHash,
+		Manifests: manifestSources{manifestDirectory(config.ManifestDir), quoted}, Network: network, ActorCodeHash: config.ActorCodeHash,
 		BuyerWallet: config.BuyerWallet, Sender: sender, Lifecycle: sender, Journal: journal,
 		Limits: buyersdk.ServiceActorLimits{Window: time.Duration(config.Budget.WindowSeconds) * time.Second,
 			MaxCalls: config.Budget.MaxCalls, MaxPerCallNanoTOS: perCall, MaxWindowNanoTOS: window, MaxPrepared: unconfirmed}})
@@ -320,12 +363,40 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Search by capability_id and local Quotes need no hint source: every
+	// fact is read from finalized state. A configured gateway and catalog
+	// add search hints, and the gateway serves gateway Quotes.
+	sessions := serviceactorindex.FromChain(reader)
+	offersConfig := buyeragent.OffersConfig{Network: network, RegistryCodeHash: config.RegistryCodeHash,
+		ActorCodeHash: config.ActorCodeHash, BuyerWallet: config.BuyerWallet, Sessions: sessions,
+		Manifests: quoted, Cards: carrier}
+	if config.GatewayURL != "" {
+		gateway, err := newGatewayClient(config.GatewayURL, config.GatewayCAFile, config.GatewayTokenFile)
+		if err != nil {
+			return nil, err
+		}
+		offersConfig.Gateway = gateway
+		offersConfig.Hints = append(offersConfig.Hints, buyeragent.GatewayHints{Gateway: gateway})
+	}
+	if config.CatalogDir != "" {
+		catalog, err := capabilitycatalog.New(capabilitycatalog.Config{Directory: config.CatalogDir,
+			Resolver: finalizedResolver{reader: sessions}, Network: network, RegistryCodeHash: config.RegistryCodeHash,
+			CallerID: "tos-service-buyer"})
+		if err != nil {
+			return nil, err
+		}
+		offersConfig.Hints = append(offersConfig.Hints, buyeragent.CatalogHints{Catalog: catalog})
+	}
+	offers, err := buyeragent.NewOffers(offersConfig)
+	if err != nil {
+		return nil, err
+	}
 	agentDir, err := privateSubdir(config.StateDir, "agent")
 	if err != nil {
 		return nil, err
 	}
 	agent, err := buyeragent.Open(buyeragent.Config{StateDir: agentDir, BuyerAgentID: config.BuyerAgentID, Network: network,
-		Buyer: buyer, Carriage: carrier, Delivery: carrier, Results: carrier, Accepted: carrier,
+		Buyer: buyer, Carriage: carrier, Delivery: carrier, Results: carrier, Accepted: carrier, Offers: offers,
 		MaxLifecycleSends: config.Budget.MaxLifecycleSends})
 	if err != nil {
 		return nil, err
