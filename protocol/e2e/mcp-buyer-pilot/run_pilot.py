@@ -455,8 +455,10 @@ def run_verifier(handoff: dict, profile: dict) -> None:
 
 
 def verifier_sign(message_hex: str) -> dict:
-    script = ("set -e; export VAULT_URL=\"file:///run/codex-home/declaration-vault.json?master_key=$(openssl rand -hex 32)\"; "
-              "c=/run/codex-home/declaration-tosctl.json; /opt/pilot-bin/tosctl config generate -o $c >/dev/null; "
+    # A fresh declaration key per signing, in the verifier's tmpfs only.
+    script = ("set -e; n=$(openssl rand -hex 8); "
+              "export VAULT_URL=\"file:///run/codex-home/declaration-$n.json?master_key=$(openssl rand -hex 32)\"; "
+              "c=/run/codex-home/declaration-tosctl-$n.json; /opt/pilot-bin/tosctl config generate -o $c >/dev/null; "
               "/opt/pilot-bin/tosctl wallet create -n declaration -v V4R2 -c $c >/dev/null; "
               f"/opt/pilot-bin/tosctl wallet sign -n declaration --message-hex {message_hex} -c $c")
     return json.loads(run(["docker", "exec", "-u", "verifier", "-e", "HOME=/v/work/home", CONTAINERS["verifier"],
@@ -581,7 +583,9 @@ def cmd_verify() -> None:
     if events.exists():
         events.rename(LOGS / f"codex-events-attempt-{attempt - 1}.jsonl")
     run(["docker", "exec", "-u", "verifier", CONTAINERS["verifier"], "/bin/sh", "-c",
-         f"cd /v/work/out && for f in *; do mv \"$f\" \"attempt-{attempt - 1}-$f\"; done"], check=False)
+         f"cd /v/work/out && for f in *; do case $f in attempt-*) ;; *) mv \"$f\" \"attempt-{attempt - 1}-$f\";; esac; "
+         f"done; cd /v/work && for d in ai ai-*; do [ -d \"$d\" ] && mv \"$d\" \"attempt-{attempt - 1}-$d\"; done; true"],
+        check=False)
     profile = json.loads((WORKS["buyer"] / "out" / "public" / "profile.json").read_text())
     handoff = json.loads((HANDOFF / "handoff.json").read_text())
     event("verifier attempt", attempt=attempt)

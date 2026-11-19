@@ -14,7 +14,7 @@ Rules. Use only the files under /v/in (public data) and what you fetch from http
    (the default quorum is every endpoint).
    a. Purchase R with the buyer's files: --evidence /v/in/R/evidence.json --receipt /v/in/R/receipt.boc --artifact /v/in/R/artifact.tar > /v/work/out/verdict-R.json
    b. Purchase F with its bundle: --evidence /v/in/F/evidence.json > /v/work/out/verdict-F.json
-   c. Both requests without a bundle: --actor {ACTOR} --request-id {R_ID} --request-hash {R_HASH} --request-id {F_ID} --request-hash {F_HASH} > /v/work/out/verdict-all.json
+   c. Both requests without a bundle, each selected once, by its hash: --actor {ACTOR} --request-hash {R_HASH} --request-hash {F_HASH} > /v/work/out/verdict-all.json (request {R_ID} is R, request {F_ID} is F)
    Record each run's exit status (0 pass, 1 failing verdict, 2 unusable inputs).
 5. Check, from the three verdict files alone:
    - every verdict's "result" is "pass";
