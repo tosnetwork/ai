@@ -274,10 +274,12 @@ def start_relay() -> Path:
     tls = private_dir(Path("/var/lib/e2e-relay-tls"), None)
     as_account(None, ["/usr/bin/openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
                       "-nodes", "-days", "2", "-subj", "/CN=e2e relay CA", "-keyout", str(tls / "ca.key"),
-                      "-out", str(tls / "ca.pem"), "-addext", "basicConstraints=critical,CA:TRUE"])
+                      "-out", str(tls / "ca.pem"), "-addext", "basicConstraints=critical,CA:TRUE",
+                      "-addext", "keyUsage=critical,keyCertSign,cRLSign"])
     as_account(None, ["/usr/bin/openssl", "req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
                       "-subj", "/CN=127.0.0.1", "-keyout", str(tls / "relay.key"), "-out", str(tls / "relay.csr")])
-    (tls / "san.ext").write_text("subjectAltName=IP:127.0.0.1\n")
+    (tls / "san.ext").write_text("subjectAltName=IP:127.0.0.1\nkeyUsage=critical,digitalSignature\n"
+                                 "extendedKeyUsage=serverAuth\n")
     as_account(None, ["/usr/bin/openssl", "x509", "-req", "-in", str(tls / "relay.csr"), "-CA", str(tls / "ca.pem"),
                       "-CAkey", str(tls / "ca.key"), "-CAcreateserial", "-days", "2", "-extfile", str(tls / "san.ext"),
                       "-out", str(tls / "relay.pem")])
@@ -399,6 +401,13 @@ def start_gateway(provider_agent_id: str) -> None:
     # nothing in this run; its sender is the provider's own tosctl wallet.
     rpc_state = private_dir(GATEWAY_DIR / "rpc-state", "provider")
     rpc_config = GATEWAY_DIR / "tos-service-v1.json"
+    # The relay sender pins exactly one RPC endpoint: a copy of the
+    # provider's tosctl configuration that names only the first.
+    sender_config = GATEWAY_DIR / "tosctl-sender.json"
+    tosctl_config = json.loads(as_account("provider", ["/bin/cat", str(HOME["provider"] / "private" /
+                                                                       "tosctl-config.json")]).stdout)
+    tosctl_config["chain_rpc"] = {"urls": [f"http://127.0.0.1:{RPC_PORTS[0]}"], "api_key": None}
+    write_private("provider", sender_config, json.dumps(tosctl_config, indent=2))
     write_private("provider", rpc_config, json.dumps({
         "protocol": "tos_service_v1",
         "network": {"network_id": network["network_id"], "genesis_root_hash": network["genesis_root_hash"],
@@ -410,7 +419,7 @@ def start_gateway(provider_agent_id: str) -> None:
         "max_funding_per_wallet_nanotos": 4_000_000_000, "recovery_relay_safety_seconds": 600,
         "state_directory": str(rpc_state),
         "sender": {"network": network["network_id"], "binary": str(BIN / "tosctl"),
-                   "configPath": str(HOME["provider"] / "private" / "tosctl-config.json"), "vaultUrl": vaults["provider"],
+                   "configPath": str(sender_config), "vaultUrl": vaults["provider"],
                    # The sender takes the genesis hashes as Base64 of the raw bytes.
                    "rpcUrl": f"http://127.0.0.1:{RPC_PORTS[0]}",
                    "genesisRootHash": base64.b64encode(bytes.fromhex(network["genesis_root_hash"][7:])).decode(),
@@ -580,7 +589,10 @@ def socket_request(account: str, method: str, params: dict, groups: list | None 
         "except OSError as error:\n"
         "    print(json.dumps({'connected': False, 'error': error.strerror})); sys.exit(0)\n"
         f"s.sendall({(request + chr(10)).encode()!r})\n"
-        "line = s.makefile().readline().strip()\n"
+        "try:\n"
+        "    line = s.makefile().readline().strip()\n"
+        "except ConnectionResetError:\n"
+        "    line = ''\n"
         "print(json.dumps({'connected': True, 'answer': json.loads(line) if line else None}))\n")
     result = as_account(account, [str(MOUNTS / "venv" / "bin" / "python3"), "-I", "-c", program], check=False,
                         timeout=30, groups=groups)
