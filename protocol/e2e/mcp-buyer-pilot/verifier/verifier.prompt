@@ -7,7 +7,7 @@ Rules. Use only the files under /v/in (public data) and what you fetch from http
    git clone https://github.com/tosnetwork/ai /v/work/ai && git -C /v/work/ai checkout --detach {AI_COMMIT}
    Confirm that `git -C /v/work/ai rev-parse HEAD` prints {AI_COMMIT} and that `git -C /v/work/ai status --porcelain` prints nothing. Then:
    cd /v/work/ai && GOWORK=off CGO_ENABLED=0 GOTOOLCHAIN=local go build -trimpath -o /v/work/bin/ ./protocol/cmd/tos-service-verify
-   Write /v/work/out/build.json with the commit and the binary's sha256.
+   Write /v/work/out/build.json as {"commit": "<the commit>", "sha256": "<the binary's sha256>"}.
 3. Reach the chain. {ENDPOINT_SETUP}
 4. Run /v/work/bin/tos-service-verify three times. Every run takes these flags:
    --global-config /v/in/global-config.json --network-id {NETWORK_ID} --rpc {RPC} --registry-code-boc /v/in/tos-service-native-registry-v1.boc.base64 --registry-code-hash {REGISTRY_HASH} --actor-code-hash {ACTOR_HASH}
