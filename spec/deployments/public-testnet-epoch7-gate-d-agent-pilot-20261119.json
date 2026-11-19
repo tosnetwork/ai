@@ -23,7 +23,12 @@
       "core_development_team": true,
       "actor": "OpenFox reference seller, operated by the team",
       "hosts_and_network": "the team's coordinator host and its Docker bridge",
-      "declaration_key": "a fresh tosctl Ed25519 key in the role's own custody; its public key is in signatures[]",
+      "declaration_key": {
+        "algorithm": "Ed25519",
+        "custody": "a tosctl key named declaration in the role's own vault",
+        "retained": true,
+        "public_key": "in signatures[]"
+      },
       "shares_no_key_with_another_role": true
     },
     {
@@ -32,7 +37,12 @@
       "core_development_team": true,
       "actor": "Claude Code CLI agent, operated by the team",
       "hosts_and_network": "the team's coordinator host and its Docker bridge",
-      "declaration_key": "a fresh tosctl Ed25519 key in the role's own custody; its public key is in signatures[]",
+      "declaration_key": {
+        "algorithm": "Ed25519",
+        "custody": "a tosctl key named declaration in the role's own vault",
+        "retained": true,
+        "public_key": "in signatures[]"
+      },
       "shares_no_key_with_another_role": true
     },
     {
@@ -41,7 +51,14 @@
       "core_development_team": true,
       "actor": "Codex CLI agent, operated by the team",
       "hosts_and_network": "the team's coordinator host and its Docker bridge",
-      "declaration_key": "a fresh tosctl Ed25519 key in the role's own custody; its public key is in signatures[]",
+      "declaration_key": {
+        "algorithm": "Ed25519",
+        "custody": "a tosctl key created in the verifier container's memory (tmpfs) at the moment of signing",
+        "retained": false,
+        "created": "after the run, which ended at 2026-11-19T07:28:55.033536+00:00 (the verifier's last session and the credential deletion); the creation time of the key that signed this copy is signatures[].signed_utc",
+        "earlier_keys": "the keys that signed earlier copies of this record are unavailable: each lived only in a container memory that no longer exists",
+        "what_the_signature_attests": "only that the verifier role's operator signed this record's digest; the verdict itself is the run's verifier output, bound by verifier_output.verdict_sha256 and automation.verifier_model_client.summary_sha256"
+      },
       "shares_no_key_with_another_role": true
     }
   ],
@@ -189,9 +206,10 @@
   "source_commits": {
     "ai": "ca2cd4d566ec0bf51651507b5b79e9a881f07e26",
     "openfox": "a73a5ed52098f85476052e6165e7a5aa7f9b43e8",
-    "operator_driver": "720f70830d20228cfb52e0761e6c285f07daac03",
+    "operator_driver": "6d8bf31589cf0e44586bd4c6ec44f2cb43c731a4",
     "operator_driver_tree_clean": true,
     "harness_commits_after_the_containers_started": [
+      "6d8bf315 e2e: agent pilot record states how each declaration key is held; the verifier's is created at signing",
       "720f7083 e2e: agent pilot record carries build.json's added_after_start and marks those binaries",
       "187af1c3 e2e: agent pilot record lists the verifier's earlier attempts and why they failed",
       "77502906 e2e: agent pilot record names no relay address",
@@ -208,8 +226,8 @@
       "388040f1 e2e: agent pilot record names the operator driver's commit",
       "9128f8dd e2e: agent pilot: hold purchase F so its deadline clears a set switch"
     ],
-    "harness_commit_count_after_the_containers_started": 15,
-    "harness_commit_range": "ca2cd4d5..720f7083",
+    "harness_commit_count_after_the_containers_started": 16,
+    "harness_commit_range": "ca2cd4d5..6d8bf315",
     "tosctl": {
       "repository": "tosnetwork/tos",
       "release_tag": "v2026.11-1",
@@ -645,27 +663,30 @@
     "no Gate E or Gate F claim: no public HTTPS gateway, no gateway was used at all",
     "the provider used the production Service Actor, whose minimum windows are 3600 s"
   ],
-  "record_sha256": "b8d67edebf6bc792b5b0e261e7bd9b11d5f6e4b995ce0b2f0ecfee62bf2c507d",
+  "record_sha256": "1b1e7bf4491cc586982feb40a7b55135748d60843470021827417724d7af4eb2",
   "signatures": [
     {
       "role": "buyer",
       "algorithm": "Ed25519",
       "public_key_hex": "503c2743b9ade7011d277e32c5abc0fcf275e279dc58201df7ebe91ab8944ba7",
-      "signature_hex": "9b92c8a7ac739014d4c448a72d72b2c01166c6ddae5d1447b37af99caac066e470dc4b1142ceb492705f362acfb88f46543891bb113c78845baebe3550d93a03",
+      "signature_hex": "7921186c02f85c731d928bc1c6354fd7eb9663f426a6af90febde3f5036518cf83e0253abe5b1b690f4f70203999b4b519221197f6f1e0d145d453c5dacef206",
+      "signed_utc": "2026-11-19T07:42:00.624928+00:00",
       "verified": true
     },
     {
       "role": "provider",
       "algorithm": "Ed25519",
       "public_key_hex": "a5dbfef46628cb62bfb3f00cd015f07474459a16cecc7b1bf8515ed7beca0c46",
-      "signature_hex": "c6a01c3e880cd0406b8447157702df0937602870e52d369329876bc67f7d550b207a220d306681462fa2439d1d3e542faa3eab9c9e57991ccc4c97d325683200",
+      "signature_hex": "699e432186a34cd1c0b1a6ef80116482b9e655cd536dd979a8df08d9353b2841a043d92b9f192dc1b10fee5550ba4d73379b5592b73f9e46435a938055df1207",
+      "signed_utc": "2026-11-19T07:42:01.063711+00:00",
       "verified": true
     },
     {
       "role": "verifier",
       "algorithm": "Ed25519",
-      "public_key_hex": "64ad21c475d084e601d1e861bd6e746fe5fb2253b9226bb10dd7f764bd7a303e",
-      "signature_hex": "bb9b5190883f37c50584f10916a6a735dfdb251ecca4b7e7e0429dd3e85bf60b460336432ca3c0fa87f86b1ff96536b8db56d84130b7469d3b73b749422bfc00",
+      "public_key_hex": "9434f2cc2aac25b81a57088b704317ffb37c97efe2ff13cb34486f00715ccef7",
+      "signature_hex": "0323163d2686ef14f01d3118c21bc58d39248c10444134efde16b35a052e2485410b7752b0cab03eb39b838d12e53301225a63068e8dc277d690262f67cf5c08",
+      "signed_utc": "2026-11-19T07:42:01.251945+00:00",
       "verified": true
     }
   ]
