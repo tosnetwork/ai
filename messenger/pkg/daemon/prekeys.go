@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/eventlog"
 	"github.com/tosnetwork/ai/messenger/pkg/identity"
 	"github.com/tosnetwork/ai/messenger/pkg/prekeyapi"
+	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 )
 
 // prekeyRuntime owns only public generation state and the device contribution
@@ -100,18 +102,28 @@ func (r *prekeyRuntime) maintainLocalDevice() error {
 // localBootstrapMaterial returns the configured Device's exact current public
 // bundle and a private copy for one suite transition. The caller must clear
 // the returned private bytes. No API above daemon may expose this method.
-func (r *prekeyRuntime) localBootstrapMaterial(now time.Time) (e2ee.Bundle, []byte, error) {
+//
+// published, when not nil, is the bundle set of this node's own published
+// relay evidence: the bundle is then taken from it, so a first-contact
+// bootstrap names exactly the bundle the frame's evidence carries, also in
+// the window after the planner started a generation and before the
+// publisher published it.
+func (r *prekeyRuntime) localBootstrapMaterial(now time.Time, published []e2ee.Bundle) (e2ee.Bundle, []byte, error) {
 	if r == nil || r.planner == nil || r.devices == nil || r.signer == nil || r.deviceID == "" {
 		return e2ee.Bundle{}, nil, errors.New("local device prekeys are not configured")
 	}
 	if now.IsZero() || now.Unix() < 0 {
 		return e2ee.Bundle{}, nil, errors.New("invalid local prekey selection time")
 	}
-	collection, found, err := r.planner.contributions.CurrentPrekeyCollection(r.planner.delegation, now)
-	if err != nil || !found {
-		return e2ee.Bundle{}, nil, err
+	candidates := published
+	if candidates == nil {
+		collection, found, err := r.planner.contributions.CurrentPrekeyCollection(r.planner.delegation, now)
+		if err != nil || !found {
+			return e2ee.Bundle{}, nil, err
+		}
+		candidates = collection.Contributions
 	}
-	for _, bundle := range collection.Contributions {
+	for _, bundle := range candidates {
 		if bundle.DeviceID != r.deviceID {
 			continue
 		}
@@ -126,6 +138,39 @@ func (r *prekeyRuntime) localBootstrapMaterial(now time.Time) (e2ee.Bundle, []by
 		return bundle, private, nil
 	}
 	return e2ee.Bundle{}, nil, errors.New("configured device has no current prekey contribution")
+}
+
+// publishedOwnBundles returns the bundle set of this node's current
+// published relay evidence, each bundle still bound to the delegation now;
+// nil when the relay route is not configured (the caller then uses the
+// planner's current collection). An unreadable or unbound publication is an
+// error: a bootstrap must never name a bundle its evidence does not carry.
+func publishedOwnBundles(sink *directory.RelayEvidenceSink, delegation identity.Delegation,
+	now time.Time) ([]e2ee.Bundle, error) {
+	if sink == nil {
+		return nil, nil
+	}
+	raw, _, _, err := sink.Current()
+	if err != nil {
+		return nil, fmt.Errorf("own relay evidence: %w", err)
+	}
+	evidence, err := relayframe.DecodeEvidence(raw)
+	if err != nil {
+		return nil, fmt.Errorf("own relay evidence: %w", err)
+	}
+	bundles, err := e2ee.DecodeBundleSetJSON(evidence.BundleSet)
+	if err != nil {
+		return nil, fmt.Errorf("own relay evidence bundle set: %w", err)
+	}
+	if len(bundles) == 0 {
+		return nil, errors.New("own relay evidence carries no bundle")
+	}
+	for _, bundle := range bundles {
+		if err := e2ee.BindBundle(delegation, bundle, now); err != nil {
+			return nil, fmt.Errorf("own published prekey bundle is not current: %w", err)
+		}
+	}
+	return bundles, nil
 }
 
 func (r *prekeyRuntime) runPlanner(ctx context.Context, failed func(error)) {

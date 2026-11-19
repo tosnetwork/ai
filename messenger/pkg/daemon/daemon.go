@@ -531,7 +531,14 @@ func (d *Daemon) ReplyDirectMessage(ctx context.Context, replyToEventID, mediaTy
 // from verified directory bundles. Endpoint, Device and session choices remain
 // daemon-owned; neither the local API nor OpenFox can supply them.
 func (d *Daemon) ensureDirectSessions(resolved contact.Result, conversationID string, now time.Time) ([]dispatch.CopyTarget, error) {
-	localBundle, private, err := d.prekeys.localBootstrapMaterial(now)
+	// On the relay route the bootstrap and the frame's evidence both come
+	// from the one published descriptor: the receiver requires the
+	// bootstrap's bundle byte-identical in the evidence.
+	published, err := d.ownPublishedBundles(now)
+	if err != nil {
+		return nil, err
+	}
+	localBundle, private, err := d.prekeys.localBootstrapMaterial(now, published)
 	if err != nil {
 		return nil, err
 	}
@@ -543,9 +550,12 @@ func (d *Daemon) ensureDirectSessions(resolved contact.Result, conversationID st
 	if len(resolved.Directory.Bundles) == 0 {
 		return nil, errors.New("verified recipient directory has no device prekeys")
 	}
+	ownSet := published
+	if ownSet == nil {
+		ownSet = d.prekeysCurrentBundles(now)
+	}
 	sessions := make(map[string]bool)
-	for _, bundle := range append(append([]e2ee.Bundle(nil), resolved.Directory.Bundles...),
-		d.prekeysCurrentBundles(now)...) {
+	for _, bundle := range append(append([]e2ee.Bundle(nil), resolved.Directory.Bundles...), ownSet...) {
 		sessionID, sessionErr := e2ee.DeviceSessionID(d.config.DeviceID, bundle.DeviceID)
 		if sessionErr != nil {
 			continue
@@ -556,7 +566,7 @@ func (d *Daemon) ensureDirectSessions(resolved contact.Result, conversationID st
 		}
 		sessions[sessionID] = found
 	}
-	senderSet := d.prekeysCurrentBundles(now)
+	senderSet := ownSet
 	plan, err := e2ee.FanOut(e2ee.PlanInput{SenderDeviceID: d.config.DeviceID,
 		SenderSet: senderSet, RecipientSet: resolved.Directory.Bundles, Now: now,
 		SessionExists: func(sessionID string) bool { return sessions[sessionID] }})
@@ -614,6 +624,15 @@ func (d *Daemon) ensureDirectSessions(resolved contact.Result, conversationID st
 		}
 	}
 	return deliveryTargets, nil
+}
+
+// ownPublishedBundles is publishedOwnBundles for this daemon's relay route;
+// nil without one.
+func (d *Daemon) ownPublishedBundles(now time.Time) ([]e2ee.Bundle, error) {
+	if d == nil || d.relay == nil || d.relay.sink == nil || d.prekeys == nil || d.prekeys.planner == nil {
+		return nil, nil
+	}
+	return publishedOwnBundles(d.relay.sink, d.prekeys.planner.delegation, now)
 }
 
 func (d *Daemon) prekeysCurrentBundles(now time.Time) []e2ee.Bundle {
