@@ -487,6 +487,14 @@ def cmd_purchases() -> None:
         held = provider_saw(r_hash)
     event("the provider holds R", operator_state=held)
     provider("pause")
+    # F's response deadline, when the buyer agent sends expire and
+    # claim_refund, must not fall inside a validator-set switch window
+    # (xx:20-xx:40 of odd UTC hours); PILOT_F_NOT_BEFORE (Unix seconds)
+    # holds F's payment until a time the operator chose for that.
+    not_before = int(os.environ.get("PILOT_F_NOT_BEFORE", "0"))
+    if not_before > time.time():
+        event("holding F until its deadline clears the set switch", until_unix=not_before)
+        time.sleep(not_before - time.time())
     f_hash = buy("F", profile, "The provider may not answer this purchase; that is expected. Do not withdraw it "
                                "and do not request a refund.\n")
     state["F"] = f_hash
