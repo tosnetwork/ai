@@ -338,10 +338,11 @@ chain step (activation, registration) is marked as sending before `tosctl`
 runs. On a re-run, a step whose effect is in finalized state is never sent
 again. A step still marked as sending is waited on until it lands or its
 inclusion window has passed on finalized chain time, and only then sent again.
-The window is 5 minutes from the step's stamp. Every send runs under a
-3-minute deadline that kills `tosctl`, and a wallet message is valid for
-2 minutes from when `tosctl` signs it, so no message signed for the step can
-land after the window. `tosctl wallet send` reports no `valid_until` of its
+The window is 5 minutes and 10 seconds from the step's stamp. Every send runs
+under a 3-minute deadline that kills `tosctl`, and a wallet message is valid
+for 2 minutes from when `tosctl` signs it. The 10 seconds cover a stamp that is
+truncated to whole seconds and taken just after the deadline starts. So no
+message signed for the step can land after the window. `tosctl wallet send` reports no `valid_until` of its
 own; the stamp and that expiry both come from the host clock. Only the wallet
 checks `tosctl` makes before it builds the message (an amount the balance
 cannot cover, an uninitialized or frozen wallet) return the step to pending.

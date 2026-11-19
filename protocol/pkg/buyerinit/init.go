@@ -40,13 +40,17 @@ const (
 // Send timing. tosctl signs a wallet message valid for walletMessageLifetime
 // from the moment it signs, which is at most maxSendTime after the step is
 // stamped: every send runs under that deadline and tosctl is killed at it.
-// So sendResolutionWindow after the stamp, an absent message can no longer
-// be included, and a slow tosctl cannot sign later than the window allows.
+// The stamp is taken slightly after the deadline starts and truncated to
+// whole seconds, so it can lie up to about a second before the deadline's
+// real start; stampMargin covers that with room to spare. So
+// sendResolutionWindow after the stamp, an absent message can no longer be
+// included, and a slow tosctl cannot sign later than the window allows.
 // tosctl's wallet send reports no valid_until of its own to use instead.
 const (
 	maxSendTime           = 3 * time.Minute
 	walletMessageLifetime = 2 * time.Minute
-	sendResolutionWindow  = maxSendTime + walletMessageLifetime
+	stampMargin           = 10 * time.Second
+	sendResolutionWindow  = maxSendTime + walletMessageLifetime + stampMargin
 )
 
 var (
