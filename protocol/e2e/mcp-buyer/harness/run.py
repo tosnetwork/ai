@@ -55,6 +55,9 @@ SOCKET_DIR = Path("/run/tos-buyer")
 EXECUTOR_DIR = Path("/run/tos-service-executor")
 EXECUTOR_SOCKET = EXECUTOR_DIR / "executor.sock"
 RELAY_URL = f"https://127.0.0.1:{RELAY_PORT}"
+# A version 16 genesis needs a 32-byte AUTH network tag; a fresh one per run
+# keeps this network's signatures from any other's (tostester reads it).
+os.environ["TOS_AUTH_NETWORK_TAG"] = secrets.token_hex(32)
 
 steps: list = []
 evidence: dict = {}
