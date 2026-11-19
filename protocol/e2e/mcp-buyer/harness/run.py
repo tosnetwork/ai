@@ -345,6 +345,55 @@ def setup_provider(tosctl_sha256: str) -> dict:
     return offer
 
 
+# --- The gateway, under the provider uid ------------------------------------------------
+
+GATEWAY_PORT = 47691
+GATEWAY_URL = f"http://127.0.0.1:{GATEWAY_PORT}"
+GATEWAY_DIR = HOME["provider"] / "gateway"
+
+
+def write_private(account: str, path: Path, text: str) -> None:
+    as_account(account, ["/usr/bin/tee", str(path)], input_text=text)
+    as_account(account, ["/bin/chmod", "0600", str(path)])
+
+
+def start_gateway(provider_agent_id: str) -> None:
+    """The reference gateway quoting for the OpenFox provider. It runs as the
+    provider uid because it serves the key card file OpenFox keeps, which it
+    accepts only when its own uid owns it."""
+    rail = json.loads(as_account("provider", ["/bin/cat", str(PROVIDER_RAIL / "rail.json")]).stdout)
+    registry = GATEWAY_DIR / "registry-code.boc"
+    write_private("provider", registry, REGISTRY_BOC.read_text())
+    state = private_dir(GATEWAY_DIR / "quote-state", "provider")
+    private_dir(GATEWAY_DIR / "catalog", "provider")
+    profile = GATEWAY_DIR / "quote-profile.json"
+    write_private("provider", profile, json.dumps({
+        "schema": "tos.service.provider-quote-profile.v2", "provider_agent_id": provider_agent_id,
+        "manifest_cbor_file": rail["provider"]["manifest_file"],
+        "transport": {"security_mode": 2, "max_request_bytes": 1 << 20, "base_url": "agent-packet:" + provider_agent_id},
+        "proposal_ttl_seconds": 900, "tos_rpc_endpoints": rpc_endpoints(), "registry_code_boc_file": str(registry),
+        "service_actor_code_hash": ACTOR_CODE_HASH, "state_directory": str(state),
+        "provider_key_card_file": str(GATEWAY_CARD)}))
+    read_token, relay_token, rpc_token = (secrets.token_hex(24) for _ in range(3))
+    for token in (read_token, relay_token, rpc_token):
+        register_secret(token)
+    write_private("custody", HOME["custody"] / "private" / "gateway-token", read_token)
+    network = evidence["network"]
+    start("provider", [str(BIN / "tos-service-gateway")], "gateway.log", env_extra={
+        "TOS_SERVICE_ADDR": f"127.0.0.1:{GATEWAY_PORT}", "TOS_SERVICE_PUBLIC_BASE_URL": GATEWAY_URL,
+        "TOS_SERVICE_READ_TOKEN": read_token, "TOS_SERVICE_RELAY_TOKEN": relay_token,
+        "TOS_SERVICE_TOS_RPC_URL": "http://127.0.0.1:47692", "TOS_SERVICE_TOS_RPC_INSECURE": "true",
+        "TOS_SERVICE_TOS_RPC_TOKEN": rpc_token,
+        "TOS_SERVICE_CAPABILITY_CATALOG_DIRECTORY": str(GATEWAY_DIR / "catalog"),
+        "TOS_SERVICE_NETWORK_ID": network["network_id"], "TOS_SERVICE_GENESIS_ROOT_HASH": network["genesis_root_hash"],
+        "TOS_SERVICE_GENESIS_FILE_HASH": network["genesis_file_hash"],
+        "TOS_SERVICE_REGISTRY_CODE_HASH": evidence["registry_code_hash"],
+        "TOS_SERVICE_PROVIDER_QUOTE_PROFILE_FILE": str(profile)})
+    import urllib.request
+    ready = poll(lambda: urllib.request.urlopen(GATEWAY_URL + "/livez", timeout=5).status == 200, 60, 1)
+    record("the gateway serves Quotes for the provider under its uid, with its key card file", bool(ready), GATEWAY_URL)
+
+
 # --- The buyer agent -----------------------------------------------------------------
 
 AGENT_STATE = HOME["custody"] / "agent-state"
@@ -357,8 +406,7 @@ def setup_buyer(wallet: str, tosctl_sha256: str) -> dict:
     private_dir(HOME["custody"] / "manifests", "custody")
     for directory in ("work", "results"):
         private_dir(HOME["developer"] / directory, "developer")
-    code_hash = json.loads(as_account(None, [str(BIN / "service-actor-e2e-fixture"), "code-hash", "--boc-file",
-                                             str(REGISTRY_BOC)]).stdout)["code_hash"]
+    code_hash = evidence["registry_code_hash"]
     config = {
         "schema": "tos.service.mcp-buyer.agent-config.v1", "state_dir": str(AGENT_STATE), "socket_dir": str(SOCKET_DIR),
         "client_uid": ACCOUNTS["developer"][0], "network": {key: evidence["network"][key] for key in
@@ -371,6 +419,8 @@ def setup_buyer(wallet: str, tosctl_sha256: str) -> dict:
                    "packet_controller": "buyer-packet"},
         "packet_controller_key_id": key_id, "relays": [RELAY_URL],
         "relay_ca_file": str(HOME["custody"] / "private" / "relay-ca.pem"),
+        # The gateway on loopback, quoting with the read token.
+        "gateway_url": GATEWAY_URL, "gateway_token_file": str(HOME["custody"] / "private" / "gateway-token"),
         "budget": {"window_seconds": 86400, "max_calls": 10, "max_per_call_nanotos": "2000000000",
                    "max_window_nanotos": "10000000000", "max_unconfirmed": 4, "max_lifecycle_sends_per_window": 28,
                    "duty_interval_seconds": 30}}
@@ -383,6 +433,87 @@ def setup_buyer(wallet: str, tosctl_sha256: str) -> dict:
                                     check=False).returncode == 0, 120, 1)
     record("the buyer agent serves its socket as custody", bool(ready), {"agent_id": agent_id})
     return {"agent_id": agent_id, "packet_key_id": key_id}
+
+
+# --- Scenario 1: a gateway-quoted purchase from a relay-only provider ----------------
+
+def structured(result: dict) -> dict:
+    return json.loads(result["structured"]) if result.get("structured") else {}
+
+
+def source_tree() -> Path:
+    """A small source directory in the developer's workspace."""
+    source = HOME["developer"] / "work" / "src"
+    private_dir(source, "developer")
+    as_account("developer", ["/usr/bin/tee", str(source / "main.go")],
+               input_text="package main\n\nfunc main() { println(\"built over the TOS rail\") }\n")
+    as_account("developer", ["/usr/bin/tee", str(source / "go.mod")], input_text="module example.com/e2e\n\ngo 1.26\n")
+    return source
+
+
+def confirm_payment(request_hash: str) -> dict:
+    """request_payment from the developer while the human confirms in the
+    real confirmer on custody's own terminal."""
+    waiting = subprocess.Popen(
+        [str(BIN / "mcp-buyer-e2e-client"), "--server", str(BIN / "tos-service-buyer-mcp"), "call",
+         "tos_buyer_request_payment", json.dumps({"request_hash": request_hash, "wait_seconds": 240}), "--",
+         "--agent-socket", str(SOCKET_DIR / "agent.sock"), "--agent-state-dir", str(AGENT_STATE),
+         "--workspace-root", str(HOME["developer"] / "work"), "--results-dir", str(HOME["developer"] / "results")],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, user=ACCOUNTS["developer"][0],
+        group=ACCOUNTS["developer"][1], extra_groups=[SOCKET_GROUP],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(HOME["developer"])})
+    confirmer = Confirmer(str(BIN / "tos-service-buyer"), str(SOCKET_DIR / "agent.sock"), *ACCOUNTS["custody"],
+                          {"PATH": "/usr/bin:/bin", "HOME": str(HOME["custody"]), "TERM": "dumb"})
+    confirmer.start()
+    try:
+        code = confirmer.confirm(timeout=180)
+        record("the human confirmed in the real confirmer on custody's terminal", bool(code), {"code_length": len(code)})
+    finally:
+        status = confirmer.finish()
+    stdout, stderr = waiting.communicate(timeout=300)
+    result = json.loads(stdout.strip().splitlines()[-1]) if stdout.strip() else {"error": stderr[-500:]}
+    record("the confirmer exited cleanly", status == 0, status)
+    return result
+
+
+def scenario_gateway_purchase(offer: dict) -> None:
+    capability, version = offer["capability_id"], offer["version"]
+    quoted = mcp("tos_buyer_quote", {"capability_id": capability, "capability_version": version, "source": "gateway"})
+    quote = structured(quoted)
+    record("a gateway Quote validated against finalized state, carriable to the relay-only provider",
+           not quoted["is_error"] and bool(quote.get("carriable")) and bool(quote.get("offer", {}).get("provider_card_held")),
+           {"quote_id": quote.get("quote_id"), "source": quote.get("quote_source"),
+            "card_refused": quote.get("provider_card_refused"), "not_carriable_item": quote.get("not_carriable_item")})
+    source = source_tree()
+    prepared = mcp("tos_buyer_prepare", {"quote_id": quote["quote_id"], "source_path": str(source),
+                                         "idempotency_key": "e2e-first-purchase-" + secrets.token_hex(4)})
+    purchase = structured(prepared).get("purchase", {})
+    request_hash = purchase.get("request_hash", "")
+    record("prepare reserves the purchase and pays nothing", not prepared["is_error"] and
+           purchase.get("state") == "awaiting_confirmation", {"request_hash": request_hash, "state": purchase.get("state")})
+    paid = confirm_payment(request_hash)
+    paid_state = structured(paid).get("purchase", {}).get("state")
+    record("the confirmed purchase is paid with one call", not paid.get("is_error", True) and
+           paid_state not in (None, "awaiting_confirmation", "declined"), paid_state)
+    # The agent delivers the task over the relay; OpenFox executes (stand-in),
+    # responds and returns the result; the agent accepts it and acks.
+    result = poll(lambda: (lambda r: r if not r["is_error"] else None)(
+        mcp("tos_buyer_result", {"request_hash": request_hash, "max_inline_bytes": 4096})), 1800, 20)
+    accepted = structured(result) if result else {}
+    files = accepted.get("files") or {}
+    record("the result is accepted against the finalized response hash and written as four files",
+           bool(result) and bool(files.get("receipt_boc")),
+           {"response_hash": (accepted.get("result") or {}).get("response_hash"), "files": files})
+    if files:
+        sizes = as_account("developer", ["/usr/bin/stat", "-c", "%n %s", *files.values()], check=False).stdout
+        record("the developer holds receipt.boc, artifact.tar, output.log and report.json", "artifact.tar" in sizes,
+               sizes.strip().splitlines())
+    status = json.loads(openfox("status", "--rail-config", str(PROVIDER_RAIL / "rail.json")).stdout)
+    entry = next((r for r in status.get("requests", []) if r.get("request_hash") == request_hash), {})
+    record("OpenFox recorded the buyer's ack", poll(lambda: next(
+        (r for r in json.loads(openfox("status", "--rail-config", str(PROVIDER_RAIL / "rail.json")).stdout).get("requests", [])
+         if r.get("request_hash") == request_hash), {}).get("operator_state") == "acked", 300, 15) is not None,
+        {"chain_fact": entry.get("chain_fact"), "operator_state": entry.get("operator_state")})
 
 
 # --- Negatives that need no purchase --------------------------------------------
@@ -486,12 +617,18 @@ async def main() -> int:
             start_relay()
             start_executor()
             tosctl_sha256 = build["tosctl_sha256"]
-            evidence["provider"] = setup_provider(tosctl_sha256)
+            evidence["registry_code_hash"] = json.loads(as_account(None, [
+                str(BIN / "service-actor-e2e-fixture"), "code-hash", "--boc-file", str(REGISTRY_BOC)]).stdout)["code_hash"]
+            offer = setup_provider(tosctl_sha256)
+            evidence["provider"] = offer
+            start_gateway(offer["provider_agent_id"])
             evidence["buyer"] = setup_buyer(evidence["wallets"]["custody"], tosctl_sha256)
             listed = mcp(None)
             record("the developer's MCP client lists the buyer tools through the real server",
-                   "tos_buyer_result" in listed.get("tools", []), listed.get("tools"))
+                   "tos_buyer_quote" in listed.get("tools", []) and "tos_buyer_result" in listed.get("tools", []),
+                   listed.get("tools"))
             peer_negatives()
+            scenario_gateway_purchase(offer)
     except Exception as error:  # noqa: BLE001 - the evidence records the failure
         import traceback
         record("run completed without an exception", False, {"error": repr(error),
