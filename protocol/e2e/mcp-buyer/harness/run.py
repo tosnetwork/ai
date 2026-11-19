@@ -566,7 +566,8 @@ def diagnose_discovery(offer: dict) -> None:
 def scenario_gateway_purchase(offer: dict) -> None:
     capability, version = offer["capability_id"], offer["version"]
     quoted = mcp("tos_buyer_quote", {"capability_id": capability, "capability_version": version, "source": "gateway"})
-    quote = structured(quoted)
+    # tos_buyer_quote's structured content holds the Quote under "quote".
+    quote = structured(quoted).get("quote") or structured(quoted)
     record("a gateway Quote validated against finalized state, carriable to the relay-only provider",
            not quoted["is_error"] and bool(quote.get("carriable")) and bool(quote.get("offer", {}).get("provider_card_held")),
            {"quote_id": quote.get("quote_id"), "source": quote.get("quote_source"),
