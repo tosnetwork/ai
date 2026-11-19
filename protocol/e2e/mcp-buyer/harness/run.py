@@ -19,6 +19,7 @@ The run ends with work/evidence.json and one ALL PASS or FAIL line.
 """
 
 import asyncio
+import base64
 import datetime
 import json
 import os
@@ -213,7 +214,14 @@ def setup_accounts() -> None:
         register_secret(vaults[account])
     # setgid, so the socket the agent creates there belongs to tos-buyer and
     # the developer account in that group can reach it.
-    private_dir(SOCKET_DIR, "custody", 0o2750, SOCKET_GROUP)
+    private_dir(SOCKET_DIR, "custody", 0o750, SOCKET_GROUP)
+    # Container root holds no FSETID, so a chmod by it drops the setgid bit
+    # on a directory of a group it is not in. The owner sets it, holding the
+    # shared group for that one call, as an operator's sudo install would.
+    as_account("custody", ["/bin/chmod", "2750", str(SOCKET_DIR)], groups=[SOCKET_GROUP])
+    mode = as_account("custody", ["/usr/bin/stat", "-c", "%a %g", str(SOCKET_DIR)]).stdout.split()
+    if mode != ["2750", str(SOCKET_GROUP)]:
+        raise RuntimeError(f"the socket directory is {mode}, not setgid 2750 of the shared group")
     private_dir(EXECUTOR_DIR, None, 0o750, ACCOUNTS["provider"][1])
     record("accounts, vaults and runtime directories prepared", True,
            {account: {"uid": ids[0]} for account, ids in ACCOUNTS.items()})
@@ -285,8 +293,16 @@ def start_relay() -> Path:
     import ssl
     import urllib.request
     context = ssl.create_default_context(cafile=str(tls / "ca.pem"))
-    ready = poll(lambda: urllib.request.urlopen(RELAY_URL + "/v1/relay", context=context, timeout=5).status == 200, 60, 1)
-    record("packet relay serves HTTPS under the run's own CA", bool(ready), RELAY_URL)
+    last = {}
+
+    def probe():
+        try:
+            return urllib.request.urlopen(RELAY_URL + "/v1/relay", context=context, timeout=5).status == 200
+        except Exception as error:  # noqa: BLE001 - the last failure goes into the record
+            last["error"] = repr(error)
+            return False
+    ready = poll(probe, 60, 1)
+    record("packet relay serves HTTPS under the run's own CA", bool(ready), {"url": RELAY_URL, **last})
     return tls / "ca.pem"
 
 
@@ -395,8 +411,11 @@ def start_gateway(provider_agent_id: str) -> None:
         "state_directory": str(rpc_state),
         "sender": {"network": network["network_id"], "binary": str(BIN / "tosctl"),
                    "configPath": str(HOME["provider"] / "private" / "tosctl-config.json"), "vaultUrl": vaults["provider"],
-                   "rpcUrl": f"http://127.0.0.1:{RPC_PORTS[0]}", "genesisRootHash": network["genesis_root_hash"],
-                   "genesisFileHash": network["genesis_file_hash"], "walletName": "provider",
+                   # The sender takes the genesis hashes as Base64 of the raw bytes.
+                   "rpcUrl": f"http://127.0.0.1:{RPC_PORTS[0]}",
+                   "genesisRootHash": base64.b64encode(bytes.fromhex(network["genesis_root_hash"][7:])).decode(),
+                   "genesisFileHash": base64.b64encode(bytes.fromhex(network["genesis_file_hash"][7:])).decode(),
+                   "walletName": "provider",
                    "payer": evidence["wallets"]["provider"]},
         "signature_helper": {"binary": str(BIN / "tosctl"), "sha256": evidence["build"]["tosctl_sha256"]}}))
     start("provider", [str(BIN / "tos-service-rpc"), "-listen", "127.0.0.1:47692", "-bearer-token", rpc_token,
