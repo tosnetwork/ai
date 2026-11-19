@@ -284,7 +284,9 @@ record = {
                  "verifier_tos_service_verify_sha256": verifier_build.get("sha256") or verifier_build.get(
                      "binary_sha256"), "verifier_built_by": "the Codex verifier, from a fresh clone"},
     "endpoints": endpoint_forms,
-    "relays": {"urls": profile["relays"], "operator": "TOS core development team (test relays, private CA)"},
+    "relays": {"count": len(profile["relays"]), "form": "the installed Agent Packet Relays over HTTPS with their "
+                                                         "private CA pinned",
+               "operator": "TOS core development team (test relays, private CA)"},
     "objects": {k: objects.get(k) for k in ("capability_id", "capability_version", "provider_agent_id", "actor",
                                             "manifest_digest", "metadata_hash", "attestor_key_id", "capability_address",
                                             "provider_wallet", "buyer_agent_id", "offer_sha256")} |
