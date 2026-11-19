@@ -596,7 +596,17 @@ def finish_pilot(handoff: dict, profile: dict) -> None:
     run_verifier(handoff, profile)
     finish_credentials()
     save()
-    unsigned = run([sys.executable, "-I", HERE / "make_record.py", RUN, RECORD / "record-unsigned.json"], check=False)
+    build_record()
+
+
+def build_record() -> None:
+    """The unsigned record, the three signatures over its digest, and the
+    signed record. Signatures of an earlier attempt are set aside first, so
+    the unsigned record is built without any."""
+    old = RECORD / "signatures.json"
+    if old.exists():
+        old.rename(RECORD / f"signatures-set-aside-{int(time.time())}.json")
+    unsigned =run([sys.executable, "-I", HERE / "make_record.py", RUN, RECORD / "record-unsigned.json"], check=False)
     event("unsigned record", summary=unsigned.stdout[-800:])
     sign_record(json.loads(unsigned.stdout)["record_sha256"])
     final = run([sys.executable, "-I", HERE / "make_record.py", RUN, RECORD / "record.json"], check=False)
@@ -679,4 +689,5 @@ def cmd_refresh_credentials() -> None:
 
 if __name__ == "__main__":
     {"start": cmd_start, "offer": cmd_offer, "purchases": cmd_purchases, "stop": cmd_stop, "verify": cmd_verify,
+     "record": build_record,
      "refresh-credentials": cmd_refresh_credentials}[COMMAND]()
