@@ -183,6 +183,13 @@ tosctl_listed = any(release_sums[i] == build["tosctl_sha256"] and release_sums[i
                     for i in range(0, len(release_sums) - 1, 2))
 check("tosctl-is-the-released-binary", tosctl_listed, provenance.get("tag"))
 
+# Binaries staged after the containers started are logged in build.json's
+# added_after_start; each must also be in its binaries map, with that digest.
+added_names = {name for entry in build.get("added_after_start", []) for name in entry.get("binaries", {})}
+check("binaries-added-after-start-are-in-build-json",
+      all(build["binaries"].get(name) == digest for entry in build.get("added_after_start", [])
+          for name, digest in entry.get("binaries", {}).items()), sorted(added_names))
+
 def ok_of(name: str) -> bool:
     return any(c["id"] == name and c["ok"] for c in checks)
 
@@ -197,6 +204,8 @@ verdict = "AGENT_OPERATED_PILOT_PASSED" if passed else "AGENT_OPERATED_PILOT_FAI
 # --- The record -----------------------------------------------------------------------
 
 ai_root = HERE.parents[2]
+harness_commits = git(ai_root, "log", "--format=%h %s", f"{build['ai_commit']}..HEAD", "--",
+                      "protocol/e2e/mcp-buyer-pilot").splitlines()
 endpoint_forms = [{"role": role, "form": "SSH local forward through the restricted pilot-rpc account, with the role's "
                                          "own key, to each validator's loopback JSON-RPC (127.0.0.1:8081)",
                    "validators": [v["name"] for v in profile["endpoints"]["validators"]],
@@ -278,14 +287,19 @@ record = {
     "source_commits": {"ai": build["ai_commit"], "openfox": build["openfox_commit"],
                        "operator_driver": git(ai_root, "rev-parse", "HEAD"),
                        "operator_driver_tree_clean": git(ai_root, "status", "--porcelain") == "",
-                       "harness_commits_after_the_containers_started": [
-                           line for line in git(ai_root, "log", "--format=%h %s", f"{build['ai_commit']}..HEAD", "--",
-                                                "protocol/e2e/mcp-buyer-pilot").splitlines()],
+                       "harness_commits_after_the_containers_started": harness_commits,
+                       "harness_commit_count_after_the_containers_started": len(harness_commits),
+                       "harness_commit_range": f"{build['ai_commit'][:8]}..{git(ai_root, 'rev-parse', '--short=8', 'HEAD')}",
                        "tosctl": {"repository": provenance.get("repository"), "release_tag": provenance.get("tag"),
                                   "tag_commit": provenance.get("tag_commit"), "asset": "tosctl-linux-x86_64",
                                   "listed_in_release_sha256sums": tosctl_listed},
                        "verifier_clone": verifier_build.get("commit")},
-    "binaries": {"built_by_operator": build["binaries"], "tosctl_sha256": build["tosctl_sha256"],
+    "binaries": {"built_by_operator": {name: {"sha256": digest, "added_after_start": name in added_names}
+                                       for name, digest in build["binaries"].items()},
+                 "tosctl_sha256": build["tosctl_sha256"],
+                 # Binaries the operator staged after the containers started,
+                 # copied from build.json exactly as they were logged there.
+                 "added_after_start": build.get("added_after_start", []),
                  "verifier_tos_service_verify_sha256": verifier_build.get("sha256") or verifier_build.get(
                      "binary_sha256"), "verifier_built_by": "the Codex verifier, from a fresh clone"},
     "endpoints": endpoint_forms,

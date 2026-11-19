@@ -196,6 +196,27 @@ class MakeRecordTest(unittest.TestCase):
         self.assertIn("model-credentials-scanned-and-deleted-before-the-record", summary["failed_checks"])
         self.assertIn("did NOT pass", json.loads(out.read_text())["automation"]["credentials"])
 
+    def test_binaries_added_after_start_are_carried_and_marked(self):
+        path = self.root / "bin" / "build.json"
+        build = json.loads(path.read_text())
+        build["binaries"]["codex-code-mode-host"] = "ff" * 32
+        build["added_after_start"] = [{"at": "2026-11-19T07:22:40+00:00", "binaries": {"codex-code-mode-host": "ff" * 32},
+                                       "reason": "the Codex CLI's companion executable"}]
+        write(path, build)
+        status, summary, out = make(self.root)
+        self.assertEqual(status, 0, summary)
+        binaries = json.loads(out.read_text())["binaries"]
+        self.assertEqual(binaries["added_after_start"], build["added_after_start"])
+        self.assertTrue(binaries["built_by_operator"]["codex-code-mode-host"]["added_after_start"])
+        self.assertFalse(binaries["built_by_operator"]["claude"]["added_after_start"])
+        # An addition whose digest is not the build's fails the record.
+        build["added_after_start"][0]["binaries"]["codex-code-mode-host"] = "ee" * 32
+        write(path, build)
+        write(self.root / "verifier-work" / "out" / "codex-summary.json", {"verdict": "AGENT_OPERATED_PILOT_FAILED"})
+        status, summary, _ = make(self.root)
+        self.assertEqual(status, 1)
+        self.assertIn("binaries-added-after-start-are-in-build-json", summary["failed_checks"])
+
     def test_refuses_to_write_the_gate_d_verdict(self):
         write(self.root / "verifier-work" / "out" / "codex-summary.json", {"verdict": FORBIDDEN})
         status, summary, out = make(self.root)
