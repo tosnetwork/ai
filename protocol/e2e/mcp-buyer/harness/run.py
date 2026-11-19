@@ -72,14 +72,17 @@ def record(name: str, ok: bool, detail=None) -> None:
 
 
 def as_account(account: str | None, command: list, *, check: bool = True, timeout: int = 300,
-               env_extra: dict | None = None, input_text: str | None = None) -> subprocess.CompletedProcess:
+               env_extra: dict | None = None, input_text: str | None = None,
+               groups: list | None = None) -> subprocess.CompletedProcess:
     """Run a command as an account (root when None), with only that
-    account's environment: its home, and its own vault when it has one."""
+    account's environment: its home, and its own vault when it has one.
+    Only the developer is in the socket group unless groups says otherwise."""
     env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
     kwargs = {}
     if account is not None:
         uid, gid = ACCOUNTS[account]
-        groups = [SOCKET_GROUP] if account == "developer" else []
+        if groups is None:
+            groups = [SOCKET_GROUP] if account == "developer" else []
         kwargs = {"user": uid, "group": gid, "extra_groups": groups}
         env["HOME"] = str(HOME[account])
         if account in vaults:
@@ -109,8 +112,25 @@ def start(account: str | None, command: list, log: str, env_extra: dict | None =
         env.update(env_extra)
     out = open(WORK / "logs" / log, "w")
     process = subprocess.Popen(command, stdout=out, stderr=subprocess.STDOUT, env=env, **kwargs)
-    processes.append(process)
+    processes.append((account, process))
     return process
+
+
+def stop_all() -> None:
+    """Stop every started process. Root holds no KILL capability, so a
+    process of an account is signalled by that account itself."""
+    for account, process in reversed(processes):
+        if process.poll() is not None:
+            continue
+        if account is None:
+            process.terminate()
+        else:
+            as_account(account, ["/bin/kill", "-TERM", str(process.pid)], check=False)
+    for _, process in processes:
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def last_json(text: str):
@@ -191,7 +211,9 @@ def setup_accounts() -> None:
         register_secret(master)
         vaults[account] = f"file://{private}/vault.json?master_key={master}"
         register_secret(vaults[account])
-    private_dir(SOCKET_DIR, "custody", 0o750, SOCKET_GROUP)
+    # setgid, so the socket the agent creates there belongs to tos-buyer and
+    # the developer account in that group can reach it.
+    private_dir(SOCKET_DIR, "custody", 0o2750, SOCKET_GROUP)
     private_dir(EXECUTOR_DIR, None, 0o750, ACCOUNTS["provider"][1])
     record("accounts, vaults and runtime directories prepared", True,
            {account: {"uid": ids[0]} for account, ids in ACCOUNTS.items()})
@@ -254,7 +276,7 @@ def start_relay() -> Path:
     state = private_dir(Path("/var/lib/e2e-relay"), None)
     start(None, [str(BIN / "tos-service-packet-relay"), "-listen", f"127.0.0.1:{RELAY_PORT}",
                  "-tls-cert", str(tls / "relay.pem"), "-tls-key", str(tls / "relay.key"), "-state-dir", str(state),
-                 "-global-max-entries", "100000"], "relay.log")
+                 "-global-max-entries", "100000", "-global-max-bytes", str(1 << 30)], "relay.log")
     # Each account gets its own copy of the CA certificate it pins.
     for account in ("custody", "provider"):
         copy = HOME[account] / "private" / "relay-ca.pem"
@@ -357,6 +379,31 @@ def start_gateway(provider_agent_id: str) -> None:
         register_secret(token)
     write_private("custody", HOME["custody"] / "private" / "gateway-token", read_token)
     network = evidence["network"]
+    # The gateway's protocol backend, which it requires at start. It relays
+    # nothing in this run; its sender is the provider's own tosctl wallet.
+    rpc_state = private_dir(GATEWAY_DIR / "rpc-state", "provider")
+    rpc_config = GATEWAY_DIR / "tos-service-v1.json"
+    write_private("provider", rpc_config, json.dumps({
+        "protocol": "tos_service_v1",
+        "network": {"network_id": network["network_id"], "genesis_root_hash": network["genesis_root_hash"],
+                    "genesis_file_hash": network["genesis_file_hash"]},
+        "endpoints": rpc_endpoints(), "quorum": 2, "registry_workchain": 0,
+        "contract_code_boc_base64": "".join(REGISTRY_BOC.read_text().split()),
+        "contract_code_hash": evidence["registry_code_hash"], "funding_nanotos": 200_000_000, "relay_window_seconds": 600,
+        "max_actions_per_target": 4, "max_funding_per_target_nanotos": 1_000_000_000, "max_actions_per_wallet": 16,
+        "max_funding_per_wallet_nanotos": 4_000_000_000, "recovery_relay_safety_seconds": 600,
+        "state_directory": str(rpc_state),
+        "sender": {"network": network["network_id"], "binary": str(BIN / "tosctl"),
+                   "configPath": str(HOME["provider"] / "private" / "tosctl-config.json"), "vaultUrl": vaults["provider"],
+                   "rpcUrl": f"http://127.0.0.1:{RPC_PORTS[0]}", "genesisRootHash": network["genesis_root_hash"],
+                   "genesisFileHash": network["genesis_file_hash"], "walletName": "provider",
+                   "payer": evidence["wallets"]["provider"]},
+        "signature_helper": {"binary": str(BIN / "tosctl"), "sha256": evidence["build"]["tosctl_sha256"]}}))
+    start("provider", [str(BIN / "tos-service-rpc"), "-listen", "127.0.0.1:47692", "-bearer-token", rpc_token,
+                       "-native-v1-config", str(rpc_config)], "service-rpc.log")
+    import urllib.request
+    rpc_ready = poll(lambda: urllib.request.urlopen("http://127.0.0.1:47692/healthz", timeout=5).status == 200, 60, 1)
+    record("the gateway's protocol backend is up under the provider uid", bool(rpc_ready))
     start("provider", [str(BIN / "tos-service-gateway")], "gateway.log", env_extra={
         "TOS_SERVICE_ADDR": f"127.0.0.1:{GATEWAY_PORT}", "TOS_SERVICE_PUBLIC_BASE_URL": GATEWAY_URL,
         "TOS_SERVICE_READ_TOKEN": read_token, "TOS_SERVICE_RELAY_TOKEN": relay_token,
@@ -420,7 +467,8 @@ def setup_buyer(wallet: str, tosctl_sha256: str) -> dict:
 # --- Scenario 1: a gateway-quoted purchase from a relay-only provider ----------------
 
 def structured(result: dict) -> dict:
-    return json.loads(result["structured"]) if result.get("structured") else {}
+    # The client prints the structured content as a JSON object.
+    return result.get("structured") or {}
 
 
 def source_tree() -> Path:
@@ -500,27 +548,36 @@ def scenario_gateway_purchase(offer: dict) -> None:
 
 # --- Negatives that need no purchase --------------------------------------------
 
-def socket_request(account: str, method: str, params: dict) -> dict | None:
-    """One raw agent-socket request from an account; None when refused at
-    connect (the agent closes an unknown peer without reading)."""
+def socket_request(account: str, method: str, params: dict, groups: list | None = None) -> dict:
+    """One raw agent-socket request from an account: whether it connected,
+    and the answer line, if any (the agent closes an unknown peer without
+    reading or answering)."""
+    request = json.dumps({"schema": "tos.service.mcp-buyer.agent-api.v1", "method": method, "params": params})
     program = (
         "import json, socket, sys\n"
         "s = socket.socket(socket.AF_UNIX)\n"
-        f"s.connect({str(SOCKET_DIR / 'agent.sock')!r})\n"
-        f"s.sendall((json.dumps({{'schema': 'tos.service.mcp-buyer.agent-api.v1', 'method': {method!r}, "
-        f"'params': {json.dumps(params)}}}) + '\\n').encode())\n"
-        "data = s.makefile().readline()\n"
-        "print(data)\n")
-    result = as_account(account, [str(MOUNTS / "venv" / "bin" / "python3"), "-I", "-c", program], check=False, timeout=30)
-    line = result.stdout.strip()
-    return json.loads(line) if line else None
+        "try:\n"
+        f"    s.connect({str(SOCKET_DIR / 'agent.sock')!r})\n"
+        "except OSError as error:\n"
+        "    print(json.dumps({'connected': False, 'error': error.strerror})); sys.exit(0)\n"
+        f"s.sendall({(request + chr(10)).encode()!r})\n"
+        "line = s.makefile().readline().strip()\n"
+        "print(json.dumps({'connected': True, 'answer': json.loads(line) if line else None}))\n")
+    result = as_account(account, [str(MOUNTS / "venv" / "bin" / "python3"), "-I", "-c", program], check=False,
+                        timeout=30, groups=groups)
+    return json.loads(result.stdout.strip() or '{"connected": false, "error": "no output"}')
 
 
 def peer_negatives() -> None:
-    stranger = socket_request("stranger", "purchases", {"page_size": 1})
-    record("a third account is refused before its request is read", stranger is None, stranger)
+    outside = socket_request("stranger", "purchases", {"page_size": 1})
+    record("an account outside the socket group cannot reach the socket", not outside.get("connected"), outside)
+    # In the socket group, the agent's own peer-credential check decides.
+    member = socket_request("stranger", "purchases", {"page_size": 1}, groups=[SOCKET_GROUP])
+    record("a third account in the socket group is refused before its request is read",
+           member.get("connected") and member.get("answer") is None, member)
     decide = socket_request("developer", "decide", {"request_hash": "00" * 32, "decision": "confirm", "code": "x"})
-    refused = bool(decide) and not decide.get("ok") and decide.get("error", {}).get("code") == "MCP_BUYER_PERMISSION_DENIED"
+    answer = decide.get("answer") or {}
+    refused = not answer.get("ok", True) and (answer.get("error") or {}).get("code") == "MCP_BUYER_PERMISSION_DENIED"
     record("the developer account cannot call decide", refused, decide)
     for account in ("developer", "provider"):
         result = as_account(account, ["/bin/ls", str(HOME["custody"] / "agent-state")], check=False)
@@ -622,9 +679,7 @@ async def main() -> int:
         record("run completed without an exception", False, {"error": repr(error),
                                                               "traceback": traceback.format_exc()[-4000:]})
     finally:
-        for process in processes:
-            if process.poll() is None:
-                process.terminate()
+        stop_all()
     evidence["steps"] = steps
     thermal = WORK / "thermal.jsonl"
     evidence["thermal_pauses"] = [json.loads(line) for line in thermal.read_text().splitlines()] if thermal.exists() else []
