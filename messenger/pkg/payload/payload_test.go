@@ -351,6 +351,9 @@ func TestRetiredKindsAndSchemasStayUnused(t *testing.T) {
 	// are refused.
 	retired := append(append([]string(nil), RetiredKinds...), RetiredSchemas...)
 	root := filepath.Join("..", "..")
+	// Only the list itself is exempt, by exact path: a file elsewhere that
+	// happens to be called retired.go is scanned like any other.
+	list := filepath.Join(root, "pkg", "payload", "retired.go")
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -361,8 +364,7 @@ func TestRetiredKindsAndSchemasStayUnused(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
-			filepath.Base(path) == "retired.go" {
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || path == list {
 			return nil
 		}
 		content, err := os.ReadFile(path)

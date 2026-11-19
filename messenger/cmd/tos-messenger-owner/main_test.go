@@ -13,6 +13,30 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/localapi"
 )
 
+// A v1 envelope was prepared against the request layout that still signed
+// mandate fields. It is refused rather than signed against the v2 preimage,
+// even when its signing bytes match the current request.
+func TestRetiredV1EnvelopeIsRefused(t *testing.T) {
+	request := localapi.Request{
+		Schema: localapi.RequestSchema, Op: localapi.OpGrantAction,
+		ActionID: "act_" + strings.Repeat("a", 64), Challenge: strings.Repeat("b", 64),
+	}
+	preimage, err := localapi.DecisionBytes(request, request.Challenge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := decisionEnvelope{Schema: decisionSchema, Request: request, SigningBytesHex: hex.EncodeToString(preimage)}
+	if err := validateEnvelope(current, false); err != nil {
+		t.Fatalf("the current envelope was refused: %v", err)
+	}
+	retired := current
+	retired.Schema = "tos.messaging.owner-decision.v1"
+	err = validateEnvelope(retired, false)
+	if err == nil || !strings.Contains(err.Error(), "unsupported owner decision") {
+		t.Fatalf("a v1 owner envelope was not refused as unsupported: %v", err)
+	}
+}
+
 func TestOfflineSignProducesBoundDecision(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
 	request := localapi.Request{

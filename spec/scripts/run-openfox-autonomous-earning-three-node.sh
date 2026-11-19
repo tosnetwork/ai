@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run from this checkout: protocol/, gateway/, execution/ and spec/ are
-# directories of it. openfox, tos-messenger and tos are external sibling
-# checkouts under TOS_WORKSPACE (default: the parent directory of this checkout).
+# Run from this checkout: protocol/, gateway/, execution/, messenger/ and spec/
+# are directories of it. openfox and tos are external sibling checkouts under
+# TOS_WORKSPACE (default: the parent directory of this checkout).
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 workspace=${TOS_WORKSPACE:-$(cd "$repo/.." && pwd)}
 artifacts=${ACCEPTANCE_ARTIFACT_DIR:-$(mktemp -d /tmp/openfox-autonomous-earning.XXXXXX)}
@@ -75,8 +75,9 @@ TOS_WORKSPACE="$workspace" ACCEPTANCE_ARTIFACT_DIR="$artifacts/source-loss" \
 {
   printf 'schema=tos.openfox.autonomous-earning-acceptance.v1\n'
   printf 'completed_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  # spec, protocol, gateway and execution are one checkout, recorded as ai.
-  for checkout in "ai=$repo" "openfox=$workspace/openfox" "tos-messenger=$workspace/tos-messenger" "tos=$workspace/tos"; do
+  # spec, protocol, gateway, execution and messenger are one checkout,
+  # recorded as ai.
+  for checkout in "ai=$repo" "openfox=$workspace/openfox" "tos=$workspace/tos"; do
     repository=${checkout%%=*}
     path=${checkout#*=}
     printf '%s_commit=%s\n' "$repository" "$(git -C "$path" rev-parse HEAD)"
