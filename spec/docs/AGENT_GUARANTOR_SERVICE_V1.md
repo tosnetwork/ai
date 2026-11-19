@@ -994,11 +994,29 @@ exact-size vectors: an object of exactly 2,000,000 bytes (accepted), one of
 2,000,001 bytes (refused), and a 1,165,360-character nested request string
 (accepted); none is accepted under the shared default limits.
 
-The deterministic-fallback variant of claim-decision admission embeds a
-complete claim admission receipt in its request and cannot be encoded for a
-realistic coverage (at least 2,451,854 bytes for the measured history). It is
-a known defect tracked as tos-service-spec issue 71 and is not covered by this
-budget.
+The deterministic-fallback variant of claim-decision admission (section 17.4,
+`DeterministicFallbackAdmissionVariantV1`) carries its source head by
+reference only: at most four references, none followed past one level. The
+admission receipt carries the claim admission receipt and the current
+transition receipt once, the current decision admission travels as its compact
+proof, and the late filing-close receipt is resolved from its descriptor and
+never carried. Built from the same measured history with the same real Go
+types:
+
+| fallback construction | canonical bytes |
+|---|---|
+| `initial_terminal_fallback` from the measured history: request | 1,210 (1,616 base64 characters) |
+| `initial_terminal_fallback` from the measured history: receipt | 1,069,384 |
+| worst case, `late_recovery_terminal_fallback` from a `reviewing` head over the worst-case history above (transition receipt with its decision proof, prior pending token, late filing-close descriptor, every optional field): receipt | 1,512,852 |
+| the same from a `disputed` head (current decision compact proof instead of the transition receipt): receipt | 1,483,042 |
+| worst-case fallback request | 1,782 |
+| for comparison: the smallest receipt whose request embeds the claim admission receipt instead | 2,451,938 |
+
+The worst fallback receipt is 487,148 bytes (24.4%) under the ceiling, and its
+request is three orders of magnitude under the stage request ceiling. A request
+that embeds the claim admission receipt (1,038,125 bytes, 1,384,168 base64
+characters) puts the smallest such receipt 451,938 bytes over the ceiling,
+which is why references replace embedding.
 
 ### 9.2 Descriptor-only Guarantor evidence
 
@@ -6078,11 +6096,11 @@ DeterministicFallbackAdmissionVariantV1 {
   coverage_agreement_body_digest
   coverage_obligation_id
   claim_id
-  authorized_claim_admission_receipt
+  authorized_claim_admission_receipt_digest
   claim_revision_epoch_expectation   # exact epoch branch defined below
-  current_decision_admission_receipt?
-  current_claim_state_transition_receipt?
-  late_filing_close_receipt?         # required only for late recovery
+  current_decision_admission_receipt_digest?      # every source state except initial_reviewing
+  current_claim_state_transition_receipt_digest?  # exactly the two reviewing source states
+  late_filing_close_receipt_descriptor?           # ImmutableEvidenceDescriptorV1; exactly late recovery
   fallback_profile_digest
   source_claim_revision
   source_claim_state_revision
@@ -6182,9 +6200,11 @@ AuthorizedClaimDecisionAdmissionReceiptV1 {
   authorized_claim_decision
   authorized_claim_admission_receipt
   claim_revision_ingress_cut_proof
-  late_filing_close_receipt?         # exact and only for late recovery
   coverage_end_commitment            # exact preserved CoverageEndCommitmentV1
   prior_pending_application_token?
+  predecessor_claim_state_transition_receipt?  # successor, or fallback from a reviewing head
+  current_decision_admission_proof?  # ClaimDecisionAdmissionReceiptProofV1; only fallback
+                                     # from evidence_required or disputed
   authority_admission_eligibility_proof_set
   authorizations[]
 }
@@ -6196,15 +6216,53 @@ claim_revision_epoch_expectation)`. The source head, identity preimage, and
 selected tagged variant use that same exact embedded expectation. A digest
 without those bytes, two expectations, or a mismatch in Agreement, obligation,
 claim, epoch, log, state revision, or selected claim revision fails before
-action admission. `late_filing_close_receipt_digest` and the embedded receipt
-are both present exactly for `late_recovery_terminal_fallback`; they equal the
-tagged variant and source-head digest and are absent otherwise. A verifier of an
-`authorized_decision` receipt refuses it, before any other check, when it
-carries `late_filing_close_receipt`, `late_filing_close_receipt_digest` or
-`fallback_trigger_cutoff_unix`: those fields exist only for deterministic
-fallback, and an authorized receipt carrying them would sign over an object no
-check reads. The released maximum-size table budgets this additional complete
-envelope in every wrapper that may carry the late path.
+action admission. A verifier of an `authorized_decision` receipt refuses it,
+before any other check, when it carries `late_filing_close_receipt_digest`,
+`fallback_trigger_cutoff_unix`, `current_decision_admission_proof` or a decision
+on a fallback path: those exist only for deterministic fallback, and an
+authorized receipt carrying them would sign over an object no check reads.
+
+**Fallback source references.** The fallback variant names its source head by
+reference only, so the request stays a few kilobytes and the admission chain is
+never present twice. It has at most four references, each resolved to exactly
+one object, and nothing a resolved object itself references is followed: a
+compact proof's optional complete-receipt retrieval only compares digests. The
+verification work per fallback receipt is therefore constant: one claim
+admission, at most one transition receipt or one decision proof, and at most
+one retrieval of a late filing-close receipt. Before any signature is checked,
+the verifier binds the references:
+
+| reference | carried by | rule |
+| --- | --- | --- |
+| `authorized_claim_admission_receipt_digest` | the receipt's `authorized_claim_admission_receipt` | equals its digest and the body's `authorized_claim_admission_receipt_digest` |
+| `current_decision_admission_receipt_digest` | `current_decision_admission_proof` for `evidence_required` and `disputed`; the `decision_admission_proof` of `predecessor_claim_state_transition_receipt` for the two reviewing states | equals that proof's `receipt_envelope_digest`; absent for `initial_reviewing` |
+| `current_claim_state_transition_receipt_digest` | `predecessor_claim_state_transition_receipt` | present and equal exactly for the two reviewing states |
+| `late_filing_close_receipt_descriptor` | nothing; resolved | present exactly for late recovery; see below |
+
+Each object is carried at most once. `initial_reviewing` carries neither the
+transition receipt nor a decision proof; `evidence_required` and `disputed`
+carry the decision proof and no transition receipt; a reviewing state carries
+the transition receipt and no separate decision proof. A missing, extra,
+duplicated, or mismatched object fails before any signature is checked. The
+source head (`ClaimDecisionSourceHeadV1`) takes its digests from these
+references; its late filing-close digest is the descriptor's `content_digest`.
+
+The late filing-close descriptor names
+`application/vnd.tos.service.agent-guarantor-claim-filing-close.v1+cbor`, the
+Agreement's `claim_admission_profile` digest as `retrieval_policy_digest`, and
+a `content_size` no larger than the accepted
+`maximum_claim_filing_close_receipt_envelope_bytes`. The verifier resolves it
+through the owner-selected immutable evidence resolver at every assurance
+level. An absent resolver, unavailable content, a length other than
+`content_size`, undecodable or noncanonical bytes, or a receipt whose digest is
+not `content_digest` fails closed. The receipt body's
+`late_filing_close_receipt_digest` equals `content_digest` exactly for late
+recovery and is absent otherwise. The resolved filing-close receipt must belong
+to the same Agreement and obligation, and its activation evidence must have the
+digest of the activation evidence carried by the verified claim admission
+request. Carrying the filing-close receipt instead would repeat that
+activation evidence, which already sits inside the claim admission receipt, and
+put the worst late-recovery receipt over the ceiling (section 9.1).
 
 The receipt is also the immutable, portable proof of its stage-action
 authorization. `authorized_action_digest` is recomputed from
@@ -6227,8 +6285,9 @@ The action is a closed tagged union. `authorized_decision` requires exactly one
 `authorized_decision_variant` and forbids the fallback variant;
 `deterministic_fallback` does the reverse. Mixed, empty, or unknown modes fail
 canonical decoding. The ordinary variant carries a pre-authorized merits
-decision. The fallback variant carries only immutable source-state objects and
-the Agreement-bound fallback grant; it must not carry a proposed result,
+decision. The fallback variant carries only references to immutable
+source-state objects and the Agreement-bound fallback grant; it must not carry
+a source-state object itself, a proposed result,
 amount, payout line, output authorization wrapper, application token, coverage
 revision, aggregate operand, or target revision.
 
@@ -7578,6 +7637,13 @@ and the seal and MAY retrieve the descriptor to re-run full stage verification;
 high-assurance profiles MUST do so. This compact proof rule prevents recursive
 receipt embedding from making every non-empty claim history exceed the
 complete-object ceiling without weakening content identity or authority.
+A decision admission proof, and a closure bundle's terminal decision, verify
+the projected decision against the authority set of its own decision path: the
+Agreement-fixed `terminal_fallback` authority set, profile and quorum for the
+three fallback paths and the Decision Authority set otherwise. A proof's
+`admission_mode` is `deterministic_fallback` exactly when its decision path is
+a fallback path; a proof that mixes them is invalid. Without this rule an
+admitted fallback decision could never be applied, challenged or closed.
 Before admitting closure, the sink also recomputes the accepted
 `ClaimClosureCapacityV1`, checks every per-claim count and encoded-size bound,
 and measures the complete prospective authorized terminal envelope including
