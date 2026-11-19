@@ -66,6 +66,7 @@ func boolPointer(value bool) *bool { return &value }
 
 // Register adds the tools to server.
 func (t *Tools) Register(server *mcp.Server) {
+	t.registerMarket(server)
 	mcp.AddTool(server, &mcp.Tool{Name: ToolPrepare, Title: "Prepare a TOS purchase",
 		Description: "Prepares one software-work purchase from a stored Quote and a source directory or tar under a " +
 			"workspace root. It pays nothing and returns a preview: price, storage fee, deadlines, refund terms and " +
@@ -206,6 +207,9 @@ func refused(err error) (*mcp.CallToolResult, *ToolError) {
 	switch {
 	case errors.As(err, &known):
 		toolErr = &ToolError{Code: known.Code, Disposition: known.Disposition, Message: known.Message}
+	case errors.Is(err, ErrOfferFileRefused):
+		toolErr = &ToolError{Code: buyeragent.CodeBadInput, Disposition: buyeragent.DispositionNever,
+			Message: offerFileMessage}
 	case errors.Is(err, ErrSourceRefused):
 		toolErr = &ToolError{Code: buyeragent.CodeBadInput, Disposition: buyeragent.DispositionNever,
 			Message: sourceMessage(err)}

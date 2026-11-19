@@ -748,9 +748,19 @@ func TestAFullInboxLeavesTheEnvelopeAtTheRelay(t *testing.T) {
 	if err := f.carrier.clearInbox(requestHash); err != nil {
 		t.Fatal(err)
 	}
+	// Until InboxFullRetry has passed it is not downloaded again, even with
+	// room in the inbox.
+	downloads := box.downloads
 	f.clock.advance(PollInterval + PollInterval/5)
+	if view := f.poll(t); view.Stored != 0 || box.downloads != downloads {
+		t.Fatalf("a deferred envelope was taken again early: %+v, %d downloads", view, box.downloads-downloads)
+	}
+	f.clock.advance(InboxFullRetry)
 	if view := f.poll(t); view.Stored != 1 || !box.acked[idOf(t, envelope)] {
 		t.Fatalf("the later pass: %+v", view)
+	}
+	if InboxFullRetry != 5*time.Minute {
+		t.Fatal("a full inbox defers an envelope for 5 minutes")
 	}
 }
 

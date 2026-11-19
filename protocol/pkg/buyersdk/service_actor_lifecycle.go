@@ -86,19 +86,25 @@ func parseWalletMessage(output []byte) LifecycleSubmission {
 // checkSubmissionEndpoints requires every endpoint tosctl would submit
 // through to be a verified endpoint of the verified network.
 func (s *TOSCTLServiceActorSender) checkSubmissionEndpoints(ctx context.Context) error {
-	endpoints, err := effectiveChainEndpoints(s.runner.config)
+	return checkTOSCTLEndpoints(ctx, s.runner.config, s.endpoints)
+}
+
+// checkTOSCTLEndpoints requires every endpoint a tosctl configuration
+// submits through to be a verified endpoint of the verified network.
+func checkTOSCTLEndpoints(ctx context.Context, config []byte, vetter EndpointVetter) error {
+	endpoints, err := effectiveChainEndpoints(config)
 	if err != nil {
 		return err
 	}
 	allowed := map[string]bool{}
-	for _, endpoint := range s.endpoints.Endpoints() {
+	for _, endpoint := range vetter.Endpoints() {
 		allowed[endpoint] = true
 	}
 	for _, endpoint := range endpoints {
 		if !allowed[endpoint] {
 			return fmt.Errorf("tosctl would submit through %s, which is not a verified endpoint", endpoint)
 		}
-		if err := s.endpoints.CheckEndpointGenesis(ctx, endpoint); err != nil {
+		if err := vetter.CheckEndpointGenesis(ctx, endpoint); err != nil {
 			return fmt.Errorf("tosctl endpoint %s is not on the verified network: %w", endpoint, err)
 		}
 	}
