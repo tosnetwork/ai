@@ -2259,8 +2259,8 @@ MUTANTS = [
      '\t"result":          {RoleCustody: true},',
      "TestTheResultMethodReturnsOnlyAnAcceptedBoundResult"),
     ("result-not-ready-retried", AGENT + "errors.go",
-     "\tcase CodeDependencyUnavailable, CodeAgentUnavailable, CodeResultNotReady:",
-     "\tcase CodeDependencyUnavailable, CodeAgentUnavailable:",
+     "\tcase CodeDependencyUnavailable, CodeAgentUnavailable, CodeResultNotReady, CodeRateLimited:",
+     "\tcase CodeDependencyUnavailable, CodeAgentUnavailable, CodeRateLimited:",
      "TestTheResultMethodReturnsOnlyAnAcceptedBoundResult"),
     # tos_buyer_result in the MCP server (section 4.9).
     ("mcp-result-request-hash", MCP + "result.go",
