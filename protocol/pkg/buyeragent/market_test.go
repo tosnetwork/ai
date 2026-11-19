@@ -286,12 +286,13 @@ func TestALocalQuoteIsBuiltAtOneFinalizedCheckpointAndStored(t *testing.T) {
 	}
 }
 
-// gatewayPackage is the fixture's Quote as a gateway would serve it, with
-// mutate applied to the proposal.
+// gatewayPackage is the fixture's Quote as a gateway would serve it,
+// expiring in 10 minutes, with mutate applied to the proposal.
 func gatewayPackage(t *testing.T, binding nativecore.TransportBindingV1,
 	mutate func(*nativev1.QuoteProposalV1)) *nativev1.QuoteProposalPackageV1 {
 	t.Helper()
 	_, value := quotePackageWith(t, fxNow, binding)
+	value.Proposal.ExpiresAtUnixSeconds = uint64(fxNow.Add(10 * time.Minute).Unix())
 	if mutate != nil {
 		mutate(value.Proposal)
 	}

@@ -499,6 +499,12 @@ Refusals: no source configured and no `capability_id`
 (`MCP_BUYER_DEPENDENCY_UNAVAILABLE`); a `capability_id` finalized state does
 not hold (`MCP_BUYER_NOT_FOUND`).
 
+**Rate bound.** Each search costs quorum reads for every candidate, and each
+quote several. The agent serves at most 30 searches and 20 quotes (of
+either source) in any minute. Over the bound it refuses with
+`MCP_BUYER_RATE_LIMITED` before reading anything. A request refused for its
+input does not count.
+
 ### 4.4 `tos_buyer_quote`
 
 Input: `capability_id`, `capability_version` (1 to 128 bytes of `0x21` to
@@ -531,7 +537,13 @@ finalized checkpoint**, the agent:
    cross-checked field by field against the finalized offer: Capability and
    version, provider, manifest digest, actor, actor code hash, attestor,
    policy version, `terms_hash`, price, storage fee, and a mode-2 transport.
-   A Quote that differs in any field is refused (`MCP_BUYER_OFFER_INVALID`).
+   A Quote that differs in any field is refused (`MCP_BUYER_OFFER_INVALID`),
+   and so is a Quote expiring later than 20 minutes from now: the 15-minute
+   local Quote lifetime plus 5 minutes for a gateway clock that runs ahead
+   of the agent's (the clock skew 11.2 also allows). A gateway stamps its
+   own clock plus the lifetime, so without the margin any drift would
+   refuse its Quotes. A longer expiry would hold the prepared call's budget
+   reservation longer and widen the buyer card's window (3.3).
    A gateway Quote may come with the provider's key card, which is how a
    buyer with no offer file reaches a provider it can contact only through a
    relay. The agent verifies that card under 3.3
@@ -1455,6 +1467,7 @@ request the SDK rejects against the input schema is a JSON-RPC error
 | `MCP_BUYER_AMBIGUOUS` | a `call` or lifecycle send may have been submitted | `RESOLVE_BEFORE_RETRY` |
 | `MCP_BUYER_PERMISSION_DENIED` | the socket peer's account may not call this method (2.3) | `NEVER` |
 | `MCP_BUYER_NOT_CONFIGURED` | the agent's configuration does not serve the request: a gateway Quote without a gateway, a search with neither a source nor a `capability_id` (2.4) | `NEVER` |
+| `MCP_BUYER_RATE_LIMITED` | more searches or quotes in the last minute than the agent serves (4.3) | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_BUYER_INTERNAL` | anything else | `NEVER` |
 
 `awaiting_confirmation`, `submitted` and `ambiguous` are states, not errors,
