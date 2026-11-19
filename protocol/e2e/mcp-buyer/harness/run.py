@@ -534,6 +534,29 @@ def confirm_payment(request_hash: str) -> dict:
     return result
 
 
+def diagnose_discovery(offer: dict) -> None:
+    """The agent tells a client only that discovery failed; the same
+    discovery through `tos-service-buyer discover` names the failing step,
+    for the record."""
+    diag = private_dir(HOME["custody"] / "diag", "custody")
+    manifests = private_dir(diag / "manifests", "custody")
+    rail = json.loads(as_account("provider", ["/bin/cat", str(PROVIDER_RAIL / "rail.json")]).stdout)
+    manifest = as_account("provider", ["/usr/bin/base64", "-w0", rail["provider"]["manifest_file"]]).stdout
+    digest = offer["manifest_digest"].removeprefix("sha256:")
+    as_account("custody", ["/bin/sh", "-c", f"/usr/bin/base64 -d > {manifests / (digest + '.cbor')}"], input_text=manifest)
+    network = evidence["network"]
+    write_private("custody", diag / "network.json", json.dumps(
+        {key: network[key] for key in ("network_id", "genesis_root_hash", "genesis_file_hash")}))
+    result = as_account("custody", [str(BIN / "tos-service-buyer"), "discover", "--network-domain", str(diag / "network.json"),
+                                    "--rpc", ",".join(rpc_endpoints()), "--registry-code-boc", str(REGISTRY_BOC),
+                                    "--registry-code-hash", evidence["registry_code_hash"], "--actor-code-hash",
+                                    ACTOR_CODE_HASH, "--state-dir", str(diag), "--manifest-dir", str(manifests),
+                                    "--buyer-wallet", evidence["wallets"]["custody"], "--capability-id",
+                                    offer["capability_id"], "--version", offer["version"]], check=False)
+    record("diagnosis: discovery of the offer with tos-service-buyer discover", result.returncode == 0,
+           {"stdout": result.stdout[-1500:], "stderr": result.stderr[-1500:]})
+
+
 def scenario_gateway_purchase(offer: dict) -> None:
     capability, version = offer["capability_id"], offer["version"]
     quoted = mcp("tos_buyer_quote", {"capability_id": capability, "capability_version": version, "source": "gateway"})
@@ -541,7 +564,11 @@ def scenario_gateway_purchase(offer: dict) -> None:
     record("a gateway Quote validated against finalized state, carriable to the relay-only provider",
            not quoted["is_error"] and bool(quote.get("carriable")) and bool(quote.get("offer", {}).get("provider_card_held")),
            {"quote_id": quote.get("quote_id"), "source": quote.get("quote_source"),
-            "card_refused": quote.get("provider_card_refused"), "not_carriable_item": quote.get("not_carriable_item")})
+            "card_refused": quote.get("provider_card_refused"), "not_carriable_item": quote.get("not_carriable_item"),
+            "error": quote.get("error")})
+    if not quote.get("quote_id"):
+        diagnose_discovery(offer)
+        raise RuntimeError("no Quote: scenario 1 stops here")
     source = source_tree()
     prepared = mcp("tos_buyer_prepare", {"quote_id": quote["quote_id"], "source_path": str(source),
                                          "idempotency_key": "e2e-first-purchase-" + secrets.token_hex(4)})
