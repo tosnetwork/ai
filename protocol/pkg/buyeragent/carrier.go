@@ -59,6 +59,9 @@ var (
 	// outlive the 30-day card lifetime: the Quote's expiry plus the response
 	// SLA plus the result's retention lies too far ahead.
 	ErrCardWindowTooLong = errors.New("the purchase needs a buyer key card beyond the 30-day card lifetime")
+	// ErrNotAgentPackets reports a Quote whose transport binding is not
+	// Agent Packets to its provider (section 7.1 item 1).
+	ErrNotAgentPackets = errors.New("the Quote is not delivered over Agent Packets")
 )
 
 // CardVerifier verifies key cards against finalized state; buyersdk's
@@ -510,6 +513,21 @@ func (c *Carrier) relaysAnswered(ctx context.Context, relays []string) error {
 // CheckCarriage runs the carriage check of section 7.1 for a prepared
 // purchase: every item must hold at the moment of the check.
 func (c *Carrier) CheckCarriage(ctx context.Context, record buyersdk.CallRecord, archive []byte) error {
+	return c.checkCarriage(ctx, record, archive, true)
+}
+
+// CheckQuoteCarriage runs, for a Quote before any purchase exists, the
+// items of section 7.1 that need no source (section 4.4 step 4): the card
+// window, items 1, 3, 4 and 5, and item 2 for the package and version. The
+// record carries the Quote's package, expiry and request identity and the
+// finalized response SLA. Prepare runs the full check again with the task.
+func (c *Carrier) CheckQuoteCarriage(ctx context.Context, record buyersdk.CallRecord) error {
+	return c.checkCarriage(ctx, record, nil, false)
+}
+
+// checkCarriage runs the check; withSource adds the archive bound and the
+// task encoding of item 2.
+func (c *Carrier) checkCarriage(ctx context.Context, record buyersdk.CallRecord, archive []byte, withSource bool) error {
 	packageBytes, err := base64.StdEncoding.Strict().DecodeString(record.PackageBase64)
 	if err != nil {
 		return errors.New("the journaled Quote package is not Base64")
@@ -528,7 +546,7 @@ func (c *Carrier) CheckCarriage(ctx context.Context, record buyersdk.CallRecord,
 	// check below ties that provider to the Capability's finalized owner.
 	provider := validated.Proposal.ProviderAgentId
 	if validated.TransportBinding.SecurityMode != nativecore.TransportAgentPacket {
-		return errors.New("the Quote is not delivered over Agent Packets")
+		return ErrNotAgentPackets
 	}
 	now := c.config.Now()
 	// The buyer card covers the latest response deadline the call can get
@@ -548,7 +566,7 @@ func (c *Carrier) CheckCarriage(ctx context.Context, record buyersdk.CallRecord,
 	if limit > railwork.MaxInlineInputBytes {
 		limit = railwork.MaxInlineInputBytes
 	}
-	if len(archive) == 0 || len(archive) > limit {
+	if withSource && (len(archive) == 0 || len(archive) > limit) {
 		return fmt.Errorf("the source archive of %d bytes exceeds the provider's %d-byte bound", len(archive), limit)
 	}
 	if err := railwork.CheckCarriablePackage(len(packageBytes), validated.TransportBinding); err != nil {
@@ -574,6 +592,9 @@ func (c *Carrier) CheckCarriage(ctx context.Context, record buyersdk.CallRecord,
 	buyerCard, err := c.BuyerCard(ctx, cover)
 	if err != nil {
 		return err
+	}
+	if !withSource {
+		return nil
 	}
 	// Item 2 with the card: the task for this purchase encodes, with the
 	// call fields at their widest.

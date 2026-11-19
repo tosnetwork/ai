@@ -106,6 +106,9 @@ contradict them.
   those independent operators.
 - [Gate E Provider Onboarding](docs/GATE_E_PROVIDER_ONBOARDING.md) defines the
   first SDK and deployment-template workflow without gateway-owned facts.
+- [MCP Buyer Guide](docs/MCP_BUYER_GUIDE.md) walks a developer using an MCP
+  client through custody setup, configuration, purchase, confirmation, result
+  and refunds with the MCP buyer adapter.
 - [Gate E Buyer Onboarding](docs/GATE_E_BUYER_ONBOARDING.md) defines canonical
   Quote review, funding, and crash-safe buyer recovery (its stablecoin
   funding path describes the retired escrow rail).

@@ -174,6 +174,30 @@ func TestVerifyReportsEveryOutcome(t *testing.T) {
 	})
 }
 
+// Without a bundle the verdict says plainly that only the caller wallet is
+// proven; with one it does not.
+func TestVerifyStatesThatWithoutABundleOnlyTheCallerIsProven(t *testing.T) {
+	purchase := newPurchase(t)
+	has := func(verdict *purchaseevidence.Verdict) bool {
+		for _, line := range verdict.NotClaimed {
+			if line == purchaseevidence.NoBundleNotClaimed {
+				return true
+			}
+		}
+		return false
+	}
+	plain := run(newSession(t, purchase, purchasefixture.Responded), baseInput(purchase))
+	requirePass(t, plain)
+	if !has(plain) || plain.Requests[0].Caller != purchasefixture.Buyer {
+		t.Fatalf("a verdict without a bundle does not limit its claim to the caller: %v", plain.NotClaimed)
+	}
+	bundled := run(newSession(t, purchase, purchasefixture.Responded), bundleInput(purchase, purchase.Bundle(false)))
+	requirePass(t, bundled)
+	if has(bundled) {
+		t.Fatal("a verdict with a bundle claims only the caller")
+	}
+}
+
 // An actor that does not run the pinned release, or that does not read, is
 // never verified.
 func TestVerifyRefusesAnotherActorRelease(t *testing.T) {

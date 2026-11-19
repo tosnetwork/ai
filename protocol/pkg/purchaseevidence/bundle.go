@@ -68,20 +68,19 @@ type Bundle struct {
 	Tool         Tool         `json:"tool"`
 	ExportedUnix int64        `json:"exported_unix"`
 	Network      NetworkTuple `json:"network"`
-	// Endpoints and Quorum are the buyer's own read configuration.
-	Endpoints        []string `json:"rpc_endpoints"`
-	Quorum           int      `json:"quorum"`
-	RegistryCodeHash string   `json:"registry_code_hash"`
-	ActorCodeHash    string   `json:"actor_code_hash"`
-	Actor            string   `json:"actor"`
-	BuyerWallet      string   `json:"buyer_wallet"`
-	BuyerAgentID     string   `json:"buyer_agent_id"`
-	Offer            Offer    `json:"offer"`
-	Quote            Quote    `json:"quote"`
-	Request          Request  `json:"request"`
-	Journal          Journal  `json:"journal"`
-	Result           Result   `json:"result"`
-	Budget           Budget   `json:"budget"`
+	// The buyer's endpoints and quorum are deliberately absent: they are
+	// the buyer's private configuration, and a verifier brings its own.
+	RegistryCodeHash string  `json:"registry_code_hash"`
+	ActorCodeHash    string  `json:"actor_code_hash"`
+	Actor            string  `json:"actor"`
+	BuyerWallet      string  `json:"buyer_wallet"`
+	BuyerAgentID     string  `json:"buyer_agent_id"`
+	Offer            Offer   `json:"offer"`
+	Quote            Quote   `json:"quote"`
+	Request          Request `json:"request"`
+	Journal          Journal `json:"journal"`
+	Result           Result  `json:"result"`
+	Budget           Budget  `json:"budget"`
 	// Finalized is the buyer's own verification at export, absent when
 	// none was made.
 	Finalized *Finalized `json:"finalized,omitempty"`
@@ -198,7 +197,7 @@ func DecodeBundle(raw []byte) (*Bundle, error) {
 	if bundle.Schema != BundleSchema {
 		return nil, errors.New("the evidence bundle names another schema")
 	}
-	if len(bundle.Journal.Lifecycle) > MaxLifecycleEntries || len(bundle.Endpoints) > 8 || len(bundle.Result.Members) > 2 {
+	if len(bundle.Journal.Lifecycle) > MaxLifecycleEntries || len(bundle.Result.Members) > 2 {
 		return nil, errors.New("the evidence bundle is outside its bounds")
 	}
 	return &bundle, nil

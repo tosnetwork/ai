@@ -62,7 +62,9 @@ type world struct {
 	checkpoint  uint64
 	sends       int
 	activations int
-	created     []string
+	// budgets records the time each send's context left it.
+	budgets []time.Duration
+	created []string
 }
 
 type agentLanding struct {
@@ -148,7 +150,18 @@ func (w *world) CreateWallet(_ context.Context, name string) error {
 	return nil
 }
 
-func (w *world) ActivateWallet(_ context.Context, name string) error {
+// sendBudget is how much time a send's context leaves; zero when it has
+// no deadline.
+func sendBudget(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0
+	}
+	return time.Until(deadline)
+}
+
+func (w *world) ActivateWallet(ctx context.Context, name string) error {
+	w.budgets = append(w.budgets, sendBudget(ctx))
 	w.activations++
 	address := w.wallets[name].Address
 	account := w.account(address)
@@ -203,7 +216,8 @@ func (w *world) RegisterAgent(_ context.Context, policyPath, nonce, signer strin
 		ActionHash: strings.Repeat("51", 32), StateInitBOC: "te6cckEBAQEAAgAAAEysuc0=", BodyBOC: "te6cckEBAQEAAgAAAEysuc0="}, nil
 }
 
-func (w *world) SendRegistration(_ context.Context, wallet string, value uint64, registration buyersdk.SignedAgentRegistration) error {
+func (w *world) SendRegistration(ctx context.Context, wallet string, value uint64, registration buyersdk.SignedAgentRegistration) error {
+	w.budgets = append(w.budgets, sendBudget(ctx))
 	if errors.Is(w.sendError, buyersdk.ErrCallNotStarted) {
 		return w.sendError
 	}

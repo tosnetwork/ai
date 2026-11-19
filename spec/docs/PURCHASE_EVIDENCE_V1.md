@@ -21,10 +21,14 @@ conflict, they govern.
 
 It serves the Gate D verifier role (`ROADMAP.md` section 4): another resolver
 reconstructs a purchase from finalized state without a private gateway
-database. A passing verdict is evidence for that role only. It is not the Gate
-D acceptance verdict, whose name, record schema and independence rules belong
-to the Service Actor rewrite of
-[`GATE_D_EXTERNAL_PILOT.md`](GATE_D_EXTERNAL_PILOT.md).
+database. A passing verdict is evidence for that role only. The Gate D pilot
+record (`tos.service.gate-d-external-pilot-record.v1`, verdict
+`PASS_INDEPENDENT_SERVICE_ACTOR_SOFTWARE_WORK`) wraps this tool's verdict in
+`verifier_output`, and
+[`GATE_D_EXTERNAL_PILOT.md`](GATE_D_EXTERNAL_PILOT.md) section 8.4 maps each
+check ID to the acceptance item it shows. A tool `pass` is necessary for that
+verdict but not sufficient: the record also needs the role, custody,
+endpoint-operator and signature items that this tool does not judge.
 
 ## 1. The verifier: `tos-service-verify`
 
@@ -160,9 +164,14 @@ running. It reads:
   must hash to the accepted `response_hash`, and the artifact must match the
   Receipt.
 
-It writes only the new output directory. Its finalized reads use the agent's
-own endpoints, quorum and fences (the state directory's `chain`
-subdirectory); fences only ever advance.
+It writes only the new output directory and the agent's finality fences.
+Its finalized reads use the agent's own endpoints and quorum, and the
+agent's own fences: the `registry.checkpoint` and `service-actor.checkpoint`
+files in the state directory's `chain` subdirectory. Every fence update,
+from the agent or from `evidence`, is one read-compare-raise under an
+exclusive `flock` on that fence file (`toschain`'s checkpoint store). A
+running agent and an export therefore never lose each other's update, and a
+fence only ever advances.
 
 Before it writes anything, it verifies the purchase at a fresh finalized
 checkpoint exactly as section 1 does, with the bundle, the Receipt and the
@@ -188,8 +197,10 @@ checkpoint.
 duplicate keys and trailing data refused; at most 8 MiB):
 
 - `tool`, `exported_unix`;
-- `network`, the buyer's `rpc_endpoints` and `quorum`, `registry_code_hash`,
-  `actor_code_hash`, `actor`, `buyer_wallet`, `buyer_agent_id`;
+- `network`, `registry_code_hash`, `actor_code_hash`, `actor`,
+  `buyer_wallet`, `buyer_agent_id`. The buyer's endpoints and quorum are not
+  exported: they are private, and a verifier brings its own (the independence
+  of section 1);
 - `offer`: Capability ID and version, manifest and toolchain digests, provider
   Agent, result retention;
 - `quote`: the deterministic protobuf Quote package, the Quote request's buyer
@@ -210,8 +221,8 @@ duplicate keys and trailing data refused; at most 8 MiB):
 
 A bundle holds no secret. It never contains a key, seed, mnemonic, vault URL
 or export, token, confirmation code or nonce, execution nonce, idempotency
-key, Quote ID, `tosctl` path or configuration, relay CA, state path, the
-buyer's source, or its member names. It holds only the source digest and
+key, Quote ID, `tosctl` path or configuration, relay CA, state path, RPC
+endpoint or quorum, the buyer's source, or its member names. It holds only the source digest and
 size. Every field comes from an explicit list, and a test checks the
 exported bytes against these values.
 
@@ -230,6 +241,10 @@ not establish:
 - anything after the checkpoint, or about a request the run did not select;
 - the Capability binding of a request verified without a bundle. That needs
   the Quote, so `bundle-binding` runs only with a bundle.
+- whose purchase a request is, when no bundle is given. Without a bundle, a
+  request is proven only to come from its caller wallet, and the verdict's
+  `not_claimed` says so. A Gate D record must bind each selected request to
+  the buyer's declared wallet: the reported `caller` must equal that wallet.
 
 ## 4. Bounds
 

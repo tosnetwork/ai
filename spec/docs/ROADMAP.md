@@ -201,9 +201,9 @@ replay test, not the fresh external interoperability requirement.
 (`pkg/adapterhttp`) and the cross-transport acceptance test described in the
 two paragraphs above were removed with the escrow rail in `execution/` commit
 `0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c`. They are history, not current
-code or evidence. An MCP buyer adapter on the Service Actor rail is planned
-for Gate D; its design is `docs/MCP_BUYER_ADAPTER_V1.md`, not yet
-implemented.
+code or evidence. An MCP buyer adapter on the Service Actor rail is a Gate D
+item, designed in `docs/MCP_BUYER_ADAPTER_V1.md` and partly implemented;
+section 4 states what is merged and what is not.
 
 ## 1. Gate A — Registry protocol freeze
 
@@ -346,8 +346,20 @@ Deliver on the Service Actor rail:
 - 🟡 MCP buyer adapter, so that an MCP client can buy without an Agent
   runtime — designed in `docs/MCP_BUYER_ADAPTER_V1.md` (local stdio server
   without custody; payment only after a human confirms it from a separate
-  custody account; a long-running buyer agent for delivery and refunds); not
-  implemented.
+  custody account; a long-running buyer agent for delivery and refunds);
+  partly implemented. Merged on main (the adapter's pull requests from ai #57
+  to #79, through merge `fcddd6bc`): the custody-side agent
+  core, the confirmer (`tos-service-buyer confirm`), the stdio MCP server
+  (`tos-service-buyer-mcp`) with the prepare, request-payment, withdraw,
+  status, purchases, refund and result tools, the refund duties, the
+  Quote-carried provider key card, the relay carriage check, task delivery,
+  relay polling and Receipt acceptance, `tos-service-buyer agent`, and
+  `tos-service-buyer init plan|apply`. Not merged: the search and quote tools
+  with their finalized reads (ai #81), the `init` follow-ups (ai #80), the
+  end-to-end test against an OpenFox provider, and the buyer's evidence export
+  and a third-party Service Actor verifier. The buyer's user guide is
+  `docs/MCP_BUYER_GUIDE.md`. No Gate D acceptance item is met by this work
+  alone.
 
 Delivered earlier:
 
@@ -458,9 +470,9 @@ Deliver:
   `deployments/archive/pre-tos-service-v1/local-gate-e-live-chain-adapter-acceptance-2026-08-15.json`;
 - ⬜ MCP tool adapter — **retired**: the provider-side tool below was built on
   the escrow execution Gate and removed with the escrow rail in `execution/`
-  commit `0d0dfc22`; an MCP buyer adapter on the Service Actor rail is planned
-  for Gate D and designed in `docs/MCP_BUYER_ADAPTER_V1.md` (not yet
-  implemented). The retired implementation: official MCP
+  commit `0d0dfc22`; an MCP buyer adapter on the Service Actor rail is a
+  Gate D item, designed in `docs/MCP_BUYER_ADAPTER_V1.md` and partly
+  implemented (section 4). The retired implementation: official MCP
   2026-07-28 typed tool registration,
   committed input/result mapping, shared production finalized-chain execution
   Gate, stateless streamable-HTTP binding, and negative tests were implemented;
@@ -806,10 +818,13 @@ Gate D evidence. The next Gate D acceptance
 task is an external pilot with a buyer outside the core team, an independent
 provider, and an independently operated resolver or endpoint set. The
 same-host transaction is reproducible deployment evidence, not grounds to mark
-Gate D accepted. The role separation, execution sequence, strict verification
-command, custody-safe two-stage Receipt signing flow, and acceptance record
-were frozen for the escrow rail in `docs/GATE_D_EXTERNAL_PILOT.md`; its
-escrow-specific sections are void and a Service Actor rewrite follows. A fresh local preflight exercised
+Gate D accepted. `docs/GATE_D_EXTERNAL_PILOT.md` is the Service Actor
+runbook for that pilot: the roles and independence rules, the execution
+sequence, the acceptance items, the evidence record and its verdict, and what
+a record must not claim. No pilot under it has run, and it cannot pass until
+the open items of section 4 it lists are merged. The escrow-rail version of
+that runbook (strict verification command, two-stage Receipt signing) is git
+history. On the escrow rail a fresh local preflight exercised
 that flow through a second 25,000,000 atomic `tUSDT` settlement and proved the
 provider balance increase between finalized checkpoints; its evidence is
 `deployments/archive/pre-tos-service-v1/initial-public-testnet-gate-d-local-preflight-2026-08-14.json`.
@@ -830,8 +845,9 @@ is not implied by Gate C's initial profile.
     `deployments/archive/pre-tos-service-v1/local-gate-e-live-chain-adapter-acceptance-2026-08-15.json`).
     Those adapters and that Gate were removed with the escrow rail
     (`protocol/` `b9ad8e17`, `execution/` `0d0dfc22`), so engineering is not
-    complete: an MCP buyer adapter on the Service Actor rail is planned for
-    Gate D (design: `docs/MCP_BUYER_ADAPTER_V1.md`, not yet implemented), and
+    complete: an MCP buyer adapter on the Service Actor rail is a Gate D
+    item, partly implemented (section 4; design
+    `docs/MCP_BUYER_ADAPTER_V1.md`, buyer guide `docs/MCP_BUYER_GUIDE.md`), and
     the onboarding runbooks need a Service Actor
     rewrite. After that, the remaining Gate E task is one independently
     operated provider/buyer working session using the public onboarding docs.

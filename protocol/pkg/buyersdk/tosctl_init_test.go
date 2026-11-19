@@ -302,17 +302,21 @@ func TestInitRegistrationSendIsBoundAndClassified(t *testing.T) {
 		errors.Is(err, ErrCallNotStarted) {
 		t.Fatalf("a send without a transfer report: %v", err)
 	}
-	for _, phrase := range []string{"Wrong amount value 2 TOS", "wallet 'buyer' is uninitialized", "wallet 'buyer' is frozen",
-		"secret wallet-buyer [E100: Not found]"} {
+	for _, phrase := range []string{"Wrong amount value 2 TOS", "wallet 'buyer' is uninitialized", "wallet 'buyer' is frozen"} {
 		refused, _ := scriptedCustody(t, initConfig, initEndpoints, "command failed: "+phrase+"\n", exitFailure)
 		if err := refused.SendRegistration(context.Background(), "buyer", 2_000_000_000, registration); !errors.Is(err, ErrCallNotStarted) {
 			t.Errorf("%q is a refusal before broadcasting: %v", phrase, err)
 		}
 	}
-	timeout, _ := scriptedCustody(t, initConfig, initEndpoints, "command failed: Transaction timeout expired\n", exitFailure)
-	if err := timeout.SendRegistration(context.Background(), "buyer", 2_000_000_000, registration); err == nil ||
-		errors.Is(err, ErrCallNotStarted) {
-		t.Fatalf("a broadcast whose inclusion was not seen is not ambiguous: %v", err)
+	// A broadcast whose inclusion was not seen, and a generic "not found"
+	// that can follow the broadcast (an RPC or vault error), are ambiguous:
+	// the step waits for finalized state instead of returning to pending.
+	for _, line := range []string{"Transaction timeout expired", "getAccountState [E100: Not found]"} {
+		after, _ := scriptedCustody(t, initConfig, initEndpoints, "command failed: "+line+"\n", exitFailure)
+		if err := after.SendRegistration(context.Background(), "buyer", 2_000_000_000, registration); err == nil ||
+			errors.Is(err, ErrCallNotStarted) {
+			t.Errorf("%q is not ambiguous: %v", line, err)
+		}
 	}
 	unverified, calls := scriptedCustody(t, initConfig, vetter{endpoints: []string{"https://b.example/jsonRPC"}}, "OK Transfer sent", nil)
 	if err := unverified.SendRegistration(context.Background(), "buyer", 2_000_000_000, registration); !errors.Is(err, ErrCallNotStarted) || len(*calls) != 0 {

@@ -135,8 +135,9 @@ func runEvidence(arguments []string, out io.Writer) error {
 }
 
 // buildBundle assembles the bundle from the agent's records. Every field is
-// named here: nothing from the configuration but the public read pins and
-// budget, and from the purchase record only the source digest and size,
+// named here: nothing from the configuration but the network and release
+// pins and the budget (not its endpoints, quorum, paths or custody
+// settings), and from the purchase record only the source digest and size,
 // the offer and the retention, never its nonces, keys or member names.
 func buildBundle(config agentConfig, record buyersdk.CallRecord, purchase buyeragent.PurchaseRecord,
 	accepted buyeragent.AcceptedResult, found bool, now time.Time) (*purchaseevidence.Bundle, error) {
@@ -145,15 +146,13 @@ func buildBundle(config agentConfig, record buyersdk.CallRecord, purchase buyera
 		record.ActorCodeHash != config.ActorCodeHash || record.BuyerWallet != config.BuyerWallet {
 		return nil, errors.New("the journal record belongs to another purchase, network, release or buyer than this agent")
 	}
-	quorum := config.Quorum
-	if quorum == 0 {
-		quorum = len(config.Endpoints)/2 + 1
-	}
+	// The agent's endpoints and quorum stay out: they are the buyer's
+	// private configuration, and a verifier brings its own.
 	bundle := &purchaseevidence.Bundle{Schema: purchaseevidence.BundleSchema, Tool: evidenceTool(), ExportedUnix: now.Unix(),
 		Network: purchaseevidence.NetworkTuple{NetworkID: record.NetworkID, GenesisRootHash: record.GenesisRootHash,
 			GenesisFileHash: record.GenesisFileHash},
-		Endpoints: append([]string(nil), config.Endpoints...), Quorum: quorum, RegistryCodeHash: config.RegistryCodeHash,
-		ActorCodeHash: record.ActorCodeHash, Actor: record.Actor, BuyerWallet: record.BuyerWallet, BuyerAgentID: config.BuyerAgentID,
+		RegistryCodeHash: config.RegistryCodeHash,
+		ActorCodeHash:    record.ActorCodeHash, Actor: record.Actor, BuyerWallet: record.BuyerWallet, BuyerAgentID: config.BuyerAgentID,
 		Offer: purchaseevidence.Offer{CapabilityID: record.CapabilityID, CapabilityVersion: record.CapabilityVersion,
 			ManifestDigest: purchase.ManifestDigest, ToolchainDigest: purchase.ToolchainDigest,
 			ProviderAgentID: purchase.ProviderAgentID, RetentionSeconds: purchase.RetentionSeconds},

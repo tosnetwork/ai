@@ -207,7 +207,8 @@ func TestEvidenceHoldsNoSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, secret := range []string{secretVault, secretNonce, secretConfirm, secretIdempotency, secretMember, "tosctl.json",
-		"/usr/local/bin/tosctl", "buyer-packet", "relay-ca.pem", "quote-1", agent.state} {
+		"/usr/local/bin/tosctl", "buyer-packet", "relay-ca.pem", "quote-1", agent.state, "https://a.example",
+		`"quorum"`, "rpc_endpoints"} {
 		if strings.Contains(string(raw), secret) || strings.Contains(printed, secret) {
 			t.Fatalf("the export carries %q", secret)
 		}

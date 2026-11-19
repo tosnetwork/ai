@@ -175,7 +175,6 @@ func (p *Purchase) Bundle(responded bool) *purchaseevidence.Bundle {
 	bundle := &purchaseevidence.Bundle{Schema: purchaseevidence.BundleSchema, Tool: purchaseevidence.Tool{Name: "fixture"},
 		ExportedUnix: Now.Unix(), Network: purchaseevidence.NetworkTuple{NetworkID: p.Network.NetworkId,
 			GenesisRootHash: p.Network.GenesisRootHash, GenesisFileHash: p.Network.GenesisFileHash},
-		Endpoints: []string{"http://127.0.0.1:1", "http://127.0.0.1:2", "http://127.0.0.1:3"}, Quorum: 2,
 		RegistryCodeHash: "tvm-cell-sha256:" + strings.Repeat("66", 32), ActorCodeHash: ActorCodeHash, Actor: Actor,
 		BuyerWallet: Buyer, BuyerAgentID: BuyerAgentID,
 		Offer: purchaseevidence.Offer{CapabilityID: CapabilityID, CapabilityVersion: Version, ManifestDigest: p.ManifestDigest,

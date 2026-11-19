@@ -203,6 +203,12 @@ var notClaimed = []string{
 	"anything after the checkpoint, or about a request the verification did not select",
 }
 
+// NoBundleNotClaimed is added to not_claimed when no evidence bundle is
+// given: a request is then tied to its caller wallet and nothing more. A
+// record must bind each request's caller to the buyer's declared wallet.
+const NoBundleNotClaimed = "without an evidence bundle, only the caller wallet of each request is proven: " +
+	"not its Quote, its Capability binding or whose purchase it is; bind the reported caller to the buyer's declared wallet"
+
 type verification struct {
 	ctx     context.Context
 	session Session
@@ -248,6 +254,9 @@ func (d *Verdict) Fail(id, detail string) {
 // every check passed.
 func Verify(ctx context.Context, session Session, input Input) *Verdict {
 	v := &verification{ctx: ctx, session: session, input: input, verdict: NewVerdict(input.Network)}
+	if input.Bundle == nil {
+		v.verdict.NotClaimed = append(v.verdict.NotClaimed, NoBundleNotClaimed)
+	}
 	v.run()
 	if v.failed {
 		v.verdict.Result = ResultFail
