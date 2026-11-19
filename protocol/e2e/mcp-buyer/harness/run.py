@@ -550,9 +550,15 @@ async def main() -> int:
     # Container root holds no DAC_OVERRIDE: it takes the work directory over
     # with CHOWN for the run and gives it back to the host account at the
     # end.
-    # Only the directory itself: the host's thermal guard keeps appending to
-    # thermal.jsonl in it.
+    # Everything a previous run left too (root cannot write a file the host
+    # owns), except thermal.jsonl, which the host's thermal guard keeps
+    # appending to, and the build the host made.
     os.chown(WORK, 0, 0)
+    for path in WORK.rglob("*"):
+        if path.name == "thermal.jsonl" or path.is_symlink() or WORK / "bin" in [path, *path.parents] or \
+                path == WORK / "build.json":
+            continue
+        os.chown(path, 0, 0)
     private_dir(WORK / "logs", None)
     build = json.loads((WORK / "build.json").read_text())
     evidence.update({
