@@ -31,7 +31,8 @@ bin="$E2E_WORKDIR/bin"
 mkdir -p "$bin"
 export GOWORK=off CGO_ENABLED=0
 (cd "$repo" && go build -trimpath -o "$bin/" ./protocol/cmd/tos-service-buyer ./protocol/cmd/tos-service-buyer-mcp \
-  ./protocol/cmd/mcp-buyer-e2e-client ./protocol/cmd/tos-service-packet-relay ./protocol/cmd/service-actor-e2e-fixture)
+  ./protocol/cmd/mcp-buyer-e2e-client ./protocol/cmd/tos-service-packet-relay ./protocol/cmd/service-actor-e2e-fixture \
+  ./protocol/cmd/tos-service-rpc)
 (cd "$repo" && go build -trimpath -o "$bin/tos-service-gateway" ./gateway/cmd/api)
 # The test-only stand-in executor exists only under its build tag; its own
 # tests run first.
