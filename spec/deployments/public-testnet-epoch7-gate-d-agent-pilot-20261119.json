@@ -189,9 +189,10 @@
   "source_commits": {
     "ai": "ca2cd4d566ec0bf51651507b5b79e9a881f07e26",
     "openfox": "a73a5ed52098f85476052e6165e7a5aa7f9b43e8",
-    "operator_driver": "187af1c3c5e80331747c81f71670080f56da3ec3",
+    "operator_driver": "720f70830d20228cfb52e0761e6c285f07daac03",
     "operator_driver_tree_clean": true,
     "harness_commits_after_the_containers_started": [
+      "720f7083 e2e: agent pilot record carries build.json's added_after_start and marks those binaries",
       "187af1c3 e2e: agent pilot record lists the verifier's earlier attempts and why they failed",
       "77502906 e2e: agent pilot record names no relay address",
       "aa7eafe7 e2e: agent pilot builds the unsigned record without an earlier attempt's signatures",
@@ -207,6 +208,8 @@
       "388040f1 e2e: agent pilot record names the operator driver's commit",
       "9128f8dd e2e: agent pilot: hold purchase F so its deadline clears a set switch"
     ],
+    "harness_commit_count_after_the_containers_started": 15,
+    "harness_commit_range": "ca2cd4d5..720f7083",
     "tosctl": {
       "repository": "tosnetwork/tos",
       "release_tag": "v2026.11-1",
@@ -218,19 +221,62 @@
   },
   "binaries": {
     "built_by_operator": {
-      "claude": "a982d38030b97e750848add2cbb2df6d9a70d5544a22ca9b216a349ba25865e8",
-      "codex": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971",
-      "openfox": "6353fa53b7360d04ec3a8aed5e85816839b350c214741041ed0f0ef400f8808d",
-      "service-actor-e2e-fixture": "548cbc3888228c904cf2627c5c1f01150de15cfe60ecb3d0209571b8790b21fc",
-      "tos-service-buyer": "927ce7c1b1d6b2ce6532782c98176a5d9599453ea6375f47f3ee8c9390ac126d",
-      "tos-service-buyer-mcp": "4626cbdfa051b9ce7b5edabe8cc3fc429bd13107a2ca2589d86390dfea51fe3f",
-      "tos-service-packet-relay": "f8e1d1eab18acca7329dc5831feee496cce98211ec8c967f27ef88c53f498e01",
-      "tos-service-verify": "82c1b5d668591f3fad68eb2cd5ae465ff2459a7335b2c59380898eba3cf8baa4",
-      "tosctl": "73b00c7d4a3ce6449d232c161722281ba189bd545a61cb8d99904b1d3e8fed7c",
-      "codex-code-mode-host": "ffc1ad7023864bfc209c408887d6834a8f644201eff4432fb9558b7f1c40e9dc",
-      "codex-exec-server": "4cb5c1c1fcfe4cd28450a9f559dc23c17b7e29dd1ce21fdd4dfb380a32a7605c"
+      "claude": {
+        "sha256": "a982d38030b97e750848add2cbb2df6d9a70d5544a22ca9b216a349ba25865e8",
+        "added_after_start": false
+      },
+      "codex": {
+        "sha256": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971",
+        "added_after_start": false
+      },
+      "openfox": {
+        "sha256": "6353fa53b7360d04ec3a8aed5e85816839b350c214741041ed0f0ef400f8808d",
+        "added_after_start": false
+      },
+      "service-actor-e2e-fixture": {
+        "sha256": "548cbc3888228c904cf2627c5c1f01150de15cfe60ecb3d0209571b8790b21fc",
+        "added_after_start": false
+      },
+      "tos-service-buyer": {
+        "sha256": "927ce7c1b1d6b2ce6532782c98176a5d9599453ea6375f47f3ee8c9390ac126d",
+        "added_after_start": false
+      },
+      "tos-service-buyer-mcp": {
+        "sha256": "4626cbdfa051b9ce7b5edabe8cc3fc429bd13107a2ca2589d86390dfea51fe3f",
+        "added_after_start": false
+      },
+      "tos-service-packet-relay": {
+        "sha256": "f8e1d1eab18acca7329dc5831feee496cce98211ec8c967f27ef88c53f498e01",
+        "added_after_start": false
+      },
+      "tos-service-verify": {
+        "sha256": "82c1b5d668591f3fad68eb2cd5ae465ff2459a7335b2c59380898eba3cf8baa4",
+        "added_after_start": false
+      },
+      "tosctl": {
+        "sha256": "73b00c7d4a3ce6449d232c161722281ba189bd545a61cb8d99904b1d3e8fed7c",
+        "added_after_start": false
+      },
+      "codex-code-mode-host": {
+        "sha256": "ffc1ad7023864bfc209c408887d6834a8f644201eff4432fb9558b7f1c40e9dc",
+        "added_after_start": true
+      },
+      "codex-exec-server": {
+        "sha256": "4cb5c1c1fcfe4cd28450a9f559dc23c17b7e29dd1ce21fdd4dfb380a32a7605c",
+        "added_after_start": true
+      }
     },
     "tosctl_sha256": "73b00c7d4a3ce6449d232c161722281ba189bd545a61cb8d99904b1d3e8fed7c",
+    "added_after_start": [
+      {
+        "at": "2026-11-19T07:22:40.860513+00:00",
+        "binaries": {
+          "codex-code-mode-host": "ffc1ad7023864bfc209c408887d6834a8f644201eff4432fb9558b7f1c40e9dc",
+          "codex-exec-server": "4cb5c1c1fcfe4cd28450a9f559dc23c17b7e29dd1ce21fdd4dfb380a32a7605c"
+        },
+        "reason": "the Codex CLI's companion executables, missing from the first staging; same Codex 0.170.0 package"
+      }
+    ],
     "verifier_tos_service_verify_sha256": "a6f3c724745b799276faccbc055776049f64846cc49d5ba2e20ab4bca93a4155",
     "verifier_built_by": "the Codex verifier, from a fresh clone"
   },
@@ -575,6 +621,14 @@
       "detail": "v2026.11-1"
     },
     {
+      "id": "binaries-added-after-start-are-in-build-json",
+      "ok": true,
+      "detail": [
+        "codex-code-mode-host",
+        "codex-exec-server"
+      ]
+    },
+    {
       "id": "codex-verdict-agrees",
       "ok": true,
       "detail": "AGENT_OPERATED_PILOT_PASSED"
@@ -591,27 +645,27 @@
     "no Gate E or Gate F claim: no public HTTPS gateway, no gateway was used at all",
     "the provider used the production Service Actor, whose minimum windows are 3600 s"
   ],
-  "record_sha256": "ca2f357d73d6b4d41d1dbb9dccaff5c9d8b88a73a3814cc54b8c8b781aaadfce",
+  "record_sha256": "b8d67edebf6bc792b5b0e261e7bd9b11d5f6e4b995ce0b2f0ecfee62bf2c507d",
   "signatures": [
     {
       "role": "buyer",
       "algorithm": "Ed25519",
       "public_key_hex": "503c2743b9ade7011d277e32c5abc0fcf275e279dc58201df7ebe91ab8944ba7",
-      "signature_hex": "807aee8851730d65bf32530825b75a6ae3fc9aa0977345d5cfdd9fafa50ced28f60e78fa9d28504cb74ecf56d8b1c06517a6f26afd7570a615651767bacf120a",
+      "signature_hex": "9b92c8a7ac739014d4c448a72d72b2c01166c6ddae5d1447b37af99caac066e470dc4b1142ceb492705f362acfb88f46543891bb113c78845baebe3550d93a03",
       "verified": true
     },
     {
       "role": "provider",
       "algorithm": "Ed25519",
       "public_key_hex": "a5dbfef46628cb62bfb3f00cd015f07474459a16cecc7b1bf8515ed7beca0c46",
-      "signature_hex": "cbe70629deeb8f8cc93d69e05ee6911914e6f8a4807c0f72e433eaa286f1df43ba65370af513365ecff9b2d02a73301825868926bb1dd7bf6deeb4b86c638108",
+      "signature_hex": "c6a01c3e880cd0406b8447157702df0937602870e52d369329876bc67f7d550b207a220d306681462fa2439d1d3e542faa3eab9c9e57991ccc4c97d325683200",
       "verified": true
     },
     {
       "role": "verifier",
       "algorithm": "Ed25519",
-      "public_key_hex": "7788c18f63dad1e50c3cb454d0d5ab82c371a98308b6d1d5fe6d638acb404593",
-      "signature_hex": "38ecf3e4482ee1d134adfc8c711c7204764bbfcc4ee334a353be4e8e9c08f81b2a11f64b221c91a9fc7573bc153800e274b1a4dcfc13ff7a6a1f098c7c338d0a",
+      "public_key_hex": "64ad21c475d084e601d1e861bd6e746fe5fb2253b9226bb10dd7f764bd7a303e",
+      "signature_hex": "bb9b5190883f37c50584f10916a6a735dfdb251ecca4b7e7e0429dd3e85bf60b460336432ca3c0fa87f86b1ff96536b8db56d84130b7469d3b73b749422bfc00",
       "verified": true
     }
   ]
