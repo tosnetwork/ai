@@ -21,14 +21,40 @@ import (
 )
 
 // socketDir returns a directory a socket server accepts: the test
-// account's own, mode 0750, outside the state directory.
+// account's own, setgid, mode 2750, outside the state directory. A test
+// runs as one account, so the directory's group stands for the shared
+// group and the agent's private group is taken to be another one.
 func socketDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o750); err != nil {
+	if err := os.Chmod(dir, 0o750|os.ModeSetgid); err != nil {
 		t.Fatal(err)
 	}
+	actual := privateGroup
+	privateGroup = func() uint32 { return uint32(os.Getegid()) + 1 }
+	t.Cleanup(func() { privateGroup = actual })
 	return dir
+}
+
+// The socket directory must be setgid and belong to the shared group, not
+// the agent's own, or the client account could never reach the socket.
+func TestTheSocketDirectoryMustCarryTheSharedGroup(t *testing.T) {
+	f := newFixture(t)
+	self := uint32(os.Getuid())
+	plain := socketDir(t)
+	if err := os.Chmod(plain, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Listen(ServerConfig{Agent: f.agent, SocketDir: plain, CustodyUID: self, ClientUID: self + 1}); err == nil ||
+		!strings.Contains(err.Error(), "setgid") {
+		t.Fatalf("a socket directory without setgid: %v", err)
+	}
+	private := socketDir(t)
+	privateGroup = func() uint32 { return uint32(os.Getegid()) }
+	if _, err := Listen(ServerConfig{Agent: f.agent, SocketDir: private, CustodyUID: self, ClientUID: self + 1}); err == nil ||
+		!strings.Contains(err.Error(), "shares") {
+		t.Fatalf("a socket directory of the agent's own group: %v", err)
+	}
 }
 
 // serve starts a server whose custody and client uids are chosen so the
@@ -336,13 +362,23 @@ func TestTheSocketDecodesRequestsStrictly(t *testing.T) {
 func TestListenRefusesUnsafeDeployments(t *testing.T) {
 	f := newFixture(t)
 	self := uint32(os.Geteuid())
-	open := t.TempDir()
-	if err := os.Chmod(open, 0o777); err != nil {
+	// The world-open and in-state directories satisfy every other check
+	// (setgid, shared group), so the check each case names is the one that
+	// refuses it.
+	open := socketDir(t)
+	if err := os.Chmod(open, 0o777|os.ModeSetgid); err != nil {
 		t.Fatal(err)
 	}
 	inside := filepath.Join(f.state, "socket")
 	if err := os.Mkdir(inside, 0o750); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.Chmod(inside, 0o750|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	named := map[string]string{
+		"world-open socket dir":   "unwritable by group and closed to others",
+		"socket dir in the state": "must not be the state directory or inside it",
 	}
 	cases := map[string]ServerConfig{
 		"client equals custody":   {Agent: f.agent, SocketDir: socketDir(t), CustodyUID: self, ClientUID: self},
@@ -353,9 +389,14 @@ func TestListenRefusesUnsafeDeployments(t *testing.T) {
 		"relative socket dir":     {Agent: f.agent, SocketDir: "relative", CustodyUID: self, ClientUID: self + 1},
 	}
 	for name, config := range cases {
-		if server, err := Listen(config); err == nil {
+		server, err := Listen(config)
+		if err == nil {
 			server.Close()
 			t.Errorf("%s was accepted", name)
+			continue
+		}
+		if want, ok := named[name]; ok && !strings.Contains(err.Error(), want) {
+			t.Errorf("%s was refused by another check: %v", name, err)
 		}
 	}
 	notSocket := socketDir(t)

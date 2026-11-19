@@ -149,7 +149,10 @@ that cannot start local processes is not served by V1.
 
 The MCP server and the confirmer reach the agent through one Unix domain
 socket, created by the agent in a directory owned by the custody account
-(mode `0750`, group shared with the developer account; socket mode `0660`).
+(mode `2750`: setgid, group shared with the developer account; socket mode
+`0660`). The setgid bit gives the socket the shared group; the agent refuses
+to start when the directory is not setgid or belongs to its own group, since
+the developer account could then never connect.
 That directory holds only the socket and is not the agent's state directory.
 The agent authorizes every request by the peer's kernel-reported credentials
 (`SO_PEERCRED`), never by anything the request says:

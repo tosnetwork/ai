@@ -559,7 +559,9 @@ A code the client does not know is treated as "do not retry".
 | `the buyer agent's state directory cannot be checked` | `--agent-state-dir` names no existing directory |
 | `the agent socket is not a socket` | start the agent first; check `--agent-socket` |
 | `the MCP server runs as the account that owns the agent socket` | the client was started as `tosbuyer`; start it as `dev` |
-| `the socket directory must be the agent's own, unwritable by group and closed to others` | recreate it as in section 3 (`2750`, owner `tosbuyer`) |
+| `the socket directory must be the agent's own, unwritable by group and closed to others` | recreate it as in section 3: socket directory `2750`, owner `tosbuyer`, group `tosbuyer-clients`, setgid |
+| `the socket directory must be setgid (mode 2750) so the socket belongs to the group the client account shares` | `sudo chmod 2750 /var/lib/tosbuyer-sock`. Without setgid the socket gets the custody account's own group, and the developer account's connect fails with `permission denied`; the agent now refuses to start instead |
+| `the socket directory must belong to the group the client account shares, not the agent's own group` | `sudo chgrp tosbuyer-clients /var/lib/tosbuyer-sock` (and keep it `2750`, setgid) |
 | `an https relay is configured but relay_ca_file pins no CA` | re-run `init` with `--relay-ca-file` |
 | `VAULT_URL must name the tosctl vault` | the agent's environment lacks the vault file (`EnvironmentFile`) |
 | `the confirmer's terminal is not owned by the custody account` | you started the confirmer from a `dev` terminal; log in as `tosbuyer` on a separate console or from another device |
