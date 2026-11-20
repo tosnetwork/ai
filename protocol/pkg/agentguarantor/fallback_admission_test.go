@@ -180,19 +180,29 @@ func worstCaseNonterminalLateFallback(t *testing.T, terms CoverageTermsV1) fallb
 	return shape
 }
 
+// lateCandidateFilingDigest is the late filing-close digest the challenged
+// late-recovery candidate of the test shapes carries.
+var lateCandidateFilingDigest = sizeTestDigest("6")
+
 // reviewingAfterLateCandidate is a fallback from a reviewing head whose
 // challenged decision was a late-recovery candidate: that challenge left the
-// epoch frozen, so the fallback reuses the candidate's epoch and cut.
+// epoch frozen, so the fallback reuses the candidate's epoch and cut, stands
+// on its claim admission, and carries its late filing-close digest as the
+// one-challenge-round marker.
 func reviewingAfterLateCandidate(t *testing.T, reviewing fallbackShape) fallbackShape {
 	t.Helper()
 	shape := reviewing
 	transition := *shape.receipt.PredecessorClaimStateTransitionReceipt
-	transition.DecisionAdmissionProof.AuthorizedClaimDecision.Body.DecisionPath = "late_recovery_terminal_fallback"
+	candidate := &transition.DecisionAdmissionProof
+	candidate.AuthorizedClaimDecision.Body.DecisionPath = "late_recovery_terminal_fallback"
+	candidate.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest = shape.variant.AuthorizedClaimAdmissionReceiptDigest
+	candidate.ReceiptBody.LateFilingCloseReceiptDigest = lateCandidateFilingDigest
 	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(shape.receipt.ClaimRevisionIngressCutProof)
 	if err != nil {
 		t.Fatal(err)
 	}
-	transition.DecisionAdmissionProof.ReceiptBody.ClaimRevisionIngressCutProofDigest = cutDigest
+	candidate.ReceiptBody.ClaimRevisionIngressCutProofDigest = cutDigest
+	shape.receipt.Body.LateFilingCloseReceiptDigest = lateCandidateFilingDigest
 	transitionDigest, err := ClaimStateTransitionReceiptDigestV1(transition)
 	if err != nil {
 		t.Fatal(err)
@@ -450,6 +460,21 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 			shape.receipt.CurrentDecisionAdmissionProof = &proof
 		}
 	}
+	// withTransition changes a private copy of the carried transition receipt
+	// and re-points the request at it, so only the check under test refuses.
+	withTransition := func(change func(*AuthorizedClaimStateTransitionReceiptV1)) func(*fallbackShape) {
+		return func(shape *fallbackShape) {
+			transition := *shape.receipt.PredecessorClaimStateTransitionReceipt
+			change(&transition)
+			digest, err := ClaimStateTransitionReceiptDigestV1(transition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			shape.receipt.PredecessorClaimStateTransitionReceipt = &transition
+			shape.variant.CurrentClaimStateTransitionReceiptDigest = digest
+			shape.setRequest(t)
+		}
+	}
 	type mutation struct {
 		shape  string
 		change func(*fallbackShape)
@@ -510,7 +535,48 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		}, "source state is not registered"},
 		"late digest without a descriptor": {"reviewing in window", func(shape *fallbackShape) {
 			shape.receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("1")
-		}, "names a late filing-close receipt"},
+		}, "is not its late-recovery marker"},
+		"late candidate's successor drops its marker": {"reviewing after a late candidate", func(shape *fallbackShape) {
+			shape.receipt.Body.LateFilingCloseReceiptDigest = ""
+		}, "is not its late-recovery marker"},
+		"late candidate's successor names another marker": {"reviewing after a late candidate", func(shape *fallbackShape) {
+			shape.receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("1")
+		}, "is not its late-recovery marker"},
+		"late candidate on another claim admission": {"reviewing after a late candidate", withTransition(func(transition *AuthorizedClaimStateTransitionReceiptV1) {
+			transition.DecisionAdmissionProof.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest = sizeTestDigest("1")
+		}), "late-recovery candidate stands on another claim admission"},
+		"late candidate with a different cut": {"reviewing after a late candidate", func(shape *fallbackShape) {
+			shape.receipt.ClaimRevisionIngressCutProof.IngressCutoffUnix++
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"reuse changes only the prior epoch state revision": {"disputed in window", func(shape *fallbackShape) {
+			shape.receipt.Body.PriorRevisionEpochStateRevision++
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"reuse changes only the frozen log root": {"disputed in window", func(shape *fallbackShape) {
+			shape.receipt.Body.FrozenClaimRevisionIngressLogRoot = sizeTestDigest("1")
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"reuse names another ingress log": {"disputed in window", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.RevisionIngressLogID = sizeTestDigest("1")
+			shape.setRequest(t)
+		}, "names another revision ingress log than its cut"},
+		"open path names another ingress log": {"initial", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.RevisionIngressLogID = sizeTestDigest("1")
+			shape.setRequest(t)
+		}, "names another revision ingress log than its cut"},
+		"open path frozen epoch": {"initial", func(shape *fallbackShape) {
+			shape.receipt.Body.FrozenRevisionEpoch++
+		}, "frozen-epoch fields differ from its cut"},
+		"open path prior epoch state revision": {"initial", func(shape *fallbackShape) {
+			shape.receipt.Body.PriorRevisionEpochStateRevision++
+		}, "frozen-epoch fields differ from its cut"},
+		"open path frozen epoch state revision": {"initial", func(shape *fallbackShape) {
+			shape.receipt.Body.FrozenRevisionEpochStateRevision++
+		}, "frozen-epoch fields differ from its cut"},
+		"open path frozen high-water": {"reviewing in window", func(shape *fallbackShape) {
+			shape.receipt.Body.FrozenClaimRevisionIngressHighWater++
+		}, "frozen-epoch fields differ from its cut"},
+		"open path frozen log root": {"reviewing in window", func(shape *fallbackShape) {
+			shape.receipt.Body.FrozenClaimRevisionIngressLogRoot = sizeTestDigest("1")
+		}, "frozen-epoch fields differ from its cut"},
 		"late body digest differs": {"reviewing late", func(shape *fallbackShape) {
 			shape.receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("1")
 		}, "other than its request"},
@@ -769,5 +835,99 @@ func TestDecisionProofRefusesMixedModeAndPath(t *testing.T) {
 	err := VerifyClaimDecisionAdmissionReceiptProofV1(consistent, terms, allowAuthorityResolver{}, now)
 	if err == nil || strings.Contains(err.Error(), "mixes its admission mode") || strings.Contains(err.Error(), "binding is invalid") {
 		t.Fatalf("a consistent fallback proof did not get past its bindings to claim verification: %v", err)
+	}
+}
+
+// TestLateRecoverySuccessorCarriesItsCandidateMarker covers the marker an
+// authorized decision may carry in late_filing_close_receipt_digest: exactly
+// its challenged late-recovery candidate's digest when it is that candidate's
+// successor, and nothing otherwise.
+func TestLateRecoverySuccessorCarriesItsCandidateMarker(t *testing.T) {
+	terms := testCoverageTerms(t)
+	now := time.Unix(2_000_000_100, 0).UTC()
+	const refused = "late filing-close digest other than its late-recovery candidate's"
+	successor := func() AuthorizedClaimDecisionAdmissionReceiptV1 {
+		receipt := buildWorstCaseAuthorizedDecisionReceipt(t)
+		receipt.AuthorizedClaimDecision.Body.DecisionPath = "successor"
+		return receipt
+	}
+	lateSuccessor := func() AuthorizedClaimDecisionAdmissionReceiptV1 {
+		receipt := successor()
+		transition := *receipt.PredecessorClaimStateTransitionReceipt
+		transition.DecisionAdmissionProof.AuthorizedClaimDecision.Body.DecisionPath = "late_recovery_terminal_fallback"
+		transition.DecisionAdmissionProof.ReceiptBody.LateFilingCloseReceiptDigest = lateCandidateFilingDigest
+		receipt.PredecessorClaimStateTransitionReceipt = &transition
+		receipt.Body.LateFilingCloseReceiptDigest = lateCandidateFilingDigest
+		return receipt
+	}
+	cases := map[string]struct {
+		receipt func() AuthorizedClaimDecisionAdmissionReceiptV1
+		refused bool
+	}{
+		"initial decision with a digest": {func() AuthorizedClaimDecisionAdmissionReceiptV1 {
+			receipt := loadMeasuredDecisionReceipt(t)
+			receipt.Body.LateFilingCloseReceiptDigest = lateCandidateFilingDigest
+			return receipt
+		}, true},
+		"ordinary successor with a digest": {func() AuthorizedClaimDecisionAdmissionReceiptV1 {
+			receipt := successor()
+			receipt.Body.LateFilingCloseReceiptDigest = lateCandidateFilingDigest
+			return receipt
+		}, true},
+		"late successor without its marker": {func() AuthorizedClaimDecisionAdmissionReceiptV1 {
+			receipt := lateSuccessor()
+			receipt.Body.LateFilingCloseReceiptDigest = ""
+			return receipt
+		}, true},
+		"late successor with another marker": {func() AuthorizedClaimDecisionAdmissionReceiptV1 {
+			receipt := lateSuccessor()
+			receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("1")
+			return receipt
+		}, true},
+		"late successor with its marker":      {lateSuccessor, false},
+		"ordinary successor without a digest": {successor, false},
+	}
+	for name, test := range cases {
+		err := VerifyClaimDecisionAdmissionReceiptV1(test.receipt(), terms, permissiveAgreementVerifier{},
+			allowAuthorityResolver{}, nil, now)
+		if test.refused != (err != nil && strings.Contains(err.Error(), refused)) {
+			t.Errorf("%s: refused=%v, got %v", name, test.refused, err)
+		}
+	}
+}
+
+// TestLateRecoveryPathAllowsOneChallengeRound: the successor of a challenged
+// late-recovery candidate, authorized or fallback, cannot be challenged again,
+// while the candidate itself, ordinary decisions and every successor's
+// challenge close are unaffected.
+func TestLateRecoveryPathAllowsOneChallengeRound(t *testing.T) {
+	terms := testCoverageTerms(t)
+	now := time.Unix(2_000_000_100, 0).UTC()
+	const refused = "targets the late-recovery successor"
+	base := *buildWorstCaseAuthorizedDecisionReceipt(t).PredecessorClaimStateTransitionReceipt
+	transition := func(kind, path, lateDigest string) AuthorizedClaimStateTransitionReceiptV1 {
+		receipt := base
+		receipt.Body.TransitionKind = kind
+		receipt.DecisionAdmissionProof.AuthorizedClaimDecision.Body.DecisionPath = path
+		receipt.DecisionAdmissionProof.ReceiptBody.LateFilingCloseReceiptDigest = lateDigest
+		return receipt
+	}
+	cases := map[string]struct {
+		receipt AuthorizedClaimStateTransitionReceiptV1
+		refused bool
+	}{
+		"challenge of the authorized late successor": {transition("challenge_admission", "successor", lateCandidateFilingDigest), true},
+		"challenge of the fallback late successor":   {transition("challenge_admission", "terminal_fallback", lateCandidateFilingDigest), true},
+		"challenge of the late candidate":            {transition("challenge_admission", "late_recovery_terminal_fallback", lateCandidateFilingDigest), false},
+		"challenge of an ordinary successor":         {transition("challenge_admission", "successor", ""), false},
+		"challenge of an ordinary fallback":          {transition("challenge_admission", "terminal_fallback", ""), false},
+		"challenge close of the late successor":      {transition("challenge_close", "successor", lateCandidateFilingDigest), false},
+	}
+	for name, test := range cases {
+		err := VerifyClaimStateTransitionReceiptV1(test.receipt, terms, permissiveAgreementVerifier{},
+			allowAuthorityResolver{}, nil, now)
+		if test.refused != (err != nil && strings.Contains(err.Error(), refused)) {
+			t.Errorf("%s: refused=%v, got %v", name, test.refused, err)
+		}
 	}
 }

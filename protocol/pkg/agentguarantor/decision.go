@@ -226,6 +226,28 @@ func AuthorizedDecisionAdmissionSourceIdentityV1(variant AuthorizedDecisionAdmis
 	return headDigest, identityDigest, err
 }
 
+// lateRecoveryCandidateMarkerV1 is the late filing-close digest a decision
+// following predecessor must carry: the challenged candidate's own digest when
+// predecessor is the challenge of a late-recovery candidate, and none
+// otherwise.
+func lateRecoveryCandidateMarkerV1(predecessor *AuthorizedClaimStateTransitionReceiptV1) string {
+	if predecessor == nil || predecessor.Body.TransitionKind != "challenge_admission" ||
+		predecessor.DecisionAdmissionProof.AuthorizedClaimDecision.Body.DecisionPath != "late_recovery_terminal_fallback" {
+		return ""
+	}
+	return predecessor.DecisionAdmissionProof.ReceiptBody.LateFilingCloseReceiptDigest
+}
+
+// isLateRecoverySuccessorV1 reports whether a decision is the sole successor
+// of a challenged late-recovery candidate. The late-recovery path allows one
+// challenge round, so that successor is never challengeable. The candidate
+// itself carries a late filing-close digest on its own path and remains
+// challengeable.
+func isLateRecoverySuccessorV1(proof ClaimDecisionAdmissionReceiptProofV1) bool {
+	path := proof.AuthorizedClaimDecision.Body.DecisionPath
+	return (path == "successor" || path == "terminal_fallback") && proof.ReceiptBody.LateFilingCloseReceiptDigest != ""
+}
+
 // VerifyClaimDecisionAdmissionReceiptV1 verifies the ordinary, explicitly
 // authorized decision path. Deterministic fallback materialization is a
 // separate constructor because its decision is an output of admission rather
@@ -240,13 +262,22 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 	if receipt.Body.AdmissionMode != "authorized_decision" || agreementVerifier == nil {
 		return errors.New("claim decision admission mode is unsupported or incomplete")
 	}
-	// A late filing-close digest, a fallback trigger cutoff, a current decision
-	// proof and a fallback decision path exist only for deterministic fallback
-	// admission; an authorized decision carrying any of them would sign over an
-	// object no check ever reads.
-	if receipt.Body.LateFilingCloseReceiptDigest != "" || receipt.Body.FallbackTriggerCutoffUnix != 0 ||
+	// A fallback trigger cutoff, a current decision proof and a fallback
+	// decision path exist only for deterministic fallback admission; an
+	// authorized decision carrying any of them would sign over an object no
+	// check ever reads.
+	if receipt.Body.FallbackTriggerCutoffUnix != 0 ||
 		receipt.CurrentDecisionAdmissionProof != nil || isFallbackDecisionPathV1(receipt.AuthorizedClaimDecision.Body.DecisionPath) {
 		return errors.New("authorized claim decision admission carries a fallback-only field")
+	}
+	// The late filing-close digest appears on an authorized decision only as
+	// the late-recovery successor's marker, equal to its candidate's.
+	wantLateMarker := ""
+	if receipt.AuthorizedClaimDecision.Body.DecisionPath == "successor" {
+		wantLateMarker = lateRecoveryCandidateMarkerV1(receipt.PredecessorClaimStateTransitionReceipt)
+	}
+	if receipt.Body.LateFilingCloseReceiptDigest != wantLateMarker {
+		return errors.New("authorized claim decision admission carries a late filing-close digest other than its late-recovery candidate's")
 	}
 	bound, err := FindStageActionAuthorityV1(terms.StageActionAuthorityBinding, "terminal_decision")
 	if err != nil {
@@ -456,6 +487,9 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 		return err
 	}
 	decisionProof := receipt.DecisionAdmissionProof
+	if receipt.Body.TransitionKind == "challenge_admission" && isLateRecoverySuccessorV1(decisionProof) {
+		return errors.New("claim challenge admission targets the late-recovery successor: that path allows one challenge round")
+	}
 	if err := VerifyClaimDecisionAdmissionReceiptProofV1(decisionProof, terms, authorityResolver, now); err != nil {
 		return fmt.Errorf("claim transition has an invalid decision predecessor: %w", err)
 	}

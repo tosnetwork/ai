@@ -521,9 +521,6 @@ func TestAuthorizedDecisionRefusesFallbackOnlyFields(t *testing.T) {
 		"fallback decision path": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
 			receipt.AuthorizedClaimDecision.Body.DecisionPath = "initial_terminal_fallback"
 		},
-		"filing-close digest only": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
-			receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("f")
-		},
 		"fallback cutoff": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
 			receipt.Body.FallbackTriggerCutoffUnix = 1
 		},
