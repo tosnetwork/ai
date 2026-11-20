@@ -522,8 +522,13 @@ runs as an ordinary user.
 
 ## Messenger relay carriage M-R2: private rooms and invites over the test relays
 
-This is the live acceptance of milestone M-R2 of `MESSENGER_RELAY_CARRIAGE_V1.md`
-(section 8, design in section 11). A, the room's authority, runs with the
+**Status: live acceptance ALL PASS on 2026-11-20 (items 1–18); items 19–20
+pending.** M-R2 is not accepted until a room-end record (item 19) and a
+named-test record (item 20) pass.
+
+These records are the live acceptance of items 1–18 of milestone M-R2 of
+`MESSENGER_RELAY_CARRIAGE_V1.md` (section 8, design in section 11). A, the
+room's authority, runs with the
 filler joiners D, E and F on a host behind NAT. Members B and C run on two
 separate VPSs. Each runs its own `tos-messengerd` and OpenFox, and the only
 path between them is the two Agent Packet relays. The core team operated
