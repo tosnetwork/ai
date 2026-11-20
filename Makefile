@@ -90,6 +90,10 @@ messenger-test-openmls:
 	cargo test --locked --manifest-path $(OPENMLS_DRIVER_MANIFEST)
 	cargo build --locked --manifest-path $(OPENMLS_DRIVER_MANIFEST)
 	TOS_OPENMLS_DRIVER="$(CURDIR)/messenger/rust/openmls-driver/target/debug/tos-openmls-driver" GOWORK=off go test -count=1 -run OpenMLS ./messenger/pkg/group ./messenger/pkg/eventlog ./messenger/pkg/mlslab
+	# The daemon's room tests take the driver through openMLSDriver and skip
+	# without it; their names do not say OpenMLS, so they run here in full,
+	# where a missing driver fails them.
+	TOS_OPENMLS_DRIVER="$(CURDIR)/messenger/rust/openmls-driver/target/debug/tos-openmls-driver" TOS_OPENMLS_DRIVER_REQUIRED=1 GOWORK=off go test -count=1 ./messenger/pkg/daemon
 
 # The room test settings (room_part_bytes, room_handshake_retention_seconds,
 # room_authorization_seconds) exist only in a build with the roomtest tag; a
