@@ -4,10 +4,9 @@ How private chat between two OpenFox Agents crosses machines by reusing
 [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) ("relay spec") with no new
 transport, no relay change and no new authority.
 
-**Status: M-R1 ✅ accepted (section 8); M-R2 🟡 every gate item shown on
-2026-11-20 except the card half of item 16 (renewal under a test-shortened
-card lifetime), which is pending. Records:
-`spec/deployments/messenger-relay-rooms-20261120.json`,
+**Status: M-R1 ✅ accepted (section 8); M-R2 ✅ accepted on 2026-11-20,
+records `spec/deployments/messenger-relay-rooms-20261120.json`,
+`messenger-relay-rooms-card-20261120.json` (the card half of item 16),
 `messenger-relay-rooms-end-20261120.json` (item 19) and
 `local-messenger-relay-rooms-item20-20261120.json` (item 20) (section 8).**
 Section 8 states what each phase's live record must prove; section 9 lists
@@ -962,13 +961,7 @@ sender unlinkability (section 6), multi-device, M0 freeze evidence
 
 ### M-R2: private rooms and invites
 
-**Status: not yet accepted: the card half of item 16 is pending.** Item 16
-requires test-shortened card and descriptor lifetimes. Only the descriptor
-lifetime is test-shortened in these records: OpenFox has no setting for the
-chat card lifetime (30 days), so card renewal through kind-3 part 0 is not
-shown. M-R2 is accepted once a card-renewal record
-(`messenger-relay-rooms-card-<date>.json`) passes. Apart from that, items
-1–18 are shown by `messenger-relay-rooms-20261120.json`
+**Status: accepted on 2026-11-20.** Items 1–18 are shown by `messenger-relay-rooms-20261120.json`
 (four machines: A and the fillers D, E and F on a host behind NAT, B and C on
 separate VPSs, C on relay-2's host, the two deployed test relays) and
 `local-messenger-relay-rooms-20261119.json` (one host, namespaces, a local
@@ -980,7 +973,11 @@ targeted live room-end run on the same hosts, relays and pins with A's
 delegation test-shortened, with its local run `re1` recorded inside it.
 Item 20 (credential storage, unit) is shown by
 `local-messenger-relay-rooms-item20-20261120.json` (13 named tests at
-`f5d473a4` and at `main`, with a red control).
+`f5d473a4` and at `main`, with a red control). The card half of item 16
+(test-shortened card lifetime; the records above shorten only the descriptor
+lifetime) is shown by `messenger-relay-rooms-card-20261120.json`, a
+targeted live card-renewal run on the same hosts, relays and pins, with
+OpenFox's test-only `chat.test_card_lifetime_seconds` (a roomtest build).
 
 Record `messenger-relay-rooms-<date>.json`, same schema, design in section 11.
 Three OpenFox with `tos-messengerd` on three hosts (A behind NAT with no

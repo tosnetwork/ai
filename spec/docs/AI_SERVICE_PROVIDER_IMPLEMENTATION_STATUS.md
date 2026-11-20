@@ -522,12 +522,10 @@ runs as an ordinary user.
 
 ## Messenger relay carriage M-R2: private rooms and invites over the test relays
 
-**Status: not yet accepted.** The card half of item 16 is pending: card
-renewal under a test-shortened card lifetime is not shown, because OpenFox
-has no setting for that lifetime yet. M-R2 is accepted once a card-renewal
-record passes. Apart from that, items 1–18 rest on the two records below,
-item 19 on the room-end record and its local run (end of this section), and
-item 20 on the named-test record.
+**Status: accepted on 2026-11-20.** Items 1–18 rest on the two records
+below, except the card half of item 16, which rests on the card-renewal
+record. Item 19 rests on the room-end record and its local run, and item 20
+on the named-test record (all three at the end of this section).
 
 The two records below are the live acceptance of items 1–18 of milestone M-R2 of
 `MESSENGER_RELAY_CARRIAGE_V1.md` (section 8, design in section 11). A, the
@@ -654,8 +652,9 @@ item 17, and the unit halves of items 6, 12, 14 and 18.
 
 Not proven by these records:
 
-- **Item 16, card renewal:** the chat card lifetime has no test setting in
-  OpenFox, so card renewal through part 0 is not shown live.
+- **Item 16, card renewal:** these records shorten only the descriptor
+  lifetime; card renewal under a test-shortened card lifetime is shown by
+  the card-renewal record below.
 - **Item 19 (room end, live, D18):** not a run step of these records; it is
   shown by the room-end record below.
 - **Item 20 (credential storage, unit, 11.8):** not part of the live
@@ -725,6 +724,55 @@ The validators on V1 and V2 were watched twice:
   82 lines. V1 and V2 kept their baseline PIDs with 0 restarts, and the last
   head ages were 1.4 s and 1.6 s. No ALERT or WARN line appeared.
 - **The harness's own guard** took 282 read-only samples and never tripped.
+
+**Item 16, the card half (renewal under a test-shortened card lifetime, live):**
+[`messenger-relay-rooms-card-20261120.json`](../deployments/messenger-relay-rooms-card-20261120.json)
+(sha256 `7f7655063932673da08049801273dc3e03a4ee987e9a3fcf9564b9da3c723082`,
+sanitized from the run's `evidence.json`, sha256
+`2bda462a54dcec23fcf5674dbed840e82d9075ad39ca1e93ee25e7317dad4531`).
+
+- **Run:** 2026-11-20 13:15 to 14:33 UTC, ALL PASS, 165 of 165, on the same
+  four machines and two test relays.
+- **Pins:** ai `f5d473a4`, relay `f8e906ff`, `openfox` `89c477ee`
+  (tosnetwork/openfox#71). The harness includes OpenFox's test-only
+  `chat.test_card_lifetime_seconds` (tosnetwork/openfox#73, merged), which
+  only a roomtest build accepts.
+- **Scenario:** `MR2_CARD_RENEWAL=1`. It runs only the steps that build the
+  three-member room, then the card renewal. A's and C's cards last 1,200 s
+  and B's 2,400 s; the asymmetry lets C be cut off by an expired card on one
+  side only. A pre-flight reads each node's lifetime from its configuration
+  on its own host before the room is built.
+- **Attempts:** the record's `record_provenance.attempts` indexes rc1
+  (local), `live-card1-attempt1` and `live-card1-attempt2`, each with its
+  evidence sha256, its cause and the harness commit that fixed it. It also
+  notes that the run host rebooted uncleanly at about 11:19 UTC, before
+  attempt 2.
+
+Proven, live:
+
+- Every member's card lasts its test lifetime and is renewed at half its
+  life, before it expires: A, B and C, each at least once.
+- B and C, no contacts of each other, learn each other's renewed card in
+  band (kind-3 part 0). They keep exchanging room messages past the older
+  cards' expiry, and every message of every round, from A, B and C, is
+  applied.
+- The authority's stored member cards of B and C are refreshed to renewed
+  cards from their own frames (11.8, Member cards).
+- C was stopped until the card of C that B holds expired. B's room message to
+  C then waits for a fresh card: nothing is deposited to C, while A's copy is
+  carried.
+- C comes back with a fresh card that its room message carries, and is
+  reached again: B learns the card in band, deposits the waiting message,
+  and C applies it once.
+
+The validators on V1 and V2 were watched twice in this run as well:
+
+- **The operator-side watch,** started by the run's agent after the reboot,
+  covered 13:12:23 to 14:34:45 UTC in 82 lines and stopped on the final
+  `evidence.json`. V1 and V2 kept the same validator PIDs with 0 restarts,
+  the last head ages were 1.1 s and 0.7 s, and no ALERT or WARN line
+  appeared.
+- **The harness's own guard** took 306 read-only samples and never tripped.
 
 ## Not delivered by these changes
 
