@@ -153,6 +153,9 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 		receipt.Body.NonterminalRoundsUsedAfter != wantNonterminalAfter {
 		return source, errors.New("claim decision fallback round consumption is invalid")
 	}
+	if err := bindFallbackRevisionEpochV1(receipt, variant, source); err != nil {
+		return source, err
+	}
 	descriptor := variant.LateFilingCloseReceiptDescriptor
 	if descriptor == nil {
 		if receipt.Body.LateFilingCloseReceiptDigest != "" {
@@ -172,6 +175,53 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 	}
 	source.lateFilingClose = &filing
 	return source, nil
+}
+
+// fallbackReusesFrozenEpochV1 reports whether a fallback's head left revision
+// ingress frozen: the current decision of an evidence_required or disputed
+// head froze the epoch and no transition followed, and the challenge of a
+// late-recovery candidate does not reopen it. Every other head's transition
+// opened the next epoch, and initial_reviewing has no frozen epoch yet.
+func fallbackReusesFrozenEpochV1(sourceState string, source deterministicFallbackSourceV1) bool {
+	switch sourceState {
+	case "disputed", "evidence_required":
+		return true
+	case "reviewing_after_challenge":
+		return source.currentDecision != nil &&
+			source.currentDecision.AuthorizedClaimDecision.Body.DecisionPath == "late_recovery_terminal_fallback"
+	}
+	return false
+}
+
+// bindFallbackRevisionEpochV1 binds the request's revision-epoch expectation
+// and the receipt's cut to the epoch the head left. A head that left ingress
+// frozen is reused exactly: frozen expectation, the current decision's
+// byte-identical cut and unchanged epoch fields. Every other head is frozen by
+// this admission's ordinary open-to-frozen CAS.
+func bindFallbackRevisionEpochV1(receipt AuthorizedClaimDecisionAdmissionReceiptV1,
+	variant DeterministicFallbackAdmissionVariantV1, source deterministicFallbackSourceV1) error {
+	epoch := variant.ClaimRevisionEpochExpectation
+	cut := receipt.ClaimRevisionIngressCutProof
+	if !fallbackReusesFrozenEpochV1(variant.SourceClaimState, source) {
+		if epoch.ExpectedEpochState != "open" || cut.PriorEpochStateRevision != epoch.ExpectedEpochStateRevision {
+			return errors.New("claim decision fallback must freeze the open revision epoch its head opened")
+		}
+		return nil
+	}
+	head := source.currentDecision.ReceiptBody
+	body := receipt.Body
+	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(cut)
+	if err != nil || epoch.ExpectedEpochState != "frozen" || cutDigest != head.ClaimRevisionIngressCutProofDigest ||
+		epoch.RevisionEpoch != head.FrozenRevisionEpoch ||
+		epoch.ExpectedEpochStateRevision != head.FrozenRevisionEpochStateRevision ||
+		body.FrozenRevisionEpoch != head.FrozenRevisionEpoch ||
+		body.PriorRevisionEpochStateRevision != head.PriorRevisionEpochStateRevision ||
+		body.FrozenRevisionEpochStateRevision != head.FrozenRevisionEpochStateRevision ||
+		body.FrozenClaimRevisionIngressHighWater != head.FrozenClaimRevisionIngressHighWater ||
+		body.FrozenClaimRevisionIngressLogRoot != head.FrozenClaimRevisionIngressLogRoot {
+		return errors.New("claim decision fallback must reuse its head's frozen revision epoch and cut")
+	}
+	return nil
 }
 
 // bindLateFilingCloseToClaimAdmissionV1 requires the late filing close and the
@@ -410,9 +460,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	cut := receipt.ClaimRevisionIngressCutProof
 	if epoch.CoverageAgreementBodyDigest != receipt.Body.CoverageAgreementBodyDigest ||
 		epoch.CoverageObligationID != receipt.Body.CoverageObligationID || epoch.ClaimID != receipt.Body.ClaimID ||
-		epoch.ExpectedEpochState != "open" || cut.CutKind != "claim_revisions" || cut.ClaimID != receipt.Body.ClaimID ||
-		cut.RevisionEpoch != epoch.RevisionEpoch || cut.PriorEpochStateRevision != epoch.ExpectedEpochStateRevision ||
-		cut.PendingOrAmbiguousCount != 0 {
+		cut.CutKind != "claim_revisions" || cut.ClaimID != receipt.Body.ClaimID ||
+		cut.RevisionEpoch != epoch.RevisionEpoch || cut.PendingOrAmbiguousCount != 0 {
 		return errors.New("claim decision fallback revision epoch cut differs")
 	}
 	headDigest, identityDigest, err := DeterministicFallbackAdmissionSourceIdentityV1(variant)
