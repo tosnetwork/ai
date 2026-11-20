@@ -520,6 +520,144 @@ Also recorded, outside `not_verified`: in the four-machine record **B ran as
 uid 0 on its VPS** (`topology.b_host`); in the local record every process
 runs as an ordinary user.
 
+## Messenger relay carriage M-R2: private rooms and invites over the test relays
+
+This is the live acceptance of milestone M-R2 of `MESSENGER_RELAY_CARRIAGE_V1.md`
+(section 8, design in section 11). A, the room's authority, runs with the
+filler joiners D, E and F on a host behind NAT. Members B and C run on two
+separate VPSs. Each runs its own `tos-messengerd` and OpenFox, and the only
+path between them is the two Agent Packet relays. The core team operated
+every part, so the record does not qualify as public or independent
+acceptance, and it is not Gate O evidence.
+
+| Record | What it proves | Script commit | Result |
+|---|---|---|---|
+| [`messenger-relay-rooms-20261120.json`](../deployments/messenger-relay-rooms-20261120.json) (sha256 `091417111bed01778c57f8459d57da02ac8f4ff25ca01ca4fbbef289d9fb55e2`, sanitized from the run's `evidence.json`, sha256 `a71f4de98203ed74b542fd8edaf667bbbbbe03110b7956b613f7d449454c7995`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e-remote.py`, 2026-11-19 20:15 UTC to 2026-11-20 00:38 UTC. Four machines: A, D, E, F and the chain on a host behind NAT; B on a VPS (validator host V1); C on another VPS (validator host V2), which is also relay-2's host; relay-1 on a further VPS | `openfox` `cbc638b9` (head of tosnetwork/openfox#71; clean tree) | ALL PASS, 208 of 208; `qualifies_as_public_acceptance: false` |
+| [`local-messenger-relay-rooms-20261119.json`](../deployments/local-messenger-relay-rooms-20261119.json) (sha256 `563b86a5a3a25a33bdd466b55440704cd1691ab33e37155b27a93fd158616271`, sanitized from the run's `evidence.json`, sha256 `ec095e2182a9983fb1e08611db3cdd821376a20116c645c798522a33422d6630`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e.sh`, 2026-11-19 17:46 to 19:35 UTC. The same scenario on one host: every node and both relays in separate network namespaces, with a local relay pair. It also carries the production-cut 6-part object (item 10) | `openfox` `cbc638b9` | ALL PASS, 177 of 177; `qualifies_as_public_acceptance: false` |
+
+**Commits.** Both runs build `tos-messengerd`, the owner tool and the MLS
+driver from `ai` `f5d473a4` (main, the merge of #93) with clean trees. The
+deployed relays are the `f8e906ff` build, checked byte-identical to a build
+made during the run, with the relay server's code unchanged between the two
+commits. No run was held, and no development script ran.
+
+**Test-shortened values** (recorded, `room_settings` and
+`test_shortened_values`):
+
+| Setting | Four-machine record | Local record |
+|---|---|---|
+| Relay TTL | 1 h | 900 s |
+| Re-deposit interval | 600 s | 600 s |
+| Descriptor lifetime | 1,800 s | 1,800 s |
+| Room part size | 8,192 bytes | 8,192 bytes |
+| Handshake retention | 10,800 s | 7,200 s |
+| Authorization lifetime | 600 s | 300 s |
+| Daemon build | `roomtest` | `roomtest` |
+
+**Sanitization.** The records are the runs' `evidence.json` with these
+replacements; each record's `record_provenance` lists them:
+
+- Addresses are replaced by labels; loopback is kept.
+- Validator hosts are V1 to V3 and the DHT host is DHT. Relays are named by
+  count.
+- The run base directory is replaced by a label.
+
+**Further fields in the four-machine record:**
+
+- **`record_provenance.failed_attempts`** indexes the earlier attempts and
+  what each fixed. Each attempt's evidence sha256 is given, and none of
+  those attempts is evidence for an item.
+- **`known_context`** keeps the pre-launch health lines the gate passed. The
+  `record_provenance.known_context_ruling` field states the ruling that let
+  them pass:
+  - the V4 swap, projection and anon alerts;
+  - operator-runway alerts resolved by a top-up.
+
+  It also states that `f5d473a4` is the commit r24 passed on.
+- **`operator_validator_watch`** is the operator's independent 2-minute
+  watch of the validators on V1 and V2:
+  - Validator PIDs were the same from launch to teardown, with 0 restarts
+    and no ALERT line.
+  - The last head ages were 1.7 s and 1.9 s.
+  - The watch was down from 22:00:56 to 22:32:34 UTC. PIDs were identical
+    across the gap, and the harness's own `validator_guard` ran throughout.
+
+Proven by these records (section 8 gate items, live):
+
+- **Relay only and 1. Invites.**
+  - No node port is reachable between the hosts.
+  - C refuses strangers without an invite. A's first copy carries C's
+    unscoped invite sealed, C admits it, and later generations are
+    `duplicate`.
+  - After `contacts.remove`, A meets C's policy again.
+  - B is refused when presenting A's spent token and when presenting C's
+    expired second invite. Neither refusal changes C's state.
+- **2. Creation and Welcomes.** A adds B, then C. C's full roster is split
+  at the test part size and reassembled. All members exchange messages, and
+  each is applied once.
+- **3, 14. Catch-up in epoch order and beyond the authorization lifetime.**
+  C is stopped while A commits twice, for longer than the test authorization
+  lifetime but less than the handshake retention. On restart C gets the
+  second Commit only after acknowledging the first, applies both in order,
+  and opens the buffered newer-epoch message.
+- **4. Offline beyond the relay TTL.**
+  - After an idle longer than the descriptor lifetime, A adds F and pulls
+    every member's retired evidence over kind 4.
+  - B is then stopped beyond the TTL while A adds E. A re-deposits its
+    Commit to B in new, byte-identical generations and withdraws the older
+    ones.
+  - C's message, deposited while B was stopped, expires at every relay.
+    Restarted, B applies the Commit and gets a `room.gap` naming C.
+- **5. Remove.** A removes C:
+  - A's in-flight envelopes to C are withdrawn.
+  - Later objects are not addressed to C, and C's driver cannot open one
+    handed to it by the harness.
+  - C's room messages are refused `not-a-room-member`.
+  - B, for whom C is no contact, has forgotten C's card and leaf credential.
+- **6. One live refusal.** A 6-part Commit from B, a member but not the
+  authority, is refused `not-authentic` with a signed room ack.
+- **8. States.** Every handshake object goes `carried`, then `delivered`, on
+  a verified room ack.
+- **9. Caps and pacing.** No relay held more than 16 kind-3 or 24 chat
+  envelopes of one sender for one peer. Each sender's envelopes were matched
+  against the peer's mailbox listing at each relay every 30 s. Kind-3
+  deposits stayed within the 30-per-minute, burst-16 bucket.
+- **10. Sizes.** Every frame is a bucket. The local record's
+  production-cut object has six parts, five of them 190,464 bytes, and each
+  stored envelope matches 1,373 + F + 4·⌈B/3⌉.
+- **11. Nothing readable.** Read-only copies of the relays' state contain no
+  message text, room ID, member, KeyPackage, roster content or invite token.
+- **12. Room admission stays in the room.** B's 1:1 copy to C meets C's
+  normal policy, while B's room messages are admitted.
+- **15. Crash windows.**
+  - C's serve is killed after handing the Commit to C's paused daemon. C
+    applies it, sends no ack, and later answers the same envelope
+    `duplicate`.
+  - A's daemon is killed while its driver runs the Remove. After the
+    restart there is no fork.
+- **16. Renewal among non-contacts.** B and C exchange room messages across
+  several descriptor expiries. Each kind-4 frame between them is an
+  offline-window pull or an evidence-expired pull, following item 16 as
+  amended in this change.
+- **18. Roster to an already-joined member.**
+
+Met by the named unit tests in the records' `not_verified`: item 7, item 13,
+item 17, and the unit halves of items 6, 12, 14 and 18.
+
+Not proven by these records:
+
+- **Item 16, card renewal:** the chat card lifetime has no test setting in
+  OpenFox, so card renewal through part 0 is not shown live.
+- **Item 19 (room end, live, D18) and item 20 (credential storage, unit,
+  11.8):** neither is a run step of these records, and neither is listed in
+  their `not_verified`.
+- Third-party relays or hosts, a public chain, and the production values of
+  the shortened settings.
+
+Also recorded: in the four-machine record, B's and C's processes ran as
+root inside their run scratch directories (`topology.remote_nodes`). In the
+local record every process runs as an ordinary user.
+
 ## Not delivered by these changes
 
 - WP-07 independent commercial acceptance: a provider and buyer outside the

@@ -4,7 +4,9 @@ How private chat between two OpenFox Agents crosses machines by reusing
 [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) ("relay spec") with no new
 transport, no relay change and no new authority.
 
-**Status: M-R1 ✅ accepted (section 8); M-R2 ⬜ design only (section 11).**
+**Status: M-R1 ✅ accepted (section 8); M-R2 ✅ accepted on 2026-11-20,
+record `spec/deployments/messenger-relay-rooms-20261120.json` (section 8;
+items 19 and 20 are not shown by the record, see there).**
 Section 8 states what each phase's live record must prove; section 9 lists
 the code changes of M-R1 (9.1) and M-R2 (9.2). Citations added for M-R2 refer
 to `tosnetwork/openfox` `main` `edd88e11`.
@@ -956,6 +958,17 @@ sender unlinkability (section 6), multi-device, M0 freeze evidence
 `messenger/docs/ROADMAP.md:25`), any Gate O claim.
 
 ### M-R2: private rooms and invites
+
+**Status: accepted on 2026-11-20** by `messenger-relay-rooms-20261120.json`
+(four machines: A and the fillers D, E and F on a host behind NAT, B and C on
+separate VPSs, C on relay-2's host, the two deployed test relays) and
+`local-messenger-relay-rooms-20261119.json` (one host, namespaces, a local
+relay pair, with the production-cut 6-part object of item 10), both
+described in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`. Items 7, 13 and
+17 are met by the named unit tests in the records' `not_verified`. **Items
+19 (room end, live) and 20 (credential storage, unit) are neither run steps
+of these records nor listed in their `not_verified`**; they stay open until
+a record or a named test list covers them.
 
 Record `messenger-relay-rooms-<date>.json`, same schema, design in section 11.
 Three OpenFox with `tos-messengerd` on three hosts (A behind NAT with no
