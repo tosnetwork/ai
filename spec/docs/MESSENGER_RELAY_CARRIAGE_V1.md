@@ -4,7 +4,11 @@ How private chat between two OpenFox Agents crosses machines by reusing
 [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) ("relay spec") with no new
 transport, no relay change and no new authority.
 
-**Status: M-R1 ✅ accepted (section 8); M-R2 ⬜ design only (section 11).**
+**Status: M-R1 ✅ accepted (section 8); M-R2 ✅ accepted on 2026-11-20,
+records `spec/deployments/messenger-relay-rooms-20261120.json`,
+`messenger-relay-rooms-card-20261120.json` (the card half of item 16),
+`messenger-relay-rooms-end-20261120.json` (item 19) and
+`local-messenger-relay-rooms-item20-20261120.json` (item 20) (section 8).**
 Section 8 states what each phase's live record must prove; section 9 lists
 the code changes of M-R1 (9.1) and M-R2 (9.2). Citations added for M-R2 refer
 to `tosnetwork/openfox` `main` `edd88e11`.
@@ -957,6 +961,24 @@ sender unlinkability (section 6), multi-device, M0 freeze evidence
 
 ### M-R2: private rooms and invites
 
+**Status: accepted on 2026-11-20.** Items 1–18 are shown by `messenger-relay-rooms-20261120.json`
+(four machines: A and the fillers D, E and F on a host behind NAT, B and C on
+separate VPSs, C on relay-2's host, the two deployed test relays) and
+`local-messenger-relay-rooms-20261119.json` (one host, namespaces, a local
+relay pair, with the production-cut 6-part object of item 10), both
+described in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`. Items 7, 13 and
+17 are met by the named unit tests in the records' `not_verified`. Item 19
+(room end, live) is shown by `messenger-relay-rooms-end-20261120.json`, a
+targeted live room-end run on the same hosts, relays and pins with A's
+delegation test-shortened, with its local run `re1` recorded inside it.
+Item 20 (credential storage, unit) is shown by
+`local-messenger-relay-rooms-item20-20261120.json` (13 named tests at
+`f5d473a4` and at `main`, with a red control). The card half of item 16
+(test-shortened card lifetime; the records above shorten only the descriptor
+lifetime) is shown by `messenger-relay-rooms-card-20261120.json`, a
+targeted live card-renewal run on the same hosts, relays and pins, with
+OpenFox's test-only `chat.test_card_lifetime_seconds` (a roomtest build).
+
 Record `messenger-relay-rooms-<date>.json`, same schema, design in section 11.
 Three OpenFox with `tos-messengerd` on three hosts (A behind NAT with no
 inbound port, B and C on separate VPSs), carriage only through the two test
@@ -1035,7 +1057,16 @@ items MAY be named tests listed in `not_verified`. Test-shortened values
     and no member forks.
 16. **Renewal among non-contacts (live, 11.2).** With test-shortened card and
     descriptor lifetimes, B and C (no contacts) keep exchanging room messages
-    across several expiries, renewed only by kind-3 part 0.
+    across several expiries, in steady state renewed only by kind-3 part 0;
+    a kind-4 pull may occur only (a) for a peer whose evidence went stale
+    while it was offline (in the record: inside an offline window of the run
+    or within one re-deposit interval after it ends), or (b) when the
+    requester's held copy of that peer's evidence had already expired at
+    send time because the two exchanged nothing for longer than its
+    lifetime, at most one pull exchange per peer per expiry, after which
+    kind-3 part 0 renews it in band. The record classifies every kind-4
+    pull under (a) or (b), naming the expiry case (b) relied on; any other
+    pull fails the item.
 17. **Driver bounds (unit).** The 512 KiB state bound holds, with at least
     20 % headroom, for the worst case at 32 leaves with `max_past_epochs(2)`,
     every leaf carrying a maximal (128-byte) leaf identity, never a short test

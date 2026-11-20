@@ -520,6 +520,260 @@ Also recorded, outside `not_verified`: in the four-machine record **B ran as
 uid 0 on its VPS** (`topology.b_host`); in the local record every process
 runs as an ordinary user.
 
+## Messenger relay carriage M-R2: private rooms and invites over the test relays
+
+**Status: accepted on 2026-11-20.** Items 1–18 rest on the two records
+below, except the card half of item 16, which rests on the card-renewal
+record. Item 19 rests on the room-end record and its local run, and item 20
+on the named-test record (all three at the end of this section).
+
+The two records below are the live acceptance of items 1–18 of milestone M-R2 of
+`MESSENGER_RELAY_CARRIAGE_V1.md` (section 8, design in section 11). A, the
+room's authority, runs with the
+filler joiners D, E and F on a host behind NAT. Members B and C run on two
+separate VPSs. Each runs its own `tos-messengerd` and OpenFox, and the only
+path between them is the two Agent Packet relays. The core team operated
+every part, so the record does not qualify as public or independent
+acceptance, and it is not Gate O evidence.
+
+| Record | What it proves | Script commit | Result |
+|---|---|---|---|
+| [`messenger-relay-rooms-20261120.json`](../deployments/messenger-relay-rooms-20261120.json) (sha256 `68b3e64b702777319e454575a8a5c81ef2d820623b69767bb09798f30bb4f73c`, sanitized from the run's `evidence.json`, sha256 `a71f4de98203ed74b542fd8edaf667bbbbbe03110b7956b613f7d449454c7995`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e-remote.py`, 2026-11-19 20:15 UTC to 2026-11-20 00:38 UTC. Four machines: A, D, E, F and the chain on a host behind NAT; B on a VPS (validator host V1); C on another VPS (validator host V2), which is also relay-2's host; relay-1 on a further VPS | `openfox` `cbc638b9` (head of tosnetwork/openfox#71; clean tree) | ALL PASS, 208 of 208; `qualifies_as_public_acceptance: false` |
+| [`local-messenger-relay-rooms-20261119.json`](../deployments/local-messenger-relay-rooms-20261119.json) (sha256 `793a91b60cad51c7e05cbc375100f404cf974aaafa833ce6bff6a934eb25c1e1`, sanitized from the run's `evidence.json`, sha256 `ec095e2182a9983fb1e08611db3cdd821376a20116c645c798522a33422d6630`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e.sh`, 2026-11-19 17:46 to 19:35 UTC. The same scenario on one host: every node and both relays in separate network namespaces, with a local relay pair. It also carries the production-cut 6-part object (item 10) | `openfox` `cbc638b9` | ALL PASS, 177 of 177; `qualifies_as_public_acceptance: false` |
+
+**Commits.** Both runs build `tos-messengerd`, the owner tool and the MLS
+driver from `ai` `f5d473a4` (main, the merge of #93) with clean trees. The
+deployed relays are the `f8e906ff` build, checked byte-identical to a build
+made during the run, with the relay server's code unchanged between the two
+commits. No run was held, and no development script ran.
+
+**Test-shortened values** (recorded, `room_settings` and
+`test_shortened_values`):
+
+| Setting | Four-machine record | Local record |
+|---|---|---|
+| Relay TTL | 1 h | 900 s |
+| Re-deposit interval | 600 s | 600 s |
+| Descriptor lifetime | 1,800 s | 1,800 s |
+| Room part size | 8,192 bytes | 8,192 bytes |
+| Handshake retention | 10,800 s | 7,200 s |
+| Authorization lifetime | 600 s | 300 s |
+| Daemon build | `roomtest` | `roomtest` |
+
+**Sanitization.** The records are the runs' `evidence.json` with these
+replacements; each record's `record_provenance` lists them:
+
+- Addresses are replaced by labels; loopback is kept.
+- Validator hosts are V1 to V3 and the DHT host is DHT. Relays are named by
+  count.
+- The run base directory is replaced by a label.
+
+**Further fields in the four-machine record:**
+
+- **`record_provenance.failed_attempts`** indexes the earlier attempts and
+  what each fixed. Each attempt's evidence sha256 is given, and none of
+  those attempts is evidence for an item.
+- **`known_context`** keeps the pre-launch health lines the gate passed. The
+  `record_provenance.known_context_ruling` field states the ruling that let
+  them pass:
+  - the V4 swap, projection and anon alerts;
+  - operator-runway alerts resolved by a top-up.
+
+  It also states that `f5d473a4` is the commit r24 passed on.
+- **`operator_validator_watch`** is the operator's independent 2-minute
+  watch of the validators on V1 and V2:
+  - Validator PIDs were the same from launch to teardown, with 0 restarts
+    and no ALERT line.
+  - The last head ages were 1.7 s and 1.9 s.
+  - The watch was down from 22:00:56 to 22:32:34 UTC. PIDs were identical
+    across the gap, and the harness's own `validator_guard` ran throughout.
+
+Proven by these records (section 8 gate items, live):
+
+- **Relay only and 1. Invites.**
+  - No node port is reachable between the hosts.
+  - C refuses strangers without an invite. A's first copy carries C's
+    unscoped invite sealed, C admits it, and later generations are
+    `duplicate`.
+  - After `contacts.remove`, A meets C's policy again.
+  - B is refused when presenting A's spent token and when presenting C's
+    expired second invite. Neither refusal changes C's state.
+- **2. Creation and Welcomes.** A adds B, then C. C's full roster is split
+  at the test part size and reassembled. All members exchange messages, and
+  each is applied once.
+- **3, 14. Catch-up in epoch order and beyond the authorization lifetime.**
+  C is stopped while A commits twice, for longer than the test authorization
+  lifetime but less than the handshake retention. On restart C gets the
+  second Commit only after acknowledging the first, applies both in order,
+  and opens the buffered newer-epoch message.
+- **4. Offline beyond the relay TTL.**
+  - After an idle longer than the descriptor lifetime, A adds F and pulls
+    every member's retired evidence over kind 4.
+  - B is then stopped beyond the TTL while A adds E. A re-deposits its
+    Commit to B in new, byte-identical generations and withdraws the older
+    ones.
+  - C's message, deposited while B was stopped, expires at every relay.
+    Restarted, B applies the Commit and gets a `room.gap` naming C.
+- **5. Remove.** A removes C:
+  - A's in-flight envelopes to C are withdrawn.
+  - Later objects are not addressed to C, and C's driver cannot open one
+    handed to it by the harness.
+  - C's room messages are refused `not-a-room-member`.
+  - B, for whom C is no contact, has forgotten C's card and leaf credential.
+- **6. One live refusal.** A 6-part Commit from B, a member but not the
+  authority, is refused `not-authentic` with a signed room ack.
+- **8. States.** Every handshake object goes `carried`, then `delivered`, on
+  a verified room ack.
+- **9. Caps and pacing.** No relay held more than 16 kind-3 or 24 chat
+  envelopes of one sender for one peer. Each sender's envelopes were matched
+  against the peer's mailbox listing at each relay every 30 s. Kind-3
+  deposits stayed within the 30-per-minute, burst-16 bucket.
+- **10. Sizes.** Every frame is a bucket. The local record's
+  production-cut object has six parts, five of them 190,464 bytes, and each
+  stored envelope matches 1,373 + F + 4·⌈B/3⌉.
+- **11. Nothing readable.** Read-only copies of the relays' state contain no
+  message text, room ID, member, KeyPackage, roster content or invite token.
+- **12. Room admission stays in the room.** B's 1:1 copy to C meets C's
+  normal policy, while B's room messages are admitted.
+- **15. Crash windows.**
+  - C's serve is killed after handing the Commit to C's paused daemon. C
+    applies it, sends no ack, and later answers the same envelope
+    `duplicate`.
+  - A's daemon is killed while its driver runs the Remove. After the
+    restart there is no fork.
+- **16. Renewal among non-contacts.** B and C exchange room messages across
+  several descriptor expiries. Each kind-4 frame between them is an
+  offline-window pull or an evidence-expired pull, following item 16 as
+  amended in this change.
+- **18. Roster to an already-joined member.**
+
+Met by the named unit tests in the records' `not_verified`: item 7, item 13,
+item 17, and the unit halves of items 6, 12, 14 and 18.
+
+Not proven by these records:
+
+- **Item 16, card renewal:** these records shorten only the descriptor
+  lifetime; card renewal under a test-shortened card lifetime is shown by
+  the card-renewal record below.
+- **Item 19 (room end, live, D18):** not a run step of these records; it is
+  shown by the room-end record below.
+- **Item 20 (credential storage, unit, 11.8):** not part of the live
+  records. It is covered by the named-test record
+  [`local-messenger-relay-rooms-item20-20261120.json`](../deployments/local-messenger-relay-rooms-item20-20261120.json)
+  (sha256 `fdde306a560ffa89167c4d8dfb68a300b56759f17a1049ebbd2ebc4b507b11ed`):
+  - **Tests:** 13 named tests, mapped to each claim of the item. They pass at
+    `f5d473a4` and at `main` `9aa2cc83`, with the tree's own OpenMLS driver;
+    a skipped test fails the run.
+  - **Red control:** a mutation that keeps a removed member's credential is
+    caught by `TestRemoveDeletesTheMembersCredential`.
+  - **Gap in `make verify`:** the six `messenger/pkg/daemon` tests of the
+    item skip under `make verify`. That target sets `TOS_OPENMLS_DRIVER`
+    only for `-run OpenMLS` in other packages.
+- Third-party relays or hosts, a public chain, and the production values of
+  the shortened settings.
+
+Also recorded: in the four-machine record, B's and C's processes ran as
+root inside their run scratch directories (`topology.remote_nodes`). In the
+local record every process runs as an ordinary user.
+
+**Item 19, room end (live, D18):**
+[`messenger-relay-rooms-end-20261120.json`](../deployments/messenger-relay-rooms-end-20261120.json)
+(sha256 `d9cd9276aead592ea76e539364026fef5ef2478b81ac2d83ed3bbf992f6c0e4f`,
+sanitized from the run's `evidence.json`, sha256
+`7745a6bf22afe862f0cd1f8c02a3c029f306ccb72f50fb1a964a0ed47b80d8b8`).
+
+- **Run:** 2026-11-20 04:15 to 05:26 UTC, ALL PASS, 132 of 132. The four
+  machines and the two test relays are the same as the four-machine record.
+- **Pins:** ai `f5d473a4` and relay `f8e906ff`, as for the four-machine
+  record; `openfox` scripts at `5ff0099b` (tosnetwork/openfox#71), which add the
+  room-end scenario.
+- **Scenario:** `MR2_ROOM_END=1`. It runs only the steps that build the
+  three-member room, then the room's end. Those setup steps are not this
+  record's evidence for items 1, 2 or 18.
+- **Test-shortened values:** A's Endpoint delegation is 2,400 s, so the room
+  ends at A's leaf-credential expiry. Handshake retention is 1,200 s, skew
+  300 s and the re-deposit interval 600 s.
+- **Local run:** `re1` used the same harness, scenario and settings on one
+  host with a local relay pair. It passed ALL PASS, 109 of 109 (evidence
+  sha256 `dda9aea06eee6b568fd256c34ea0c4564b50f690799877ee07f7b30d2f2702e7`,
+  recorded in `record_provenance.local_run`).
+
+Proven, live:
+
+- All three members hold the same room end, equal to A's delegation expiry.
+- In the last re-deposit interval before end − skew, A's owner's `rooms.add`
+  is refused `room-ended`.
+- From end − skew, room messages of A, B and C are refused `room-ended`, and
+  A deposits no room frame.
+- B's message was sealed before the end, while C's serve was stopped. C
+  received it only after end + skew, and it is a room-ended gap of B at C:
+  relay-acknowledged, never listed, with the owner notice.
+- After end + skew, each of B and C refuses the other's Commit, Welcome and
+  roster with a rejected room ack `room-ended`, and its application object
+  as a room-ended gap, with one owner notice each. The Commit and the
+  application object are well-formed objects of their type. The Welcome and
+  roster are valid only up to the room-object prefix: the receiver judges
+  the room's end from that prefix before anything else of the object, so
+  the refusal shows the end check, not the content checks.
+- After end + handshake retention + skew, A, B and C no longer list the room,
+  and no file of their Messenger state names it.
+
+The validators on V1 and V2 were watched twice:
+
+- **The operator's independent watch** covered 04:05:12 to 05:26:51 UTC in
+  82 lines. V1 and V2 kept their baseline PIDs with 0 restarts, and the last
+  head ages were 1.4 s and 1.6 s. No ALERT or WARN line appeared.
+- **The harness's own guard** took 282 read-only samples and never tripped.
+
+**Item 16, the card half (renewal under a test-shortened card lifetime, live):**
+[`messenger-relay-rooms-card-20261120.json`](../deployments/messenger-relay-rooms-card-20261120.json)
+(sha256 `7f7655063932673da08049801273dc3e03a4ee987e9a3fcf9564b9da3c723082`,
+sanitized from the run's `evidence.json`, sha256
+`2bda462a54dcec23fcf5674dbed840e82d9075ad39ca1e93ee25e7317dad4531`).
+
+- **Run:** 2026-11-20 13:15 to 14:33 UTC, ALL PASS, 165 of 165, on the same
+  four machines and two test relays.
+- **Pins:** ai `f5d473a4`, relay `f8e906ff`, `openfox` `89c477ee`
+  (tosnetwork/openfox#71). The harness includes OpenFox's test-only
+  `chat.test_card_lifetime_seconds` (tosnetwork/openfox#73, merged), which
+  only a roomtest build accepts.
+- **Scenario:** `MR2_CARD_RENEWAL=1`. It runs only the steps that build the
+  three-member room, then the card renewal. A's and C's cards last 1,200 s
+  and B's 2,400 s; the asymmetry lets C be cut off by an expired card on one
+  side only. A pre-flight reads each node's lifetime from its configuration
+  on its own host before the room is built.
+- **Attempts:** the record's `record_provenance.attempts` indexes rc1
+  (local), `live-card1-attempt1` and `live-card1-attempt2`, each with its
+  evidence sha256, its cause and the harness commit that fixed it. It also
+  notes that the run host rebooted uncleanly at about 11:19 UTC, before
+  attempt 2.
+
+Proven, live:
+
+- Every member's card lasts its test lifetime and is renewed at half its
+  life, before it expires: A, B and C, each at least once.
+- B and C, no contacts of each other, learn each other's renewed card in
+  band (kind-3 part 0). They keep exchanging room messages past the older
+  cards' expiry, and every message of every round, from A, B and C, is
+  applied.
+- The authority's stored member cards of B and C are refreshed to renewed
+  cards from their own frames (11.8, Member cards).
+- C was stopped until the card of C that B holds expired. B's room message to
+  C then waits for a fresh card: nothing is deposited to C, while A's copy is
+  carried.
+- C comes back with a fresh card that its room message carries, and is
+  reached again: B learns the card in band, deposits the waiting message,
+  and C applies it once.
+
+The validators on V1 and V2 were watched twice in this run as well:
+
+- **The operator-side watch,** started by the run's agent after the reboot,
+  covered 13:12:23 to 14:34:45 UTC in 82 lines and stopped on the final
+  `evidence.json`. V1 and V2 kept the same validator PIDs with 0 restarts,
+  the last head ages were 1.1 s and 0.7 s, and no ALERT or WARN line
+  appeared.
+- **The harness's own guard** took 306 read-only samples and never tripped.
+
 ## Not delivered by these changes
 
 - WP-07 independent commercial acceptance: a provider and buyer outside the
