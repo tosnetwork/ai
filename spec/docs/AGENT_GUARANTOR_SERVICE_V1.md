@@ -4811,8 +4811,14 @@ Agreement's `terminal_resolution_deadline_unix`. For a lineage whose first
 post-late-close decision is exactly `late_recovery_terminal_fallback`, the
 materializer instead requires all three values to be no later than
 `late_recovery_terminal_deadline_unix`; the exact authorized decision chain and
-filing-close receipt make that branch mechanically distinguishable. No other
-path may use the contingency deadline. Overflow or insufficient remaining time
+filing-close receipt make that branch mechanically distinguishable. The
+materializer reads the branch from the applied decision's admission receipt:
+every admission on the late-recovery path (the candidate, its authorized
+successor and the fallback at the successor deadline) carries a
+`late_filing_close_receipt_digest`, and no other admission does. The decision
+path alone cannot tell, because the successor's path is `successor` or
+`terminal_fallback`. A `late_recovery_terminal_fallback` admission without that
+digest is invalid. No other path may use the contingency deadline. Overflow or insufficient remaining time
 rejects the earlier decision admission under the applicable continuation-
 budget rule, not the already terminal close. For each materialized line:
 
@@ -6394,7 +6400,20 @@ candidate carries the same digest; a late-recovery candidate itself carries its
 own filing close's digest, as the fallback source references require. A
 `challenge_admission` is refused when its current decision's path is
 `successor` or `terminal_fallback` and that decision carries a
-`late_filing_close_receipt_digest`.
+`late_filing_close_receipt_digest`. The refusal trusts that digest as it sits in
+the sealed proof body, exactly as it trusts the proof's challenge window: both
+are fields of the original receipt body, covered by its authorization quorum
+and the stage Action Authority's seal.
+
+Late recovery happens at most once per claim. A
+`late_recovery_terminal_fallback` whose head is already on the late-recovery
+path is invalid: a `reviewing_after_challenge` head whose challenged decision is
+a late-recovery candidate, or any head whose current decision carries a
+`late_filing_close_receipt_digest`. Such a fallback would open a second
+challenge round and could be admitted before its successor deadline, since its
+trigger, the filing close, has already passed. The path ends only through the
+candidate's authorized `successor` or the `terminal_fallback` at that
+successor's deadline.
 
 The claim still terminates: the successor's challenge window elapses and
 `challenge_close` admits its terminal state, which the terminal claim set
