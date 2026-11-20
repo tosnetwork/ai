@@ -653,9 +653,21 @@ Not proven by these records:
 
 - **Item 16, card renewal:** the chat card lifetime has no test setting in
   OpenFox, so card renewal through part 0 is not shown live.
-- **Item 19 (room end, live, D18) and item 20 (credential storage, unit,
-  11.8):** neither is a run step of these records, and neither is listed in
-  their `not_verified`.
+- **Item 19 (room end, live, D18):** it is not a run step of these records,
+  and it is not listed in their `not_verified`. It is pending a targeted
+  room-end run.
+- **Item 20 (credential storage, unit, 11.8):** this is not part of the live
+  records. It is covered by the named-test record
+  [`local-messenger-relay-rooms-item20-20261120.json`](../deployments/local-messenger-relay-rooms-item20-20261120.json)
+  (sha256 `fdde306a560ffa89167c4d8dfb68a300b56759f17a1049ebbd2ebc4b507b11ed`):
+  - **Tests:** 13 named tests, mapped to each claim of the item. They pass at
+    `f5d473a4` and at `main` `9aa2cc83`, with the tree's own OpenMLS driver;
+    a skipped test fails the run.
+  - **Red control:** a mutation that keeps a removed member's credential is
+    caught by `TestRemoveDeletesTheMembersCredential`.
+  - **Gap in `make verify`:** the six `messenger/pkg/daemon` tests of the
+    item skip under `make verify`. That target sets `TOS_OPENMLS_DRIVER`
+    only for `-run OpenMLS` in other packages.
 - Third-party relays or hosts, a public chain, and the production values of
   the shortened settings.
 

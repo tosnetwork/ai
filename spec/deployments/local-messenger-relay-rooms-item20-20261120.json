@@ -1,0 +1,257 @@
+{
+  "schema": "tos.messaging.relay-carriage.unit-record.v1",
+  "milestone": "M-R2",
+  "item": "20 (credential storage and holding, unit, section 11.8)",
+  "qualifies_as_public_acceptance": false,
+  "recorded_utc": "2026-11-20",
+  "claims_to_tests": [
+    {
+      "claim": "A learned leaf credential, its list and a fused write naming the list's digest are durable before the roster's room ack; a crash after the ack leaves the credentials rooted across a restart; a crash before the fused write leaves the roster unacknowledged and it is learned again",
+      "tests": [
+        "messenger/pkg/eventlog TestRoomCredentialsAreLearnedRootedAndRepeated (learned: records, list, fused write; an exact repeat writes nothing; both survive a restart and a collection)",
+        "messenger/pkg/eventlog TestRoomCredentialsStagedWithoutTheFusedWriteAreCollected (a crash before the fused write: restart collects the unrooted records and list, the credential is not known)",
+        "messenger/pkg/daemon TestRoomRosterLearnRefusalsArePermanentOrRetried (a failed credential read or write is retried, not acknowledged; a permanent refusal answers the roster rejected not-authentic, signed)"
+      ]
+    },
+    {
+      "claim": "The fused record's credential-list digest is a garbage-collection root: an unreadable list deletes nothing",
+      "tests": [
+        "messenger/pkg/eventlog TestRoomCredentialListIsAFailClosedRoot"
+      ]
+    },
+    {
+      "claim": "Remove deletes the removed member's credential",
+      "tests": [
+        "messenger/pkg/eventlog TestRemoveDeletesTheMembersCredential (the red control below breaks exactly this)"
+      ]
+    },
+    {
+      "claim": "An object from a current member whose credential is not yet known is held in the future-epoch buffer and opened once the roster arrives",
+      "tests": [
+        "messenger/pkg/daemon TestRoomApplicationOfAnUnknownCredentialIsHeldUntilItsRoster",
+        "messenger/pkg/eventlog TestRoomBufferHoldsObjectsOfUnknownCredentials"
+      ]
+    },
+    {
+      "claim": "That object is refused not-authentic only after a roster arrived without a verifying entry for the member",
+      "tests": [
+        "messenger/pkg/daemon TestRoomApplicationOfAnUnknownCredentialIsRefusedAfterARosterWithoutIt"
+      ]
+    },
+    {
+      "claim": "A first-time joiner authenticates its Welcome with the authority's leaf credential carried in the room.invite: a credential that does not verify is refused not-authentic and records no pending join; the verified credential survives a restart inside the pending join; a Welcome from another leaf (identity naming another digest, or another leaf signature key) is refused not-authentic; the install roots the credential before the pending join ends",
+      "tests": [
+        "messenger/pkg/daemon TestRoomInviteRecordsAPendingJoinOnlyForAVerifiedCredential",
+        "messenger/pkg/eventlog TestPendingJoinKeepsTheInviteCredentialAndTheWelcomeRootsIt",
+        "messenger/pkg/daemon TestRoomWelcomeByAnotherLeafThanTheInvitesIsRefused",
+        "messenger/pkg/group TestCheckLeafBindsIdentityAndKey (a leaf binds a credential only if its identity names exactly that credential and its key is the credential's)"
+      ]
+    },
+    {
+      "claim": "A roster entry whose card or evidence is stale but whose leaf credential verifies contributes that credential; only the card and evidence are skipped; an entry whose credential fails is skipped whole",
+      "tests": [
+        "messenger/pkg/daemon TestRoomRosterLearnsCredentialsApartFromCardsAndSkipsFailingEntries"
+      ]
+    }
+  ],
+  "command": {
+    "script": "item20-tests.sh <ai tree> <log> <cargo target dir>",
+    "script_sha256": "c16c9f634060c2cc6ac285ab0ba5704fe250f1a3e47433db75fc92469a0561ec",
+    "script_text": "#!/bin/bash\n# usage: item20-tests.sh <ai worktree> <log> <cargo target dir>\n# Runs the M-R2 item 20 named tests (-v, count=1) with the tree's own OpenMLS\n# driver, built outside the tree; a skipped or missing test fails the run.\ntree=$1; log=$2; target=$3\ncd \"$tree\" || exit 1\nexport GOWORK=off GOTOOLCHAIN=go1.26.11 GOFLAGS=-p=8 CARGO_BUILD_JOBS=8 CARGO_TARGET_DIR=\"$target\"\nEVENTLOG=(TestRoomCredentialsAreLearnedRootedAndRepeated TestRoomCredentialsStagedWithoutTheFusedWriteAreCollected TestRoomCredentialListIsAFailClosedRoot TestRemoveDeletesTheMembersCredential TestPendingJoinKeepsTheInviteCredentialAndTheWelcomeRootsIt TestRoomBufferHoldsObjectsOfUnknownCredentials)\nDAEMON=(TestRoomRosterLearnRefusalsArePermanentOrRetried TestRoomApplicationOfAnUnknownCredentialIsHeldUntilItsRoster TestRoomApplicationOfAnUnknownCredentialIsRefusedAfterARosterWithoutIt TestRoomInviteRecordsAPendingJoinOnlyForAVerifiedCredential TestRoomWelcomeByAnotherLeafThanTheInvitesIsRefused TestRoomRosterLearnsCredentialsApartFromCardsAndSkipsFailingEntries)\nGROUP=(TestCheckLeafBindsIdentityAndKey)\nre() { local IFS='|'; echo \"^($*)\\$\"; }\n{\n  echo \"tree $(git rev-parse HEAD) status_lines $(git status --short | wc -l)\"\n  cargo build --locked --manifest-path messenger/rust/openmls-driver/Cargo.toml || { echo \"rc_driver=1\"; exit 1; }\n  export TOS_OPENMLS_DRIVER=\"$target/debug/tos-openmls-driver\"\n  echo \"driver_sha256 $(sha256sum \"$TOS_OPENMLS_DRIVER\" | cut -d' ' -f1)\"\n  go test -count=1 -v -run \"$(re \"${EVENTLOG[@]}\")\" ./messenger/pkg/eventlog; echo \"rc_eventlog=$?\"\n  go test -count=1 -v -run \"$(re \"${DAEMON[@]}\")\" ./messenger/pkg/daemon; echo \"rc_daemon=$?\"\n  go test -count=1 -v -run \"$(re \"${GROUP[@]}\")\" ./messenger/pkg/group; echo \"rc_group=$?\"\n  echo \"status_lines_after $(git status --short | wc -l)\"\n} > \"$log\" 2>&1\nmissing=0\nfor t in \"${EVENTLOG[@]}\" \"${DAEMON[@]}\" \"${GROUP[@]}\"; do grep -q -- \"^--- PASS: $t \" \"$log\" || { echo \"NOT PASSED: $t\" >> \"$log\"; missing=1; }; done\ngrep -q -- \"--- SKIP\" \"$log\" && { echo \"A TEST SKIPPED\" >> \"$log\"; missing=1; }\ngrep -q \"^rc_[a-z]*=[1-9]\" \"$log\" && missing=1\necho \"item20_result=$([ $missing = 0 ] && echo PASS || echo FAIL)\" >> \"$log\"\nexit $missing\n",
+    "rule": "go test -count=1 -v of exactly the named tests, with TOS_OPENMLS_DRIVER set to the tree's own OpenMLS driver (cargo build --locked, target outside the tree); a named test that is missing, skipped or failed fails the run"
+  },
+  "toolchain": "go1.26.11 linux/amd64",
+  "runs": [
+    {
+      "ai_commit": "f5d473a4fb2b01dfe3e6854b580c64e79d590672",
+      "role": "the commit of the M-R2 records",
+      "tree_clean_before_and_after": true,
+      "openmls_driver_sha256": "7cd0bf6084b563b2466077142568a1cd029b2587899b4f0171aaf1cb5954a5b7",
+      "result": "PASS",
+      "tests": {
+        "TestRoomCredentialsAreLearnedRootedAndRepeated": {
+          "result": "PASS",
+          "seconds": 0.04
+        },
+        "TestRoomCredentialsStagedWithoutTheFusedWriteAreCollected": {
+          "result": "PASS",
+          "seconds": 0.03
+        },
+        "TestRoomCredentialListIsAFailClosedRoot": {
+          "result": "PASS",
+          "seconds": 0.02
+        },
+        "TestRemoveDeletesTheMembersCredential": {
+          "result": "PASS",
+          "seconds": 0.04
+        },
+        "TestPendingJoinKeepsTheInviteCredentialAndTheWelcomeRootsIt": {
+          "result": "PASS",
+          "seconds": 0.03
+        },
+        "TestRoomBufferHoldsObjectsOfUnknownCredentials": {
+          "result": "PASS",
+          "seconds": 0.03
+        },
+        "TestRoomApplicationOfAnUnknownCredentialIsHeldUntilItsRoster": {
+          "result": "PASS",
+          "seconds": 0.32
+        },
+        "TestRoomApplicationOfAnUnknownCredentialIsRefusedAfterARosterWithoutIt": {
+          "result": "PASS",
+          "seconds": 0.21
+        },
+        "TestRoomWelcomeByAnotherLeafThanTheInvitesIsRefused": {
+          "result": "PASS",
+          "seconds": 0.1
+        },
+        "TestRoomInviteRecordsAPendingJoinOnlyForAVerifiedCredential": {
+          "result": "PASS",
+          "seconds": 0.06
+        },
+        "TestRoomRosterLearnRefusalsArePermanentOrRetried": {
+          "result": "PASS",
+          "seconds": 0.19
+        },
+        "TestRoomRosterLearnsCredentialsApartFromCardsAndSkipsFailingEntries": {
+          "result": "PASS",
+          "seconds": 0.43
+        },
+        "TestCheckLeafBindsIdentityAndKey": {
+          "result": "PASS",
+          "seconds": 0.0
+        }
+      },
+      "log_sha256": "63e1095f9cd08dbb96d146696834adbc6d3a8c89bf75331611843efc7ecb18d2"
+    },
+    {
+      "ai_commit": "9aa2cc83032b952184b56d1e85f335d79875124e",
+      "role": "main when this record was made",
+      "tree_clean_before_and_after": true,
+      "openmls_driver_sha256": "8e6cd4a94ea78291793118437b216cba7cec0300d0c2a38a7fd2c3f4e69fb23f",
+      "result": "PASS",
+      "tests": {
+        "TestRoomCredentialsAreLearnedRootedAndRepeated": {
+          "result": "PASS",
+          "seconds": 0.02
+        },
+        "TestRoomCredentialsStagedWithoutTheFusedWriteAreCollected": {
+          "result": "PASS",
+          "seconds": 0.02
+        },
+        "TestRoomCredentialListIsAFailClosedRoot": {
+          "result": "PASS",
+          "seconds": 0.01
+        },
+        "TestRemoveDeletesTheMembersCredential": {
+          "result": "PASS",
+          "seconds": 0.02
+        },
+        "TestPendingJoinKeepsTheInviteCredentialAndTheWelcomeRootsIt": {
+          "result": "PASS",
+          "seconds": 0.01
+        },
+        "TestRoomBufferHoldsObjectsOfUnknownCredentials": {
+          "result": "PASS",
+          "seconds": 0.02
+        },
+        "TestRoomApplicationOfAnUnknownCredentialIsHeldUntilItsRoster": {
+          "result": "PASS",
+          "seconds": 0.26
+        },
+        "TestRoomApplicationOfAnUnknownCredentialIsRefusedAfterARosterWithoutIt": {
+          "result": "PASS",
+          "seconds": 0.21
+        },
+        "TestRoomWelcomeByAnotherLeafThanTheInvitesIsRefused": {
+          "result": "PASS",
+          "seconds": 0.1
+        },
+        "TestRoomInviteRecordsAPendingJoinOnlyForAVerifiedCredential": {
+          "result": "PASS",
+          "seconds": 0.05
+        },
+        "TestRoomRosterLearnRefusalsArePermanentOrRetried": {
+          "result": "PASS",
+          "seconds": 0.19
+        },
+        "TestRoomRosterLearnsCredentialsApartFromCardsAndSkipsFailingEntries": {
+          "result": "PASS",
+          "seconds": 0.42
+        },
+        "TestCheckLeafBindsIdentityAndKey": {
+          "result": "PASS",
+          "seconds": 0.0
+        }
+      },
+      "log_sha256": "69d4027d94145e78382005424f95d3a14f06b3d725250c1c279f76afef0ebff2"
+    }
+  ],
+  "red_control": {
+    "ai_commit": "f5d473a4fb2b01dfe3e6854b580c64e79d590672",
+    "mutation": "messenger/pkg/eventlog/room_mls.go, Advance: the credential list is retained for the current and the next members, so a removed member's credential stays listed",
+    "diff": "diff --git a/messenger/pkg/eventlog/room_mls.go b/messenger/pkg/eventlog/room_mls.go\nindex 24ebdf32..04a0b030 100644\n--- a/messenger/pkg/eventlog/room_mls.go\n+++ b/messenger/pkg/eventlog/room_mls.go\n@@ -501,7 +501,7 @@ func (l *RoomMLSLedger) Advance(advance RoomMLSAdvance, now time.Time) (bool, Ro\n \t\t// A removed member's credential leaves the list in the same write\n \t\t// (section 11.4); its record is then collected. An added member's\n \t\t// credential joins it in the same write.\n-\t\tlistDigest, err := l.journal.retainMemberCredentials(current, next.Members, advance.Learned)\n+\t\tlistDigest, err := l.journal.retainMemberCredentials(current, append(append([]string(nil), next.Members...), current.Members...), advance.Learned)\n \t\tif err != nil {\n \t\t\treturn false, RoomMLSRecord{}, err\n \t\t}\n",
+    "diff_sha256": "93a47f2233590b8f722378a747f3fa91144157c4777ff6d2a19d3dc1f0e79f5c",
+    "expected": "TestRemoveDeletesTheMembersCredential fails; the run fails",
+    "observed": "--- FAIL: TestRemoveDeletesTheMembersCredential: room_credentials_test.go:189: a removed member's credential is still listed: true <nil>; item20_result=FAIL",
+    "result": "caught",
+    "tests": {
+      "TestRoomCredentialsAreLearnedRootedAndRepeated": {
+        "result": "PASS",
+        "seconds": 0.04
+      },
+      "TestRoomCredentialsStagedWithoutTheFusedWriteAreCollected": {
+        "result": "PASS",
+        "seconds": 0.03
+      },
+      "TestRoomCredentialListIsAFailClosedRoot": {
+        "result": "PASS",
+        "seconds": 0.02
+      },
+      "TestRemoveDeletesTheMembersCredential": {
+        "result": "FAIL",
+        "seconds": 0.04
+      },
+      "TestPendingJoinKeepsTheInviteCredentialAndTheWelcomeRootsIt": {
+        "result": "PASS",
+        "seconds": 0.02
+      },
+      "TestRoomBufferHoldsObjectsOfUnknownCredentials": {
+        "result": "PASS",
+        "seconds": 0.03
+      },
+      "TestRoomApplicationOfAnUnknownCredentialIsHeldUntilItsRoster": {
+        "result": "PASS",
+        "seconds": 0.26
+      },
+      "TestRoomApplicationOfAnUnknownCredentialIsRefusedAfterARosterWithoutIt": {
+        "result": "PASS",
+        "seconds": 0.22
+      },
+      "TestRoomWelcomeByAnotherLeafThanTheInvitesIsRefused": {
+        "result": "PASS",
+        "seconds": 0.09
+      },
+      "TestRoomInviteRecordsAPendingJoinOnlyForAVerifiedCredential": {
+        "result": "PASS",
+        "seconds": 0.05
+      },
+      "TestRoomRosterLearnRefusalsArePermanentOrRetried": {
+        "result": "PASS",
+        "seconds": 0.19
+      },
+      "TestRoomRosterLearnsCredentialsApartFromCardsAndSkipsFailingEntries": {
+        "result": "PASS",
+        "seconds": 0.42
+      },
+      "TestCheckLeafBindsIdentityAndKey": {
+        "result": "PASS",
+        "seconds": 0.0
+      }
+    },
+    "log_sha256": "b6709acb79dbf5b7e6cbce037849be24014b81902d8369fe90975a368cfa661f",
+    "restored": "git checkout of the mutated file; the tree was clean afterwards"
+  },
+  "finding": "make verify does not run the six messenger/pkg/daemon tests above: they skip unless TOS_OPENMLS_DRIVER is set, and messenger-test-openmls sets it only for -run OpenMLS in pkg/group, pkg/eventlog and pkg/mlslab (messenger-test-roomtest runs only ^TestRoomTest in pkg/daemon). This record runs them with the driver and fails on any skip.",
+  "result": "ALL PASS"
+}
