@@ -76,12 +76,17 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 		receipt.Body.AuthorizedClaimAdmissionReceiptDigest != claimDigest {
 		return source, errors.New("claim decision fallback claim admission reference differs from the carried receipt")
 	}
+	// The head's state revision and round counts as its predecessor produced
+	// them; initial_reviewing has no predecessor and no consumed rounds.
+	var headStateRevision, headChallengeRounds, headNonterminalRounds uint64
+	consumesNonterminalRound := false
 	switch variant.SourceClaimState {
 	case "initial_reviewing":
 		if variant.CurrentDecisionAdmissionReceiptDigest != "" || variant.CurrentClaimStateTransitionReceiptDigest != "" ||
 			receipt.CurrentDecisionAdmissionProof != nil || receipt.PredecessorClaimStateTransitionReceipt != nil {
 			return source, errors.New("initial fallback carries a predecessor head")
 		}
+		headStateRevision = variant.SourceClaimStateRevision
 	case "disputed", "evidence_required":
 		if variant.CurrentClaimStateTransitionReceiptDigest != "" || receipt.PredecessorClaimStateTransitionReceipt != nil {
 			return source, errors.New("nonterminal fallback carries a transition head")
@@ -94,7 +99,16 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 			proof.ReceiptEnvelopeDigest != variant.CurrentDecisionAdmissionReceiptDigest {
 			return source, errors.New("nonterminal fallback decision proof differs from its reference")
 		}
+		// No transition has reopened the revision epoch the current decision
+		// froze, so the claim admission is still the one that decision saw.
+		if proof.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest != claimDigest {
+			return source, errors.New("nonterminal fallback decision proof stands on another claim admission")
+		}
 		source.currentDecision = proof
+		headStateRevision = proof.ReceiptBody.AdmittedClaimStateRevision
+		headChallengeRounds = proof.ReceiptBody.ChallengeRoundsUsedAfter
+		headNonterminalRounds = proof.ReceiptBody.NonterminalRoundsUsedAfter
+		consumesNonterminalRound = true
 	case "reviewing_after_challenge", "reviewing_after_nonterminal_response":
 		if receipt.CurrentDecisionAdmissionProof != nil {
 			return source, errors.New("reviewing fallback carries its current decision proof outside its transition receipt")
@@ -112,8 +126,32 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 		}
 		source.transition = transition
 		source.currentDecision = &transition.DecisionAdmissionProof
+		headStateRevision = transition.Body.ResultingClaimStateRevision
+		headChallengeRounds = transition.Body.ChallengeRoundsUsedAfter
+		headNonterminalRounds = transition.Body.NonterminalRoundsUsedAfter
 	default:
 		return source, errors.New("claim decision fallback source state is not registered")
+	}
+	if variant.SourceClaimStateRevision != headStateRevision {
+		return source, errors.New("claim decision fallback source state revision differs from its head")
+	}
+	if variant.ExpectedChallengeRoundsUsed != headChallengeRounds ||
+		variant.ExpectedNonterminalRoundsUsed != headNonterminalRounds ||
+		receipt.Body.ChallengeRoundsUsedBefore != headChallengeRounds ||
+		receipt.Body.NonterminalRoundsUsedBefore != headNonterminalRounds {
+		return source, errors.New("claim decision fallback round counts differ from its head")
+	}
+	wantNonterminalAfter := headNonterminalRounds
+	if consumesNonterminalRound {
+		next, fits := checkedDurationAddV1(headNonterminalRounds, 1)
+		if !fits || next > terms.ClaimClosureCapacity.MaximumNonterminalRoundsPerClaim {
+			return source, errors.New("claim decision fallback exceeds its reserved nonterminal rounds")
+		}
+		wantNonterminalAfter = next
+	}
+	if receipt.Body.ChallengeRoundsUsedAfter != headChallengeRounds ||
+		receipt.Body.NonterminalRoundsUsedAfter != wantNonterminalAfter {
+		return source, errors.New("claim decision fallback round consumption is invalid")
 	}
 	descriptor := variant.LateFilingCloseReceiptDescriptor
 	if descriptor == nil {
@@ -129,8 +167,38 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 	if err != nil {
 		return source, err
 	}
+	if err := bindLateFilingCloseToClaimAdmissionV1(filing, receipt.AuthorizedClaimAdmissionReceipt); err != nil {
+		return source, err
+	}
 	source.lateFilingClose = &filing
 	return source, nil
+}
+
+// bindLateFilingCloseToClaimAdmissionV1 requires the late filing close and the
+// claim admission to stand on the same coverage and activation: the claim
+// admission request carries the activation, and the filing close is later
+// verified against the offer its own copy of that activation carries.
+func bindLateFilingCloseToClaimAdmissionV1(filing AuthorizedClaimFilingCloseReceiptV1,
+	claimAdmission AuthorizedClaimAdmissionReceiptV1) error {
+	claim := claimAdmission.AuthorizedClaimIngressReceipt.AuthorizedClaim
+	if filing.AuthorizedActivationEvidence == nil {
+		return errors.New("late fallback filing receipt lacks activation evidence")
+	}
+	if filing.Body.CoverageAgreementBodyDigest != claim.Body.CoverageAgreementBodyDigest ||
+		filing.Body.CoverageObligationID != claim.Body.CoverageObligationID {
+		return errors.New("late fallback filing-close receipt belongs to another coverage")
+	}
+	var submission ClaimSubmissionActionBodyV1
+	if guarantorCodec.Unmarshal(claimAdmission.StageActionAdmissionEvidence.CanonicalRequest, &submission) != nil {
+		return errors.New("late fallback claim admission request is undecodable")
+	}
+	admittedActivation, admittedErr := CoverageActivationEvidenceDigestV1(
+		submission.AuthorityInstanceEffect.AuthorizedCoverageActivationEvidence)
+	filingActivation, filingErr := CoverageActivationEvidenceDigestV1(*filing.AuthorizedActivationEvidence)
+	if admittedErr != nil || filingErr != nil || admittedActivation != filingActivation {
+		return errors.New("late fallback filing-close receipt stands on another activation")
+	}
+	return nil
 }
 
 // resolveLateFilingCloseReceiptV1 retrieves the one late filing-close receipt
@@ -216,27 +284,9 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	lateRecovery := source.lateFilingClose != nil
 	lateFilingDigest := ""
 	if lateRecovery {
+		// Coverage and activation were bound to the claim admission with the
+		// references; the filing close is now verified against its offer.
 		filing := *source.lateFilingClose
-		if filing.AuthorizedActivationEvidence == nil {
-			return errors.New("late fallback filing receipt lacks activation evidence")
-		}
-		if filing.Body.CoverageAgreementBodyDigest != claim.Body.CoverageAgreementBodyDigest ||
-			filing.Body.CoverageObligationID != claim.Body.CoverageObligationID {
-			return errors.New("late fallback filing-close receipt belongs to another coverage")
-		}
-		// The filing close and the claim admission must stand on the same
-		// activation: the claim admission request carries it, and the filing
-		// close is verified against the offer its own copy carries.
-		var submission ClaimSubmissionActionBodyV1
-		if guarantorCodec.Unmarshal(claimAdmission.StageActionAdmissionEvidence.CanonicalRequest, &submission) != nil {
-			return errors.New("late fallback claim admission request is undecodable")
-		}
-		admittedActivation, admittedErr := CoverageActivationEvidenceDigestV1(
-			submission.AuthorityInstanceEffect.AuthorizedCoverageActivationEvidence)
-		filingActivation, filingErr := CoverageActivationEvidenceDigestV1(*filing.AuthorizedActivationEvidence)
-		if admittedErr != nil || filingErr != nil || admittedActivation != filingActivation {
-			return errors.New("late fallback filing-close receipt stands on another activation")
-		}
 		offer, offerErr := extractFirmOfferFromAcceptanceV1(filing.AuthorizedActivationEvidence.AuthorizedAcceptanceReceipt)
 		if offerErr != nil || VerifyClaimFilingCloseReceiptV1(filing, offer, agreementVerifier,
 			authorityResolver, fenceResolver, now) != nil {
@@ -387,8 +437,7 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		body.DecisionSequence != wantSequence || body.DecisionRevision != 1 || body.DecisionPath != wantPath ||
 		body.PriorClaimState != wantPriorState || body.AdmittedClaimState != target || body.AdmittedClaimStateRevision != body.PriorClaimStateRevision+1 ||
 		body.AdmittedCoverageRevision != body.PriorCoverageRevision+1 || body.PriorCoverageEndCommitmentDigest != endDigest ||
-		body.ResultingCoverageEndCommitmentDigest != endDigest || body.ChallengeRoundsUsedAfter != body.ChallengeRoundsUsedBefore ||
-		body.NonterminalRoundsUsedAfter != body.NonterminalRoundsUsedBefore || body.AuthorizedActionDigest != actionDigest ||
+		body.ResultingCoverageEndCommitmentDigest != endDigest || body.AuthorizedActionDigest != actionDigest ||
 		body.StableActionID != receipt.StageActionAdmissionEvidence.AuthorizedAction.StableActionID ||
 		body.ExactRequestDigest != receipt.StageActionAdmissionEvidence.AuthorizedAction.ExactRequestDigest ||
 		body.WriterGeneration != receipt.StageActionAdmissionEvidence.AuthorizedAction.WriterGeneration ||

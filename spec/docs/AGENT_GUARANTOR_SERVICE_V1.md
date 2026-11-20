@@ -6225,12 +6225,14 @@ authorized receipt carrying them would sign over an object no check reads.
 **Fallback source references.** The fallback variant names its source head by
 reference only, so the request stays a few kilobytes and the admission chain is
 never present twice. It has at most four references, each resolved to exactly
-one object, and nothing a resolved object itself references is followed: a
-compact proof's optional complete-receipt retrieval only compares digests. The
+one object, and nothing a resolved object itself references is followed. The
 verification work per fallback receipt is therefore constant: one claim
-admission, at most one transition receipt or one decision proof, and at most
-one retrieval of a late filing-close receipt. Before any signature is checked,
-the verifier binds the references:
+admission, at most one transition receipt or one decision proof, at most one
+retrieval of a late filing-close receipt, and at most one optional retrieval of
+the current decision's complete receipt through its compact proof's descriptor
+(required for `independently-enforceable`). That complete receipt is only
+decoded and compared by digest and seal; its own references are not resolved.
+Before any signature is checked, the verifier binds the references:
 
 | reference | carried by | rule |
 | --- | --- | --- |
@@ -6247,6 +6249,29 @@ duplicated, or mismatched object fails before any signature is checked. The
 source head (`ClaimDecisionSourceHeadV1`) takes its digests from these
 references; its late filing-close digest is the descriptor's `content_digest`.
 
+The same step binds the source head's counters to the predecessor that
+produced it, so the request cannot name a state revision or round count the
+current head does not have:
+
+| source state | predecessor | `source_claim_state_revision` equals | `expected_challenge_rounds_used` / `expected_nonterminal_rounds_used` equal |
+| --- | --- | --- | --- |
+| `initial_reviewing` | none | (the receipt body's `prior_claim_state_revision`, as for every path) | `0` / `0` |
+| `evidence_required`, `disputed` | `current_decision_admission_proof` | its body's `admitted_claim_state_revision` | its body's `challenge_rounds_used_after` / `nonterminal_rounds_used_after` |
+| both reviewing states | `predecessor_claim_state_transition_receipt` | its body's `resulting_claim_state_revision` | its body's `challenge_rounds_used_after` / `nonterminal_rounds_used_after` |
+
+The receipt body's `challenge_rounds_used_before` and
+`nonterminal_rounds_used_before` equal the request's expected counts. The
+challenge count never changes. From `evidence_required` or `disputed`, on the
+ordinary and the late path alike, the fallback consumes the nonterminal round
+it closes: `nonterminal_rounds_used_after = nonterminal_rounds_used_before + 1`,
+no larger than `maximum_nonterminal_rounds_per_claim`. Every other source state
+leaves the nonterminal count unchanged. From `evidence_required` or
+`disputed` the current decision froze the revision epoch and no transition has
+reopened it, so the proof's `authorized_claim_admission_receipt_digest` equals
+the fallback's claim admission digest. A reviewing head is not bound this way:
+its transition may open the next epoch, and a revision admitted in that epoch
+legitimately changes the claim admission.
+
 The late filing-close descriptor names
 `application/vnd.tos.service.agent-guarantor-claim-filing-close.v1+cbor`, the
 Agreement's `claim_admission_profile` digest as `retrieval_policy_digest`, and
@@ -6259,8 +6284,8 @@ not `content_digest` fails closed. The receipt body's
 `late_filing_close_receipt_digest` equals `content_digest` exactly for late
 recovery and is absent otherwise. The resolved filing-close receipt must belong
 to the same Agreement and obligation, and its activation evidence must have the
-digest of the activation evidence carried by the verified claim admission
-request. Carrying the filing-close receipt instead would repeat that
+digest of the activation evidence carried by the claim admission request; both
+checks run in the same binding step, before any signature is checked. Carrying the filing-close receipt instead would repeat that
 activation evidence, which already sits inside the claim admission receipt, and
 put the worst late-recovery receipt over the ceiling (section 9.1).
 

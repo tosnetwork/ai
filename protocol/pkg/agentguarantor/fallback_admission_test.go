@@ -129,8 +129,26 @@ func worstCaseReviewingLateFallback(t *testing.T, terms CoverageTermsV1) fallbac
 	shape.variant.CurrentClaimStateTransitionReceiptDigest = transitionDigest
 	shape.variant.LateFilingCloseReceiptDescriptor = &descriptor
 	shape.receipt.Body.LateFilingCloseReceiptDigest = descriptor.ContentDigest
+	// The source head is the transition's resulting state and counts.
+	head := transition.Body
+	setFallbackHead(&shape, head.ResultingClaimStateRevision, head.ChallengeRoundsUsedAfter, head.NonterminalRoundsUsedAfter, false)
 	shape.setRequest(t)
 	return shape
+}
+
+// setFallbackHead aligns the request and receipt body with the head's state
+// revision and round counts; consumes adds the nonterminal round a fallback
+// from evidence_required or disputed closes.
+func setFallbackHead(shape *fallbackShape, stateRevision, challengeRounds, nonterminalRounds uint64, consumes bool) {
+	shape.variant.SourceClaimStateRevision = stateRevision
+	shape.receipt.Body.PriorClaimStateRevision = stateRevision
+	shape.receipt.Body.AdmittedClaimStateRevision = stateRevision + 1
+	shape.variant.ExpectedChallengeRoundsUsed, shape.variant.ExpectedNonterminalRoundsUsed = challengeRounds, nonterminalRounds
+	shape.receipt.Body.ChallengeRoundsUsedBefore, shape.receipt.Body.ChallengeRoundsUsedAfter = challengeRounds, challengeRounds
+	shape.receipt.Body.NonterminalRoundsUsedBefore, shape.receipt.Body.NonterminalRoundsUsedAfter = nonterminalRounds, nonterminalRounds
+	if consumes {
+		shape.receipt.Body.NonterminalRoundsUsedAfter = nonterminalRounds + 1
+	}
 }
 
 // worstCaseNonterminalLateFallback is late recovery from a disputed head: the
@@ -140,11 +158,17 @@ func worstCaseNonterminalLateFallback(t *testing.T, terms CoverageTermsV1) fallb
 	t.Helper()
 	shape := worstCaseReviewingLateFallback(t, terms)
 	proof := shape.receipt.PredecessorClaimStateTransitionReceipt.DecisionAdmissionProof
+	// The disputed decision froze the epoch, so it stands on the same claim
+	// admission as the fallback.
+	proof.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest = shape.variant.AuthorizedClaimAdmissionReceiptDigest
+	proof.ReceiptBody.AdmittedClaimState = "disputed"
 	shape.receipt.PredecessorClaimStateTransitionReceipt = nil
 	shape.receipt.PriorPendingApplicationToken = nil
 	shape.receipt.CurrentDecisionAdmissionProof = &proof
 	shape.variant.SourceClaimState = "disputed"
 	shape.variant.CurrentClaimStateTransitionReceiptDigest = ""
+	head := proof.ReceiptBody
+	setFallbackHead(&shape, head.AdmittedClaimStateRevision, head.ChallengeRoundsUsedAfter, head.NonterminalRoundsUsedAfter, true)
 	shape.setRequest(t)
 	return shape
 }
@@ -263,13 +287,31 @@ func TestWorstCaseFallbackReceiptsFitWithMargin(t *testing.T) {
 	}
 }
 
-// fakeFilingCloseReceipt is a canonically encodable filing-close receipt
-// whose content only needs to be resolvable and digestible.
+// claimAdmissionActivation is the activation evidence the receipt's claim
+// admission request carries.
+func claimAdmissionActivation(t *testing.T, receipt AuthorizedClaimDecisionAdmissionReceiptV1) AuthorizedCoverageActivationEvidenceV1 {
+	t.Helper()
+	var submission ClaimSubmissionActionBodyV1
+	if err := Unmarshal(receipt.AuthorizedClaimAdmissionReceipt.StageActionAdmissionEvidence.CanonicalRequest, &submission); err != nil {
+		t.Fatal(err)
+	}
+	return submission.AuthorityInstanceEffect.AuthorizedCoverageActivationEvidence
+}
+
+// fakeFilingCloseReceipt is a canonically encodable filing-close receipt on
+// the receipt's coverage and activation; only its binding fields are real.
 func fakeFilingCloseReceipt(t *testing.T, receipt AuthorizedClaimDecisionAdmissionReceiptV1, root string) (AuthorizedClaimFilingCloseReceiptV1, []byte, string) {
 	t.Helper()
+	activation := claimAdmissionActivation(t, receipt)
 	filing := AuthorizedClaimFilingCloseReceiptV1{Body: ClaimFilingCloseReceiptBodyV1{SchemaVersion: 1,
-		CoverageAgreementBodyDigest: receipt.Body.CoverageAgreementBodyDigest, FrozenClaimAdmissionLogRoot: root},
-		Authorizations: receipt.Authorizations[:1]}
+		CoverageAgreementBodyDigest: receipt.Body.CoverageAgreementBodyDigest,
+		CoverageObligationID:        receipt.Body.CoverageObligationID, FrozenClaimAdmissionLogRoot: root},
+		AuthorizedActivationEvidence: &activation, Authorizations: receipt.Authorizations[:1]}
+	return encodeFilingClose(t, filing)
+}
+
+func encodeFilingClose(t *testing.T, filing AuthorizedClaimFilingCloseReceiptV1) (AuthorizedClaimFilingCloseReceiptV1, []byte, string) {
+	t.Helper()
 	wire, err := Canonical(filing)
 	if err != nil {
 		t.Fatal(err)
@@ -338,6 +380,28 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		}
 	}
 
+	// lateFiling re-points a late shape at a changed filing-close receipt that
+	// the resolver holds, so only the binding under test can refuse it.
+	lateFiling := func(change func(*AuthorizedClaimFilingCloseReceiptV1)) func(*fallbackShape) {
+		return func(shape *fallbackShape) {
+			filing, _, _ := fakeFilingCloseReceipt(t, shape.receipt, sizeTestDigest("7"))
+			change(&filing)
+			_, wire, digest := encodeFilingClose(t, filing)
+			resolver.content[digest] = wire
+			descriptor := lateFilingDescriptor(terms, digest, uint64(len(wire)))
+			shape.variant.LateFilingCloseReceiptDescriptor = &descriptor
+			shape.receipt.Body.LateFilingCloseReceiptDigest = digest
+			shape.setRequest(t)
+		}
+	}
+	// withProof changes a private copy of the carried current-decision proof.
+	withProof := func(change func(*ClaimDecisionAdmissionReceiptProofV1)) func(*fallbackShape) {
+		return func(shape *fallbackShape) {
+			proof := *shape.receipt.CurrentDecisionAdmissionProof
+			change(&proof)
+			shape.receipt.CurrentDecisionAdmissionProof = &proof
+		}
+	}
 	type mutation struct {
 		shape  string
 		change func(*fallbackShape)
@@ -423,6 +487,61 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 			shape.receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("2")
 			shape.setRequest(t)
 		}, "late filing-close receipt is unavailable"},
+		"late filing close on another activation": {"reviewing late", lateFiling(func(filing *AuthorizedClaimFilingCloseReceiptV1) {
+			activation := *filing.AuthorizedActivationEvidence
+			activation.Body.ActivatedAtUnix++
+			filing.AuthorizedActivationEvidence = &activation
+		}), "stands on another activation"},
+		"late filing close on another obligation": {"disputed late", lateFiling(func(filing *AuthorizedClaimFilingCloseReceiptV1) {
+			filing.Body.CoverageObligationID = "obligation:other"
+		}), "belongs to another coverage"},
+		"late filing close without activation": {"reviewing late", lateFiling(func(filing *AuthorizedClaimFilingCloseReceiptV1) {
+			filing.AuthorizedActivationEvidence = nil
+		}), "lacks activation evidence"},
+		"disputed proof on another claim admission": {"disputed in window", withProof(func(proof *ClaimDecisionAdmissionReceiptProofV1) {
+			proof.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest = sizeTestDigest("1")
+		}), "stands on another claim admission"},
+		"disputed state revision": {"disputed in window", func(shape *fallbackShape) {
+			shape.variant.SourceClaimStateRevision++
+			shape.setRequest(t)
+		}, "source state revision differs from its head"},
+		"reviewing state revision": {"reviewing in window", func(shape *fallbackShape) {
+			shape.variant.SourceClaimStateRevision++
+			shape.setRequest(t)
+		}, "source state revision differs from its head"},
+		"reviewing expected challenge rounds": {"reviewing in window", func(shape *fallbackShape) {
+			shape.variant.ExpectedChallengeRoundsUsed++
+			shape.setRequest(t)
+		}, "round counts differ from its head"},
+		"disputed expected nonterminal rounds": {"disputed in window", func(shape *fallbackShape) {
+			shape.variant.ExpectedNonterminalRoundsUsed++
+			shape.setRequest(t)
+		}, "round counts differ from its head"},
+		"initial expected rounds": {"initial", func(shape *fallbackShape) {
+			shape.variant.ExpectedNonterminalRoundsUsed = 1
+			shape.setRequest(t)
+		}, "round counts differ from its head"},
+		"receipt rounds before": {"reviewing in window", func(shape *fallbackShape) {
+			shape.receipt.Body.NonterminalRoundsUsedBefore++
+		}, "round counts differ from its head"},
+		"disputed does not consume its round": {"disputed in window", func(shape *fallbackShape) {
+			shape.receipt.Body.NonterminalRoundsUsedAfter = shape.receipt.Body.NonterminalRoundsUsedBefore
+		}, "round consumption is invalid"},
+		"reviewing consumes a round": {"reviewing in window", func(shape *fallbackShape) {
+			shape.receipt.Body.NonterminalRoundsUsedAfter = shape.receipt.Body.NonterminalRoundsUsedBefore + 1
+		}, "round consumption is invalid"},
+		"challenge count changes": {"initial", func(shape *fallbackShape) {
+			shape.receipt.Body.ChallengeRoundsUsedAfter = shape.receipt.Body.ChallengeRoundsUsedBefore + 1
+		}, "round consumption is invalid"},
+		"disputed past its reserved rounds": {"disputed in window", func(shape *fallbackShape) {
+			maximum := terms.ClaimClosureCapacity.MaximumNonterminalRoundsPerClaim
+			withProof(func(proof *ClaimDecisionAdmissionReceiptProofV1) {
+				proof.ReceiptBody.NonterminalRoundsUsedAfter = maximum
+			})(shape)
+			head := shape.receipt.CurrentDecisionAdmissionProof.ReceiptBody
+			setFallbackHead(shape, head.AdmittedClaimStateRevision, head.ChallengeRoundsUsedAfter, head.NonterminalRoundsUsedAfter, true)
+			shape.setRequest(t)
+		}, "exceeds its reserved nonterminal rounds"},
 	}
 	for name, test := range mutations {
 		shape := shapes[test.shape]
@@ -435,7 +554,7 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		test.change(&shape)
 		err := verifyFallbackShape(shape, terms, resolver)
 		if err == nil || !strings.Contains(err.Error(), test.want) {
-			t.Fatalf("%s: got %v, want an error containing %q", name, err, test.want)
+			t.Errorf("%s: got %v, want an error containing %q", name, err, test.want)
 		}
 	}
 }
