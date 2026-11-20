@@ -545,6 +545,18 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		"late candidate on another claim admission": {"reviewing after a late candidate", withTransition(func(transition *AuthorizedClaimStateTransitionReceiptV1) {
 			transition.DecisionAdmissionProof.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest = sizeTestDigest("1")
 		}), "late-recovery candidate stands on another claim admission"},
+		"second late recovery naming the candidate's filing close": {"reviewing after a late candidate", func(shape *fallbackShape) {
+			descriptor := lateFilingDescriptor(terms, lateCandidateFilingDigest, 1024)
+			shape.variant.LateFilingCloseReceiptDescriptor = &descriptor
+			shape.receipt.Body.DecisionPath = "late_recovery_terminal_fallback"
+			shape.receipt.AuthorizedClaimDecision.Body.DecisionPath = "late_recovery_terminal_fallback"
+			shape.setRequest(t)
+		}, "late recovery happens once per claim"},
+		"second late recovery naming another filing close": {"reviewing after a late candidate", lateFiling(func(*AuthorizedClaimFilingCloseReceiptV1) {}),
+			"late recovery happens once per claim"},
+		"late recovery from a head already on the late path": {"disputed late", withProof(func(proof *ClaimDecisionAdmissionReceiptProofV1) {
+			proof.ReceiptBody.LateFilingCloseReceiptDigest = lateCandidateFilingDigest
+		}), "late recovery happens once per claim"},
 		"late candidate with a different cut": {"reviewing after a late candidate", func(shape *fallbackShape) {
 			shape.receipt.ClaimRevisionIngressCutProof.IngressCutoffUnix++
 		}, "must reuse its head's frozen revision epoch and cut"},

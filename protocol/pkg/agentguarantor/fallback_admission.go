@@ -175,8 +175,13 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 		}
 		return source, nil
 	}
-	if receipt.Body.LateFilingCloseReceiptDigest != descriptor.ContentDigest ||
-		lateMarker != "" && lateMarker != descriptor.ContentDigest {
+	// Late recovery happens at most once per claim: a head already on the
+	// late-recovery path ends only through its successor or the fallback at
+	// the successor deadline.
+	if lateMarker != "" || source.currentDecision != nil && source.currentDecision.ReceiptBody.LateFilingCloseReceiptDigest != "" {
+		return source, errors.New("late fallback from a head already on the late-recovery path: late recovery happens once per claim")
+	}
+	if receipt.Body.LateFilingCloseReceiptDigest != descriptor.ContentDigest {
 		return source, errors.New("late fallback receipt names a filing-close receipt other than its request")
 	}
 	filing, err := resolveLateFilingCloseReceiptV1(*descriptor, terms, authorityResolver)

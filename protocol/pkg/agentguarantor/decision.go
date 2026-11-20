@@ -683,7 +683,8 @@ func VerifyClaimDecisionApplicationReceiptV1(receipt AuthorizedClaimDecisionAppl
 	}
 	wantSet, err := MaterializeClaimPayout(bound.ActionOwnerID, bound.ActionAgentID,
 		receipt.StageActionAdmissionEvidence.AuthorizedAction.MandateDigest, terms.PayoutTemplate.AgreementObligationID,
-		terms, decision, transitionDigest, transition.Body.TransitionedAtUnix, request.ExpectedNextPayoutSequence)
+		terms, decision, transitionDigest, transition.Body.TransitionedAtUnix, request.ExpectedNextPayoutSequence,
+		OnLateRecoveryPathV1(admission.ReceiptBody))
 	if err != nil || !equalCanonical(wantSet, receipt.MaterializedPayoutObligationSet) {
 		return errors.New("decision application payout materialization differs")
 	}

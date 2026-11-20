@@ -367,16 +367,56 @@ func TestClaimValidationAndPayoutMaterialization(t *testing.T) {
 		ChallengeWindowSeconds: 600, DecidedAtUnix: terms.CoverageStartsAtUnix + 60,
 		ExpiresAtUnix: terms.CoverageStartsAtUnix + 1200}}
 	set, err := MaterializeClaimPayout("owner:guarantor", "agent:guarantor", testDigest("8"),
-		"obligation:payout", terms, decision, testDigest("9"), terms.CoverageStartsAtUnix+100, 1)
+		"obligation:payout", terms, decision, testDigest("9"), terms.CoverageStartsAtUnix+100, 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(set.Obligations) != 1 || set.Obligations[0].Amount.AmountAtomic != "500" || set.FirstPayoutSequence != 1 {
 		t.Fatalf("unexpected payout materialization: %+v", set)
 	}
+
+	// The payout ceiling follows the decision's path: the late-recovery
+	// deadline on the late-recovery path and the terminal resolution deadline
+	// otherwise, each inclusive.
+	if terms.LateRecoveryTerminalDeadlineUnix == 0 {
+		terms.LateIngressRecoveryDeadlineUnix = terms.TerminalResolutionDeadlineUnix + 1800
+		terms.LateRecoveryTerminalDeadlineUnix = terms.TerminalResolutionDeadlineUnix + 3600
+	}
+	if terms.LateRecoveryTerminalDeadlineUnix <= terms.TerminalResolutionDeadlineUnix {
+		t.Fatalf("test terms leave no late-recovery window: %d <= %d",
+			terms.LateRecoveryTerminalDeadlineUnix, terms.TerminalResolutionDeadlineUnix)
+	}
+	expiresAfter := decision.Body.PayoutLines[0].ExpiresAfterTerminalCloseSeconds
+	ceilingCases := []struct {
+		name    string
+		late    bool
+		closeAt uint64
+		accept  bool
+	}{
+		{"ordinary payout at the terminal resolution deadline", false, terms.TerminalResolutionDeadlineUnix - expiresAfter, true},
+		{"ordinary payout one second after it", false, terms.TerminalResolutionDeadlineUnix - expiresAfter + 1, false},
+		{"late payout after the terminal resolution deadline", true, terms.TerminalResolutionDeadlineUnix - expiresAfter + 1, true},
+		{"late payout at the late-recovery deadline", true, terms.LateRecoveryTerminalDeadlineUnix - expiresAfter, true},
+		{"late payout one second after it", true, terms.LateRecoveryTerminalDeadlineUnix - expiresAfter + 1, false},
+	}
+	for _, test := range ceilingCases {
+		_, err := MaterializeClaimPayout("owner:guarantor", "agent:guarantor", testDigest("8"),
+			"obligation:payout", terms, decision, testDigest("9"), test.closeAt, 1, test.late)
+		if (err == nil) != test.accept {
+			t.Errorf("%s: accept=%v, got %v", test.name, test.accept, err)
+		}
+	}
+	late := decision
+	late.Body.DecisionPath = "late_recovery_terminal_fallback"
+	if _, err := MaterializeClaimPayout("owner:guarantor", "agent:guarantor", testDigest("8"),
+		"obligation:payout", terms, late, testDigest("9"), terms.CoverageStartsAtUnix+100, 1, false); err == nil ||
+		!strings.Contains(err.Error(), "off the late-recovery path") {
+		t.Fatalf("a late-recovery decision materialized off its path: %v", err)
+	}
+
 	decision.Body.PayoutLines[0].Amount.AmountAtomic = "499"
 	if _, err := MaterializeClaimPayout("owner:guarantor", "agent:guarantor", testDigest("8"),
-		"obligation:payout", terms, decision, testDigest("9"), terms.CoverageStartsAtUnix+100, 1); err == nil {
+		"obligation:payout", terms, decision, testDigest("9"), terms.CoverageStartsAtUnix+100, 1, false); err == nil {
 		t.Fatal("decision with inconsistent line sum was accepted")
 	}
 }
