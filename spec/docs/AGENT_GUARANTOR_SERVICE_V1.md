@@ -1008,7 +1008,7 @@ types:
 | `initial_terminal_fallback` from the measured history: request | 1,210 (1,616 base64 characters) |
 | `initial_terminal_fallback` from the measured history: receipt | 1,069,384 |
 | worst case, `late_recovery_terminal_fallback` from a `reviewing` head over the worst-case history above (transition receipt with its decision proof, prior pending token, late filing-close descriptor, every optional field): receipt | 1,512,852 |
-| the same from a `disputed` head (current decision compact proof instead of the transition receipt): receipt | 1,483,042 |
+| the same from a `disputed` head (current decision compact proof instead of the transition receipt; frozen-epoch reuse): receipt | 1,483,046 |
 | worst-case fallback request | 1,782 |
 | for comparison: the smallest receipt whose request embeds the claim admission receipt instead | 2,451,938 |
 
@@ -5994,7 +5994,9 @@ the applicable challenge or nonterminal round, so the counters are unchanged.
 `initial_terminal_fallback` changes neither counter. A
 `late_recovery_terminal_fallback` deterministically consumes any current
 nonterminal/reviewing head into one challengeable candidate without exceeding
-the already reserved counters and forbids another nonterminal result. All three
+the already reserved counters and forbids another nonterminal result; from an
+`evidence_required` or `disputed` head it, too, consumes exactly one nonterminal
+round. All three
 fallback paths use
 the exact `claim_closure_capacity.terminal_fallback.fallback_profile`, authority
 set, quorum, and deterministic derivation instead of the ordinary
@@ -6076,7 +6078,9 @@ ClaimRevisionEpochExpectationV1 {
   claim_id
   revision_epoch
   revision_ingress_log_id
-  expected_epoch_state               # open, or frozen only for late recovery
+  expected_epoch_state               # open: this admission freezes the epoch (open-to-frozen CAS);
+                                     # frozen: it reuses the frozen epoch and cut of a head that
+                                     # did not reopen revision ingress (section 17.4, frozen-epoch reuse)
   expected_epoch_state_revision
   expected_claim_revision
 }
@@ -6359,7 +6363,34 @@ challenge transition does not reopen revision ingress and its one successor
 uses `expected_epoch_state = frozen`, the exact unchanged epoch/state revision,
 and the prior decision receipt's byte-identical cut proof. That exception may
 neither create another proof nor change high-water, root, claim revision, or
-epoch state. It exists only for a successor to a late-recovery candidate.
+epoch state. Among authorized decisions it exists only for a successor to a
+late-recovery candidate.
+
+**Frozen-epoch reuse by a fallback.** A deterministic fallback whose head did
+not reopen revision ingress has no open epoch to freeze, so it reuses the
+current decision's frozen epoch exactly as the late-recovery successor does.
+This applies to `terminal_fallback` and `late_recovery_terminal_fallback`
+directly from `evidence_required` or `disputed` (the current decision froze the
+epoch and no transition followed), and to a fallback from
+`reviewing_after_challenge` whose challenged decision is a
+`late_recovery_terminal_fallback` candidate (that challenge does not reopen
+ingress). For these paths the request's `claim_revision_epoch_expectation` has
+`expected_epoch_state = frozen`, `revision_epoch` equal to the current
+decision's `frozen_revision_epoch`, and `expected_epoch_state_revision` equal
+to its `frozen_revision_epoch_state_revision`; the receipt's
+`claim_revision_ingress_cut_proof` is byte-identical to the current decision's
+(its digest equals the current decision proof's
+`claim_revision_ingress_cut_proof_digest`); and the receipt body repeats the
+current decision's `frozen_revision_epoch`,
+`prior_revision_epoch_state_revision`, `frozen_revision_epoch_state_revision`,
+`frozen_claim_revision_ingress_high_water` and
+`frozen_claim_revision_ingress_log_root`. The reuse creates no cut, freeze,
+high-water, root, claim revision or epoch-state change. Every other fallback,
+including `initial_terminal_fallback` and a fallback from any other reviewing
+head (whose transition opened the next epoch, which its successor must
+freeze), uses the ordinary open-to-frozen CAS with
+`expected_epoch_state = open`; `frozen` there, or `open` on a reuse path, is
+invalid.
 `challenge_close` accepts only the
 current decision receipt and its authority-produced frozen cut. Timeout, local
 queue absence, an unfrozen expectation, or a caller-supplied/digest-only cut is

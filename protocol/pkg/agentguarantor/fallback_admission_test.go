@@ -17,7 +17,7 @@ const (
 	measuredFallbackReceiptBytes         = 1_069_384
 	measuredEmbeddedFallbackReceiptBytes = 2_451_938
 	worstCaseReviewingFallbackBytes      = 1_512_852
-	worstCaseNonterminalFallbackBytes    = 1_483_042
+	worstCaseNonterminalFallbackBytes    = 1_483_046
 	worstCaseFallbackRequestBytes        = 1_782
 )
 
@@ -162,6 +162,12 @@ func worstCaseNonterminalLateFallback(t *testing.T, terms CoverageTermsV1) fallb
 	// admission as the fallback.
 	proof.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest = shape.variant.AuthorizedClaimAdmissionReceiptDigest
 	proof.ReceiptBody.AdmittedClaimState = "disputed"
+	// It also left the epoch frozen with the cut the fallback reuses.
+	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(shape.receipt.ClaimRevisionIngressCutProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof.ReceiptBody.ClaimRevisionIngressCutProofDigest = cutDigest
 	shape.receipt.PredecessorClaimStateTransitionReceipt = nil
 	shape.receipt.PriorPendingApplicationToken = nil
 	shape.receipt.CurrentDecisionAdmissionProof = &proof
@@ -169,8 +175,49 @@ func worstCaseNonterminalLateFallback(t *testing.T, terms CoverageTermsV1) fallb
 	shape.variant.CurrentClaimStateTransitionReceiptDigest = ""
 	head := proof.ReceiptBody
 	setFallbackHead(&shape, head.AdmittedClaimStateRevision, head.ChallengeRoundsUsedAfter, head.NonterminalRoundsUsedAfter, true)
+	reuseFrozenEpoch(&shape, head)
 	shape.setRequest(t)
 	return shape
+}
+
+// reviewingAfterLateCandidate is a fallback from a reviewing head whose
+// challenged decision was a late-recovery candidate: that challenge left the
+// epoch frozen, so the fallback reuses the candidate's epoch and cut.
+func reviewingAfterLateCandidate(t *testing.T, reviewing fallbackShape) fallbackShape {
+	t.Helper()
+	shape := reviewing
+	transition := *shape.receipt.PredecessorClaimStateTransitionReceipt
+	transition.DecisionAdmissionProof.AuthorizedClaimDecision.Body.DecisionPath = "late_recovery_terminal_fallback"
+	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(shape.receipt.ClaimRevisionIngressCutProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition.DecisionAdmissionProof.ReceiptBody.ClaimRevisionIngressCutProofDigest = cutDigest
+	transitionDigest, err := ClaimStateTransitionReceiptDigestV1(transition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shape.receipt.PredecessorClaimStateTransitionReceipt = &transition
+	shape.variant.CurrentClaimStateTransitionReceiptDigest = transitionDigest
+	reuseFrozenEpoch(&shape, transition.DecisionAdmissionProof.ReceiptBody)
+	shape.setRequest(t)
+	return shape
+}
+
+// reuseFrozenEpoch points a fallback at the frozen epoch its head left: a
+// frozen expectation of that epoch and state revision and the head's
+// unchanged epoch fields. The shapes already carry the head decision's own
+// cut.
+func reuseFrozenEpoch(shape *fallbackShape, head ClaimDecisionAdmissionReceiptBodyV1) {
+	epoch := &shape.variant.ClaimRevisionEpochExpectation
+	epoch.ExpectedEpochState = "frozen"
+	epoch.RevisionEpoch = head.FrozenRevisionEpoch
+	epoch.ExpectedEpochStateRevision = head.FrozenRevisionEpochStateRevision
+	body := &shape.receipt.Body
+	body.FrozenRevisionEpoch, body.PriorRevisionEpochStateRevision = head.FrozenRevisionEpoch, head.PriorRevisionEpochStateRevision
+	body.FrozenRevisionEpochStateRevision = head.FrozenRevisionEpochStateRevision
+	body.FrozenClaimRevisionIngressHighWater = head.FrozenClaimRevisionIngressHighWater
+	body.FrozenClaimRevisionIngressLogRoot = head.FrozenClaimRevisionIngressLogRoot
 }
 
 // checkFallbackFits asserts the bounds every fallback receipt must meet and
@@ -364,6 +411,7 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		shape.setRequest(t)
 		shapes[name] = shape
 	}
+	shapes["reviewing after a late candidate"] = reviewingAfterLateCandidate(t, shapes["reviewing in window"])
 	for name, shape := range shapes {
 		before := *resolver.calls
 		err := verifyFallbackShape(shape, terms, resolver)
@@ -533,6 +581,43 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		"challenge count changes": {"initial", func(shape *fallbackShape) {
 			shape.receipt.Body.ChallengeRoundsUsedAfter = shape.receipt.Body.ChallengeRoundsUsedBefore + 1
 		}, "round consumption is invalid"},
+		"disputed expects an open epoch": {"disputed in window", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.ExpectedEpochState = "open"
+			shape.setRequest(t)
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"disputed cut not byte-identical": {"disputed in window", func(shape *fallbackShape) {
+			shape.receipt.ClaimRevisionIngressCutProof.IngressCutoffUnix++
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"disputed names another epoch": {"disputed late", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.RevisionEpoch++
+			shape.setRequest(t)
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"disputed names another epoch state revision": {"disputed in window", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.ExpectedEpochStateRevision++
+			shape.setRequest(t)
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"disputed moves the frozen high-water": {"disputed in window", func(shape *fallbackShape) {
+			shape.receipt.Body.FrozenClaimRevisionIngressHighWater++
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"disputed refreezes the epoch": {"disputed in window", func(shape *fallbackShape) {
+			shape.receipt.Body.FrozenRevisionEpochStateRevision++
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"late candidate's challenge expects an open epoch": {"reviewing after a late candidate", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.ExpectedEpochState = "open"
+			shape.setRequest(t)
+		}, "must reuse its head's frozen revision epoch and cut"},
+		"initial expects a frozen epoch": {"initial", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.ExpectedEpochState = "frozen"
+			shape.setRequest(t)
+		}, "must freeze the open revision epoch"},
+		"reviewing expects a frozen epoch": {"reviewing in window", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.ExpectedEpochState = "frozen"
+			shape.setRequest(t)
+		}, "must freeze the open revision epoch"},
+		"reviewing reuses an old cut": {"reviewing in window", func(shape *fallbackShape) {
+			shape.variant.ClaimRevisionEpochExpectation.ExpectedEpochStateRevision++
+			shape.setRequest(t)
+		}, "must freeze the open revision epoch"},
 		"disputed past its reserved rounds": {"disputed in window", func(shape *fallbackShape) {
 			maximum := terms.ClaimClosureCapacity.MaximumNonterminalRoundsPerClaim
 			withProof(func(proof *ClaimDecisionAdmissionReceiptProofV1) {
