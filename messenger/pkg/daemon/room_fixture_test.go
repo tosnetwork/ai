@@ -36,6 +36,11 @@ func openMLSDriver(t *testing.T) *group.OpenMLSSidecar {
 	t.Helper()
 	binary := os.Getenv("TOS_OPENMLS_DRIVER")
 	if binary == "" {
+		// make messenger-test-openmls sets the driver and requires it: there
+		// a missing driver fails the test instead of skipping it.
+		if os.Getenv("TOS_OPENMLS_DRIVER_REQUIRED") == "1" {
+			t.Fatal("TOS_OPENMLS_DRIVER is required and not set")
+		}
 		t.Skip("TOS_OPENMLS_DRIVER is set by make messenger-test-openmls")
 	}
 	return &group.OpenMLSSidecar{Command: []string{binary}, Timeout: 20 * time.Second}
