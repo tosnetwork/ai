@@ -4,10 +4,10 @@ How private chat between two OpenFox Agents crosses machines by reusing
 [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) ("relay spec") with no new
 transport, no relay change and no new authority.
 
-**Status: M-R1 ✅ accepted (section 8); M-R2 🟡 live acceptance ALL PASS on
-2026-11-20 (items 1–18), record
-`spec/deployments/messenger-relay-rooms-20261120.json`; items 19–20 pending
-(section 8).**
+**Status: M-R1 ✅ accepted (section 8); M-R2 ✅ accepted on 2026-11-20,
+record `spec/deployments/messenger-relay-rooms-20261120.json` with
+`messenger-relay-rooms-end-20261120.json` (item 19) and
+`local-messenger-relay-rooms-item20-20261120.json` (item 20) (section 8).**
 Section 8 states what each phase's live record must prove; section 9 lists
 the code changes of M-R1 (9.1) and M-R2 (9.2). Citations added for M-R2 refer
 to `tosnetwork/openfox` `main` `edd88e11`.
@@ -960,17 +960,19 @@ sender unlinkability (section 6), multi-device, M0 freeze evidence
 
 ### M-R2: private rooms and invites
 
-**Status: live acceptance ALL PASS on 2026-11-20 (items 1–18); items 19–20
-pending.** Items 1–18 are shown by `messenger-relay-rooms-20261120.json`
+**Status: accepted on 2026-11-20.** Items 1–18 are shown by `messenger-relay-rooms-20261120.json`
 (four machines: A and the fillers D, E and F on a host behind NAT, B and C on
 separate VPSs, C on relay-2's host, the two deployed test relays) and
 `local-messenger-relay-rooms-20261119.json` (one host, namespaces, a local
 relay pair, with the production-cut 6-part object of item 10), both
 described in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`. Items 7, 13 and
-17 are met by the named unit tests in the records' `not_verified`. Items 19
-(room end, live) and 20 (credential storage, unit) are neither run steps of
-these records nor listed in their `not_verified`: M-R2 is accepted only once
-a room-end record and a named-test record for them pass.
+17 are met by the named unit tests in the records' `not_verified`. Item 19
+(room end, live) is shown by `messenger-relay-rooms-end-20261120.json`, a
+targeted live room-end run on the same hosts, relays and pins with A's
+delegation test-shortened, with its local run `re1` recorded inside it.
+Item 20 (credential storage, unit) is shown by
+`local-messenger-relay-rooms-item20-20261120.json` (13 named tests at
+`f5d473a4` and at `main`, with a red control).
 
 Record `messenger-relay-rooms-<date>.json`, same schema, design in section 11.
 Three OpenFox with `tos-messengerd` on three hosts (A behind NAT with no

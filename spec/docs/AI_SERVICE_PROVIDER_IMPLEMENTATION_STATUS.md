@@ -522,11 +522,11 @@ runs as an ordinary user.
 
 ## Messenger relay carriage M-R2: private rooms and invites over the test relays
 
-**Status: live acceptance ALL PASS on 2026-11-20 (items 1–18); items 19–20
-pending.** M-R2 is not accepted until a room-end record (item 19) and a
-named-test record (item 20) pass.
+**Status: accepted on 2026-11-20.** Items 1–18 rest on the two records
+below. Item 19 rests on the room-end record and its local run (end of this
+section). Item 20 rests on the named-test record.
 
-These records are the live acceptance of items 1–18 of milestone M-R2 of
+The two records below are the live acceptance of items 1–18 of milestone M-R2 of
 `MESSENGER_RELAY_CARRIAGE_V1.md` (section 8, design in section 11). A, the
 room's authority, runs with the
 filler joiners D, E and F on a host behind NAT. Members B and C run on two
@@ -653,10 +653,9 @@ Not proven by these records:
 
 - **Item 16, card renewal:** the chat card lifetime has no test setting in
   OpenFox, so card renewal through part 0 is not shown live.
-- **Item 19 (room end, live, D18):** it is not a run step of these records,
-  and it is not listed in their `not_verified`. It is pending a targeted
-  room-end run.
-- **Item 20 (credential storage, unit, 11.8):** this is not part of the live
+- **Item 19 (room end, live, D18):** not a run step of these records; it is
+  shown by the room-end record below.
+- **Item 20 (credential storage, unit, 11.8):** not part of the live
   records. It is covered by the named-test record
   [`local-messenger-relay-rooms-item20-20261120.json`](../deployments/local-messenger-relay-rooms-item20-20261120.json)
   (sha256 `fdde306a560ffa89167c4d8dfb68a300b56759f17a1049ebbd2ebc4b507b11ed`):
@@ -674,6 +673,55 @@ Not proven by these records:
 Also recorded: in the four-machine record, B's and C's processes ran as
 root inside their run scratch directories (`topology.remote_nodes`). In the
 local record every process runs as an ordinary user.
+
+**Item 19, room end (live, D18):**
+[`messenger-relay-rooms-end-20261120.json`](../deployments/messenger-relay-rooms-end-20261120.json)
+(sha256 `d9cd9276aead592ea76e539364026fef5ef2478b81ac2d83ed3bbf992f6c0e4f`,
+sanitized from the run's `evidence.json`, sha256
+`7745a6bf22afe862f0cd1f8c02a3c029f306ccb72f50fb1a964a0ed47b80d8b8`).
+
+- **Run:** 2026-11-20 04:15 to 05:26 UTC, ALL PASS, 132 of 132. The four
+  machines and the two test relays are the same as the four-machine record.
+- **Pins:** ai `f5d473a4` and relay `f8e906ff`, as for the four-machine
+  record; `openfox` scripts at `5ff0099b` (tosnetwork/openfox#71), which add the
+  room-end scenario.
+- **Scenario:** `MR2_ROOM_END=1`. It runs only the steps that build the
+  three-member room, then the room's end. Those setup steps are not this
+  record's evidence for items 1, 2 or 18.
+- **Test-shortened values:** A's Endpoint delegation is 2,400 s, so the room
+  ends at A's leaf-credential expiry. Handshake retention is 1,200 s, skew
+  300 s and the re-deposit interval 600 s.
+- **Local run:** `re1` used the same harness, scenario and settings on one
+  host with a local relay pair. It passed ALL PASS, 109 of 109 (evidence
+  sha256 `dda9aea06eee6b568fd256c34ea0c4564b50f690799877ee07f7b30d2f2702e7`,
+  recorded in `record_provenance.local_run`).
+
+Proven, live:
+
+- All three members hold the same room end, equal to A's delegation expiry.
+- In the last re-deposit interval before end − skew, A's owner's `rooms.add`
+  is refused `room-ended`.
+- From end − skew, room messages of A, B and C are refused `room-ended`, and
+  A deposits no room frame.
+- B's message was sealed before the end, while C's serve was stopped. C
+  received it only after end + skew, and it is a room-ended gap of B at C:
+  relay-acknowledged, never listed, with the owner notice.
+- After end + skew, each of B and C refuses the other's Commit, Welcome and
+  roster with a rejected room ack `room-ended`, and its application object
+  as a room-ended gap, with one owner notice each. The Commit and the
+  application object are well-formed objects of their type. The Welcome and
+  roster are valid only up to the room-object prefix: the receiver judges
+  the room's end from that prefix before anything else of the object, so
+  the refusal shows the end check, not the content checks.
+- After end + handshake retention + skew, A, B and C no longer list the room,
+  and no file of their Messenger state names it.
+
+The validators on V1 and V2 were watched twice:
+
+- **The operator's independent watch** covered 04:05:12 to 05:26:51 UTC in
+  82 lines. V1 and V2 kept their baseline PIDs with 0 restarts, and the last
+  head ages were 1.4 s and 1.6 s. No ALERT or WARN line appeared.
+- **The harness's own guard** took 282 read-only samples and never tripped.
 
 ## Not delivered by these changes
 
