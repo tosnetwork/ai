@@ -21,9 +21,16 @@ var RetiredKinds = []string{
 	"service.receipt.reference",
 }
 
-// RetiredSchemas are payload schema identifiers reserved for the same reason.
-// No codec may emit or accept any of them, under any kind.
+// RetiredSchemas are schema identifiers reserved for the same reason: the
+// escrow-era payload schemas, the on-disk record schemas of the retired
+// economic-execution claim and negotiation snapshot, and the v1 owner-decision
+// envelope whose request layout signed mandate fields. No codec may emit or
+// accept any of them under any kind, and no Messenger source may name one
+// outside this list.
 var RetiredSchemas = []string{
+	"tos.messaging.economic-execution-claim.v1",
+	"tos.messaging.negotiation-state.v1",
+	"tos.messaging.owner-decision.v1",
 	"tos.messaging.payload.negotiation-proposal.v1",
 	"tos.messaging.payload.negotiation-proposal.v2",
 	"tos.messaging.payload.negotiation-proposal.v3",

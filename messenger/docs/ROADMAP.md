@@ -37,7 +37,7 @@ proactive recipient intent. Daemon local API v10 reduces either an explicit
 AgentID or `.tos` name to a finalized AgentID, then owns conversation creation,
 verified device/prekey fan-out, pair-session bootstrap and delivery copies.
 OpenFox no longer selects a direct route. The alias is absent from session,
-conversation, policy, replay, mandate, payment and receipt authority. The
+conversation, policy, replay, payment and receipt authority. The
 HTTPS bootstrap carrier can deliver this path over real TLS, while final native
 route selection and independent deployment evidence remain open. See
 [`DNS_RECIPIENT_CANONICALIZATION.md`](DNS_RECIPIENT_CANONICALIZATION.md) and
