@@ -7011,7 +7011,8 @@
         "fixed_by": "harness cbc638b9 (each sender's envelopes matched against the peer's mailbox listing at each relay, carriage section 7 item 3)"
       }
     ],
-    "local_record_sha256": "563b86a5a3a25a33bdd466b55440704cd1691ab33e37155b27a93fd158616271",
+    "local_record_sha256": "793a91b60cad51c7e05cbc375100f404cf974aaafa833ce6bff6a934eb25c1e1",
+    "failed_attempts_scope": "This index covers the attempts from 2026-11-19 on, from harness 7ce3a1e9 (live5-attempt1) to the passing runs. The earlier runs of 2026-11-17 and 2026-11-18 (local r1-r18, targeted t1-t15 and live live1-live4, harness commits from 4a3d3992 to dc72a69f) are not indexed here: each run's evidence.json is kept with its run directory outside the repository, as these are, and the team memo's M-R2 test report (gate-cd/TEST-REPORT-20261119.md) lists them from r18 (ALL PASS on the earlier item-4 order) on.",
     "source_evidence_sha256": "a71f4de98203ed74b542fd8edaf667bbbbbe03110b7956b613f7d449454c7995"
   },
   "operator_validator_watch": {

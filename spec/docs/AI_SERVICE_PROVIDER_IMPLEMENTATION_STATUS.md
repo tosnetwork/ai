@@ -522,9 +522,12 @@ runs as an ordinary user.
 
 ## Messenger relay carriage M-R2: private rooms and invites over the test relays
 
-**Status: accepted on 2026-11-20.** Items 1–18 rest on the two records
-below. Item 19 rests on the room-end record and its local run (end of this
-section). Item 20 rests on the named-test record.
+**Status: not yet accepted.** The card half of item 16 is pending: card
+renewal under a test-shortened card lifetime is not shown, because OpenFox
+has no setting for that lifetime yet. M-R2 is accepted once a card-renewal
+record passes. Apart from that, items 1–18 rest on the two records below,
+item 19 on the room-end record and its local run (end of this section), and
+item 20 on the named-test record.
 
 The two records below are the live acceptance of items 1–18 of milestone M-R2 of
 `MESSENGER_RELAY_CARRIAGE_V1.md` (section 8, design in section 11). A, the
@@ -537,8 +540,8 @@ acceptance, and it is not Gate O evidence.
 
 | Record | What it proves | Script commit | Result |
 |---|---|---|---|
-| [`messenger-relay-rooms-20261120.json`](../deployments/messenger-relay-rooms-20261120.json) (sha256 `091417111bed01778c57f8459d57da02ac8f4ff25ca01ca4fbbef289d9fb55e2`, sanitized from the run's `evidence.json`, sha256 `a71f4de98203ed74b542fd8edaf667bbbbbe03110b7956b613f7d449454c7995`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e-remote.py`, 2026-11-19 20:15 UTC to 2026-11-20 00:38 UTC. Four machines: A, D, E, F and the chain on a host behind NAT; B on a VPS (validator host V1); C on another VPS (validator host V2), which is also relay-2's host; relay-1 on a further VPS | `openfox` `cbc638b9` (head of tosnetwork/openfox#71; clean tree) | ALL PASS, 208 of 208; `qualifies_as_public_acceptance: false` |
-| [`local-messenger-relay-rooms-20261119.json`](../deployments/local-messenger-relay-rooms-20261119.json) (sha256 `563b86a5a3a25a33bdd466b55440704cd1691ab33e37155b27a93fd158616271`, sanitized from the run's `evidence.json`, sha256 `ec095e2182a9983fb1e08611db3cdd821376a20116c645c798522a33422d6630`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e.sh`, 2026-11-19 17:46 to 19:35 UTC. The same scenario on one host: every node and both relays in separate network namespaces, with a local relay pair. It also carries the production-cut 6-part object (item 10) | `openfox` `cbc638b9` | ALL PASS, 177 of 177; `qualifies_as_public_acceptance: false` |
+| [`messenger-relay-rooms-20261120.json`](../deployments/messenger-relay-rooms-20261120.json) (sha256 `68b3e64b702777319e454575a8a5c81ef2d820623b69767bb09798f30bb4f73c`, sanitized from the run's `evidence.json`, sha256 `a71f4de98203ed74b542fd8edaf667bbbbbe03110b7956b613f7d449454c7995`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e-remote.py`, 2026-11-19 20:15 UTC to 2026-11-20 00:38 UTC. Four machines: A, D, E, F and the chain on a host behind NAT; B on a VPS (validator host V1); C on another VPS (validator host V2), which is also relay-2's host; relay-1 on a further VPS | `openfox` `cbc638b9` (head of tosnetwork/openfox#71; clean tree) | ALL PASS, 208 of 208; `qualifies_as_public_acceptance: false` |
+| [`local-messenger-relay-rooms-20261119.json`](../deployments/local-messenger-relay-rooms-20261119.json) (sha256 `793a91b60cad51c7e05cbc375100f404cf974aaafa833ce6bff6a934eb25c1e1`, sanitized from the run's `evidence.json`, sha256 `ec095e2182a9983fb1e08611db3cdd821376a20116c645c798522a33422d6630`) | `openfox` `scripts/messenger-relay-three-host-rooms-e2e.sh`, 2026-11-19 17:46 to 19:35 UTC. The same scenario on one host: every node and both relays in separate network namespaces, with a local relay pair. It also carries the production-cut 6-part object (item 10) | `openfox` `cbc638b9` | ALL PASS, 177 of 177; `qualifies_as_public_acceptance: false` |
 
 **Commits.** Both runs build `tos-messengerd`, the owner tool and the MLS
 driver from `ai` `f5d473a4` (main, the merge of #93) with clean trees. The
