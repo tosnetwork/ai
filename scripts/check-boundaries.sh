@@ -139,10 +139,16 @@ for platform in host windows darwin; do
     printf '%s\n' "$found" | sed 's/^/  /' >&2
   fi
 done
-unsafe=$(find "$guarantor" -name '*.go' -not -name '*_test.go' -exec grep -nHE '["`](unsafe|C)["`]' {} + || true)
+# The text backstop reads import lines only: a line that holds nothing but an
+# optional import keyword and parenthesis, an optional name, and the quoted
+# path. A string literal "C" or "unsafe" inside a statement is not an import
+# and is allowed.
+unsafe=$(find "$guarantor" -name '*.go' -not -name '*_test.go' -exec grep -nHE \
+  '^[[:space:]]*(import[[:space:]]*(\([[:space:]]*)?)?([A-Za-z_.][A-Za-z0-9_]*[[:space:]]+)?["`](unsafe|C)["`][[:space:]]*\)?[[:space:]]*;?[[:space:]]*(//.*|/\*.*)?$' \
+  {} + || true)
 if [ -n "$unsafe" ]; then
   status=1
-  echo "boundary violation (source text): $guarantor names unsafe or C in a non-test file:" >&2
+  echo "boundary violation (source text): $guarantor imports unsafe or C in a non-test file:" >&2
   printf '%s\n' "$unsafe" | sed 's/^/  /' >&2
 fi
 
