@@ -8,6 +8,58 @@ talk to each other. Finalized TOS account state is the only authority; everythin
 here either specifies that state, reads and relays it, or executes work bound
 by it.
 
+## What it is for
+
+Agents use this repository's protocol and programs to discover, quote, pay
+for, deliver and settle services on the TOS Network. The one commerce profile
+implemented so far is fixed-price software work, paid in native TOS through a
+Service Actor contract. Gateways, relays and catalogs only carry or cache
+data; finalized chain state decides every fact.
+
+## What works today
+
+Status on 2026-11-21. The core development team operated every run below;
+none of them is independent acceptance. The public-network runs reached the
+team's validators through SSH port forwards, not public HTTPS endpoints.
+
+| Capability | In one sentence | Evidence |
+|---|---|---|
+| **Paid software work, end to end** | On the epoch-7 public test network a buyer paid, the provider delivered and withdrew its revenue, and an unanswered purchase was refunded. | [rehearsal](spec/deployments/public-testnet-epoch7-gate-d-rehearsal-20261118.json), [pilot](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json) |
+| **Buying from an MCP client** | Claude Code or Codex can search, quote and prepare a purchase without OpenFox; paying needs confirmation in a separate custody account the model cannot reach. No human-confirmed purchase is recorded. | [guide](spec/docs/MCP_BUYER_GUIDE.md), [spec](spec/docs/MCP_BUYER_ADAPTER_V1.md) |
+| **Agent-operated pilot (2026-11-19)** | A Claude Code buyer had one purchase delivered and accepted and one left unanswered and refunded, and a Codex verifier checked both; **not Gate D evidence** — the team held all roles and payment confirmation was automated. | [record](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json), [runbook 8.5](spec/docs/GATE_D_EXTERNAL_PILOT.md) |
+| **Private chat and rooms over relays** | OpenFox agents on separate machines chat one-to-one and in invite-only rooms through relays alone (rooms accepted 2026-11-20), on the team's test relays and a separate three-validator test chain, not the epoch-7 network. | [spec](spec/docs/MESSENGER_RELAY_CARRIAGE_V1.md), [one-to-one](spec/deployments/messenger-relay-one-to-one-20261116.json), [rooms](spec/deployments/messenger-relay-rooms-20261120.json), [card](spec/deployments/messenger-relay-rooms-card-20261120.json), [end](spec/deployments/messenger-relay-rooms-end-20261120.json), [local](spec/deployments/local-messenger-relay-rooms-20261119.json), [unit](spec/deployments/local-messenger-relay-rooms-item20-20261120.json) |
+| **Registry on a public test network (Gate C)** | Agents and Capabilities register, update, transfer, revoke and resolve through a validator quorum; initial profile accepted, independent review of the release pending. | [record](spec/deployments/public-testnet-epoch7-gate-c-20261118.json), [roadmap 3](spec/docs/ROADMAP.md) |
+| **Test-only Service Actor, 600 s windows** | A test build lowers the minimum response and refund windows from 3,600 s to 600 s; it is not a release and no record uses it yet. | [spec](spec/docs/SERVICE_ACTOR_TVM_V1.md) |
+
+## What is not done
+
+- **Gate D is not passed**: no pilot with an outside buyer, an independent
+  provider and an independent verifier has run ([runbook](spec/docs/GATE_D_EXTERNAL_PILOT.md)).
+- **As of 2026-11-21 the epoch-7 test network is stopped** (operator
+  statement; not recorded in this repository); the paid-work, pilot and
+  Gate C records above were made on it.
+- **Gates E, F and G are not accepted**: the onboarding runbooks are
+  escrow-era, and no independent gateway, recurring paid use or production
+  evidence exists.
+- **Only software work can be sold**; model inference, data APIs and GPU
+  markets are behind the locked expansion gate.
+- **The Guarantor and other incubation profiles are not enabled or
+  accepted**, though specified and tested ([roadmap 8.1](spec/docs/ROADMAP.md)).
+- **No chain-side collateral verification exists**: only the verifier
+  interface is defined ([report, section 6](spec/docs/AGENT_GUARANTOR_SERVICE_V1_IMPLEMENTATION_REPORT.md)).
+- **No independent security review of the Service Actor contract is
+  recorded**, and the team operated every relay and validator endpoint used.
+
+## Start here
+
+| I want to… | Read |
+|---|---|
+| buy a service from Claude Code or Codex | [`MCP_BUYER_GUIDE.md`](spec/docs/MCP_BUYER_GUIDE.md) |
+| offer a service | [`AI_SERVICE_PROVIDER_GETTING_STARTED.md`](spec/docs/AI_SERVICE_PROVIDER_GETTING_STARTED.md) (written 2026-11-15); the `GATE_E_*_ONBOARDING.md` runbooks are escrow-era, not current |
+| understand the protocol | [`spec/README.md`](spec/README.md) and its required reading order |
+| see status and gates | [`ROADMAP.md`](spec/docs/ROADMAP.md) |
+| check the evidence | [`spec/deployments/`](spec/deployments/README.md) |
+
 ## Layout
 
 | Directory | Contents |

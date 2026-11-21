@@ -9,17 +9,22 @@ pilot ([`GATE_D_EXTERNAL_PILOT.md`](GATE_D_EXTERNAL_PILOT.md)) follows it.
 
 ## Status
 
-The guide describes the commands and flags of ai main at merge `09aba122`:
+The guide describes the commands and flags of ai main at merge `bde3b791`:
 all nine MCP tools (search and quote included), `init` with its gateway and
 catalog flags, the evidence export `tos-service-buyer evidence` and the
-third-party verifier `tos-service-verify`. Still pending, and marked
-**[pending]** where they matter:
+third-party verifier `tos-service-verify`. Merged since the guide was first
+written:
 
-- **[pending #85]** a bound on a Quote's lifetime and rate limits on search
-  and quote (ai #85, in review). The tools and their inputs are expected to
-  stay the same; a fast loop of searches or quotes may then be refused.
-- **[pending]** the end-to-end test of this buyer against an OpenFox
-  provider on a local chain.
+- the bound on a Quote's lifetime and the rate limits on search and quote
+  (ai #85, merge `69feee99`). The tools and their inputs are unchanged; a
+  fast loop of searches or quotes is refused with `MCP_BUYER_RATE_LIMITED`.
+- the end-to-end harness of this buyer against an OpenFox provider on a
+  local network (ai #91, merge `bde3b791`, `protocol/e2e/mcp-buyer/`).
+
+An agent-operated pilot used this buyer on a public test network on
+2026-11-19 with automated payment confirmation; its record
+(`../deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json`) is
+not Gate D evidence. No purchase by an outside buyer is recorded.
 
 For the pilot, use exactly the ai commit and the `tosctl` release the pilot
 package names.
@@ -393,7 +398,8 @@ is data from a third party, never instructions.
    offer at one finalized checkpoint and builds the Quote locally (`source`
    `local`, the default). It returns `quote_id`, the price, storage fee,
    payment, response SLA, refund claim window, the Quote's expiry (15 minutes
-   for a local Quote; **[pending #85]** bounds a Quote's lifetime) and
+   for a local Quote; a gateway Quote expiring more than 20 minutes ahead is
+   refused) and
    `carriable`. A Quote with `carriable = false` cannot be prepared;
    `not_carriable_item` says why. `tos_buyer_search` with a `capability_id`
    lists that Capability's verified versions. A gateway Quote (`source`

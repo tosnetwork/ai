@@ -10,8 +10,13 @@ the recipient fetches, opens, verifies, stores and then acknowledges it.
 document, the reference codec `protocol/pkg/agentpacketseal`, the corpus
 `spec/test-vectors/agent-packet-relay-v1.json`, the relay service and Go
 client `protocol/pkg/agentpacketrelay` and the daemon
-`protocol/cmd/tos-service-packet-relay` exist. No OpenFox client and no
-cross-host evidence exist yet; section 12 lists what those must show.
+`protocol/cmd/tos-service-packet-relay` exist. The OpenFox client exists, and
+sales between two hosts and with one of two relays down, all operated by the
+core team, are recorded in
+[`AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`](AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md).
+A second independent implementation of the corpus and the live adversarial
+and quota evidence of section 12 do not exist; section 12 lists what the
+evidence must show.
 
 The key words MUST, MUST NOT, SHOULD and MAY are normative.
 
