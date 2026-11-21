@@ -170,6 +170,9 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 	}
 	descriptor := variant.LateFilingCloseReceiptDescriptor
 	if descriptor == nil {
+		if receipt.InitialClaimAdmissionProof != nil {
+			return source, errors.New("only a late-recovery fallback carries an initial claim admission proof")
+		}
 		if receipt.Body.LateFilingCloseReceiptDigest != lateMarker {
 			return source, errors.New("fallback admission's late filing-close digest is not its late-recovery marker")
 		}
@@ -188,11 +191,40 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 	if err != nil {
 		return source, err
 	}
-	if err := bindLateFilingCloseToClaimAdmissionV1(filing, receipt.AuthorizedClaimAdmissionReceipt); err != nil {
+	if err := bindLateFilingCloseToClaimAdmissionV1(filing, receipt.AuthorizedClaimAdmissionReceipt,
+		receipt.InitialClaimAdmissionProof); err != nil {
 		return source, err
 	}
 	source.lateFilingClose = &filing
 	return source, nil
+}
+
+// lateRecoveryClosureFitsV1 requires a late-recovery candidate admitted at
+// admittedAt to close by the late-recovery terminal deadline. The late path
+// allows one challenge round, so the closure time is that of a challengeable
+// candidate with at most one remaining round, not every negotiated round.
+func lateRecoveryClosureFitsV1(terms CoverageTermsV1, challengeRoundsUsed, admittedAt uint64) error {
+	maximum := terms.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim
+	if challengeRoundsUsed > maximum {
+		return errors.New("late fallback challenge counter exceeds its reserved capacity")
+	}
+	remaining := maximum - challengeRoundsUsed
+	if remaining > 1 {
+		remaining = 1
+	}
+	key := "challengeable_candidate:r=" + new(big.Int).SetUint64(remaining).String()
+	var closureSeconds uint64
+	for _, entry := range terms.ClaimClosureCapacity.ContinuationBudgetEntries {
+		if entry.ProfileStateKey == key {
+			closureSeconds = entry.MaximumRemainingClosureSeconds
+			break
+		}
+	}
+	terminalAt, fits := checkedDurationAddV1(admittedAt, closureSeconds)
+	if closureSeconds == 0 || !fits || terminalAt > terms.LateRecoveryTerminalDeadlineUnix {
+		return errors.New("late fallback cannot complete inside its reserved contingency window")
+	}
+	return nil
 }
 
 // fallbackReusesFrozenEpochV1 reports whether a fallback's head left revision
@@ -258,7 +290,7 @@ func bindFallbackRevisionEpochV1(receipt AuthorizedClaimDecisionAdmissionReceipt
 // admission request carries the activation, and the filing close is later
 // verified against the offer its own copy of that activation carries.
 func bindLateFilingCloseToClaimAdmissionV1(filing AuthorizedClaimFilingCloseReceiptV1,
-	claimAdmission AuthorizedClaimAdmissionReceiptV1) error {
+	claimAdmission AuthorizedClaimAdmissionReceiptV1, initialProof *ClaimAdmissionReceiptProofV1) error {
 	claim := claimAdmission.AuthorizedClaimIngressReceipt.AuthorizedClaim
 	if filing.AuthorizedActivationEvidence == nil {
 		return errors.New("late fallback filing receipt lacks activation evidence")
@@ -279,7 +311,7 @@ func bindLateFilingCloseToClaimAdmissionV1(filing AuthorizedClaimFilingCloseRece
 	}
 	// The filing close's initial_claims cut records each claim's initial
 	// admission, so the timely ingress is matched against that admission.
-	initialAdmission, err := initialClaimAdmissionDigestV1(claimAdmission)
+	initialAdmission, err := initialClaimAdmissionDigestV1(claimAdmission, initialProof)
 	if err != nil {
 		return err
 	}
@@ -293,17 +325,35 @@ func bindLateFilingCloseToClaimAdmissionV1(filing AuthorizedClaimFilingCloseRece
 }
 
 // initialClaimAdmissionDigestV1 is the digest of a claim's initial admission:
-// the receipt's own for an initial admission, and the one a revision admission
-// names.
-func initialClaimAdmissionDigestV1(claimAdmission AuthorizedClaimAdmissionReceiptV1) (string, error) {
+// the receipt's own for an initial admission, which carries no initial proof;
+// for a revision admission, the initial admission it names, which the carried
+// initial proof must be for the same claim. The proof's authorization and seal
+// are verified with the rest of the receipt.
+func initialClaimAdmissionDigestV1(claimAdmission AuthorizedClaimAdmissionReceiptV1,
+	initialProof *ClaimAdmissionReceiptProofV1) (string, error) {
 	switch claimAdmission.Body.AdmissionKind {
 	case "initial":
+		if initialProof != nil {
+			return "", errors.New("late fallback for an initial admission carries an initial claim admission proof")
+		}
 		return ClaimAdmissionReceiptDigestV1(claimAdmission)
 	case "revision":
-		if !validDigest(claimAdmission.Body.InitialClaimAdmissionReceiptDigest) {
+		initial := claimAdmission.Body.InitialClaimAdmissionReceiptDigest
+		if !validDigest(initial) {
 			return "", errors.New("late fallback revision admission names no initial admission")
 		}
-		return claimAdmission.Body.InitialClaimAdmissionReceiptDigest, nil
+		if initialProof == nil {
+			return "", errors.New("late fallback for a revised claim lacks its initial claim admission proof")
+		}
+		body := initialProof.ReceiptBody
+		if _, err := ClaimAdmissionReceiptProofDigestV1(*initialProof); err != nil ||
+			initialProof.ReceiptEnvelopeDigest != initial || body.AdmissionKind != "initial" ||
+			body.ClaimID != claimAdmission.Body.ClaimID ||
+			body.CoverageAgreementBodyDigest != claimAdmission.Body.CoverageAgreementBodyDigest ||
+			body.CoverageObligationID != claimAdmission.Body.CoverageObligationID {
+			return "", errors.New("late fallback initial claim admission proof is not the claim's initial admission")
+		}
+		return initial, nil
 	default:
 		return "", errors.New("late fallback claim admission kind is unknown")
 	}
@@ -399,6 +449,11 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			authorityResolver, fenceResolver, now) != nil {
 			return errors.New("late fallback filing-close receipt is invalid")
 		}
+		if proof := receipt.InitialClaimAdmissionProof; proof != nil {
+			if err := ValidateClaimAdmissionReceiptProofV1(*proof, terms, authorityResolver, fenceResolver, now, true); err != nil {
+				return fmt.Errorf("late fallback initial claim admission proof is invalid: %w", err)
+			}
+		}
 		lateFilingDigest = variant.LateFilingCloseReceiptDescriptor.ContentDigest
 		if filing.Body.ClosedAtUnix <= terms.TerminalResolutionDeadlineUnix ||
 			filing.Body.ClosedAtUnix > terms.LateIngressRecoveryDeadlineUnix ||
@@ -480,21 +535,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		return errors.New("claim decision fallback trigger cutoff is invalid")
 	}
 	if lateRecovery {
-		if receipt.Body.ChallengeRoundsUsedAfter > terms.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim {
-			return errors.New("late fallback challenge counter exceeds its reserved capacity")
-		}
-		remaining := terms.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim - receipt.Body.ChallengeRoundsUsedAfter
-		key := "challengeable_candidate:r=" + new(big.Int).SetUint64(remaining).String()
-		var closureSeconds uint64
-		for _, entry := range terms.ClaimClosureCapacity.ContinuationBudgetEntries {
-			if entry.ProfileStateKey == key {
-				closureSeconds = entry.MaximumRemainingClosureSeconds
-				break
-			}
-		}
-		terminalAt, fits := checkedDurationAddV1(receipt.Body.AdmittedAtUnix, closureSeconds)
-		if closureSeconds == 0 || !fits || terminalAt > terms.LateRecoveryTerminalDeadlineUnix {
-			return errors.New("late fallback cannot complete inside its reserved contingency window")
+		if err := lateRecoveryClosureFitsV1(terms, receipt.Body.ChallengeRoundsUsedAfter, receipt.Body.AdmittedAtUnix); err != nil {
+			return err
 		}
 	}
 	if err := ValidateClaimDecision(decision, claim, terms, authorityResolver,

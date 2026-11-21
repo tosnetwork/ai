@@ -128,10 +128,26 @@ func extractFirmOfferFromAcceptanceV1(receipt AuthorizedCoverageAcceptanceReceip
 	return *found, nil
 }
 
+// validateRevisionInitialAdmissionV1 applies the portable step of the
+// initial-admission induction: the first revision's predecessor is the
+// initial admission, so the initial digest it names must be that
+// predecessor's. Later revisions carry only their predecessor's digest, so
+// their initial digest is checked where the initial admission is carried.
+func validateRevisionInitialAdmissionV1(body ClaimAdmissionReceiptBodyV1) error {
+	if body.AdmissionKind == "revision" && body.AdmittedClaimRevision == 2 &&
+		body.InitialClaimAdmissionReceiptDigest != body.PredecessorRevisionAdmissionReceiptDigest {
+		return errors.New("Guarantor first claim revision names an initial admission other than its predecessor")
+	}
+	return nil
+}
+
 func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, terms CoverageTermsV1,
 	agreementVerifier agentcommerce.AgreementEvidenceVerifier, authorityResolver AuthorityKeyResolver,
 	fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
 	body, ingress := receipt.Body, receipt.AuthorizedClaimIngressReceipt
+	if err := validateRevisionInitialAdmissionV1(body); err != nil {
+		return err
+	}
 	claim := ingress.AuthorizedClaim
 	stageName := "claim_revision_admission"
 	if claim.Body.ClaimRevision == 1 {

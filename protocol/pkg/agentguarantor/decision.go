@@ -267,7 +267,8 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 	// authorized decision carrying any of them would sign over an object no
 	// check ever reads.
 	if receipt.Body.FallbackTriggerCutoffUnix != 0 ||
-		receipt.CurrentDecisionAdmissionProof != nil || isFallbackDecisionPathV1(receipt.AuthorizedClaimDecision.Body.DecisionPath) {
+		receipt.CurrentDecisionAdmissionProof != nil || receipt.InitialClaimAdmissionProof != nil ||
+		isFallbackDecisionPathV1(receipt.AuthorizedClaimDecision.Body.DecisionPath) {
 		return errors.New("authorized claim decision admission carries a fallback-only field")
 	}
 	// The late filing-close digest appears on an authorized decision only as

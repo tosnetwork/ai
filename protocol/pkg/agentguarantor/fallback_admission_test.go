@@ -3,6 +3,7 @@ package agentguarantor
 import (
 	"encoding/base64"
 	"errors"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,8 @@ const (
 	measuredFallbackRequestBytes         = 1_210
 	measuredFallbackReceiptBytes         = 1_069_384
 	measuredEmbeddedFallbackReceiptBytes = 2_451_938
-	worstCaseReviewingFallbackBytes      = 1_512_852
-	worstCaseNonterminalFallbackBytes    = 1_483_046
+	worstCaseReviewingFallbackBytes      = 1_699_024
+	worstCaseNonterminalFallbackBytes    = 1_669_218
 	worstCaseFallbackRequestBytes        = 1_782
 )
 
@@ -129,6 +130,10 @@ func worstCaseReviewingLateFallback(t *testing.T, terms CoverageTermsV1) fallbac
 	shape.variant.CurrentClaimStateTransitionReceiptDigest = transitionDigest
 	shape.variant.LateFilingCloseReceiptDescriptor = &descriptor
 	shape.receipt.Body.LateFilingCloseReceiptDigest = descriptor.ContentDigest
+	// The claim admission is a revision, so the late fallback carries the
+	// initial admission's proof; its claim is as large as the revision's.
+	initialProof := testInitialAdmissionProof(shape.receipt.AuthorizedClaimAdmissionReceipt)
+	shape.receipt.InitialClaimAdmissionProof = &initialProof
 	// The source head is the transition's resulting state and counts.
 	head := transition.Body
 	setFallbackHead(&shape, head.ResultingClaimStateRevision, head.ChallengeRoundsUsedAfter, head.NonterminalRoundsUsedAfter, false)
@@ -328,6 +333,13 @@ func TestWorstCaseFallbackReceiptsFitWithMargin(t *testing.T) {
 	reviewingSize := checkFallbackFits(t, "worst-case reviewing late fallback", reviewing)
 	nonterminalSize := checkFallbackFits(t, "worst-case disputed late fallback", nonterminal)
 	request := len(reviewing.receipt.StageActionAdmissionEvidence.CanonicalRequest)
+	initial := *reviewing.receipt.InitialClaimAdmissionProof
+	t.Logf("worst-case initial claim admission proof: %d bytes (ingress receipt %d, coverage end %d, "+
+		"authority instance %d, eligibility proofs %d, receipt authorizations %d, seal authorization %d, receipt body %d)",
+		mustCanonicalSize(t, initial), mustCanonicalSize(t, initial.AuthorizedClaimIngressReceipt),
+		mustCanonicalSize(t, initial.CoverageEndCommitment), mustCanonicalSize(t, initial.AuthorityInstanceRecord),
+		mustCanonicalSize(t, initial.AuthorityAdmissionEligibilityProofSet), mustCanonicalSize(t, initial.ReceiptAuthorizations),
+		mustCanonicalSize(t, initial.SealAuthorization), mustCanonicalSize(t, initial.ReceiptBody))
 	t.Logf("worst-case fallback: reviewing %d bytes (margin %d, %.1f%%), disputed %d bytes, request %d bytes",
 		reviewingSize, MaxCanonicalObjectBytes-reviewingSize,
 		100*float64(MaxCanonicalObjectBytes-reviewingSize)/float64(MaxCanonicalObjectBytes), nonterminalSize, request)
@@ -337,9 +349,11 @@ func TestWorstCaseFallbackReceiptsFitWithMargin(t *testing.T) {
 			reviewingSize, nonterminalSize, request, worstCaseReviewingFallbackBytes,
 			worstCaseNonterminalFallbackBytes, worstCaseFallbackRequestBytes)
 	}
-	// The reviewing shape is the larger, and it must leave at least a fifth of
-	// the ceiling for profile variation.
-	if reviewingSize < nonterminalSize || MaxCanonicalObjectBytes-reviewingSize < MaxCanonicalObjectBytes/5 {
+	// The reviewing shape is the larger, and it must leave at least an eighth
+	// of the ceiling for profile variation. The late fallback of a revised
+	// claim carries the initial admission's compact proof, and this worst case
+	// assumes a maximum-size claim and full ML-DSA-44 signature sets in it.
+	if reviewingSize < nonterminalSize || MaxCanonicalObjectBytes-reviewingSize < MaxCanonicalObjectBytes/8 {
 		t.Fatalf("worst-case fallback ordering or margin changed: reviewing %d, disputed %d", reviewingSize, nonterminalSize)
 	}
 }
@@ -360,9 +374,12 @@ func claimAdmissionActivation(t *testing.T, receipt AuthorizedClaimDecisionAdmis
 func fakeFilingCloseReceipt(t *testing.T, receipt AuthorizedClaimDecisionAdmissionReceiptV1, root string) (AuthorizedClaimFilingCloseReceiptV1, []byte, string) {
 	t.Helper()
 	activation := claimAdmissionActivation(t, receipt)
-	initialAdmission, err := initialClaimAdmissionDigestV1(receipt.AuthorizedClaimAdmissionReceipt)
-	if err != nil {
-		t.Fatal(err)
+	initialAdmission := receipt.AuthorizedClaimAdmissionReceipt.Body.InitialClaimAdmissionReceiptDigest
+	if receipt.AuthorizedClaimAdmissionReceipt.Body.AdmissionKind == "initial" {
+		var err error
+		if initialAdmission, err = ClaimAdmissionReceiptDigestV1(receipt.AuthorizedClaimAdmissionReceipt); err != nil {
+			t.Fatal(err)
+		}
 	}
 	filing := AuthorizedClaimFilingCloseReceiptV1{Body: ClaimFilingCloseReceiptBodyV1{SchemaVersion: 1,
 		CoverageAgreementBodyDigest: receipt.Body.CoverageAgreementBodyDigest,
@@ -414,38 +431,85 @@ func TestLateFallbackMatchesTheClaimsInitialAdmission(t *testing.T) {
 	late.ReceivedAtUnix = lateFilingCutoffUnix + 1
 	notAdmitted := timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)
 	notAdmitted.ResolutionKind = "claim_rejected"
+	proof := testInitialAdmissionProof(revision)
+	withProof := func(change func(*ClaimAdmissionReceiptProofV1)) *ClaimAdmissionReceiptProofV1 {
+		copied := proof
+		change(&copied)
+		return &copied
+	}
+	const noIngress = "does not identify a timely admitted ingress"
+	const notInitial = "is not the claim's initial admission"
+	timely := filingWith(timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest))
 	cases := map[string]struct {
 		admission AuthorizedClaimAdmissionReceiptV1
+		proof     *ClaimAdmissionReceiptProofV1
 		filing    AuthorizedClaimFilingCloseReceiptV1
-		accept    bool
+		want      string
 	}{
-		"revised claim, its initial admission in the cut": {revision,
-			filingWith(timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)), true},
-		"initial admission, itself in the cut": {initial, filingWith(timelyAdmittedEntry(initialDigest)), true},
+		"revised claim, its initial admission in the cut": {revision, &proof, timely, ""},
+		"initial admission, itself in the cut":            {initial, nil, filingWith(timelyAdmittedEntry(initialDigest)), ""},
 		"revised claim naming another initial admission": {func() AuthorizedClaimAdmissionReceiptV1 {
 			other := revision
 			other.Body.InitialClaimAdmissionReceiptDigest = sizeTestDigest("1")
 			return other
-		}(), filingWith(timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)), false},
-		"revised claim matched by its own revision digest": {revision, filingWith(timelyAdmittedEntry(revisionDigest)), false},
-		"initial admission received after the cutoff":      {revision, filingWith(late), false},
-		"initial admission not admitted":                   {revision, filingWith(notAdmitted), false},
-		"empty cut":                                        {revision, filingWith(), false},
+		}(), &proof, timely, notInitial},
+		"revised claim without the initial proof": {revision, nil, timely, "lacks its initial claim admission proof"},
+		"initial proof of another claim": {revision, withProof(func(p *ClaimAdmissionReceiptProofV1) {
+			p.ReceiptBody.ClaimID = sizeTestDigest("2")
+		}), timely, notInitial},
+		"initial proof on another coverage": {revision, withProof(func(p *ClaimAdmissionReceiptProofV1) {
+			p.ReceiptBody.CoverageObligationID = "obligation:other"
+		}), timely, notInitial},
+		"initial proof of a revision admission": {revision, withProof(func(p *ClaimAdmissionReceiptProofV1) {
+			p.ReceiptBody.AdmissionKind = "revision"
+		}), timely, notInitial},
+		"initial admission carrying an initial proof":      {initial, &proof, filingWith(timelyAdmittedEntry(initialDigest)), "carries an initial claim admission proof"},
+		"revised claim matched by its own revision digest": {revision, &proof, filingWith(timelyAdmittedEntry(revisionDigest)), noIngress},
+		"initial admission received after the cutoff":      {revision, &proof, filingWith(late), noIngress},
+		"initial admission not admitted":                   {revision, &proof, filingWith(notAdmitted), noIngress},
+		"empty cut":                                        {revision, &proof, filingWith(), noIngress},
 	}
 	for name, test := range cases {
-		err := bindLateFilingCloseToClaimAdmissionV1(test.filing, test.admission)
-		if test.accept != (err == nil) {
-			t.Errorf("%s: accept=%v, got %v", name, test.accept, err)
+		err := bindLateFilingCloseToClaimAdmissionV1(test.filing, test.admission, test.proof)
+		if test.want == "" && err != nil {
+			t.Errorf("%s: refused: %v", name, err)
 		}
-		if !test.accept && err != nil && !strings.Contains(err.Error(), "does not identify a timely admitted ingress") {
-			t.Errorf("%s: refused for another reason: %v", name, err)
+		if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+			t.Errorf("%s: got %v, want an error containing %q", name, err, test.want)
 		}
 	}
 	unknown := revision
 	unknown.Body.AdmissionKind = "replacement"
-	if _, err := initialClaimAdmissionDigestV1(unknown); err == nil {
+	if _, err := initialClaimAdmissionDigestV1(unknown, &proof); err == nil {
 		t.Error("an unknown admission kind named an initial admission")
 	}
+}
+
+// testInitialAdmissionProof is a compact proof of the initial admission a
+// revision admission names, built from that revision's own parts so its size
+// matches a real initial admission's. Only its binding fields are checked
+// before signatures.
+func testInitialAdmissionProof(revision AuthorizedClaimAdmissionReceiptV1) ClaimAdmissionReceiptProofV1 {
+	body := revision.Body
+	body.AdmissionKind = "initial"
+	body.PriorClaimRevision, body.AdmittedClaimRevision, body.ClaimRevisionAdmissionSequence = 0, 1, 1
+	body.InitialClaimAdmissionReceiptDigest, body.PredecessorRevisionAdmissionReceiptDigest = "", ""
+	initial := revision.Body.InitialClaimAdmissionReceiptDigest
+	return ClaimAdmissionReceiptProofV1{SchemaVersion: 1, ReceiptEnvelopeDigest: initial,
+		ReceiptDescriptor: ImmutableEvidenceDescriptorV1{ContentType: GuarantorMediaTypePrefixV1 + "claim-admission.v1+cbor",
+			ContentDigest: initial, ContentSize: MaxCanonicalObjectBytes, RetrievalPolicyDigest: sizeTestDigest("6")},
+		ReceiptBody: body, AuthorizedClaimIngressReceipt: revision.AuthorizedClaimIngressReceipt,
+		CoverageEndCommitment: revision.CoverageEndCommitment, AuthorityInstanceRecord: revision.AuthorityInstanceRecord,
+		AuthorityAdmissionEligibilityProofSet: revision.AuthorityAdmissionEligibilityProofSet,
+		ReceiptAuthorizations:                 revision.Authorizations,
+		SealBody: ClaimAdmissionReceiptSealBodyV1{SchemaVersion: 1, ReceiptEnvelopeDigest: initial,
+			ReceiptBodyDigest: sizeTestDigest("1"), AuthorizedActionDigest: body.AuthorizedActionDigest,
+			AuthorizedClaimEnvelopeDigest: body.AuthorizedClaimEnvelopeDigest,
+			ClaimIngressReceiptDigest:     body.ClaimSubmissionIngressReceiptDigest,
+			CoverageEndCommitmentDigest:   sizeTestDigest("2"), AuthorityInstanceRecordDigest: sizeTestDigest("3"),
+			EligibilityProofSetDigest: sizeTestDigest("4"), CoverageTermsDigest: sizeTestDigest("5"),
+			SealedAtUnix: body.AdmittedAtUnix},
+		SealAuthorization: revision.Authorizations[0]}
 }
 
 func encodeFilingClose(t *testing.T, filing AuthorizedClaimFilingCloseReceiptV1) (AuthorizedClaimFilingCloseReceiptV1, []byte, string) {
@@ -498,6 +562,7 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		shape := shapes[name]
 		shape.variant.LateFilingCloseReceiptDescriptor = nil
 		shape.receipt.Body.LateFilingCloseReceiptDigest = ""
+		shape.receipt.InitialClaimAdmissionProof = nil
 		shape.receipt.Body.DecisionPath, shape.receipt.AuthorizedClaimDecision.Body.DecisionPath = "terminal_fallback", "terminal_fallback"
 		shape.setRequest(t)
 		shapes[name] = shape
@@ -614,6 +679,24 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 			shape.variant.SourceClaimState = "approved"
 			shape.setRequest(t)
 		}, "source state is not registered"},
+		"late fallback of a revised claim lacks the initial proof": {"reviewing late", func(shape *fallbackShape) {
+			shape.receipt.InitialClaimAdmissionProof = nil
+		}, "lacks its initial claim admission proof"},
+		"late fallback carries another claim's initial admission": {"disputed late", func(shape *fallbackShape) {
+			proof := *shape.receipt.InitialClaimAdmissionProof
+			proof.ReceiptBody.ClaimID = sizeTestDigest("2")
+			shape.receipt.InitialClaimAdmissionProof = &proof
+		}, "is not the claim's initial admission"},
+		"late fallback's initial proof is not the one its revision names": {"reviewing late", func(shape *fallbackShape) {
+			proof := *shape.receipt.InitialClaimAdmissionProof
+			proof.ReceiptEnvelopeDigest = sizeTestDigest("2")
+			proof.ReceiptDescriptor.ContentDigest = proof.ReceiptEnvelopeDigest
+			shape.receipt.InitialClaimAdmissionProof = &proof
+		}, "is not the claim's initial admission"},
+		"in-window fallback carries an initial proof": {"reviewing in window", func(shape *fallbackShape) {
+			proof := testInitialAdmissionProof(shape.receipt.AuthorizedClaimAdmissionReceipt)
+			shape.receipt.InitialClaimAdmissionProof = &proof
+		}, "only a late-recovery fallback carries an initial claim admission proof"},
 		"late digest without a descriptor": {"reviewing in window", func(shape *fallbackShape) {
 			shape.receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("1")
 		}, "is not its late-recovery marker"},
@@ -1022,5 +1105,106 @@ func TestLateRecoveryPathAllowsOneChallengeRound(t *testing.T) {
 		if test.refused != (err != nil && strings.Contains(err.Error(), refused)) {
 			t.Errorf("%s: refused=%v, got %v", name, test.refused, err)
 		}
+	}
+}
+
+// TestFirstRevisionMustNameItsPredecessorAsInitialAdmission: the first
+// revision's predecessor is the initial admission, so a first revision naming
+// any other initial admission is refused at admission verification, both as a
+// complete receipt and as a compact proof. A later revision carries only its
+// predecessor's digest, so this portable step does not apply to it.
+func TestFirstRevisionMustNameItsPredecessorAsInitialAdmission(t *testing.T) {
+	terms := testCoverageTerms(t)
+	now := time.Unix(2_000_000_100, 0).UTC()
+	const refused = "names an initial admission other than its predecessor"
+	revision := loadMeasuredDecisionReceipt(t).AuthorizedClaimAdmissionReceipt
+	if revision.Body.AdmissionKind != "revision" || revision.Body.AdmittedClaimRevision != 2 ||
+		revision.Body.InitialClaimAdmissionReceiptDigest != revision.Body.PredecessorRevisionAdmissionReceiptDigest {
+		t.Fatalf("the measured claim admission is not a consistent first revision: %+v", revision.Body)
+	}
+	verify := func(receipt AuthorizedClaimAdmissionReceiptV1) error {
+		return VerifyClaimAdmissionReceiptV1(receipt, terms, permissiveAgreementVerifier{}, allowAuthorityResolver{}, nil, now)
+	}
+	if err := verify(revision); err != nil && strings.Contains(err.Error(), refused) {
+		t.Fatalf("a consistent first revision was refused: %v", err)
+	}
+	other := revision
+	other.Body.InitialClaimAdmissionReceiptDigest = sizeTestDigest("1")
+	if err := verify(other); err == nil || !strings.Contains(err.Error(), refused) {
+		t.Fatalf("a first revision naming another claim's initial admission was not refused: %v", err)
+	}
+	proof := testInitialAdmissionProof(revision)
+	proof.ReceiptBody = other.Body
+	if err := ValidateClaimAdmissionReceiptProofV1(proof, terms, allowAuthorityResolver{}, nil, now, false); err == nil ||
+		!strings.Contains(err.Error(), refused) {
+		t.Fatalf("a first-revision compact proof naming another initial admission was not refused: %v", err)
+	}
+	later := other.Body
+	later.PriorClaimRevision, later.AdmittedClaimRevision, later.ClaimRevisionAdmissionSequence = 2, 3, 3
+	if err := validateRevisionInitialAdmissionV1(later); err != nil {
+		t.Fatalf("a later revision was held to the first revision's step: %v", err)
+	}
+}
+
+// TestLateRecoveryClosureReservesOneChallengeRound: the late path allows one
+// challenge round, so its closure check uses the one-round budget even when
+// more rounds were negotiated, and the zero-round budget once they are used.
+func TestLateRecoveryClosureReservesOneChallengeRound(t *testing.T) {
+	const maximum, admittedAt = 3, 1_000_000
+	entries, err := BuildClaimContinuationBudgetEntriesV1(maximum, 1, 600, 600, 600, 600, 600, 600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closure := map[uint64]uint64{}
+	for _, entry := range entries {
+		for r := uint64(0); r <= maximum; r++ {
+			if entry.ProfileStateKey == "challengeable_candidate:r="+new(big.Int).SetUint64(r).String() {
+				closure[r] = entry.MaximumRemainingClosureSeconds
+			}
+		}
+	}
+	if !(closure[0] < closure[1] && closure[1] < closure[maximum]) {
+		t.Fatalf("budget closures do not grow with remaining rounds: %v", closure)
+	}
+	terms := testCoverageTerms(t)
+	terms.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim = maximum
+	terms.ClaimClosureCapacity.ContinuationBudgetEntries = entries
+	at := func(used, deadline uint64) error {
+		terms.LateRecoveryTerminalDeadlineUnix = deadline
+		return lateRecoveryClosureFitsV1(terms, used, admittedAt)
+	}
+	const refused = "cannot complete inside its reserved contingency window"
+	cases := map[string]struct {
+		used, deadline uint64
+		want           string
+	}{
+		"no round used, one-round closure exactly fits": {0, admittedAt + closure[1], ""},
+		"no round used, one second short":               {0, admittedAt + closure[1] - 1, refused},
+		"two rounds used, one-round closure fits":       {maximum - 1, admittedAt + closure[1], ""},
+		"every round used, zero-round closure fits":     {maximum, admittedAt + closure[0], ""},
+		"every round used, one second short":            {maximum, admittedAt + closure[0] - 1, refused},
+		"counter over the negotiated rounds":            {maximum + 1, admittedAt + closure[maximum], "exceeds its reserved capacity"},
+		"deadline before admission":                     {0, admittedAt - 1, refused},
+		"closure overflows the deadline arithmetic":     {0, ^uint64(0), ""},
+	}
+	for name, test := range cases {
+		err := at(test.used, test.deadline)
+		if test.want == "" && err != nil {
+			t.Errorf("%s: refused: %v", name, err)
+		}
+		if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+			t.Errorf("%s: got %v, want an error containing %q", name, err, test.want)
+		}
+	}
+	// A profile negotiating no challenge round keeps the zero-round closure.
+	none, err := BuildClaimContinuationBudgetEntriesV1(0, 1, 600, 600, 600, 600, 600, 600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terms.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim = 0
+	terms.ClaimClosureCapacity.ContinuationBudgetEntries = none
+	terms.LateRecoveryTerminalDeadlineUnix = admittedAt + closure[0]
+	if err := lateRecoveryClosureFitsV1(terms, 0, admittedAt); err != nil {
+		t.Fatalf("a zero-round profile was refused its zero-round closure: %v", err)
 	}
 }

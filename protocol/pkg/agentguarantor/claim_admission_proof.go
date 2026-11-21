@@ -106,6 +106,9 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 	if _, err := ClaimAdmissionReceiptProofDigestV1(proof); err != nil || now.IsZero() {
 		return errors.New("claim admission compact proof is invalid")
 	}
+	if err := validateRevisionInitialAdmissionV1(proof.ReceiptBody); err != nil {
+		return err
+	}
 	body := proof.ReceiptBody
 	claim := proof.AuthorizedClaimIngressReceipt.AuthorizedClaim
 	stage := "claim_revision_admission"
