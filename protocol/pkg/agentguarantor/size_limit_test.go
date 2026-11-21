@@ -24,11 +24,34 @@ const measuredDecisionReceiptPath = "testdata/claim-decision-admission-receipt-m
 
 const measuredDecisionReceiptBytes = 1_068_868
 
+// worstCaseAuthorizedDecisionReceiptBytes is the worst-case authorized
+// successor decision admission with descriptor-only evidence; its revision
+// claim admission carries the initial admission's compact proof.
+const worstCaseAuthorizedDecisionReceiptBytes = 1_697_959
+
 // referenceMaximumAdmittedClaimEnvelopeBytes is the reference released
 // profile's maximum admitted claim envelope.
 const referenceMaximumAdmittedClaimEnvelopeBytes = 64 << 10
 
+// loadMeasuredDecisionReceipt is the measured receipt in the shape the
+// protocol now requires: its claim admission is a revision, which carries the
+// initial admission's compact proof. The recorded receipt predates that
+// proof, so a proof synthesized from the revision's own parts (and therefore
+// of a real initial admission's size) is added. The structural size tests use
+// it; nothing here checks its signatures.
 func loadMeasuredDecisionReceipt(t *testing.T) AuthorizedClaimDecisionAdmissionReceiptV1 {
+	t.Helper()
+	receipt := loadRecordedDecisionReceipt(t)
+	if admission := &receipt.AuthorizedClaimAdmissionReceipt; admission.Body.AdmissionKind == "revision" &&
+		admission.InitialClaimAdmissionProof == nil {
+		proof := testInitialAdmissionProof(*admission)
+		admission.InitialClaimAdmissionProof = &proof
+	}
+	return receipt
+}
+
+// loadRecordedDecisionReceipt is the measured receipt exactly as recorded.
+func loadRecordedDecisionReceipt(t *testing.T) AuthorizedClaimDecisionAdmissionReceiptV1 {
 	t.Helper()
 	file, err := os.Open(measuredDecisionReceiptPath)
 	if err != nil {
@@ -293,7 +316,7 @@ func largestNestedString(t *testing.T, value any) int {
 }
 
 func TestMeasuredDecisionReceiptFitsTheGuarantorCeiling(t *testing.T) {
-	receipt := loadMeasuredDecisionReceipt(t)
+	receipt := loadRecordedDecisionReceipt(t)
 	encoded, err := Canonical(receipt)
 	if err != nil {
 		t.Fatalf("measured receipt refused: %v", err)
@@ -336,6 +359,11 @@ func TestWorstCaseAuthorizedDecisionReceiptFitsWithMargin(t *testing.T) {
 	t.Logf("worst-case authorized-decision receipt: %d bytes; ceiling %d; margin %d (%.1f%%); longest nested string %d; claim admission request %d",
 		len(encoded), MaxCanonicalObjectBytes, MaxCanonicalObjectBytes-len(encoded),
 		100*float64(MaxCanonicalObjectBytes-len(encoded))/float64(MaxCanonicalObjectBytes), longest, request)
+	if len(encoded) != worstCaseAuthorizedDecisionReceiptBytes ||
+		MaxCanonicalObjectBytes-len(encoded) < MaxCanonicalObjectBytes/8 {
+		t.Fatalf("worst-case authorized-decision receipt is %d bytes, want %d with an eighth of the ceiling free",
+			len(encoded), worstCaseAuthorizedDecisionReceiptBytes)
+	}
 	if longest <= codec.MaxStringBytes {
 		t.Fatalf("worst case no longer needs the Guarantor string limit (%d)", longest)
 	}
@@ -523,10 +551,6 @@ func TestAuthorizedDecisionRefusesFallbackOnlyFields(t *testing.T) {
 		},
 		"fallback cutoff": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
 			receipt.Body.FallbackTriggerCutoffUnix = 1
-		},
-		"initial claim admission proof": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
-			proof := testInitialAdmissionProof(receipt.AuthorizedClaimAdmissionReceipt)
-			receipt.InitialClaimAdmissionProof = &proof
 		},
 	}
 	for name, change := range cases {

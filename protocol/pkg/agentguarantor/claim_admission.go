@@ -141,11 +141,43 @@ func validateRevisionInitialAdmissionV1(body ClaimAdmissionReceiptBodyV1) error 
 	return nil
 }
 
+// bindRevisionInitialAdmissionProofV1 is the binding of a claim admission's
+// initial-admission proof, checked before any signature: a revision carries
+// exactly the compact proof of the initial admission its body names, for the
+// same claim, Agreement and obligation; an initial admission carries none.
+// The proof's own authorization and seal are verified with the receipt.
+func bindRevisionInitialAdmissionProofV1(body ClaimAdmissionReceiptBodyV1, proof *ClaimAdmissionReceiptProofV1) error {
+	switch body.AdmissionKind {
+	case "initial":
+		if proof != nil {
+			return errors.New("an initial Guarantor claim admission carries an initial claim admission proof")
+		}
+		return nil
+	case "revision":
+		if proof == nil {
+			return errors.New("a Guarantor claim revision admission lacks its initial claim admission proof")
+		}
+		initial := proof.ReceiptBody
+		if _, err := ClaimAdmissionReceiptProofDigestV1(*proof); err != nil ||
+			proof.ReceiptEnvelopeDigest != body.InitialClaimAdmissionReceiptDigest || initial.AdmissionKind != "initial" ||
+			initial.ClaimID != body.ClaimID || initial.CoverageAgreementBodyDigest != body.CoverageAgreementBodyDigest ||
+			initial.CoverageObligationID != body.CoverageObligationID {
+			return errors.New("a Guarantor claim revision's initial claim admission proof is not the claim's initial admission")
+		}
+		return nil
+	default:
+		return errors.New("Guarantor claim admission kind is invalid")
+	}
+}
+
 func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, terms CoverageTermsV1,
 	agreementVerifier agentcommerce.AgreementEvidenceVerifier, authorityResolver AuthorityKeyResolver,
 	fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
 	body, ingress := receipt.Body, receipt.AuthorizedClaimIngressReceipt
 	if err := validateRevisionInitialAdmissionV1(body); err != nil {
+		return err
+	}
+	if err := bindRevisionInitialAdmissionProofV1(body, receipt.InitialClaimAdmissionProof); err != nil {
 		return err
 	}
 	claim := ingress.AuthorizedClaim
@@ -294,9 +326,17 @@ func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, te
 	if err != nil {
 		return err
 	}
-	return ValidateAuthorizationQuorumSet(receipt.Authorizations, "claim-admission-receipt", receiptBodyDigest,
+	if err := ValidateAuthorizationQuorumSet(receipt.Authorizations, "claim-admission-receipt", receiptBodyDigest,
 		"tos.service.agent-guarantor-claim-admission-receipt-signature.v1", terms.ClaimAdmissionAuthoritySubjects,
-		terms.ClaimAdmissionQuorumRule, authorityResolver, now)
+		terms.ClaimAdmissionQuorumRule, authorityResolver, now); err != nil {
+		return err
+	}
+	if proof := receipt.InitialClaimAdmissionProof; proof != nil {
+		if err := ValidateClaimAdmissionReceiptProofV1(*proof, terms, authorityResolver, fenceResolver, now, true); err != nil {
+			return fmt.Errorf("Guarantor claim revision's initial claim admission proof is invalid: %w", err)
+		}
+	}
+	return nil
 }
 
 func zeroSHA256DigestV1() string {

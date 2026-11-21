@@ -138,4 +138,9 @@ type AuthorizedClaimAdmissionReceiptV1 struct {
 	AuthorityInstanceRecord               agentcommerce.AuthorityInstanceRecord     `json:"authority_instance_record"`
 	AuthorityAdmissionEligibilityProofSet AuthorityAdmissionEligibilityProofSetV1   `json:"authority_admission_eligibility_proof_set"`
 	Authorizations                        []ProfileQualifiedObjectAuthorizationV1   `json:"authorizations"`
+	// InitialClaimAdmissionProof is the claim's initial admission as its
+	// compact proof. Every revision admission carries it, so the initial
+	// digest the revision names is verified with the revision alone; an
+	// initial admission carries none.
+	InitialClaimAdmissionProof *ClaimAdmissionReceiptProofV1 `json:"initial_claim_admission_proof,omitempty"`
 }

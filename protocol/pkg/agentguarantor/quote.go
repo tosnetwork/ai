@@ -359,6 +359,9 @@ func ValidateCoverageTerms(terms CoverageTermsV1) error {
 		terms.PayoutDeadlineSeconds, terms.AdapterRecoveryWindowSeconds); err != nil {
 		return err
 	}
+	if err := validateLateRecoveryDeadlinesV1(terms); err != nil {
+		return err
+	}
 	switch terms.SelectedAssuranceLevel {
 	case AssuranceUnsecuredSigned:
 		if terms.SelectedCollateralProfileDigest != "" || terms.CollateralObligationID != "" || terms.CollateralTerms != nil {

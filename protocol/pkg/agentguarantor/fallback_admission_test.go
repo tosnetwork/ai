@@ -15,11 +15,15 @@ import (
 // measured ML-DSA-44 receipt. They move only with a deliberate wire change.
 const (
 	measuredFallbackRequestBytes         = 1_210
-	measuredFallbackReceiptBytes         = 1_069_384
-	measuredEmbeddedFallbackReceiptBytes = 2_451_938
+	measuredFallbackReceiptBytes         = 1_117_410
+	measuredEmbeddedFallbackReceiptBytes = 2_564_000
 	worstCaseReviewingFallbackBytes      = 1_699_024
 	worstCaseNonterminalFallbackBytes    = 1_669_218
 	worstCaseFallbackRequestBytes        = 1_782
+	// worstCaseInitialClaimAdmissionProofBytes is the initial admission's
+	// compact proof a revision admission carries, over a maximum-size claim
+	// with full ML-DSA-44 authorization and seal signatures.
+	worstCaseInitialClaimAdmissionProofBytes = 186_141
 )
 
 // evidenceResolver answers immutable-evidence retrievals from content and
@@ -130,10 +134,6 @@ func worstCaseReviewingLateFallback(t *testing.T, terms CoverageTermsV1) fallbac
 	shape.variant.CurrentClaimStateTransitionReceiptDigest = transitionDigest
 	shape.variant.LateFilingCloseReceiptDescriptor = &descriptor
 	shape.receipt.Body.LateFilingCloseReceiptDigest = descriptor.ContentDigest
-	// The claim admission is a revision, so the late fallback carries the
-	// initial admission's proof; its claim is as large as the revision's.
-	initialProof := testInitialAdmissionProof(shape.receipt.AuthorizedClaimAdmissionReceipt)
-	shape.receipt.InitialClaimAdmissionProof = &initialProof
 	// The source head is the transition's resulting state and counts.
 	head := transition.Body
 	setFallbackHead(&shape, head.ResultingClaimStateRevision, head.ChallengeRoundsUsedAfter, head.NonterminalRoundsUsedAfter, false)
@@ -333,13 +333,18 @@ func TestWorstCaseFallbackReceiptsFitWithMargin(t *testing.T) {
 	reviewingSize := checkFallbackFits(t, "worst-case reviewing late fallback", reviewing)
 	nonterminalSize := checkFallbackFits(t, "worst-case disputed late fallback", nonterminal)
 	request := len(reviewing.receipt.StageActionAdmissionEvidence.CanonicalRequest)
-	initial := *reviewing.receipt.InitialClaimAdmissionProof
+	// The claim admission is a revision, which carries the initial
+	// admission's proof; its claim is as large as the revision's.
+	initial := *reviewing.receipt.AuthorizedClaimAdmissionReceipt.InitialClaimAdmissionProof
 	t.Logf("worst-case initial claim admission proof: %d bytes (ingress receipt %d, coverage end %d, "+
 		"authority instance %d, eligibility proofs %d, receipt authorizations %d, seal authorization %d, receipt body %d)",
 		mustCanonicalSize(t, initial), mustCanonicalSize(t, initial.AuthorizedClaimIngressReceipt),
 		mustCanonicalSize(t, initial.CoverageEndCommitment), mustCanonicalSize(t, initial.AuthorityInstanceRecord),
 		mustCanonicalSize(t, initial.AuthorityAdmissionEligibilityProofSet), mustCanonicalSize(t, initial.ReceiptAuthorizations),
 		mustCanonicalSize(t, initial.SealAuthorization), mustCanonicalSize(t, initial.ReceiptBody))
+	if size := mustCanonicalSize(t, initial); size != worstCaseInitialClaimAdmissionProofBytes {
+		t.Fatalf("worst-case initial claim admission proof is %d bytes, want %d", size, worstCaseInitialClaimAdmissionProofBytes)
+	}
 	t.Logf("worst-case fallback: reviewing %d bytes (margin %d, %.1f%%), disputed %d bytes, request %d bytes",
 		reviewingSize, MaxCanonicalObjectBytes-reviewingSize,
 		100*float64(MaxCanonicalObjectBytes-reviewingSize)/float64(MaxCanonicalObjectBytes), nonterminalSize, request)
@@ -414,6 +419,7 @@ func TestLateFallbackMatchesTheClaimsInitialAdmission(t *testing.T) {
 	initial := revision
 	initial.Body.AdmissionKind = "initial"
 	initial.Body.InitialClaimAdmissionReceiptDigest = ""
+	initial.InitialClaimAdmissionProof = nil
 	initialDigest, err := ClaimAdmissionReceiptDigestV1(initial)
 	if err != nil {
 		t.Fatal(err)
@@ -431,46 +437,50 @@ func TestLateFallbackMatchesTheClaimsInitialAdmission(t *testing.T) {
 	late.ReceivedAtUnix = lateFilingCutoffUnix + 1
 	notAdmitted := timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)
 	notAdmitted.ResolutionKind = "claim_rejected"
-	proof := testInitialAdmissionProof(revision)
-	withProof := func(change func(*ClaimAdmissionReceiptProofV1)) *ClaimAdmissionReceiptProofV1 {
-		copied := proof
-		change(&copied)
-		return &copied
+	withProof := func(change func(*ClaimAdmissionReceiptProofV1)) AuthorizedClaimAdmissionReceiptV1 {
+		changed := revision
+		proof := *revision.InitialClaimAdmissionProof
+		change(&proof)
+		changed.InitialClaimAdmissionProof = &proof
+		return changed
 	}
 	const noIngress = "does not identify a timely admitted ingress"
 	const notInitial = "is not the claim's initial admission"
 	timely := filingWith(timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest))
+	withoutProof := revision
+	withoutProof.InitialClaimAdmissionProof = nil
+	initialWithProof := initial
+	initialWithProof.InitialClaimAdmissionProof = revision.InitialClaimAdmissionProof
 	cases := map[string]struct {
 		admission AuthorizedClaimAdmissionReceiptV1
-		proof     *ClaimAdmissionReceiptProofV1
 		filing    AuthorizedClaimFilingCloseReceiptV1
 		want      string
 	}{
-		"revised claim, its initial admission in the cut": {revision, &proof, timely, ""},
-		"initial admission, itself in the cut":            {initial, nil, filingWith(timelyAdmittedEntry(initialDigest)), ""},
+		"revised claim, its initial admission in the cut": {revision, timely, ""},
+		"initial admission, itself in the cut":            {initial, filingWith(timelyAdmittedEntry(initialDigest)), ""},
 		"revised claim naming another initial admission": {func() AuthorizedClaimAdmissionReceiptV1 {
 			other := revision
 			other.Body.InitialClaimAdmissionReceiptDigest = sizeTestDigest("1")
 			return other
-		}(), &proof, timely, notInitial},
-		"revised claim without the initial proof": {revision, nil, timely, "lacks its initial claim admission proof"},
-		"initial proof of another claim": {revision, withProof(func(p *ClaimAdmissionReceiptProofV1) {
+		}(), timely, notInitial},
+		"revised claim without the initial proof": {withoutProof, timely, "lacks its initial claim admission proof"},
+		"initial proof of another claim": {withProof(func(p *ClaimAdmissionReceiptProofV1) {
 			p.ReceiptBody.ClaimID = sizeTestDigest("2")
 		}), timely, notInitial},
-		"initial proof on another coverage": {revision, withProof(func(p *ClaimAdmissionReceiptProofV1) {
+		"initial proof on another coverage": {withProof(func(p *ClaimAdmissionReceiptProofV1) {
 			p.ReceiptBody.CoverageObligationID = "obligation:other"
 		}), timely, notInitial},
-		"initial proof of a revision admission": {revision, withProof(func(p *ClaimAdmissionReceiptProofV1) {
+		"initial proof of a revision admission": {withProof(func(p *ClaimAdmissionReceiptProofV1) {
 			p.ReceiptBody.AdmissionKind = "revision"
 		}), timely, notInitial},
-		"initial admission carrying an initial proof":      {initial, &proof, filingWith(timelyAdmittedEntry(initialDigest)), "carries an initial claim admission proof"},
-		"revised claim matched by its own revision digest": {revision, &proof, filingWith(timelyAdmittedEntry(revisionDigest)), noIngress},
-		"initial admission received after the cutoff":      {revision, &proof, filingWith(late), noIngress},
-		"initial admission not admitted":                   {revision, &proof, filingWith(notAdmitted), noIngress},
-		"empty cut":                                        {revision, &proof, filingWith(), noIngress},
+		"initial admission carrying an initial proof":      {initialWithProof, filingWith(timelyAdmittedEntry(initialDigest)), "carries an initial claim admission proof"},
+		"revised claim matched by its own revision digest": {revision, filingWith(timelyAdmittedEntry(revisionDigest)), noIngress},
+		"initial admission received after the cutoff":      {revision, filingWith(late), noIngress},
+		"initial admission not admitted":                   {revision, filingWith(notAdmitted), noIngress},
+		"empty cut":                                        {revision, filingWith(), noIngress},
 	}
 	for name, test := range cases {
-		err := bindLateFilingCloseToClaimAdmissionV1(test.filing, test.admission, test.proof)
+		err := bindLateFilingCloseToClaimAdmissionV1(test.filing, test.admission)
 		if test.want == "" && err != nil {
 			t.Errorf("%s: refused: %v", name, err)
 		}
@@ -480,8 +490,26 @@ func TestLateFallbackMatchesTheClaimsInitialAdmission(t *testing.T) {
 	}
 	unknown := revision
 	unknown.Body.AdmissionKind = "replacement"
-	if _, err := initialClaimAdmissionDigestV1(unknown, &proof); err == nil {
+	if _, err := initialClaimAdmissionDigestV1(unknown); err == nil {
 		t.Error("an unknown admission kind named an initial admission")
+	}
+}
+
+// withClaimAdmission changes a private copy of the shape's claim admission
+// receipt and re-points the request and receipt at it, so only the check
+// under test refuses.
+func withClaimAdmission(t *testing.T, change func(*AuthorizedClaimAdmissionReceiptV1)) func(*fallbackShape) {
+	return func(shape *fallbackShape) {
+		admission := shape.receipt.AuthorizedClaimAdmissionReceipt
+		change(&admission)
+		digest, err := ClaimAdmissionReceiptDigestV1(admission)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shape.receipt.AuthorizedClaimAdmissionReceipt = admission
+		shape.receipt.Body.AuthorizedClaimAdmissionReceiptDigest = digest
+		shape.variant.AuthorizedClaimAdmissionReceiptDigest = digest
+		shape.setRequest(t)
 	}
 }
 
@@ -562,7 +590,6 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 		shape := shapes[name]
 		shape.variant.LateFilingCloseReceiptDescriptor = nil
 		shape.receipt.Body.LateFilingCloseReceiptDigest = ""
-		shape.receipt.InitialClaimAdmissionProof = nil
 		shape.receipt.Body.DecisionPath, shape.receipt.AuthorizedClaimDecision.Body.DecisionPath = "terminal_fallback", "terminal_fallback"
 		shape.setRequest(t)
 		shapes[name] = shape
@@ -679,24 +706,25 @@ func TestFallbackReferencesBindExactlyOnce(t *testing.T) {
 			shape.variant.SourceClaimState = "approved"
 			shape.setRequest(t)
 		}, "source state is not registered"},
-		"late fallback of a revised claim lacks the initial proof": {"reviewing late", func(shape *fallbackShape) {
-			shape.receipt.InitialClaimAdmissionProof = nil
-		}, "lacks its initial claim admission proof"},
-		"late fallback carries another claim's initial admission": {"disputed late", func(shape *fallbackShape) {
-			proof := *shape.receipt.InitialClaimAdmissionProof
-			proof.ReceiptBody.ClaimID = sizeTestDigest("2")
-			shape.receipt.InitialClaimAdmissionProof = &proof
-		}, "is not the claim's initial admission"},
-		"late fallback's initial proof is not the one its revision names": {"reviewing late", func(shape *fallbackShape) {
-			proof := *shape.receipt.InitialClaimAdmissionProof
-			proof.ReceiptEnvelopeDigest = sizeTestDigest("2")
-			proof.ReceiptDescriptor.ContentDigest = proof.ReceiptEnvelopeDigest
-			shape.receipt.InitialClaimAdmissionProof = &proof
-		}, "is not the claim's initial admission"},
-		"in-window fallback carries an initial proof": {"reviewing in window", func(shape *fallbackShape) {
-			proof := testInitialAdmissionProof(shape.receipt.AuthorizedClaimAdmissionReceipt)
-			shape.receipt.InitialClaimAdmissionProof = &proof
-		}, "only a late-recovery fallback carries an initial claim admission proof"},
+		"late fallback of a revised claim lacks the initial proof": {"reviewing late", withClaimAdmission(t,
+			func(admission *AuthorizedClaimAdmissionReceiptV1) { admission.InitialClaimAdmissionProof = nil }),
+			"lacks its initial claim admission proof"},
+		"late fallback carries another claim's initial admission": {"reviewing late", withClaimAdmission(t,
+			func(admission *AuthorizedClaimAdmissionReceiptV1) {
+				proof := *admission.InitialClaimAdmissionProof
+				proof.ReceiptBody.ClaimID = sizeTestDigest("2")
+				admission.InitialClaimAdmissionProof = &proof
+			}), "is not the claim's initial admission"},
+		"late fallback's initial proof is not the one its revision names": {"reviewing late", withClaimAdmission(t,
+			func(admission *AuthorizedClaimAdmissionReceiptV1) {
+				proof := *admission.InitialClaimAdmissionProof
+				proof.ReceiptEnvelopeDigest = sizeTestDigest("2")
+				proof.ReceiptDescriptor.ContentDigest = proof.ReceiptEnvelopeDigest
+				admission.InitialClaimAdmissionProof = &proof
+			}), "is not the claim's initial admission"},
+		"in-window fallback whose revision lacks its initial proof": {"reviewing in window", withClaimAdmission(t,
+			func(admission *AuthorizedClaimAdmissionReceiptV1) { admission.InitialClaimAdmissionProof = nil }),
+			"lacks its initial claim admission proof"},
 		"late digest without a descriptor": {"reviewing in window", func(shape *fallbackShape) {
 			shape.receipt.Body.LateFilingCloseReceiptDigest = sizeTestDigest("1")
 		}, "is not its late-recovery marker"},
@@ -1222,7 +1250,6 @@ func TestFallbackLateMarkerIsOneDerivationForBothBindings(t *testing.T) {
 	inWindow := func(shape fallbackShape) fallbackShape {
 		shape.variant.LateFilingCloseReceiptDescriptor = nil
 		shape.receipt.Body.LateFilingCloseReceiptDigest = ""
-		shape.receipt.InitialClaimAdmissionProof = nil
 		shape.receipt.Body.DecisionPath, shape.receipt.AuthorizedClaimDecision.Body.DecisionPath = "terminal_fallback", "terminal_fallback"
 		shape.setRequest(t)
 		return shape
@@ -1247,5 +1274,143 @@ func TestFallbackLateMarkerIsOneDerivationForBothBindings(t *testing.T) {
 			t.Errorf("%s: marker %q, receipt carries %q, want %q", name, got,
 				test.shape.receipt.Body.LateFilingCloseReceiptDigest, test.want)
 		}
+	}
+}
+
+// TestEveryRevisionAdmissionCarriesItsInitialAdmissionProof: a revision
+// admission carries the compact proof of the initial admission it names, so
+// any revision, not only the first, binds its initial digest on its own. The
+// binding is refused before any signature is checked; an initial admission
+// carries no proof.
+func TestEveryRevisionAdmissionCarriesItsInitialAdmissionProof(t *testing.T) {
+	terms := testCoverageTerms(t)
+	now := time.Unix(2_000_000_100, 0).UTC()
+	revision := loadMeasuredDecisionReceipt(t).AuthorizedClaimAdmissionReceipt
+	verify := func(receipt AuthorizedClaimAdmissionReceiptV1) error {
+		return VerifyClaimAdmissionReceiptV1(receipt, terms, permissiveAgreementVerifier{}, allowAuthorityResolver{}, nil, now)
+	}
+	// A third revision names an initial admission that is not its
+	// predecessor; only the carried proof can bind it.
+	third := revision
+	third.Body.PriorClaimRevision, third.Body.AdmittedClaimRevision, third.Body.ClaimRevisionAdmissionSequence = 2, 3, 3
+	third.Body.PredecessorRevisionAdmissionReceiptDigest = sizeTestDigest("8")
+	withProof := func(base AuthorizedClaimAdmissionReceiptV1, change func(*ClaimAdmissionReceiptProofV1)) AuthorizedClaimAdmissionReceiptV1 {
+		proof := *base.InitialClaimAdmissionProof
+		change(&proof)
+		base.InitialClaimAdmissionProof = &proof
+		return base
+	}
+	const notInitial = "is not the claim's initial admission"
+	initial := revision
+	initial.Body.AdmissionKind = "initial"
+	initial.Body.InitialClaimAdmissionReceiptDigest, initial.Body.PredecessorRevisionAdmissionReceiptDigest = "", ""
+	withoutProof := third
+	withoutProof.InitialClaimAdmissionProof = nil
+	cases := map[string]struct {
+		receipt AuthorizedClaimAdmissionReceiptV1
+		want    string
+	}{
+		"third revision without the proof": {withoutProof, "lacks its initial claim admission proof"},
+		"third revision naming another claim's initial admission": {func() AuthorizedClaimAdmissionReceiptV1 {
+			other := third
+			other.Body.InitialClaimAdmissionReceiptDigest = sizeTestDigest("1")
+			return other
+		}(), notInitial},
+		"third revision carrying another claim's proof": {withProof(third, func(p *ClaimAdmissionReceiptProofV1) {
+			p.ReceiptBody.ClaimID = sizeTestDigest("2")
+		}), notInitial},
+		"third revision carrying a proof on another Agreement": {withProof(third, func(p *ClaimAdmissionReceiptProofV1) {
+			p.ReceiptBody.CoverageAgreementBodyDigest = sizeTestDigest("3")
+		}), notInitial},
+		"third revision carrying a revision's proof": {withProof(third, func(p *ClaimAdmissionReceiptProofV1) {
+			p.ReceiptBody.AdmissionKind = "revision"
+		}), notInitial},
+		"initial admission carrying a proof": {initial, "an initial Guarantor claim admission carries an initial claim admission proof"},
+	}
+	for name, test := range cases {
+		if err := verify(test.receipt); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s: got %v, want an error containing %q", name, err, test.want)
+		}
+	}
+	// A consistent third revision passes the binding; it is refused later,
+	// at a check that needs the signed history.
+	if err := verify(third); err == nil || strings.Contains(err.Error(), "initial claim admission proof") ||
+		strings.Contains(err.Error(), "initial admission other than its predecessor") {
+		t.Fatalf("a consistent third revision was refused at its initial-admission binding: %v", err)
+	}
+}
+
+// TestLateRecoveryDeadlinesLeaveRoomForTheReservation: an Agreement's
+// late-recovery deadlines must leave room for the late-ingress window after
+// the terminal resolution deadline and for the one-round late candidate
+// closure before the late-recovery terminal deadline; terms without the late
+// contingency set neither deadline.
+func TestLateRecoveryDeadlinesLeaveRoomForTheReservation(t *testing.T) {
+	base := testCoverageTerms(t)
+	closure := lateRecoveryCandidateClosureSecondsV1(base, 0)
+	if closure == 0 {
+		t.Fatal("the test terms reserve no one-round late closure")
+	}
+	fit := base
+	fit.LateIngressRecoveryWindowSeconds = 300
+	fit.LateIngressRecoveryDeadlineUnix = fit.TerminalResolutionDeadlineUnix + 300
+	fit.LateRecoveryTerminalDeadlineUnix = fit.LateIngressRecoveryDeadlineUnix + closure
+	const refused = "late-recovery deadlines leave no room"
+	cases := map[string]struct {
+		change func(*CoverageTermsV1)
+		want   string
+	}{
+		"exact fit": {func(*CoverageTermsV1) {}, ""},
+		"no late-recovery contingency": {func(terms *CoverageTermsV1) {
+			terms.LateIngressRecoveryDeadlineUnix, terms.LateRecoveryTerminalDeadlineUnix = 0, 0
+		}, ""},
+		"late closure one second short": {func(terms *CoverageTermsV1) {
+			terms.LateRecoveryTerminalDeadlineUnix--
+		}, refused},
+		"late-ingress window one second short": {func(terms *CoverageTermsV1) {
+			terms.LateIngressRecoveryDeadlineUnix--
+			terms.LateRecoveryTerminalDeadlineUnix--
+		}, refused},
+		"late-ingress deadline at the terminal resolution deadline": {func(terms *CoverageTermsV1) {
+			terms.LateIngressRecoveryWindowSeconds = 0
+			terms.LateIngressRecoveryDeadlineUnix = terms.TerminalResolutionDeadlineUnix
+			terms.LateRecoveryTerminalDeadlineUnix = terms.LateIngressRecoveryDeadlineUnix + closure
+		}, refused},
+		"only the terminal deadline set": {func(terms *CoverageTermsV1) {
+			terms.LateIngressRecoveryDeadlineUnix = 0
+		}, refused},
+		"only the ingress deadline set": {func(terms *CoverageTermsV1) {
+			terms.LateRecoveryTerminalDeadlineUnix = 0
+		}, refused},
+	}
+	for name, test := range cases {
+		terms := fit
+		test.change(&terms)
+		err := validateLateRecoveryDeadlinesV1(terms)
+		if test.want == "" && err != nil {
+			t.Errorf("%s: refused: %v", name, err)
+		}
+		if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+			t.Errorf("%s: got %v, want %q", name, err, test.want)
+		}
+	}
+	// With several negotiated rounds the reservation is still one round.
+	many := fit
+	entries, err := BuildClaimContinuationBudgetEntriesV1(3, 1, 600, 600, 600, 600, 600, 600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	many.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim = 3
+	many.ClaimClosureCapacity.ContinuationBudgetEntries = entries
+	oneRound := lateRecoveryCandidateClosureSecondsV1(many, 0)
+	many.LateRecoveryTerminalDeadlineUnix = many.LateIngressRecoveryDeadlineUnix + oneRound
+	if err := validateLateRecoveryDeadlinesV1(many); err != nil {
+		t.Fatalf("terms reserving the one-round closure with three negotiated rounds were refused: %v", err)
+	}
+	// ValidateCoverageTerms applies the check.
+	short := fit
+	short.LateRecoveryTerminalDeadlineUnix--
+	if err := ValidateCoverageTerms(short); err == nil || !strings.Contains(err.Error(), refused) {
+		t.Fatalf("coverage terms one second short of the late closure were not refused: %v", err)
 	}
 }
