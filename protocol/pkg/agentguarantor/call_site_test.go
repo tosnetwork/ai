@@ -148,7 +148,9 @@ func TestActivationPrerequisiteSeamIsAssignedOnlyInTests(t *testing.T) {
 
 // TestSeamTestsNeverRunInParallel: the verifier seams are package-level
 // variables that tests replace and restore, so no test in the package may
-// run in parallel with another.
+// run in parallel with another. Any selector named Parallel fails here,
+// called or not: a method value (f := t.Parallel) is as much a way to run in
+// parallel as the call.
 func TestSeamTestsNeverRunInParallel(t *testing.T) {
 	files, err := filepath.Glob("*_test.go")
 	if err != nil {
@@ -161,11 +163,9 @@ func TestSeamTestsNeverRunInParallel(t *testing.T) {
 			t.Fatal(err)
 		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
-			if call, ok := node.(*ast.CallExpr); ok {
-				if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Parallel" {
-					t.Errorf("%s: a test of this package runs in parallel while the verifier seams are package variables",
-						fileSet.Position(call.Pos()))
-				}
+			if selector, ok := node.(*ast.SelectorExpr); ok && selector.Sel.Name == "Parallel" {
+				t.Errorf("%s: a test of this package runs in parallel while the verifier seams are package variables",
+					fileSet.Position(selector.Pos()))
 			}
 			return true
 		})
