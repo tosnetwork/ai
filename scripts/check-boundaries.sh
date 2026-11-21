@@ -70,7 +70,18 @@ text protocol gateway execution messenger
 text execution messenger
 text messenger gateway execution
 
+# No Go file may use //go:linkname. It reaches unexported identifiers of
+# another package, so it would let code outside a package reassign a test-only
+# seam such as the Guarantor verifier variables, which the package's own guard
+# tests can only check within the package.
+linkname=$(find . -name '*.go' -type f -not -path './.git/*' -exec grep -nH '//go:linkname' {} + || true)
+if [ -n "$linkname" ]; then
+  status=1
+  echo "boundary violation: //go:linkname is not allowed:" >&2
+  printf '%s\n' "$linkname" | sed 's/^/  /' >&2
+fi
+
 if [ "$status" = 0 ]; then
-  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither; messenger/ depends on protocol/ only; nothing depends on messenger/"
+  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither; messenger/ depends on protocol/ only; nothing depends on messenger/; no //go:linkname"
 fi
 exit "$status"

@@ -1,10 +1,11 @@
 package agentguarantor
 
 import (
-	"os"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,39 +31,144 @@ func TestActivationPredecessorSeamDefaultsToTheRealVerifier(t *testing.T) {
 	}
 }
 
-// TestActivationPredecessorSeamIsAssignedOnlyInTests: no non-test file of the
-// package assigns the seam beyond its declaration, or copies it.
-func TestActivationPredecessorSeamIsAssignedOnlyInTests(t *testing.T) {
+// seamUse is one appearance of a seam identifier in the package's source,
+// with the syntax nodes enclosing it, innermost first.
+type seamUse struct {
+	position string
+	parents  []ast.Node
+	ident    *ast.Ident
+}
+
+// packageSeamUses parses every Go file of the package whose test-ness is
+// tests, and returns each use of the identifier name.
+func packageSeamUses(t *testing.T, name string, tests bool) []seamUse {
+	t.Helper()
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	const declaration = "var coverageActivationPredecessorVerifierV1 = VerifyCoverageActivationEvidenceV1"
-	use := regexp.MustCompile(`coverageActivationPredecessorVerifierV1\s*[^\s(]`)
-	declarations := 0
+	fileSet := token.NewFileSet()
+	var uses []seamUse
 	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
+		if strings.HasSuffix(file, "_test.go") != tests {
 			continue
 		}
-		source, err := os.ReadFile(file)
+		parsed, err := parser.ParseFile(fileSet, file, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for number, line := range strings.Split(string(source), "\n") {
-			if !strings.Contains(line, "coverageActivationPredecessorVerifierV1") || strings.HasPrefix(strings.TrimSpace(line), "//") {
-				continue
+		var stack []ast.Node
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			if node == nil {
+				stack = stack[:len(stack)-1]
+				return true
 			}
-			if strings.TrimSpace(line) == declaration {
-				declarations++
-				continue
+			if ident, ok := node.(*ast.Ident); ok && ident.Name == name {
+				parents := make([]ast.Node, len(stack))
+				for index := range stack {
+					parents[index] = stack[len(stack)-1-index]
+				}
+				uses = append(uses, seamUse{position: fileSet.Position(ident.Pos()).String(), parents: parents, ident: ident})
 			}
-			if use.MatchString(line) {
-				t.Errorf("%s:%d uses the activation predecessor seam other than by calling it: %s", file, number+1, strings.TrimSpace(line))
+			stack = append(stack, node)
+			return true
+		})
+	}
+	return uses
+}
+
+// isPackageVarDeclarationName reports whether use is the declared name of a
+// package-level var.
+func isPackageVarDeclarationName(use seamUse) bool {
+	if len(use.parents) < 3 {
+		return false
+	}
+	spec, isSpec := use.parents[0].(*ast.ValueSpec)
+	declaration, isDeclaration := use.parents[1].(*ast.GenDecl)
+	_, isFile := use.parents[2].(*ast.File)
+	return isSpec && isDeclaration && isFile && declaration.Tok == token.VAR && len(spec.Names) == 1 && spec.Names[0] == use.ident
+}
+
+// isCallee reports whether node is exactly the function a call calls.
+func isCallee(node ast.Node, parent ast.Node) bool {
+	call, ok := parent.(*ast.CallExpr)
+	return ok && call.Fun == node
+}
+
+// TestActivationPredecessorSeamIsAssignedOnlyInTests: in the package's
+// non-test files the seam appears exactly once as its package-level
+// declaration, and otherwise only as the function a call calls. Taking its
+// address, assigning it, aliasing it or passing it as a value fails here,
+// wherever it happens.
+func TestActivationPredecessorSeamIsAssignedOnlyInTests(t *testing.T) {
+	declarations := 0
+	for _, use := range packageSeamUses(t, "coverageActivationPredecessorVerifierV1", false) {
+		switch {
+		case isPackageVarDeclarationName(use):
+			declarations++
+			spec := use.parents[0].(*ast.ValueSpec)
+			if len(spec.Values) != 1 {
+				t.Errorf("%s: the seam is declared without its real default", use.position)
+			} else if value, ok := spec.Values[0].(*ast.Ident); !ok || value.Name != "VerifyCoverageActivationEvidenceV1" {
+				t.Errorf("%s: the seam's default is not VerifyCoverageActivationEvidenceV1", use.position)
 			}
+		case len(use.parents) > 0 && isCallee(use.ident, use.parents[0]):
+		default:
+			t.Errorf("%s: the activation predecessor seam is used other than by calling it", use.position)
 		}
 	}
 	if declarations != 1 {
 		t.Fatalf("the activation predecessor seam is declared %d times, want once", declarations)
+	}
+}
+
+// TestActivationPrerequisiteSeamIsAssignedOnlyInTests: in the package's
+// non-test files the prerequisite verifier seam appears once as its
+// package-level declaration, and otherwise only as the receiver of a field
+// that is called at once (activationPrerequisiteVerifiersV1.collateral(...)).
+func TestActivationPrerequisiteSeamIsAssignedOnlyInTests(t *testing.T) {
+	declarations := 0
+	for _, use := range packageSeamUses(t, "activationPrerequisiteVerifiersV1", false) {
+		switch {
+		case isPackageVarDeclarationName(use):
+			declarations++
+		case len(use.parents) > 1:
+			selector, isSelector := use.parents[0].(*ast.SelectorExpr)
+			if !isSelector || selector.X != use.ident || !isCallee(selector, use.parents[1]) {
+				t.Errorf("%s: the activation prerequisite seam is used other than by calling one of its verifiers", use.position)
+			}
+		default:
+			t.Errorf("%s: the activation prerequisite seam is used other than by calling one of its verifiers", use.position)
+		}
+	}
+	if declarations != 1 {
+		t.Fatalf("the activation prerequisite seam is declared %d times, want once", declarations)
+	}
+}
+
+// TestSeamTestsNeverRunInParallel: the verifier seams are package-level
+// variables that tests replace and restore, so no test in the package may
+// run in parallel with another.
+func TestSeamTestsNeverRunInParallel(t *testing.T) {
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	for _, file := range files {
+		parsed, err := parser.ParseFile(fileSet, file, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			if call, ok := node.(*ast.CallExpr); ok {
+				if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Parallel" {
+					t.Errorf("%s: a test of this package runs in parallel while the verifier seams are package variables",
+						fileSet.Position(call.Pos()))
+				}
+			}
+			return true
+		})
 	}
 }
 

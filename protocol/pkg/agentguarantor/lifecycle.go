@@ -200,8 +200,10 @@ func CoverageActivationEvidenceDigestV1(evidence AuthorizedCoverageActivationEvi
 // coverageActivationPredecessorVerifierV1 verifies the activation evidence a
 // claim admission or a claim filing close stands on. It is a variable only so
 // a test in this package can verify a signed claim history from the claim
-// onwards without rebuilding the coverage history before it; production never
-// reassigns it, which tests in this package assert.
+// onwards without rebuilding the coverage history before it. Production code
+// only calls it: a syntax test fails on any other use in a non-test file, and
+// go:linkname directives are refused repository-wide. Tests that replace it restore it
+// with t.Cleanup and never run in parallel, which a test also checks.
 var coverageActivationPredecessorVerifierV1 = VerifyCoverageActivationEvidenceV1
 
 func VerifyCoverageActivationEvidenceV1(evidence AuthorizedCoverageActivationEvidenceV1, offer AuthorizedFirmCoverageOfferV1,
