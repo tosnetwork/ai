@@ -19,14 +19,15 @@ data; finalized chain state decides every fact.
 ## What works today
 
 Status on 2026-11-21. The core development team operated every run below;
-none of them is independent acceptance.
+none of them is independent acceptance. The public-network runs reached the
+team's validators through SSH port forwards, not public HTTPS endpoints.
 
 | Capability | In one sentence | Evidence |
 |---|---|---|
 | **Paid software work, end to end** | On the epoch-7 public test network a buyer paid, the provider delivered and withdrew its revenue, and an unanswered purchase was refunded. | [rehearsal](spec/deployments/public-testnet-epoch7-gate-d-rehearsal-20261118.json), [pilot](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json) |
-| **Buying from an MCP client** | Claude Code or Codex can search, quote and prepare a purchase without OpenFox; paying needs confirmation in a separate custody account the model cannot reach. | [guide](spec/docs/MCP_BUYER_GUIDE.md), [spec](spec/docs/MCP_BUYER_ADAPTER_V1.md) |
-| **Agent-operated pilot (2026-11-19)** | A Claude Code buyer and a Codex verifier completed two purchases; **not Gate D evidence** — the team held all roles and payment confirmation was automated. | [record](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json), [runbook 8.5](spec/docs/GATE_D_EXTERNAL_PILOT.md) |
-| **Private chat and rooms over relays** | OpenFox agents on separate machines chat one-to-one and in invite-only rooms through relays alone (rooms accepted 2026-11-20), on the team's test relays and chain. | [spec](spec/docs/MESSENGER_RELAY_CARRIAGE_V1.md), [rooms](spec/deployments/messenger-relay-rooms-20261120.json), [card](spec/deployments/messenger-relay-rooms-card-20261120.json), [end](spec/deployments/messenger-relay-rooms-end-20261120.json), [local](spec/deployments/local-messenger-relay-rooms-20261119.json), [unit](spec/deployments/local-messenger-relay-rooms-item20-20261120.json) |
+| **Buying from an MCP client** | Claude Code or Codex can search, quote and prepare a purchase without OpenFox; paying needs confirmation in a separate custody account the model cannot reach. No human-confirmed purchase is recorded. | [guide](spec/docs/MCP_BUYER_GUIDE.md), [spec](spec/docs/MCP_BUYER_ADAPTER_V1.md) |
+| **Agent-operated pilot (2026-11-19)** | A Claude Code buyer had one purchase delivered and accepted and one left unanswered and refunded, and a Codex verifier checked both; **not Gate D evidence** — the team held all roles and payment confirmation was automated. | [record](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json), [runbook 8.5](spec/docs/GATE_D_EXTERNAL_PILOT.md) |
+| **Private chat and rooms over relays** | OpenFox agents on separate machines chat one-to-one and in invite-only rooms through relays alone (rooms accepted 2026-11-20), on the team's test relays and a separate three-validator test chain, not the epoch-7 network. | [spec](spec/docs/MESSENGER_RELAY_CARRIAGE_V1.md), [one-to-one](spec/deployments/messenger-relay-one-to-one-20261116.json), [rooms](spec/deployments/messenger-relay-rooms-20261120.json), [card](spec/deployments/messenger-relay-rooms-card-20261120.json), [end](spec/deployments/messenger-relay-rooms-end-20261120.json), [local](spec/deployments/local-messenger-relay-rooms-20261119.json), [unit](spec/deployments/local-messenger-relay-rooms-item20-20261120.json) |
 | **Registry on a public test network (Gate C)** | Agents and Capabilities register, update, transfer, revoke and resolve through a validator quorum; initial profile accepted, independent review of the release pending. | [record](spec/deployments/public-testnet-epoch7-gate-c-20261118.json), [roadmap 3](spec/docs/ROADMAP.md) |
 | **Test-only Service Actor, 600 s windows** | A test build lowers the minimum response and refund windows from 3,600 s to 600 s; it is not a release and no record uses it yet. | [spec](spec/docs/SERVICE_ACTOR_TVM_V1.md) |
 
@@ -34,8 +35,9 @@ none of them is independent acceptance.
 
 - **Gate D is not passed**: no pilot with an outside buyer, an independent
   provider and an independent verifier has run ([runbook](spec/docs/GATE_D_EXTERNAL_PILOT.md)).
-- **No public test network is currently running** (2026-11-21); the public
-  records above come from the epoch-7 test network.
+- **As of 2026-11-21 the epoch-7 test network is stopped** (operator
+  statement; not recorded in this repository); the paid-work, pilot and
+  Gate C records above were made on it.
 - **Gates E, F and G are not accepted**: the onboarding runbooks are
   escrow-era, and no independent gateway, recurring paid use or production
   evidence exists.

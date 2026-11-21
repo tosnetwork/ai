@@ -347,7 +347,8 @@ Deliver on the Service Actor rail:
   runtime — designed in `docs/MCP_BUYER_ADAPTER_V1.md` (local stdio server
   without custody; payment only after a human confirms it from a separate
   custody account; a long-running buyer agent for delivery and refunds);
-  implemented. Merged on main (the adapter's pull requests from ai #57
+  implemented, with no human-confirmed purchase recorded (the one
+  public-network run, below, used an automated confirmer). Merged on main (the adapter's pull requests from ai #57
   to #91, through merge `bde3b791`):
   - the custody-side agent core, the confirmer (`tos-service-buyer confirm`)
     and the refund duties;
@@ -427,8 +428,9 @@ history without a private gateway database.
 Do not block this gate on general marketplace ranking, generalized arbitration,
 multiple verticals, cross-chain support, or per-message settlement.
 
-**Gate status: 🟡 Service Actor contract merged and released; current-domain
-public chain evidence and external acceptance pending.** The settlement rail
+**Gate status: 🟡 Service Actor contract merged and released; team-operated
+public-chain runs recorded; independent external acceptance pending.** The
+settlement rail
 changed to the Service Actor on 2026-11-07. The contract change is merged
 (tos `fc5e7723e`, #429) and released (#430, code hash `0594f9a5…`); the
 remaining items are listed above. Two team-operated runs on the epoch-7
@@ -640,14 +642,15 @@ gate item.
   discovery, and an AgentID-first OpenFox proactive-send boundary now have
   repository implementation and tests. A `.tos` input is resolved once to a
   finalized canonical AgentID; the alias never becomes messaging, session,
-  routing, authorization, commerce, or receipt authority. The current proactive
-  path still requires an operator-established direct route/session, and live
-  arbitrary first-contact transport plus the M0-R reachability evidence remain
-  incomplete. Carriage of chat over the Agent Packet relays is specified in
-  [`MESSENGER_RELAY_CARRIAGE_V1.md`](MESSENGER_RELAY_CARRIAGE_V1.md); its
-  milestones M-R1 (one-to-one chat) and M-R2 (private rooms and invites,
-  accepted 2026-11-20) are accepted there on relays and a chain the core team
-  operated (`qualifies_as_public_acceptance: false` in every record). This
+  routing, authorization, commerce, or receipt authority. On the direct
+  transport, the current proactive path still requires an operator-established
+  direct route/session, and live arbitrary first-contact transport plus the
+  M0-R reachability evidence remain incomplete. Over the Agent Packet relays
+  ([`MESSENGER_RELAY_CARRIAGE_V1.md`](MESSENGER_RELAY_CARRIAGE_V1.md)), first
+  contact (by contact file in M-R1, by invite in M-R2), one-to-one chat (M-R1)
+  and private rooms (M-R2, accepted 2026-11-20) are accepted on relays and a
+  test chain the core team operated (`qualifies_as_public_acceptance: false`
+  in every record). This
   status is incubation evidence only: it does not open the
   expansion gate, reorder Gate D--F work, or establish product acceptance.
   Mailbox Relay and attachment storage service profiles remain expansion work
