@@ -41,6 +41,20 @@ evidence: the operator stopped the epoch-7 public test network (validators
 and both test relays) on 2026-11-21 (UTC), with data retained. It binds no
 chain data, cannot be verified from this repository and satisfies no gate.
 
+Records replace host names and addresses with placeholders and keep only
+loopback: the multi-host relay records name their relays `<relay-1-host>` and
+`<relay-2-host>`, and the rooms records also replace namespace addresses and
+the run directory (see their `record_provenance`). Three early records are
+pinned byte for byte in `docs/AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`
+and predate that convention, so they are left as published:
+`local-openfox-relay-two-host-20261115.json`,
+`local-messenger-relay-one-to-one-20261116.json` and
+`messenger-relay-one-to-one-20261116.json`. They keep private-range
+(RFC 1918) addresses of per-run network namespaces that were deleted at the
+end of each run, one public probe target, and the run's scratch directory
+path, as other records of 2026-11-14 to 2026-11-16 also do. They contain no
+public address of any host, no host name, no home path and no person.
+
 Evidence produced under the pre-release protocol domain is preserved unchanged
 under `archive/pre-tos-service-v1/` for audit history. Because protocol-domain
 strings participate in cryptographic commitments, those files cannot satisfy a
