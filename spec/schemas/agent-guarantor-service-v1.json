@@ -1236,6 +1236,9 @@
         "coverage_end_commitment": {
           "$ref": "#/$defs/CoverageEndCommitmentV1"
         },
+        "initial_claim_admission_proof": {
+          "$ref": "#/$defs/ClaimAdmissionReceiptProofV1"
+        },
         "stage_action_admission_evidence": {
           "$ref": "#/$defs/PortableStageActionAdmissionEvidenceV1"
         }
@@ -1280,9 +1283,6 @@
         },
         "current_decision_admission_proof": {
           "$ref": "#/$defs/ClaimDecisionAdmissionReceiptProofV1"
-        },
-        "initial_claim_admission_proof": {
-          "$ref": "#/$defs/ClaimAdmissionReceiptProofV1"
         },
         "predecessor_claim_state_transition_receipt": {
           "$ref": "#/$defs/AuthorizedClaimStateTransitionReceiptV1"
