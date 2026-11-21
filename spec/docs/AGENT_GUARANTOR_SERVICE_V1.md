@@ -3229,8 +3229,18 @@ equals `late_ingress_recovery_deadline_unix` minus a positive
 the other is refused; without one, all three late fields are zero. The
 `hard_effect_deadline` anchor needs the Agreement, so firm-offer verification
 enforces it: `late_recovery_terminal_deadline_unix` (with the contingency) or
-`terminal_resolution_deadline_unix` (without it) equals `hard_effect_deadline`,
-and neither exceeds the request's maximum. The
+`terminal_resolution_deadline_unix` (without it) equals `hard_effect_deadline`;
+it also holds `terminal_resolution_deadline_unix` to
+`maximum_terminal_resolution_deadline_unix` and, with the contingency,
+`late_recovery_terminal_deadline_unix` to
+`maximum_late_recovery_terminal_deadline_unix` and the window to
+`maximum_late_ingress_recovery_window_seconds`. A request asks for no
+late-recovery contingency by setting both late maxima to zero, and asks for
+one by setting both positive, with the late-recovery maximum later than the
+terminal-resolution maximum; the terminal-resolution maximum is never earlier
+than the requested claim-filing end. A claim profile permits
+`late_recovery_terminal_fallback` by publishing a positive
+`maximum_late_ingress_recovery_window_seconds`. The
 continuation entry's `maximum_remaining_closure_seconds` includes its decision
 path plus payout and Adapter-recovery windows, while
 `maximum_remaining_decision_path_seconds` is exactly the formula in section
@@ -5577,7 +5587,8 @@ descriptor with it. A consumer that relies on a revision's initial digest
 through its compact proof therefore verifies the complete receipt as a claim
 admission receipt, including its initial proof. The terminal claim set does
 not need to: it carries the initial admission's proof first and every
-revision's proof after it, and before any signature binds each revision to
+revision's proof after it, and before the bundle's proofs are verified binds
+each revision to
 the proof before it (`predecessor_revision_admission_receipt_digest` equals
 that proof's envelope digest) and to the carried initial proof
 (`initial_claim_admission_receipt_digest` equals its envelope digest, and the
