@@ -4811,8 +4811,14 @@ Agreement's `terminal_resolution_deadline_unix`. For a lineage whose first
 post-late-close decision is exactly `late_recovery_terminal_fallback`, the
 materializer instead requires all three values to be no later than
 `late_recovery_terminal_deadline_unix`; the exact authorized decision chain and
-filing-close receipt make that branch mechanically distinguishable. No other
-path may use the contingency deadline. Overflow or insufficient remaining time
+filing-close receipt make that branch mechanically distinguishable. The
+materializer reads the branch from the applied decision's admission receipt:
+every admission on the late-recovery path (the candidate, its authorized
+successor and the fallback at the successor deadline) carries a
+`late_filing_close_receipt_digest`, and no other admission does. The decision
+path alone cannot tell, because the successor's path is `successor` or
+`terminal_fallback`. A `late_recovery_terminal_fallback` admission without that
+digest is invalid. No other path may use the contingency deadline. Overflow or insufficient remaining time
 rejects the earlier decision admission under the applicable continuation-
 budget rule, not the already terminal close. For each materialized line:
 
@@ -6221,10 +6227,13 @@ selected tagged variant use that same exact embedded expectation. A digest
 without those bytes, two expectations, or a mismatch in Agreement, obligation,
 claim, epoch, log, state revision, or selected claim revision fails before
 action admission. A verifier of an `authorized_decision` receipt refuses it,
-before any other check, when it carries `late_filing_close_receipt_digest`,
-`fallback_trigger_cutoff_unix`, `current_decision_admission_proof` or a decision
-on a fallback path: those exist only for deterministic fallback, and an
-authorized receipt carrying them would sign over an object no check reads.
+before any other check, when it carries `fallback_trigger_cutoff_unix`,
+`current_decision_admission_proof` or a decision on a fallback path: those
+exist only for deterministic fallback, and an authorized receipt carrying them
+would sign over an object no check reads. It carries
+`late_filing_close_receipt_digest` only as the late-recovery successor's
+marker (one challenge round on the late-recovery path, below), equal to its
+candidate's digest, and is refused with any other value.
 
 **Fallback source references.** The fallback variant names its source head by
 reference only, so the request stays a few kilobytes and the admission chain is
@@ -6272,9 +6281,12 @@ no larger than `maximum_nonterminal_rounds_per_claim`. Every other source state
 leaves the nonterminal count unchanged. From `evidence_required` or
 `disputed` the current decision froze the revision epoch and no transition has
 reopened it, so the proof's `authorized_claim_admission_receipt_digest` equals
-the fallback's claim admission digest. A reviewing head is not bound this way:
-its transition may open the next epoch, and a revision admitted in that epoch
-legitimately changes the claim admission.
+the fallback's claim admission digest. The same holds for
+`reviewing_after_challenge` when the challenged decision is a
+`late_recovery_terminal_fallback` candidate, whose challenge leaves ingress
+frozen. Any other reviewing head is not bound this way: its transition opens
+the next epoch, and a revision admitted in that epoch legitimately changes the
+claim admission.
 
 The late filing-close descriptor names
 `application/vnd.tos.service.agent-guarantor-claim-filing-close.v1+cbor`, the
@@ -6286,7 +6298,9 @@ level. An absent resolver, unavailable content, a length other than
 `content_size`, undecodable or noncanonical bytes, or a receipt whose digest is
 not `content_digest` fails closed. The receipt body's
 `late_filing_close_receipt_digest` equals `content_digest` exactly for late
-recovery and is absent otherwise. The resolved filing-close receipt must belong
+recovery. Without a descriptor it equals the challenged candidate's digest for
+a fallback from `reviewing_after_challenge` after a late-recovery candidate
+(the one-challenge-round marker) and is absent otherwise. The resolved filing-close receipt must belong
 to the same Agreement and obligation, and its activation evidence must have the
 digest of the activation evidence carried by the claim admission request; both
 checks run in the same binding step, before any signature is checked. Carrying the filing-close receipt instead would repeat that
@@ -6366,6 +6380,48 @@ neither create another proof nor change high-water, root, claim revision, or
 epoch state. Among authorized decisions it exists only for a successor to a
 late-recovery candidate.
 
+**One challenge round on the late-recovery path.** The challenge of a
+`late_recovery_terminal_fallback` candidate is the only challenge round on
+that path. Its sole successor, whether the authorized `successor` or a
+`terminal_fallback` taken at the successor deadline from that reviewing head,
+cannot itself be challenged: a `challenge_admission` whose current decision is
+that successor is invalid. Revision ingress stays frozen on this path, so the
+successor decides the same claim revision and evidence the first round
+already reviewed, and a second round would have nothing new to review.
+
+So that a verifier can apply the rule from a compact proof alone, that
+successor's admission receipt body carries its candidate's
+`late_filing_close_receipt_digest`. An authorized `successor` whose
+`predecessor_claim_state_transition_receipt` is the `challenge_admission` of a
+`late_recovery_terminal_fallback` candidate carries exactly that candidate's
+digest; every other authorized decision carries none. A `terminal_fallback`
+from `reviewing_after_challenge` whose challenged decision is a late-recovery
+candidate carries the same digest; a late-recovery candidate itself carries its
+own filing close's digest, as the fallback source references require. A
+`challenge_admission` is refused when its current decision's path is
+`successor` or `terminal_fallback` and that decision carries a
+`late_filing_close_receipt_digest`. The refusal trusts that digest as it sits in
+the sealed proof body, exactly as it trusts the proof's challenge window: both
+are fields of the original receipt body, covered by its authorization quorum
+and the stage Action Authority's seal.
+
+Late recovery happens at most once per claim. A
+`late_recovery_terminal_fallback` whose head is already on the late-recovery
+path is invalid: a `reviewing_after_challenge` head whose challenged decision is
+a late-recovery candidate, or any head whose current decision carries a
+`late_filing_close_receipt_digest`. Such a fallback would open a second
+challenge round and could be admitted before its successor deadline, since its
+trigger, the filing close, has already passed. The path ends only through the
+candidate's authorized `successor` or the `terminal_fallback` at that
+successor's deadline.
+
+The claim still terminates: the successor's challenge window elapses and
+`challenge_close` admits its terminal state, which the terminal claim set
+accepts like any other final decision. The late path's reserved closure time,
+`late_recovery_candidate_closure_seconds`, is computed for up to
+`maximum_challenge_rounds_per_claim` rounds and is therefore an upper bound on
+the one round now allowed.
+
 **Frozen-epoch reuse by a fallback.** A deterministic fallback whose head did
 not reopen revision ingress has no open epoch to freeze, so it reuses the
 current decision's frozen epoch exactly as the late-recovery successor does.
@@ -6390,7 +6446,16 @@ including `initial_terminal_fallback` and a fallback from any other reviewing
 head (whose transition opened the next epoch, which its successor must
 freeze), uses the ordinary open-to-frozen CAS with
 `expected_epoch_state = open`; `frozen` there, or `open` on a reuse path, is
-invalid.
+invalid. On that open path, as on the ordinary decision path, the
+expectation's `expected_epoch_state_revision` equals the cut's
+`prior_epoch_state_revision`, and its `revision_ingress_log_id` equals the
+cut's `claim_ingress_log_id`. The receipt body's `frozen_revision_epoch`,
+`prior_revision_epoch_state_revision`, `frozen_revision_epoch_state_revision`,
+`frozen_claim_revision_ingress_high_water` and
+`frozen_claim_revision_ingress_log_root` equal the cut's `revision_epoch`,
+`prior_epoch_state_revision`, `frozen_epoch_state_revision`,
+`admission_high_water` and `admission_log_root`. On a reuse path the log ID
+binding holds as well.
 `challenge_close` accepts only the
 current decision receipt and its authority-produced frozen cut. Timeout, local
 queue absence, an unfrozen expectation, or a caller-supplied/digest-only cut is

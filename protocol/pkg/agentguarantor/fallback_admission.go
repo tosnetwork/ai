@@ -124,6 +124,12 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 		if transition.DecisionAdmissionProof.ReceiptEnvelopeDigest != variant.CurrentDecisionAdmissionReceiptDigest {
 			return source, errors.New("reviewing fallback decision reference differs from its transition's proof")
 		}
+		// The challenge of a late-recovery candidate leaves ingress frozen, so
+		// the candidate still stands on the fallback's claim admission.
+		if transition.DecisionAdmissionProof.AuthorizedClaimDecision.Body.DecisionPath == "late_recovery_terminal_fallback" &&
+			transition.DecisionAdmissionProof.ReceiptBody.AuthorizedClaimAdmissionReceiptDigest != claimDigest {
+			return source, errors.New("reviewing fallback's late-recovery candidate stands on another claim admission")
+		}
 		source.transition = transition
 		source.currentDecision = &transition.DecisionAdmissionProof
 		headStateRevision = transition.Body.ResultingClaimStateRevision
@@ -156,12 +162,24 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 	if err := bindFallbackRevisionEpochV1(receipt, variant, source); err != nil {
 		return source, err
 	}
+	// A fallback in place of a late-recovery candidate's successor carries the
+	// candidate's digest, so its proof shows it may not be challenged again.
+	lateMarker := ""
+	if variant.SourceClaimState == "reviewing_after_challenge" {
+		lateMarker = lateRecoveryCandidateMarkerV1(source.transition)
+	}
 	descriptor := variant.LateFilingCloseReceiptDescriptor
 	if descriptor == nil {
-		if receipt.Body.LateFilingCloseReceiptDigest != "" {
-			return source, errors.New("ordinary fallback admission names a late filing-close receipt")
+		if receipt.Body.LateFilingCloseReceiptDigest != lateMarker {
+			return source, errors.New("fallback admission's late filing-close digest is not its late-recovery marker")
 		}
 		return source, nil
+	}
+	// Late recovery happens at most once per claim: a head already on the
+	// late-recovery path ends only through its successor or the fallback at
+	// the successor deadline.
+	if lateMarker != "" || source.currentDecision != nil && source.currentDecision.ReceiptBody.LateFilingCloseReceiptDigest != "" {
+		return source, errors.New("late fallback from a head already on the late-recovery path: late recovery happens once per claim")
 	}
 	if receipt.Body.LateFilingCloseReceiptDigest != descriptor.ContentDigest {
 		return source, errors.New("late fallback receipt names a filing-close receipt other than its request")
@@ -202,14 +220,25 @@ func bindFallbackRevisionEpochV1(receipt AuthorizedClaimDecisionAdmissionReceipt
 	variant DeterministicFallbackAdmissionVariantV1, source deterministicFallbackSourceV1) error {
 	epoch := variant.ClaimRevisionEpochExpectation
 	cut := receipt.ClaimRevisionIngressCutProof
+	body := receipt.Body
+	if epoch.RevisionIngressLogID != cut.ClaimIngressLogID {
+		return errors.New("claim decision fallback names another revision ingress log than its cut")
+	}
 	if !fallbackReusesFrozenEpochV1(variant.SourceClaimState, source) {
 		if epoch.ExpectedEpochState != "open" || cut.PriorEpochStateRevision != epoch.ExpectedEpochStateRevision {
 			return errors.New("claim decision fallback must freeze the open revision epoch its head opened")
 		}
+		// The admission froze this cut, so the receipt records exactly it.
+		if body.FrozenRevisionEpoch != cut.RevisionEpoch ||
+			body.PriorRevisionEpochStateRevision != cut.PriorEpochStateRevision ||
+			body.FrozenRevisionEpochStateRevision != cut.FrozenEpochStateRevision ||
+			body.FrozenClaimRevisionIngressHighWater != cut.AdmissionHighWater ||
+			body.FrozenClaimRevisionIngressLogRoot != cut.AdmissionLogRoot {
+			return errors.New("claim decision fallback's frozen-epoch fields differ from its cut")
+		}
 		return nil
 	}
 	head := source.currentDecision.ReceiptBody
-	body := receipt.Body
 	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(cut)
 	if err != nil || epoch.ExpectedEpochState != "frozen" || cutDigest != head.ClaimRevisionIngressCutProofDigest ||
 		epoch.RevisionEpoch != head.FrozenRevisionEpoch ||

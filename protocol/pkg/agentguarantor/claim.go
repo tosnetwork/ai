@@ -526,12 +526,34 @@ func validateClaimDecisionBody(body ClaimDecisionBodyV1, terms CoverageTermsV1) 
 	return nil
 }
 
+// OnLateRecoveryPathV1 reports whether a decision admission is on the
+// late-recovery path. Every admission on that path (the candidate, its
+// authorized successor and the fallback at the successor deadline) carries a
+// late filing-close digest and no other admission does; the decision path
+// alone cannot tell, because the successor's path is successor or
+// terminal_fallback.
+func OnLateRecoveryPathV1(admission ClaimDecisionAdmissionReceiptBodyV1) bool {
+	return admission.LateFilingCloseReceiptDigest != ""
+}
+
+// MaterializeClaimPayout derives the payout obligations of a terminal
+// decision. lateRecoveryPath, from OnLateRecoveryPathV1 of the decision's
+// admission, selects the payout ceiling: late_recovery_terminal_deadline_unix
+// on that path and terminal_resolution_deadline_unix otherwise.
 func MaterializeClaimPayout(ownerID, agentID, mandateDigest, payoutTemplateObligationID string, terms CoverageTermsV1,
-	decision AuthorizedClaimDecisionV1, terminalClaimStateTransitionReceiptDigest string, terminalCloseUnix, firstPayoutSequence uint64) (MaterializedPayoutObligationSetV1, error) {
+	decision AuthorizedClaimDecisionV1, terminalClaimStateTransitionReceiptDigest string, terminalCloseUnix, firstPayoutSequence uint64,
+	lateRecoveryPath bool) (MaterializedPayoutObligationSetV1, error) {
 	if !validID(ownerID) || !validID(agentID) || !validDigest(mandateDigest) || !validToken(payoutTemplateObligationID, 128) ||
 		ValidateCoverageTerms(terms) != nil || validateClaimDecisionBody(decision.Body, terms) != nil ||
 		!validDigest(terminalClaimStateTransitionReceiptDigest) || terminalCloseUnix == 0 || firstPayoutSequence == 0 {
 		return MaterializedPayoutObligationSetV1{}, errors.New("payout materialization input is invalid")
+	}
+	if decision.Body.DecisionPath == "late_recovery_terminal_fallback" && !lateRecoveryPath {
+		return MaterializedPayoutObligationSetV1{}, errors.New("a late-recovery decision is materialized off the late-recovery path")
+	}
+	payoutCeiling := terms.TerminalResolutionDeadlineUnix
+	if lateRecoveryPath {
+		payoutCeiling = terms.LateRecoveryTerminalDeadlineUnix
 	}
 	decisionDigest, err := ClaimDecisionDigestV1(decision)
 	if err != nil {
@@ -567,8 +589,8 @@ func MaterializeClaimPayout(ownerID, agentID, mandateDigest, payoutTemplateOblig
 			return MaterializedPayoutObligationSetV1{}, errors.New("payout time overflows")
 		}
 		expires, ok := checkedAdd(terminalCloseUnix, line.ExpiresAfterTerminalCloseSeconds)
-		if !ok || expires > terms.TerminalResolutionDeadlineUnix {
-			return MaterializedPayoutObligationSetV1{}, errors.New("payout exceeds terminal resolution deadline")
+		if !ok || expires > payoutCeiling {
+			return MaterializedPayoutObligationSetV1{}, errors.New("payout exceeds its path's terminal deadline")
 		}
 		lineDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-payout-line.v1", line)
 		identity := struct {
