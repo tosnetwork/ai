@@ -119,8 +119,10 @@ fi
 # The Guarantor package's non-test files import neither unsafe nor C. Either
 # reaches memory and symbols past the type system, and so past the unexported
 # verifier seams that the package's guard tests check by syntax. The loaded
-# package is checked on each platform; the source text of every non-test
-# file, whatever its build constraints, is the backstop.
+# package is checked here on each platform. Files a build constraint keeps
+# out of every one of those loads are covered by the package's own guard test
+# TestGuarantorImportsNeitherUnsafeNorCgo, which parses the imports of every
+# non-test file whatever its constraints.
 guarantor=protocol/pkg/agentguarantor
 for platform in host windows darwin; do
   goos=$(go env GOOS)
@@ -139,20 +141,8 @@ for platform in host windows darwin; do
     printf '%s\n' "$found" | sed 's/^/  /' >&2
   fi
 done
-# The text backstop reads import lines only: a line that holds nothing but an
-# optional import keyword and parenthesis, an optional name, and the quoted
-# path. A string literal "C" or "unsafe" inside a statement is not an import
-# and is allowed.
-unsafe=$(find "$guarantor" -name '*.go' -not -name '*_test.go' -exec grep -nHE \
-  '^[[:space:]]*(import[[:space:]]*(\([[:space:]]*)?)?([A-Za-z_.][A-Za-z0-9_]*[[:space:]]+)?["`](unsafe|C)["`][[:space:]]*\)?[[:space:]]*;?[[:space:]]*(//.*|/\*.*)?$' \
-  {} + || true)
-if [ -n "$unsafe" ]; then
-  status=1
-  echo "boundary violation (source text): $guarantor imports unsafe or C in a non-test file:" >&2
-  printf '%s\n' "$unsafe" | sed 's/^/  /' >&2
-fi
 
 if [ "$status" = 0 ]; then
-  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither; messenger/ depends on protocol/ only; nothing depends on messenger/; no //go:linkname; no symlinked Go file; no assembly, C or object file in a Go package directory; no unsafe or cgo in $guarantor"
+  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither; messenger/ depends on protocol/ only; nothing depends on messenger/; no //go:linkname; no symlinked Go file; no assembly, C or object file in a Go package directory; no unsafe or cgo in the loaded $guarantor"
 fi
 exit "$status"
