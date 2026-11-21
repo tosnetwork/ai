@@ -35,9 +35,10 @@ team's validators through SSH port forwards, not public HTTPS endpoints.
 
 - **Gate D is not passed**: no pilot with an outside buyer, an independent
   provider and an independent verifier has run ([runbook](spec/docs/GATE_D_EXTERNAL_PILOT.md)).
-- **As of 2026-11-21 the epoch-7 test network is stopped** (operator
-  statement; not recorded in this repository); the paid-work, pilot and
-  Gate C records above were made on it.
+- **As of 2026-11-21 the epoch-7 test network is stopped**
+  ([operator statement](spec/deployments/public-testnet-epoch7-stopped-20261121.json),
+  not independently verifiable); the paid-work, pilot and Gate C records
+  above were made on it.
 - **Gates E, F and G are not accepted**: the onboarding runbooks are
   escrow-era, and no independent gateway, recurring paid use or production
   evidence exists.

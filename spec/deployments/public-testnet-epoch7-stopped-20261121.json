@@ -1,0 +1,28 @@
+{
+  "schema": "tos.service.network.operator-statement.v1",
+  "statement_type": "operator statement, not independently verifiable",
+  "is_evidence": false,
+  "qualifies_for_any_gate": false,
+  "network": {
+    "network_id": "tos:global-id:2",
+    "label": "epoch-7 public test network",
+    "global_id": 2,
+    "identity_reference": "the genesis and global-config hashes of this network are in public-testnet-epoch7-gate-c-20261118.json (network)"
+  },
+  "event": "stopped",
+  "stopped_utc_date": "2026-11-21",
+  "stopped_by": "the network operator",
+  "stopped_components": [
+    "all validators",
+    "both test relays"
+  ],
+  "data_retained": true,
+  "last_masterchain_seqno": 617110,
+  "last_masterchain_seqno_source": "as stated by the operator; not read from an endpoint quorum for this record",
+  "restart": "none stated",
+  "effect_on_existing_records": "none: the records made on this network describe finalized state at the time of their runs and are unchanged; while the network is stopped their chain reads cannot be repeated against live endpoints",
+  "notes": [
+    "This file records a statement by the operator. It binds no transaction, block hash, endpoint output or signature, and nothing in this repository can confirm it.",
+    "It contains no host names, addresses or names of people."
+  ]
+}
