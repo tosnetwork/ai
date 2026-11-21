@@ -19,7 +19,11 @@ import (
 // measuredDecisionReceiptPath is a complete authorized claim-decision
 // admission receipt produced by a full Guarantor provider flow with ML-DSA-44
 // authority (test identities only). Its canonical size is 1,068,868 bytes,
-// which the 1 MiB ceiling refused.
+// which the 1 MiB ceiling refused. It was recorded before revision admissions
+// carried the initial admission's proof and before the deadline and request
+// rules of the later profile revisions, so its history would no longer verify;
+// it is used structurally only, for sizes and binder shapes. The signed
+// history tests (signed_history_test.go) build verifiable histories instead.
 const measuredDecisionReceiptPath = "testdata/claim-decision-admission-receipt-mldsa44.json.gz"
 
 const measuredDecisionReceiptBytes = 1_068_868

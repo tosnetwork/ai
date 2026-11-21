@@ -227,7 +227,7 @@ func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, te
 	if err != nil {
 		return err
 	}
-	if err := VerifyCoverageActivationEvidenceV1(effect.AuthorizedCoverageActivationEvidence, offer, agreementVerifier,
+	if err := coverageActivationPredecessorVerifierV1(effect.AuthorizedCoverageActivationEvidence, offer, agreementVerifier,
 		authorityResolver, fenceResolver, collateralFinalityVerifierFromResolverV1(authorityResolver), now); err != nil {
 		return fmt.Errorf("Guarantor claim admission activation predecessor is invalid: %w", err)
 	}
