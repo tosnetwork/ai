@@ -1208,3 +1208,44 @@ func TestLateRecoveryClosureReservesOneChallengeRound(t *testing.T) {
 		t.Fatalf("a zero-round profile was refused its zero-round closure: %v", err)
 	}
 }
+
+// TestFallbackLateMarkerIsOneDerivationForBothBindings: the late filing-close
+// digest a fallback without a late filing close must carry is derived once,
+// for both the reference binding and the receipt binding of the deep verifier:
+// the challenged late candidate's digest for the fallback at that candidate's
+// successor deadline, and none for every other head. A unit test cannot reach
+// the deep verifier's receipt binding, which runs after the signed claim
+// admission check; the signed end-to-end run of this path is in OpenFox.
+func TestFallbackLateMarkerIsOneDerivationForBothBindings(t *testing.T) {
+	terms := testCoverageTerms(t)
+	resolver := newEvidenceResolver()
+	inWindow := func(shape fallbackShape) fallbackShape {
+		shape.variant.LateFilingCloseReceiptDescriptor = nil
+		shape.receipt.Body.LateFilingCloseReceiptDigest = ""
+		shape.receipt.InitialClaimAdmissionProof = nil
+		shape.receipt.Body.DecisionPath, shape.receipt.AuthorizedClaimDecision.Body.DecisionPath = "terminal_fallback", "terminal_fallback"
+		shape.setRequest(t)
+		return shape
+	}
+	reviewing := inWindow(worstCaseReviewingLateFallback(t, terms))
+	cases := map[string]struct {
+		shape fallbackShape
+		want  string
+	}{
+		"after a challenged late candidate": {reviewingAfterLateCandidate(t, reviewing), lateCandidateFilingDigest},
+		"after an ordinary challenge":       {reviewing, ""},
+		"from a disputed head":              {inWindow(worstCaseNonterminalLateFallback(t, terms)), ""},
+		"initial":                           {measuredInitialFallback(t, terms), ""},
+	}
+	for name, test := range cases {
+		source, err := bindDeterministicFallbackReferencesV1(test.shape.receipt, test.shape.variant, terms, resolver)
+		if err != nil {
+			t.Fatalf("%s: a well-formed fallback did not pass reference binding: %v", name, err)
+		}
+		if got := fallbackLateRecoveryMarkerV1(test.shape.variant, source); got != test.want ||
+			got != test.shape.receipt.Body.LateFilingCloseReceiptDigest {
+			t.Errorf("%s: marker %q, receipt carries %q, want %q", name, got,
+				test.shape.receipt.Body.LateFilingCloseReceiptDigest, test.want)
+		}
+	}
+}

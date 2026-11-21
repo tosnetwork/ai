@@ -162,12 +162,7 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 	if err := bindFallbackRevisionEpochV1(receipt, variant, source); err != nil {
 		return source, err
 	}
-	// A fallback in place of a late-recovery candidate's successor carries the
-	// candidate's digest, so its proof shows it may not be challenged again.
-	lateMarker := ""
-	if variant.SourceClaimState == "reviewing_after_challenge" {
-		lateMarker = lateRecoveryCandidateMarkerV1(source.transition)
-	}
+	lateMarker := fallbackLateRecoveryMarkerV1(variant, source)
 	descriptor := variant.LateFilingCloseReceiptDescriptor
 	if descriptor == nil {
 		if receipt.InitialClaimAdmissionProof != nil {
@@ -225,6 +220,19 @@ func lateRecoveryClosureFitsV1(terms CoverageTermsV1, challengeRoundsUsed, admit
 		return errors.New("late fallback cannot complete inside its reserved contingency window")
 	}
 	return nil
+}
+
+// fallbackLateRecoveryMarkerV1 is the late filing-close digest a fallback
+// without a late filing close carries: in place of a challenged late-recovery
+// candidate's successor, the candidate's digest, so its proof shows it may not
+// be challenged again; none for any other head. The reference binding and the
+// receipt binding both derive it here, so they cannot disagree.
+func fallbackLateRecoveryMarkerV1(variant DeterministicFallbackAdmissionVariantV1,
+	source deterministicFallbackSourceV1) string {
+	if variant.SourceClaimState != "reviewing_after_challenge" {
+		return ""
+	}
+	return lateRecoveryCandidateMarkerV1(source.transition)
 }
 
 // fallbackReusesFrozenEpochV1 reports whether a fallback's head left revision
@@ -439,7 +447,9 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		return errors.New("claim decision fallback source claim is substituted")
 	}
 	lateRecovery := source.lateFilingClose != nil
-	lateFilingDigest := ""
+	// Without a late filing close, the body carries the marker the reference
+	// binding required: the challenged late candidate's digest, or none.
+	lateFilingDigest := fallbackLateRecoveryMarkerV1(variant, source)
 	if lateRecovery {
 		// Coverage and activation were bound to the claim admission with the
 		// references; the filing close is now verified against its offer.
