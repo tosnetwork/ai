@@ -3219,13 +3219,18 @@ later timestamp. `late_ingress_recovery_window_seconds` is positive and no
 greater than both the request and selected claim-profile maxima. The selected
 claim profile must permit `late_recovery_terminal_fallback`; otherwise all
 three late-recovery fields are forbidden and the ordinary deadline equals
-`hard_effect_deadline`. Terms validation refuses late-recovery deadlines that
-leave no room for the reservation: `late_ingress_recovery_deadline_unix` must
-be later than `terminal_resolution_deadline_unix` and no earlier than it plus
-`late_ingress_recovery_window_seconds`, and `late_recovery_terminal_deadline_unix`
-no earlier than `late_ingress_recovery_deadline_unix` plus
-`late_recovery_candidate_closure_seconds`; setting one late deadline without
-the other is refused. The
+`hard_effect_deadline`. Terms validation enforces the parts of this
+derivation the terms carry: with a late-recovery contingency,
+`late_ingress_recovery_deadline_unix` equals
+`late_recovery_terminal_deadline_unix` minus
+`late_recovery_candidate_closure_seconds`, `terminal_resolution_deadline_unix`
+equals `late_ingress_recovery_deadline_unix` minus a positive
+`late_ingress_recovery_window_seconds`, and setting one late deadline without
+the other is refused; without one, all three late fields are zero. The
+`hard_effect_deadline` anchor needs the Agreement, so firm-offer verification
+enforces it: `late_recovery_terminal_deadline_unix` (with the contingency) or
+`terminal_resolution_deadline_unix` (without it) equals `hard_effect_deadline`,
+and neither exceeds the request's maximum. The
 continuation entry's `maximum_remaining_closure_seconds` includes its decision
 path plus payout and Adapter-recovery windows, while
 `maximum_remaining_decision_path_seconds` is exactly the formula in section
@@ -5566,10 +5571,23 @@ revisions: every revision carries the initial admission's proof, never its
 predecessor's.
 
 One limit remains. A `ClaimAdmissionReceiptProofV1` of a revision admission
-carries the revision's body but not its initial proof, so on its own it
-cannot confirm the initial digest without retrieving the complete receipt. The
-terminal claim set is not affected: it carries the initial admission's proof
-next to every revision's.
+carries the revision's body but not its initial proof, and validating the
+compact proof only compares a retrieved complete receipt's digest, seal and
+descriptor with it. A consumer that relies on a revision's initial digest
+through its compact proof therefore verifies the complete receipt as a claim
+admission receipt, including its initial proof. The terminal claim set does
+not need to: it carries the initial admission's proof first and every
+revision's proof after it, and before any signature binds each revision to
+the proof before it (`predecessor_revision_admission_receipt_digest` equals
+that proof's envelope digest) and to the carried initial proof
+(`initial_claim_admission_receipt_digest` equals its envelope digest, and the
+claim ID, Agreement and obligation equal its body's).
+
+Every decision admission on a revised claim verifies its revision admission,
+and with it the initial admission's proof. Under independently enforced
+assurance that proof's complete receipt must be retrievable, so the initial
+admission is sealed, and its complete receipt kept retrievable, before any
+revision of the claim is admitted.
 
 Every authorized admission receipt embeds the byte-identical ingress receipt
 that its action consumed. That receipt carries the sole

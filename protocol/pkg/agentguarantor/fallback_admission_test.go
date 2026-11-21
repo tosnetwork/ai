@@ -1322,6 +1322,9 @@ func TestEveryRevisionAdmissionCarriesItsInitialAdmissionProof(t *testing.T) {
 		"third revision carrying a proof on another Agreement": {withProof(third, func(p *ClaimAdmissionReceiptProofV1) {
 			p.ReceiptBody.CoverageAgreementBodyDigest = sizeTestDigest("3")
 		}), notInitial},
+		"third revision carrying a proof on another obligation": {withProof(third, func(p *ClaimAdmissionReceiptProofV1) {
+			p.ReceiptBody.CoverageObligationID = "obligation:other"
+		}), notInitial},
 		"third revision carrying a revision's proof": {withProof(third, func(p *ClaimAdmissionReceiptProofV1) {
 			p.ReceiptBody.AdmissionKind = "revision"
 		}), notInitial},
@@ -1340,12 +1343,14 @@ func TestEveryRevisionAdmissionCarriesItsInitialAdmissionProof(t *testing.T) {
 	}
 }
 
-// TestLateRecoveryDeadlinesLeaveRoomForTheReservation: an Agreement's
-// late-recovery deadlines must leave room for the late-ingress window after
-// the terminal resolution deadline and for the one-round late candidate
-// closure before the late-recovery terminal deadline; terms without the late
-// contingency set neither deadline.
-func TestLateRecoveryDeadlinesLeaveRoomForTheReservation(t *testing.T) {
+// TestLateRecoveryDeadlinesFollowTheDerivation: section 13 derives
+// "late_ingress_recovery_deadline_unix = checked_sub(late_recovery_terminal_deadline_unix,
+// late_recovery_candidate_closure_seconds)" and "terminal_resolution_deadline_unix =
+// checked_sub(late_ingress_recovery_deadline_unix, late_ingress_recovery_window_seconds)",
+// with "late_ingress_recovery_window_seconds is positive", and without the
+// contingency "all three late-recovery fields are forbidden". Terms validation
+// holds the terms to that exactly.
+func TestLateRecoveryDeadlinesFollowTheDerivation(t *testing.T) {
 	base := testCoverageTerms(t)
 	closure := lateRecoveryCandidateClosureSecondsV1(base, 0)
 	if closure == 0 {
@@ -1355,23 +1360,32 @@ func TestLateRecoveryDeadlinesLeaveRoomForTheReservation(t *testing.T) {
 	fit.LateIngressRecoveryWindowSeconds = 300
 	fit.LateIngressRecoveryDeadlineUnix = fit.TerminalResolutionDeadlineUnix + 300
 	fit.LateRecoveryTerminalDeadlineUnix = fit.LateIngressRecoveryDeadlineUnix + closure
-	const refused = "late-recovery deadlines leave no room"
+	const refused = "late-recovery deadlines differ from the late-ingress window and the one-round late closure"
 	cases := map[string]struct {
 		change func(*CoverageTermsV1)
 		want   string
 	}{
-		"exact fit": {func(*CoverageTermsV1) {}, ""},
+		"exact derivation": {func(*CoverageTermsV1) {}, ""},
 		"no late-recovery contingency": {func(terms *CoverageTermsV1) {
 			terms.LateIngressRecoveryDeadlineUnix, terms.LateRecoveryTerminalDeadlineUnix = 0, 0
+			terms.LateIngressRecoveryWindowSeconds = 0
 		}, ""},
-		"late closure one second short": {func(terms *CoverageTermsV1) {
+		"no contingency but a late-ingress window": {func(terms *CoverageTermsV1) {
+			terms.LateIngressRecoveryDeadlineUnix, terms.LateRecoveryTerminalDeadlineUnix = 0, 0
+		}, "without a late-recovery contingency carry a late-ingress window"},
+		"late terminal deadline one second early": {func(terms *CoverageTermsV1) {
 			terms.LateRecoveryTerminalDeadlineUnix--
+		}, refused},
+		"late terminal deadline one second late": {func(terms *CoverageTermsV1) {
+			terms.LateRecoveryTerminalDeadlineUnix++
 		}, refused},
 		"late-ingress window one second short": {func(terms *CoverageTermsV1) {
-			terms.LateIngressRecoveryDeadlineUnix--
-			terms.LateRecoveryTerminalDeadlineUnix--
+			terms.LateIngressRecoveryWindowSeconds--
 		}, refused},
-		"late-ingress deadline at the terminal resolution deadline": {func(terms *CoverageTermsV1) {
+		"late-ingress window one second long": {func(terms *CoverageTermsV1) {
+			terms.LateIngressRecoveryWindowSeconds++
+		}, refused},
+		"zero late-ingress window with the deadlines set": {func(terms *CoverageTermsV1) {
 			terms.LateIngressRecoveryWindowSeconds = 0
 			terms.LateIngressRecoveryDeadlineUnix = terms.TerminalResolutionDeadlineUnix
 			terms.LateRecoveryTerminalDeadlineUnix = terms.LateIngressRecoveryDeadlineUnix + closure
@@ -1412,5 +1426,115 @@ func TestLateRecoveryDeadlinesLeaveRoomForTheReservation(t *testing.T) {
 	short.LateRecoveryTerminalDeadlineUnix--
 	if err := ValidateCoverageTerms(short); err == nil || !strings.Contains(err.Error(), refused) {
 		t.Fatalf("coverage terms one second short of the late closure were not refused: %v", err)
+	}
+}
+
+// TestCoverageDeadlinesAnchorAtTheHardEffectDeadline: section 13 derives
+// "hard_effect_deadline = if unsecured: agreement.expires_at otherwise:
+// min(agreement.expires_at, checked_sub(collateral_terms.lock_until_unix,
+// collateral_terms.reorg_window_seconds))" and
+// "late_recovery_terminal_deadline_unix = hard_effect_deadline"; without the
+// late contingency "the ordinary deadline equals hard_effect_deadline".
+func TestCoverageDeadlinesAnchorAtTheHardEffectDeadline(t *testing.T) {
+	base := testCoverageTerms(t)
+	const refused = "final deadline differs from the hard-effect deadline"
+	none := base
+	late := base
+	late.LateIngressRecoveryWindowSeconds = 300
+	late.LateIngressRecoveryDeadlineUnix = late.TerminalResolutionDeadlineUnix + 300
+	late.LateRecoveryTerminalDeadlineUnix = late.LateIngressRecoveryDeadlineUnix + lateRecoveryCandidateClosureSecondsV1(late, 0)
+	collateralized := late
+	collateralized.SelectedAssuranceLevel = AssuranceCollateralAttested
+	collateralized.CollateralTerms = &CollateralTermsV1{LockUntilUnix: late.LateRecoveryTerminalDeadlineUnix + 60, ReorgWindowSeconds: 60}
+	cases := map[string]struct {
+		terms     CoverageTermsV1
+		expiresAt uint64
+		want      string
+	}{
+		"no contingency, ordinary deadline at the Agreement's expiry": {none, none.TerminalResolutionDeadlineUnix, ""},
+		"no contingency, expiry one second later":                     {none, none.TerminalResolutionDeadlineUnix + 1, refused},
+		"no contingency, expiry one second earlier":                   {none, none.TerminalResolutionDeadlineUnix - 1, refused},
+		"late contingency, late deadline at the Agreement's expiry":   {late, late.LateRecoveryTerminalDeadlineUnix, ""},
+		"late contingency, expiry one second later":                   {late, late.LateRecoveryTerminalDeadlineUnix + 1, refused},
+		"late contingency anchored at the ordinary deadline":          {late, late.TerminalResolutionDeadlineUnix, refused},
+		"collateral lock bounds the anchor":                           {collateralized, collateralized.LateRecoveryTerminalDeadlineUnix + 3600, ""},
+		"collateral lock one second short": {func() CoverageTermsV1 {
+			short := collateralized
+			lock := *short.CollateralTerms
+			lock.LockUntilUnix--
+			short.CollateralTerms = &lock
+			return short
+		}(), collateralized.LateRecoveryTerminalDeadlineUnix + 3600, refused},
+		"Agreement expiry earlier than the collateral lock": {collateralized, collateralized.LateRecoveryTerminalDeadlineUnix, ""},
+	}
+	for name, test := range cases {
+		err := validateCoverageDeadlineAnchorV1(test.terms, test.expiresAt)
+		if test.want == "" && err != nil {
+			t.Errorf("%s: refused: %v", name, err)
+		}
+		if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+			t.Errorf("%s: got %v, want %q", name, err, test.want)
+		}
+	}
+}
+
+// TestTerminalClaimSetBindsEveryRevisionToItsInitialAdmission: a terminal
+// bundle's admission proofs start with the initial admission, and every
+// revision proof names that initial admission and its claim, Agreement and
+// obligation, and the proof before it as its predecessor. The binding is
+// checked before any signature.
+func TestTerminalClaimSetBindsEveryRevisionToItsInitialAdmission(t *testing.T) {
+	revision := loadMeasuredDecisionReceipt(t).AuthorizedClaimAdmissionReceipt
+	initial := *revision.InitialClaimAdmissionProof
+	proofOf := func(body ClaimAdmissionReceiptBodyV1, envelope string) ClaimAdmissionReceiptProofV1 {
+		proof := initial
+		proof.ReceiptBody, proof.ReceiptEnvelopeDigest = body, envelope
+		proof.ReceiptDescriptor.ContentDigest = envelope
+		return proof
+	}
+	second := revision.Body
+	second.PredecessorRevisionAdmissionReceiptDigest = initial.ReceiptEnvelopeDigest
+	third := second
+	third.PriorClaimRevision, third.AdmittedClaimRevision, third.ClaimRevisionAdmissionSequence = 2, 3, 3
+	third.PredecessorRevisionAdmissionReceiptDigest = sizeTestDigest("8")
+	chain := func(change func(*ClaimAdmissionReceiptBodyV1)) []ClaimAdmissionReceiptProofV1 {
+		changed := third
+		change(&changed)
+		return []ClaimAdmissionReceiptProofV1{initial, proofOf(second, sizeTestDigest("8")), proofOf(changed, sizeTestDigest("9"))}
+	}
+	const otherInitial = "names another initial admission or claim"
+	cases := map[string]struct {
+		admissions []ClaimAdmissionReceiptProofV1
+		want       string
+	}{
+		"initial, second and third revision": {chain(func(*ClaimAdmissionReceiptBodyV1) {}), ""},
+		"initial only":                       {[]ClaimAdmissionReceiptProofV1{initial}, ""},
+		"third revision naming another initial admission": {chain(func(body *ClaimAdmissionReceiptBodyV1) {
+			body.InitialClaimAdmissionReceiptDigest = sizeTestDigest("1")
+		}), otherInitial},
+		"third revision of another claim": {chain(func(body *ClaimAdmissionReceiptBodyV1) {
+			body.ClaimID = sizeTestDigest("2")
+		}), otherInitial},
+		"third revision on another Agreement": {chain(func(body *ClaimAdmissionReceiptBodyV1) {
+			body.CoverageAgreementBodyDigest = sizeTestDigest("3")
+		}), otherInitial},
+		"third revision on another obligation": {chain(func(body *ClaimAdmissionReceiptBodyV1) {
+			body.CoverageObligationID = "obligation:other"
+		}), otherInitial},
+		"third revision with another predecessor": {chain(func(body *ClaimAdmissionReceiptBodyV1) {
+			body.PredecessorRevisionAdmissionReceiptDigest = sizeTestDigest("4")
+		}), "chain is broken"},
+		"a revision first": {[]ClaimAdmissionReceiptProofV1{proofOf(second, sizeTestDigest("8"))},
+			"does not start with the initial admission"},
+		"empty": {nil, "does not start with the initial admission"},
+	}
+	for name, test := range cases {
+		err := bindTerminalClaimAdmissionChainV1(test.admissions)
+		if test.want == "" && err != nil {
+			t.Errorf("%s: refused: %v", name, err)
+		}
+		if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+			t.Errorf("%s: got %v, want %q", name, err, test.want)
+		}
 	}
 }

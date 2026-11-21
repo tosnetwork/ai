@@ -538,6 +538,9 @@ func VerifyFirmOffer(offer AuthorizedFirmCoverageOfferV1, request AuthorizedCove
 	if err := VerifyQuoteRequest(request, profile, resolver, underlyingResolver, agreementVerifier, now); err != nil {
 		return err
 	}
+	if err := validateCoverageDeadlineAnchorV1(offer.CoverageTerms, agreement.ExpiresAtUnix); err != nil {
+		return err
+	}
 	agreementDigest, _ := agentcommerce.AgreementBodyDigest(agreement)
 	requestDigest, _ := QuoteRequestDigest(request)
 	termsDigest, _ := CoverageTermsDigest(offer.CoverageTerms)
