@@ -156,7 +156,11 @@ type AuthorizedClaimDecisionAdmissionReceiptV1 struct {
 	// CurrentDecisionAdmissionProof is carried only by a deterministic
 	// fallback from evidence_required or disputed: that current decision has
 	// no transition receipt to carry its proof.
-	CurrentDecisionAdmissionProof         *ClaimDecisionAdmissionReceiptProofV1   `json:"current_decision_admission_proof,omitempty"`
+	CurrentDecisionAdmissionProof *ClaimDecisionAdmissionReceiptProofV1 `json:"current_decision_admission_proof,omitempty"`
+	// InitialClaimAdmissionProof is carried only by a late-recovery fallback
+	// for a revised claim: the initial admission its revision names, whose
+	// timely ingress the filing close's cut records.
+	InitialClaimAdmissionProof            *ClaimAdmissionReceiptProofV1           `json:"initial_claim_admission_proof,omitempty"`
 	AuthorityAdmissionEligibilityProofSet AuthorityAdmissionEligibilityProofSetV1 `json:"authority_admission_eligibility_proof_set"`
 	Authorizations                        []ProfileQualifiedObjectAuthorizationV1 `json:"authorizations"`
 }

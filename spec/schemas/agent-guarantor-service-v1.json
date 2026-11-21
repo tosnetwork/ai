@@ -1281,6 +1281,9 @@
         "current_decision_admission_proof": {
           "$ref": "#/$defs/ClaimDecisionAdmissionReceiptProofV1"
         },
+        "initial_claim_admission_proof": {
+          "$ref": "#/$defs/ClaimAdmissionReceiptProofV1"
+        },
         "predecessor_claim_state_transition_receipt": {
           "$ref": "#/$defs/AuthorizedClaimStateTransitionReceiptV1"
         },

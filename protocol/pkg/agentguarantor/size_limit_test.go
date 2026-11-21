@@ -524,6 +524,10 @@ func TestAuthorizedDecisionRefusesFallbackOnlyFields(t *testing.T) {
 		"fallback cutoff": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
 			receipt.Body.FallbackTriggerCutoffUnix = 1
 		},
+		"initial claim admission proof": func(receipt *AuthorizedClaimDecisionAdmissionReceiptV1) {
+			proof := testInitialAdmissionProof(receipt.AuthorizedClaimAdmissionReceipt)
+			receipt.InitialClaimAdmissionProof = &proof
+		},
 	}
 	for name, change := range cases {
 		receipt := loadMeasuredDecisionReceipt(t)
