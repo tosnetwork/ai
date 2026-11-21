@@ -202,8 +202,8 @@ replay test, not the fresh external interoperability requirement.
 two paragraphs above were removed with the escrow rail in `execution/` commit
 `0d0dfc22d357c04ef128e4d1f68fde7d09d43c5c`. They are history, not current
 code or evidence. An MCP buyer adapter on the Service Actor rail is a Gate D
-item, designed in `docs/MCP_BUYER_ADAPTER_V1.md` and partly implemented;
-section 4 states what is merged and what is not.
+item, designed in `docs/MCP_BUYER_ADAPTER_V1.md` and implemented (ai #57 to
+#91); section 4 states what is merged and what Gate D still needs.
 
 ## 1. Gate A — Registry protocol freeze
 
@@ -343,12 +343,12 @@ Deliver on the Service Actor rail:
   `deployments/local-service-actor-settlement-lifecycle-20261114.json`
   (`qualifies_as_public_acceptance: false`); reconstruction by a second
   resolver is not recorded;
-- 🟡 MCP buyer adapter, so that an MCP client can buy without an Agent
+- ✅ MCP buyer adapter, so that an MCP client can buy without an Agent
   runtime — designed in `docs/MCP_BUYER_ADAPTER_V1.md` (local stdio server
   without custody; payment only after a human confirms it from a separate
   custody account; a long-running buyer agent for delivery and refunds);
-  partly implemented. Merged on main (the adapter's pull requests from ai #57
-  to #84, through merge `09aba122`):
+  implemented. Merged on main (the adapter's pull requests from ai #57
+  to #91, through merge `bde3b791`):
   - the custody-side agent core, the confirmer (`tos-service-buyer confirm`)
     and the refund duties;
   - the stdio MCP server (`tos-service-buyer-mcp`) with all nine tools: search
@@ -364,10 +364,19 @@ Deliver on the Service Actor rail:
     third-party verifier `tos-service-verify` (ai #83,
     `docs/PURCHASE_EVIDENCE_V1.md`).
 
-  Not merged: the bound on a Quote's lifetime and the search and quote rate
-  limits (ai #85, in review), and the end-to-end test against an OpenFox
-  provider. The buyer's user guide is `docs/MCP_BUYER_GUIDE.md`. No Gate D
-  acceptance item is met by this work alone.
+  - the bound on a Quote's lifetime and the search and quote rate limits
+    (ai #85, merge `69feee99`); and
+  - the end-to-end harness against an OpenFox provider on a local network
+    (ai #91, merge `bde3b791`, `protocol/e2e/mcp-buyer/`).
+
+  An agent-operated pilot used the adapter on the epoch-7 public test network
+  on 2026-11-19 (ai #89, merge `1ddf88a1`;
+  `deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json`,
+  verdict `AGENT_OPERATED_PILOT_PASSED`, `qualifies_as_gate_d: false`): the
+  core team held all three roles and an automated policy, not a human,
+  confirmed the payments. The buyer's user guide is
+  `docs/MCP_BUYER_GUIDE.md`. No Gate D acceptance item is met by this work
+  alone.
 
 Delivered earlier:
 
@@ -422,7 +431,13 @@ multiple verticals, cross-chain support, or per-message settlement.
 public chain evidence and external acceptance pending.** The settlement rail
 changed to the Service Actor on 2026-11-07. The contract change is merged
 (tos `fc5e7723e`, #429) and released (#430, code hash `0594f9a5…`); the
-remaining items are listed above. The public Service Actor run of 2026-11-07
+remaining items are listed above. Two team-operated runs on the epoch-7
+public test network are recorded: the rehearsal of 2026-11-18
+(`deployments/public-testnet-epoch7-gate-d-rehearsal-20261118.json`) and the
+agent-operated pilot of 2026-11-19
+(`deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json`). Both
+state `qualifies_as_gate_d: false`; the external acceptance is still
+pending. The public Service Actor run of 2026-11-07
 (case `scsa`, team memo STATUS 13.353) was a same-operator rehearsal with the
 discovery catalog and quote transport as local stand-ins, on a public testnet
 that has since been halted (STATUS 13.559); it is not Gate D evidence.
@@ -505,7 +520,8 @@ chain-reference objects. They cannot create parallel protocol facts.
 current-domain live and external acceptance pending.** Unit and race tests
 pass under the new imports and domains. The A2A and MCP adapters and their
 cross-transport test were retired with the escrow rail (`execution/`
-`0d0dfc22`), so no protocol adapter is currently implemented; the buyer and
+`0d0dfc22`), so no Gate E protocol adapter is currently implemented (the MCP
+buyer adapter of section 4 is a Gate D item); the buyer and
 provider onboarding runbooks still describe the escrow rail and await a
 Service Actor rewrite. The archived same-host role-isolated
 run is pre-migration evidence. A fresh current-domain live session must precede
@@ -627,7 +643,12 @@ gate item.
   routing, authorization, commerce, or receipt authority. The current proactive
   path still requires an operator-established direct route/session, and live
   arbitrary first-contact transport plus the M0-R reachability evidence remain
-  incomplete. This status is incubation evidence only: it does not open the
+  incomplete. Carriage of chat over the Agent Packet relays is specified in
+  [`MESSENGER_RELAY_CARRIAGE_V1.md`](MESSENGER_RELAY_CARRIAGE_V1.md); its
+  milestones M-R1 (one-to-one chat) and M-R2 (private rooms and invites,
+  accepted 2026-11-20) are accepted there on relays and a chain the core team
+  operated (`qualifies_as_public_acceptance: false` in every record). This
+  status is incubation evidence only: it does not open the
   expansion gate, reorder Gate D--F work, or establish product acceptance.
   Mailbox Relay and attachment storage service profiles remain expansion work
   under this gate and inherit the lock above.
@@ -641,10 +662,11 @@ gate item.
   Carrier. **Status: ⬜ Design, reference codec, frozen vectors, relay program
   and Go client library.** The relay daemon (`tos-service-packet-relay`) and
   client (`protocol/pkg/agentpacketrelay`) exist with single-host tests. The
-  OpenFox client, a second independent implementation of the corpus, and the
-  two-host, outage, adversarial and quota evidence of its section 12 do not
-  exist. It supplies no gate evidence until that evidence
-  exists against independent deployments.
+  OpenFox client exists, and team-operated two-host and one-relay-down sales
+  are recorded in `AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`. A second
+  independent implementation of the corpus and the live adversarial and quota
+  evidence of its section 12 do not exist. It supplies no gate evidence until
+  that evidence exists against independent deployments.
 - [Agent Intent Exchange V1](AGENT_INTENT_EXCHANGE_V1.md) defines a generic
   signed bulletin and Agent-to-Agent negotiation layer. A small signed
   Discovery Card exposes coarse category, keyword, approximate value, time,
@@ -829,8 +851,15 @@ same-host transaction is reproducible deployment evidence, not grounds to mark
 Gate D accepted. `docs/GATE_D_EXTERNAL_PILOT.md` is the Service Actor
 runbook for that pilot: the roles and independence rules, the execution
 sequence, the acceptance items, the evidence record and its verdict, and what
-a record must not claim. No pilot under it has run, and it cannot pass until
-the open items of section 4 it lists are merged. The escrow-rail version of
+a record must not claim. No independent pilot under it has run. An
+agent-operated pilot (runbook section 8.5), with all three roles held by the
+core team, ran on 2026-11-19 and is recorded in
+`deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json`; it is
+not Gate D evidence. The two prerequisites the runbook's section 10 lists as
+unmerged are merged (ai #85 and ai #91), so the next step is the independent
+external pilot itself, together with the owner decision on endpoint
+independence that the runbook's section 3 leaves open. The escrow-rail
+version of
 that runbook (strict verification command, two-stage Receipt signing) is git
 history. On the escrow rail a fresh local preflight exercised
 that flow through a second 25,000,000 atomic `tUSDT` settlement and proved the
@@ -854,7 +883,7 @@ is not implied by Gate C's initial profile.
     Those adapters and that Gate were removed with the escrow rail
     (`protocol/` `b9ad8e17`, `execution/` `0d0dfc22`), so engineering is not
     complete: an MCP buyer adapter on the Service Actor rail is a Gate D
-    item, partly implemented (section 4; design
+    item, implemented (section 4; design
     `docs/MCP_BUYER_ADAPTER_V1.md`, buyer guide `docs/MCP_BUYER_GUIDE.md`), and
     the onboarding runbooks need a Service Actor
     rewrite. After that, the remaining Gate E task is one independently

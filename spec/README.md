@@ -46,8 +46,12 @@ are caches or projections only.
 The Registry objects, relay/resolve service, commerce primitives, and bounded
 provider execution are implemented and tested. The rename to `tos_service_v1`
 is a breaking pre-launch domain reset, so earlier local-chain evidence is
-archived and a fresh current-domain Gate C deployment is required before Gate D
-or later live acceptance. See `docs/ROADMAP.md` for evidence-backed status,
+archived and cannot satisfy a current gate. A fresh current-domain Gate C
+deployment is recorded in
+`deployments/public-testnet-epoch7-gate-c-20261118.json`: the initial profile
+is accepted on the owner-designated epoch-7 network, with the independent
+review of the registry release pending. Gate D is not accepted; it needs an
+independent external pilot. See `docs/ROADMAP.md` for evidence-backed status,
 implementation order, and acceptance gates.
 
 ## System boundaries
