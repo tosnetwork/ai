@@ -458,8 +458,31 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 
 // challenge admits the challenge of the claim's current decision at.
 func (history *signedHistory) challenge(claimID string, at uint64) AuthorizedClaimStateTransitionReceiptV1 {
+	return history.transition(claimID, "challenge_admission", at)
+}
+
+// challengeClose closes the challenge window of the claim's current decision
+// at, which makes that decision the claim's terminal one.
+func (history *signedHistory) challengeClose(claimID string, at uint64) AuthorizedClaimStateTransitionReceiptV1 {
+	return history.transition(claimID, "challenge_close", at)
+}
+
+// transition admits a claim state transition of kind from the claim's current
+// decision at: challenge_admission moves the claim to reviewing with a
+// successor decision due, challenge_close to the final state of its decision.
+func (history *signedHistory) transition(claimID, kind string, at uint64) AuthorizedClaimStateTransitionReceiptV1 {
 	t, terms := history.t, history.terms
 	state := history.claims[claimID]
+	purpose, resultingState := "claim-challenge-admission", "reviewing"
+	challengeRoundsAfter, successorDue := state.challengeRounds+1, at+terms.SuccessorDecisionWindowSeconds
+	switch kind {
+	case "challenge_admission":
+	case "challenge_close":
+		purpose, resultingState = "claim-challenge-close", "final_"+state.status
+		challengeRoundsAfter, successorDue = state.challengeRounds, 0
+	default:
+		t.Fatalf("signed history has no %s transition", kind)
+	}
 	decision := *state.decision
 	decisionDigest, err := ClaimDecisionAdmissionReceiptDigestV1(decision)
 	if err != nil {
@@ -471,7 +494,7 @@ func (history *signedHistory) challenge(claimID string, at uint64) AuthorizedCla
 		t.Fatal(err)
 	}
 	mediaType := "application/vnd.tos.service.agent-guarantor-claim-decision-admission.v1+cbor"
-	evidence := CanonicalGuarantorEvidenceSetV1{SchemaVersion: 1, Purpose: "claim-challenge-admission", ContextDigest: decisionDigest,
+	evidence := CanonicalGuarantorEvidenceSetV1{SchemaVersion: 1, Purpose: purpose, ContextDigest: decisionDigest,
 		Items: []CanonicalGuarantorEvidenceItemV1{{ContentType: mediaType,
 			EvidenceProfileDigest: terms.DecisionAdmissionProfile.ProfileDigest, EvidenceEnvelopeDigest: decisionDigest,
 			Representation: "content_addressed", ImmutableDescriptor: &ImmutableEvidenceDescriptorV1{ContentType: mediaType,
@@ -481,9 +504,8 @@ func (history *signedHistory) challenge(claimID string, at uint64) AuthorizedCla
 	if err != nil {
 		t.Fatal(err)
 	}
-	successorDue := at + terms.SuccessorDecisionWindowSeconds
 	projection := TransitionEvidenceProjectionV1{SchemaVersion: 1, Purpose: "claim-state-transition",
-		CoverageAgreementBodyDigest: history.agreement, ObligationID: history.obligation, ClaimID: claimID, TargetState: "reviewing",
+		CoverageAgreementBodyDigest: history.agreement, ObligationID: history.obligation, ClaimID: claimID, TargetState: resultingState,
 		EvidenceDigests: []TransitionEvidenceDigestRefV1{{EvidenceRole: "decision_admission", DigestKind: "authorized_envelope",
 			ObjectDigest: decisionDigest}}}
 	projectionDigest, err := TransitionEvidenceProjectionDigestV1(projection)
@@ -491,9 +513,9 @@ func (history *signedHistory) challenge(claimID string, at uint64) AuthorizedCla
 		t.Fatal(err)
 	}
 	requestBody := ClaimStateTransitionActionBodyV1{SchemaVersion: 1, CoverageAgreementBodyDigest: history.agreement,
-		CoverageObligationID: history.obligation, ClaimID: claimID, TransitionKind: "challenge_admission",
-		ExpectedClaimStateRevision: state.stateRevision, TargetState: "reviewing", ExpectedChallengeRoundsUsed: state.challengeRounds,
-		TargetChallengeRoundsUsed: state.challengeRounds + 1, ExpectedNonterminalRoundsUsed: state.nonterminalRounds,
+		CoverageObligationID: history.obligation, ClaimID: claimID, TransitionKind: kind,
+		ExpectedClaimStateRevision: state.stateRevision, TargetState: resultingState, ExpectedChallengeRoundsUsed: state.challengeRounds,
+		TargetChallengeRoundsUsed: challengeRoundsAfter, ExpectedNonterminalRoundsUsed: state.nonterminalRounds,
 		TargetNonterminalRoundsUsed: state.nonterminalRounds, SuccessorDecisionDueAtUnix: successorDue,
 		AuthorizedClaimDecisionAdmissionReceiptDigest: decisionDigest, TransitionEvidenceProjection: projection,
 		TransitionEvidenceSet: evidence}
@@ -522,11 +544,11 @@ func (history *signedHistory) challenge(claimID string, at uint64) AuthorizedCla
 	}
 	body := ClaimStateTransitionReceiptBodyV1{SchemaVersion: 1, AuthorityID: action.AuthorityID,
 		CoverageAgreementBodyDigest: history.agreement, CoverageObligationID: history.obligation, ClaimID: claimID,
-		TransitionKind: "challenge_admission", TransitionEvidenceProjectionDigest: projectionDigest, AuthorizedActionDigest: actionDigest,
+		TransitionKind: kind, TransitionEvidenceProjectionDigest: projectionDigest, AuthorizedActionDigest: actionDigest,
 		StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest, WriterGeneration: action.WriterGeneration,
-		WriterFenceDigest: action.WriterFenceDigest, PriorClaimState: state.status, ResultingClaimState: "reviewing",
+		WriterFenceDigest: action.WriterFenceDigest, PriorClaimState: state.status, ResultingClaimState: resultingState,
 		PriorClaimStateRevision: state.stateRevision, ResultingClaimStateRevision: state.stateRevision + 1,
-		ChallengeRoundsUsedBefore: state.challengeRounds, ChallengeRoundsUsedAfter: state.challengeRounds + 1,
+		ChallengeRoundsUsedBefore: state.challengeRounds, ChallengeRoundsUsedAfter: challengeRoundsAfter,
 		NonterminalRoundsUsedBefore: state.nonterminalRounds, NonterminalRoundsUsedAfter: state.nonterminalRounds,
 		SuccessorDecisionDueAtUnix: successorDue, TransitionedAtUnix: at, AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-claim-state-transition-receipt-body.v1", body)
@@ -541,9 +563,9 @@ func (history *signedHistory) challenge(claimID string, at uint64) AuthorizedCla
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signedHistoryGuarantor,
 			terms.DecisionAdmissionProfile, "claim-state-transition-receipt", bodyDigest,
 			"tos.service.agent-guarantor-claim-state-transition-signature.v1", at)}}
-	state.status, state.stateRevision, state.challengeRounds = "reviewing", state.stateRevision+1, state.challengeRounds+1
+	state.status, state.stateRevision, state.challengeRounds = resultingState, state.stateRevision+1, challengeRoundsAfter
 	state.transition = &receipt
-	if decision.AuthorizedClaimDecision.Body.DecisionPath != "late_recovery_terminal_fallback" {
+	if kind == "challenge_admission" && decision.AuthorizedClaimDecision.Body.DecisionPath != "late_recovery_terminal_fallback" {
 		state.epoch, state.epochFrozen, state.epochRevision = state.epoch+1, false, state.epochRevision+1
 	}
 	return receipt

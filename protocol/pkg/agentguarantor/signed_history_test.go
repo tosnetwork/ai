@@ -15,7 +15,12 @@ import (
 // verifiers run in this package's own tests: the claim, its ingress
 // receipts, its initial and revision admissions (the revision carrying the
 // initial admission's compact proof), and the later decision objects built
-// on them.
+// on them: fallback and authorized decision admissions, challenge and
+// challenge-close transitions, the decision application with its materialized
+// payouts and, for a claim that ends denied, the terminal claim set.
+//
+// It holds no payout execution evidence, so it closes no coverage with an
+// approved claim.
 //
 // It does not build the coverage history before the claim. The activation
 // evidence a claim admission or a filing close stands on is a structurally
@@ -44,6 +49,15 @@ type signedHistory struct {
 	latestReceipts   map[string]AuthorizedClaimAdmissionReceiptV1
 	admissions       map[string][]AuthorizedClaimAdmissionReceiptV1
 	claims           map[string]*signedHistoryClaim
+
+	// The coverage's decision reserve and payout counters, in atomic units of
+	// the coverage asset: what admitted approving decisions reserve until they
+	// are applied, what applied decisions approved, and the payout lines
+	// materialized so far with the digest of the last one.
+	pendingReserve     uint64
+	cumulativeApproved uint64
+	payoutSequence     uint64
+	payoutLineDigest   string
 }
 
 // signedHistoryClaim is the claim state the decision objects are built on.
@@ -672,6 +686,8 @@ func (history *signedHistory) store(value any) {
 		digest, err = ClaimDecisionAdmissionReceiptDigestV1(typed)
 	case AuthorizedClaimFilingCloseReceiptV1:
 		digest, err = ClaimFilingCloseReceiptDigestV1(typed)
+	case AuthorizedClaimDecisionApplicationReceiptV1:
+		digest, err = ClaimDecisionApplicationReceiptDigestV1(typed)
 	default:
 		t.Fatalf("signed history cannot store %T", value)
 	}
