@@ -980,13 +980,13 @@ admission receipt is the largest released object on the authorized path:
 
 | construction (real Go types) | canonical bytes |
 |---|---|
-| receipt measured from a complete provider flow (35 signatures, 42 key ids) | 1,068,868 |
-| claim envelope at the reference profile's 65,536-byte admitted maximum, replaced at every nested copy | about 1,391,500 |
-| plus a successor decision: predecessor claim-state transition receipt (decision proof repeating the maximum claim and the decision), prior pending token, every optional body field, two payout lines, four descriptor evidence items per set | 1,511,787 |
-| the same with decision and transition evidence carried inline at 64 KiB | 1,887,364 |
+| receipt measured from a complete provider flow (35 signatures, 42 key ids), recorded before revision admissions carried the initial admission's proof | 1,068,868 |
+| the same with its revision claim admission carrying the initial admission's proof, the claim envelope at the reference profile's 65,536-byte admitted maximum, replaced at every nested copy | about 1,577,600 |
+| plus a successor decision: predecessor claim-state transition receipt (decision proof repeating the maximum claim and the decision), prior pending token, every optional body field, two payout lines, four descriptor evidence items per set | 1,697,959 |
+| not allowed (section 9.2), for comparison only: the same with decision and transition evidence carried inline at 64 KiB | about 2,073,500, over the ceiling |
 
-With descriptor-only evidence (section 9.2) the worst case is 1,511,787 bytes:
-488,213 bytes (24.4%) under the ceiling. Its longest nested string is 1,165,192
+With descriptor-only evidence (section 9.2) the worst case is 1,697,959 bytes:
+302,041 bytes (15.1%) under the ceiling. Its longest nested string is 1,165,192
 characters, over the shared 1 MiB string bound, which is why the string limit
 is scoped with the object limit; the claim admission request inside it is
 873,894 bytes, under the stage request ceiling. The conformance corpus carries
@@ -1000,24 +1000,25 @@ reference only: at most four references, none followed past one level. The
 admission receipt carries the claim admission receipt and the current
 transition receipt once, the current decision admission travels as its compact
 proof, and the late filing-close receipt is resolved from its descriptor and
-never carried. A late-recovery fallback for a revised claim also carries the
-claim's initial admission as its compact proof. Built from the same measured
-history with the same real Go types:
+never carried. The claim admission receipt of a revised claim holds the
+initial admission's compact proof (section 17.2). Built from the same measured
+history with the same real Go types; the measured receipt predates that proof,
+so a proof built from the measured revision's own parts is added:
 
 | fallback construction | canonical bytes |
 |---|---|
 | `initial_terminal_fallback` from the measured history: request | 1,210 (1,616 base64 characters) |
-| `initial_terminal_fallback` from the measured history: receipt | 1,069,384 |
-| worst case, `late_recovery_terminal_fallback` of a revised claim from a `reviewing` head over the worst-case history above (transition receipt with its decision proof, prior pending token, late filing-close descriptor, initial claim admission proof, every optional field): receipt | 1,699,024 |
-| the initial claim admission proof inside it (maximum-size claim in its ingress receipt, full ML-DSA-44 authorization and seal signatures) | 186,141 |
+| `initial_terminal_fallback` from the measured history: receipt | 1,117,410 |
+| worst case, `late_recovery_terminal_fallback` of a revised claim from a `reviewing` head over the worst-case history above (transition receipt with its decision proof, prior pending token, late filing-close descriptor, the claim admission's initial-admission proof, every optional field): receipt | 1,699,024 |
+| the initial claim admission proof inside its claim admission (maximum-size claim in its ingress receipt, full ML-DSA-44 authorization and seal signatures) | 186,141 |
 | the same from a `disputed` head (current decision compact proof instead of the transition receipt; frozen-epoch reuse): receipt | 1,669,218 |
 | worst-case fallback request | 1,782 |
-| for comparison: the smallest receipt whose request embeds the claim admission receipt instead | 2,451,938 |
+| for comparison: the smallest receipt whose request embeds the claim admission receipt instead | 2,564,000 |
 
 The worst fallback receipt is 300,976 bytes (15.0%) under the ceiling, and its
 request is three orders of magnitude under the stage request ceiling. A request
-that embeds the claim admission receipt (1,038,125 bytes, 1,384,168 base64
-characters) puts the smallest such receipt 451,938 bytes over the ceiling,
+that embeds the claim admission receipt (1,086,151 bytes, 1,448,204 base64
+characters) puts the smallest such receipt 564,000 bytes over the ceiling,
 which is why references replace embedding.
 
 ### 9.2 Descriptor-only Guarantor evidence
@@ -3218,7 +3219,13 @@ later timestamp. `late_ingress_recovery_window_seconds` is positive and no
 greater than both the request and selected claim-profile maxima. The selected
 claim profile must permit `late_recovery_terminal_fallback`; otherwise all
 three late-recovery fields are forbidden and the ordinary deadline equals
-`hard_effect_deadline`. The
+`hard_effect_deadline`. Terms validation refuses late-recovery deadlines that
+leave no room for the reservation: `late_ingress_recovery_deadline_unix` must
+be later than `terminal_resolution_deadline_unix` and no earlier than it plus
+`late_ingress_recovery_window_seconds`, and `late_recovery_terminal_deadline_unix`
+no earlier than `late_ingress_recovery_deadline_unix` plus
+`late_recovery_candidate_closure_seconds`; setting one late deadline without
+the other is refused. The
 continuation entry's `maximum_remaining_closure_seconds` includes its decision
 path plus payout and Adapter-recovery windows, while
 `maximum_remaining_decision_path_seconds` is exactly the formula in section
@@ -5458,6 +5465,8 @@ AuthorizedClaimAdmissionReceiptV1 {
   authority_instance_record          # exact released allocation record
   authority_admission_eligibility_proof_set
   authorizations[]
+  initial_claim_admission_proof?     # ClaimAdmissionReceiptProofV1; exactly on a
+                                     # revision admission
 }
 ```
 
@@ -5543,19 +5552,24 @@ receipt, or signature digest. The new receipt's
 authorized predecessor-receipt envelope.
 
 A revision admission's `initial_claim_admission_receipt_digest` names the
-claim's initial admission by induction: it equals the predecessor's receipt
-digest when the predecessor is the initial admission, and the predecessor's
-own `initial_claim_admission_receipt_digest` when the predecessor is a
-revision. The receipt carries only the predecessor's digest, so a portable
-verifier checks the first step alone: for `admitted_claim_revision = 2` the
-two digests must be equal. Later steps are the admission authority's to keep;
-a consumer that relies on the initial admission (the late-recovery fallback,
-section 17.4) carries that admission's compact proof and checks it.
-Consequently a revision admission with `admitted_claim_revision >= 3`,
-verified on its own, does not confirm its
-`initial_claim_admission_receipt_digest`: only a consumer that carries and
-checks the initial admission's proof is protected against a wrong value, and
-the late-recovery fallback is today the only such consumer.
+claim's initial admission. For `admitted_claim_revision = 2` the predecessor is
+the initial admission, so the two digests must be equal. Every revision
+admission, whatever its revision, also carries the initial admission's
+`ClaimAdmissionReceiptProofV1` as `initial_claim_admission_proof`, so it binds
+its initial digest on its own: the proof's `receipt_envelope_digest` equals
+`initial_claim_admission_receipt_digest`, its body's `admission_kind` is
+`initial`, and its claim ID, Agreement and obligation are the revision's. These
+bindings are checked before any signature; the proof itself is then verified
+as any claim admission proof is, including its authorization quorum and seal.
+An initial admission carries no proof. The proof does not grow with later
+revisions: every revision carries the initial admission's proof, never its
+predecessor's.
+
+One limit remains. A `ClaimAdmissionReceiptProofV1` of a revision admission
+carries the revision's body but not its initial proof, so on its own it
+cannot confirm the initial digest without retrieving the complete receipt. The
+terminal claim set is not affected: it carries the initial admission's proof
+next to every revision's.
 
 Every authorized admission receipt embeds the byte-identical ingress receipt
 that its action consumed. That receipt carries the sole
@@ -6038,17 +6052,10 @@ admission, so the proof is a `claim_admitted` entry received no later than
 `filing_cutoff_unix` whose `claim_admission_receipt_digest` is the claim's
 initial admission: the fallback's claim admission receipt digest when that
 receipt is the initial admission, and its `initial_claim_admission_receipt_digest`
-when it is a revision admission. A revised claim keeps its late-recovery path.
-Because a revision admission's initial digest is portably bound only for the
-first revision, a late-recovery fallback for a revised claim also carries the
-initial admission's `ClaimAdmissionReceiptProofV1` as
-`initial_claim_admission_proof`. Its `receipt_envelope_digest` equals the
-revision's `initial_claim_admission_receipt_digest`, its body's
-`admission_kind` is `initial`, and its claim ID, Agreement and obligation are
-the claim's. It is verified as any claim admission proof is, including its
-authorization quorum and seal. It is required exactly for a late-recovery
-fallback whose claim admission is a revision, and forbidden on every other
-decision admission.
+when it is a revision admission. A revised claim keeps its late-recovery path:
+the revision admission the fallback carries holds the initial admission's
+proof (section 17.2), so the initial digest the cut is matched against is
+bound with it.
 That receipt is forbidden on the two normal fallback paths.
 Unknown enum values require a new claim-profile and schema version.
 
@@ -6249,8 +6256,6 @@ AuthorizedClaimDecisionAdmissionReceiptV1 {
   predecessor_claim_state_transition_receipt?  # successor, or fallback from a reviewing head
   current_decision_admission_proof?  # ClaimDecisionAdmissionReceiptProofV1; only fallback
                                      # from evidence_required or disputed
-  initial_claim_admission_proof?     # ClaimAdmissionReceiptProofV1; only late recovery
-                                     # of a revised claim
   authority_admission_eligibility_proof_set
   authorizations[]
 }
