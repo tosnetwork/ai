@@ -1,13 +1,17 @@
-.PHONY: verify fmt-check proto-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants \
+.PHONY: verify fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants \
 	test-privileged \
 	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors messenger-cross-build \
 	messenger-fuzz
 
-verify: fmt-check proto-check vet test-race build conformance boundary-lint spec-check \
+verify: fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check \
 	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors
 
 fmt-check:
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+# The committed Guarantor schema must equal what its generator emits.
+schema-check:
+	GOWORK=off go run ./protocol/cmd/agent-guarantor-schema | cmp - spec/schemas/agent-guarantor-service-v1.json
 
 # The committed generated code must equal what the pinned generator emits,
 # and the normative schema in spec/ must compile to the same descriptor as

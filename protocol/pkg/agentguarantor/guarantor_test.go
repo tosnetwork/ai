@@ -379,7 +379,8 @@ func TestClaimValidationAndPayoutMaterialization(t *testing.T) {
 	// deadline on the late-recovery path and the terminal resolution deadline
 	// otherwise, each inclusive.
 	if terms.LateRecoveryTerminalDeadlineUnix == 0 {
-		// Room for the late-ingress window and the one-round late closure.
+		// The late-ingress window and the one-round late closure, exactly.
+		terms.LateIngressRecoveryWindowSeconds = 1800
 		terms.LateIngressRecoveryDeadlineUnix = terms.TerminalResolutionDeadlineUnix + 1800
 		terms.LateRecoveryTerminalDeadlineUnix = terms.LateIngressRecoveryDeadlineUnix +
 			lateRecoveryCandidateClosureSecondsV1(terms, 0)

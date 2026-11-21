@@ -208,24 +208,59 @@ func lateRecoveryCandidateClosureSecondsV1(terms CoverageTermsV1, challengeRound
 	return 0
 }
 
-// validateLateRecoveryDeadlinesV1 requires the Agreement's late-recovery
-// deadlines to leave room for the reservation formula of section 13: the
-// late-ingress window after the terminal resolution deadline, and the
-// one-round late candidate closure after the late-ingress deadline, both
-// before the late-recovery terminal deadline. Terms with neither late
-// deadline set have no late-recovery contingency; any other partial setting
-// is refused.
+// validateLateRecoveryDeadlinesV1 enforces the parts of the section 13
+// deadline derivation the terms carry:
+//
+//	late_ingress_recovery_deadline_unix = late_recovery_terminal_deadline_unix
+//	                                      - late_recovery_candidate_closure_seconds
+//	terminal_resolution_deadline_unix   = late_ingress_recovery_deadline_unix
+//	                                      - late_ingress_recovery_window_seconds
+//
+// with a positive window and the one-round late closure. Without a
+// late-recovery contingency all three late fields are zero; setting only part
+// of them is refused. The hard_effect_deadline anchor needs the Agreement and
+// is checked by validateCoverageDeadlineAnchorV1.
 func validateLateRecoveryDeadlinesV1(terms CoverageTermsV1) error {
 	ingress, terminal := terms.LateIngressRecoveryDeadlineUnix, terms.LateRecoveryTerminalDeadlineUnix
+	window := terms.LateIngressRecoveryWindowSeconds
 	if ingress == 0 && terminal == 0 {
+		if window != 0 {
+			return errors.New("Guarantor terms without a late-recovery contingency carry a late-ingress window")
+		}
 		return nil
 	}
 	closure := lateRecoveryCandidateClosureSecondsV1(terms, 0)
-	windowEnd, windowFits := checkedDurationAddV1(terms.TerminalResolutionDeadlineUnix, terms.LateIngressRecoveryWindowSeconds)
-	closureEnd, closureFits := checkedDurationAddV1(ingress, closure)
-	if ingress == 0 || terminal == 0 || closure == 0 || !windowFits || !closureFits ||
-		ingress <= terms.TerminalResolutionDeadlineUnix || windowEnd > ingress || closureEnd > terminal {
-		return errors.New("Guarantor late-recovery deadlines leave no room for the late-ingress window and the one-round late closure")
+	if ingress == 0 || terminal == 0 || window == 0 || closure == 0 || terminal < closure || ingress < window ||
+		ingress != terminal-closure || terms.TerminalResolutionDeadlineUnix != ingress-window {
+		return errors.New("Guarantor late-recovery deadlines differ from the late-ingress window and the one-round late closure")
+	}
+	return nil
+}
+
+// validateCoverageDeadlineAnchorV1 enforces the hard_effect_deadline anchor of
+// the section 13 derivation, which needs the Agreement:
+//
+//	hard_effect_deadline = agreement.expires_at                       (unsecured)
+//	                     = min(agreement.expires_at,
+//	                           lock_until_unix - reorg_window_seconds)  (collateralized)
+//	late_recovery_terminal_deadline_unix = hard_effect_deadline   (late contingency)
+//	terminal_resolution_deadline_unix    = hard_effect_deadline   (none)
+func validateCoverageDeadlineAnchorV1(terms CoverageTermsV1, agreementExpiresAt uint64) error {
+	anchor := agreementExpiresAt
+	if terms.SelectedAssuranceLevel != AssuranceUnsecuredSigned {
+		if terms.CollateralTerms == nil || terms.CollateralTerms.LockUntilUnix < terms.CollateralTerms.ReorgWindowSeconds {
+			return errors.New("Guarantor collateral terms leave no hard-effect deadline")
+		}
+		if lockAnchor := terms.CollateralTerms.LockUntilUnix - terms.CollateralTerms.ReorgWindowSeconds; lockAnchor < anchor {
+			anchor = lockAnchor
+		}
+	}
+	anchored := terms.TerminalResolutionDeadlineUnix
+	if terms.LateRecoveryTerminalDeadlineUnix != 0 {
+		anchored = terms.LateRecoveryTerminalDeadlineUnix
+	}
+	if anchor == 0 || anchored != anchor {
+		return errors.New("Guarantor terms' final deadline differs from the hard-effect deadline")
 	}
 	return nil
 }

@@ -502,6 +502,33 @@ func VerifyClaimFilingCloseReceiptV1(value AuthorizedClaimFilingCloseReceiptV1,
 		"tos.service.agent-guarantor-claim-filing-close-signature.v1", []string{offer.Body.GuarantorAgentID}, authorityResolver, now)
 }
 
+// bindTerminalClaimAdmissionChainV1 binds a terminal bundle's admission
+// proofs to one claim before any signature is checked: the first is the
+// initial admission; every later one is a revision whose predecessor is the
+// proof before it, whose initial_claim_admission_receipt_digest is the carried
+// initial proof's envelope digest, and whose claim ID, Agreement and
+// obligation are the initial admission's.
+func bindTerminalClaimAdmissionChainV1(admissions []ClaimAdmissionReceiptProofV1) error {
+	if len(admissions) == 0 || admissions[0].ReceiptBody.AdmissionKind != "initial" {
+		return errors.New("terminal claim admission chain does not start with the initial admission")
+	}
+	initial := admissions[0]
+	for index := 1; index < len(admissions); index++ {
+		revision := admissions[index].ReceiptBody
+		if revision.AdmissionKind != "revision" ||
+			revision.PredecessorRevisionAdmissionReceiptDigest != admissions[index-1].ReceiptEnvelopeDigest {
+			return errors.New("terminal claim revision admission chain is broken")
+		}
+		if revision.InitialClaimAdmissionReceiptDigest != initial.ReceiptEnvelopeDigest ||
+			revision.ClaimID != initial.ReceiptBody.ClaimID ||
+			revision.CoverageAgreementBodyDigest != initial.ReceiptBody.CoverageAgreementBodyDigest ||
+			revision.CoverageObligationID != initial.ReceiptBody.CoverageObligationID {
+			return errors.New("terminal claim revision names another initial admission or claim")
+		}
+	}
+	return nil
+}
+
 func VerifyTerminalClaimSetV1(value AuthorizedTerminalClaimSetEvidenceV1, offer AuthorizedFirmCoverageOfferV1,
 	agreementVerifier agentcommerce.AgreementEvidenceVerifier, authorityResolver AuthorityKeyResolver,
 	fenceResolver agentcommerce.FenceAuthorityResolver, paymentVerifier agentcommerce.PaymentEvidenceVerifier, now time.Time) error {
@@ -536,16 +563,14 @@ func VerifyTerminalClaimSetV1(value AuthorizedTerminalClaimSetEvidenceV1, offer 
 	for _, bundle := range value.ClaimResolutionBundles {
 		admissions := append([]ClaimAdmissionReceiptProofV1{bundle.InitialClaimAdmissionReceiptProof},
 			bundle.RevisionAdmissionReceiptProofs...)
-		var predecessorDigest string
-		for index, admission := range admissions {
+		if err := bindTerminalClaimAdmissionChainV1(admissions); err != nil {
+			return err
+		}
+		for _, admission := range admissions {
 			if err := ValidateClaimAdmissionReceiptProofV1(admission, offer.CoverageTerms,
 				authorityResolver, fenceResolver, now, true); err != nil {
 				return err
 			}
-			if index > 0 && admission.ReceiptBody.PredecessorRevisionAdmissionReceiptDigest != predecessorDigest {
-				return errors.New("terminal claim revision admission chain is broken")
-			}
-			predecessorDigest = admission.ReceiptEnvelopeDigest
 		}
 		claim := admissions[len(admissions)-1].AuthorizedClaimIngressReceipt.AuthorizedClaim
 		for _, admission := range bundle.DecisionAdmissionReceiptProofs {

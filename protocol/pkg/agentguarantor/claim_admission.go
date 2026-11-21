@@ -128,11 +128,11 @@ func extractFirmOfferFromAcceptanceV1(receipt AuthorizedCoverageAcceptanceReceip
 	return *found, nil
 }
 
-// validateRevisionInitialAdmissionV1 applies the portable step of the
-// initial-admission induction: the first revision's predecessor is the
+// validateRevisionInitialAdmissionV1 checks what a revision's body alone
+// shows about its initial admission: the first revision's predecessor is the
 // initial admission, so the initial digest it names must be that
-// predecessor's. Later revisions carry only their predecessor's digest, so
-// their initial digest is checked where the initial admission is carried.
+// predecessor's. Every revision's initial digest is also bound by the initial
+// admission's proof the revision admission carries.
 func validateRevisionInitialAdmissionV1(body ClaimAdmissionReceiptBodyV1) error {
 	if body.AdmissionKind == "revision" && body.AdmittedClaimRevision == 2 &&
 		body.InitialClaimAdmissionReceiptDigest != body.PredecessorRevisionAdmissionReceiptDigest {
