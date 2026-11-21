@@ -6015,6 +6015,12 @@ requires the exact authorized filing-close receipt, proves
 `terminal_resolution_deadline_unix < closed_at_unix <=
 late_ingress_recovery_deadline_unix`, and proves that the receipt's frozen
 ingress cut contains the timely ingress whose ambiguity caused the late close.
+That cut is the `initial_claims` cut, which records each claim's initial
+admission, so the proof is a `claim_admitted` entry received no later than
+`filing_cutoff_unix` whose `claim_admission_receipt_digest` is the claim's
+initial admission: the fallback's claim admission receipt digest when that
+receipt is the initial admission, and its `initial_claim_admission_receipt_digest`
+when it is a revision admission. A revised claim keeps its late-recovery path.
 That receipt is forbidden on the two normal fallback paths.
 Unknown enum values require a new claim-profile and schema version.
 

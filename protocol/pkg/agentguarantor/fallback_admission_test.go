@@ -360,11 +360,92 @@ func claimAdmissionActivation(t *testing.T, receipt AuthorizedClaimDecisionAdmis
 func fakeFilingCloseReceipt(t *testing.T, receipt AuthorizedClaimDecisionAdmissionReceiptV1, root string) (AuthorizedClaimFilingCloseReceiptV1, []byte, string) {
 	t.Helper()
 	activation := claimAdmissionActivation(t, receipt)
+	initialAdmission, err := initialClaimAdmissionDigestV1(receipt.AuthorizedClaimAdmissionReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
 	filing := AuthorizedClaimFilingCloseReceiptV1{Body: ClaimFilingCloseReceiptBodyV1{SchemaVersion: 1,
 		CoverageAgreementBodyDigest: receipt.Body.CoverageAgreementBodyDigest,
-		CoverageObligationID:        receipt.Body.CoverageObligationID, FrozenClaimAdmissionLogRoot: root},
+		CoverageObligationID:        receipt.Body.CoverageObligationID, FrozenClaimAdmissionLogRoot: root,
+		FilingCutoffUnix: lateFilingCutoffUnix},
+		ClaimIngressAdmissionCutProof: ClaimIngressAdmissionCutProofV1{CutKind: "initial_claims",
+			Entries: []ClaimIngressResolutionEntryV1{timelyAdmittedEntry(initialAdmission)}},
 		AuthorizedActivationEvidence: &activation, Authorizations: receipt.Authorizations[:1]}
 	return encodeFilingClose(t, filing)
+}
+
+// lateFilingCutoffUnix is the filing cutoff of the fake filing-close receipts.
+const lateFilingCutoffUnix = 1_000
+
+// timelyAdmittedEntry is a filing-close cut entry admitting the claim whose
+// initial admission is initialAdmission, received before the filing cutoff.
+func timelyAdmittedEntry(initialAdmission string) ClaimIngressResolutionEntryV1 {
+	return ClaimIngressResolutionEntryV1{ClaimIngressSequence: 1, ReceivedAtUnix: lateFilingCutoffUnix - 1,
+		ResolutionKind: "claim_admitted", ClaimAdmissionReceiptDigest: initialAdmission}
+}
+
+// TestLateFallbackMatchesTheClaimsInitialAdmission: the filing close's cut
+// records each claim's initial admission, so a late fallback for a revised
+// claim matches the initial admission its revision admission names, and an
+// initial admission matches itself.
+func TestLateFallbackMatchesTheClaimsInitialAdmission(t *testing.T) {
+	measured := loadMeasuredDecisionReceipt(t)
+	revision := measured.AuthorizedClaimAdmissionReceipt
+	if revision.Body.AdmissionKind != "revision" || !validDigest(revision.Body.InitialClaimAdmissionReceiptDigest) {
+		t.Fatalf("the measured claim admission is not a revision admission: %q", revision.Body.AdmissionKind)
+	}
+	initial := revision
+	initial.Body.AdmissionKind = "initial"
+	initial.Body.InitialClaimAdmissionReceiptDigest = ""
+	initialDigest, err := ClaimAdmissionReceiptDigestV1(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionDigest, err := ClaimAdmissionReceiptDigestV1(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filingWith := func(entries ...ClaimIngressResolutionEntryV1) AuthorizedClaimFilingCloseReceiptV1 {
+		filing, _, _ := fakeFilingCloseReceipt(t, measured, sizeTestDigest("7"))
+		filing.ClaimIngressAdmissionCutProof.Entries = entries
+		return filing
+	}
+	late := timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)
+	late.ReceivedAtUnix = lateFilingCutoffUnix + 1
+	notAdmitted := timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)
+	notAdmitted.ResolutionKind = "claim_rejected"
+	cases := map[string]struct {
+		admission AuthorizedClaimAdmissionReceiptV1
+		filing    AuthorizedClaimFilingCloseReceiptV1
+		accept    bool
+	}{
+		"revised claim, its initial admission in the cut": {revision,
+			filingWith(timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)), true},
+		"initial admission, itself in the cut": {initial, filingWith(timelyAdmittedEntry(initialDigest)), true},
+		"revised claim naming another initial admission": {func() AuthorizedClaimAdmissionReceiptV1 {
+			other := revision
+			other.Body.InitialClaimAdmissionReceiptDigest = sizeTestDigest("1")
+			return other
+		}(), filingWith(timelyAdmittedEntry(revision.Body.InitialClaimAdmissionReceiptDigest)), false},
+		"revised claim matched by its own revision digest": {revision, filingWith(timelyAdmittedEntry(revisionDigest)), false},
+		"initial admission received after the cutoff":      {revision, filingWith(late), false},
+		"initial admission not admitted":                   {revision, filingWith(notAdmitted), false},
+		"empty cut":                                        {revision, filingWith(), false},
+	}
+	for name, test := range cases {
+		err := bindLateFilingCloseToClaimAdmissionV1(test.filing, test.admission)
+		if test.accept != (err == nil) {
+			t.Errorf("%s: accept=%v, got %v", name, test.accept, err)
+		}
+		if !test.accept && err != nil && !strings.Contains(err.Error(), "does not identify a timely admitted ingress") {
+			t.Errorf("%s: refused for another reason: %v", name, err)
+		}
+	}
+	unknown := revision
+	unknown.Body.AdmissionKind = "replacement"
+	if _, err := initialClaimAdmissionDigestV1(unknown); err == nil {
+		t.Error("an unknown admission kind named an initial admission")
+	}
 }
 
 func encodeFilingClose(t *testing.T, filing AuthorizedClaimFilingCloseReceiptV1) (AuthorizedClaimFilingCloseReceiptV1, []byte, string) {
