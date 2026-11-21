@@ -133,6 +133,8 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 		seal.CoverageTermsDigest != termsDigest || seal.SealedAtUnix < body.AdmittedAtUnix || uint64(now.UTC().Unix()) < seal.SealedAtUnix ||
 		proof.ReceiptDescriptor.RetrievalPolicyDigest != terms.ClaimAdmissionProfile.ProfileDigest ||
 		body.AuthorizedClaimEnvelopeDigest != claimDigest || body.ClaimSubmissionIngressReceiptDigest != ingressDigest ||
+		body.ClaimID != claim.Body.ClaimID || body.CoverageAgreementBodyDigest != claim.Body.CoverageAgreementBodyDigest ||
+		body.CoverageObligationID != claim.Body.CoverageObligationID ||
 		body.AuthorityInstanceID != proof.AuthorityInstanceRecord.AuthorityInstanceID ||
 		proof.SealAuthorization.AuthoritySubject != bound.ActionAuthorityID ||
 		proof.SealAuthorization.ValidationTimeUnix != seal.SealedAtUnix {

@@ -27,8 +27,22 @@ func TestCollateralTransitionIsAgreementBoundAndBalances(t *testing.T) {
 		CollateralPrincipalSubject: "agent:principal", CustodyAdapterProfile: profile.AdapterProfile,
 		CollateralControlDisclosure: disclosure, PositionIdentityProfile: testRef("7", "position"),
 		TransitionBindings: []CollateralTransitionBindingV1{binding}, ContractOrAccountDigest: testDigest("8"),
-		ExclusiveAllocationRequired: true, LockByUnix: 100, LockUntilUnix: 200, ReleaseNotBeforeUnix: 300,
+		ExclusiveAllocationRequired: true, LockByUnix: 100, LockUntilUnix: 200, ReleaseNotBeforeUnix: 150,
 		FinalityProfile: testRef("9", "finality"), MaximumEvidenceAgeSeconds: 60}
+	// Section 13: "collateral_terms.release_not_before_unix <=
+	// collateral_terms.lock_until_unix"; release_not_before is only an
+	// earliest-release guard inside the lock.
+	for name, test := range map[string]struct {
+		releaseNotBefore uint64
+		valid            bool
+	}{"release guard inside the lock": {150, true}, "release guard at the lock end": {200, true},
+		"release guard one second after the lock end": {201, false}} {
+		candidate := terms
+		candidate.ReleaseNotBeforeUnix = test.releaseNotBefore
+		if err := ValidateCollateralTermsV1(candidate); (err == nil) != test.valid {
+			t.Errorf("%s: valid=%v, got %v", name, test.valid, err)
+		}
+	}
 	position := CollateralPositionStateV1{SchemaVersion: 1, CoverageAgreementBodyDigest: testDigest("a"),
 		CollateralObligationID: "obligation:collateral", PositionID: terms.PositionID, PositionDigest: testDigest("b"),
 		CoverageBindingDigest: testDigest("c"), StateRevision: 3, Status: CollateralEncumbered, Asset: testAsset(),

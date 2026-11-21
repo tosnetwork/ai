@@ -144,7 +144,7 @@ func ValidateCollateralTermsV1(value CollateralTermsV1) error {
 		agentcommerce.ValidateProfileRefV1(value.PositionIdentityProfile) != nil || len(value.TransitionBindings) == 0 ||
 		len(value.TransitionBindings) > len(collateralTransitionRulesV1) || !validDigest(value.ContractOrAccountDigest) ||
 		!value.ExclusiveAllocationRequired || value.LockByUnix == 0 || value.LockUntilUnix < value.LockByUnix ||
-		value.ReleaseNotBeforeUnix < value.LockUntilUnix || agentcommerce.ValidateProfileRefV1(value.FinalityProfile) != nil ||
+		value.ReleaseNotBeforeUnix > value.LockUntilUnix || agentcommerce.ValidateProfileRefV1(value.FinalityProfile) != nil ||
 		value.MaximumEvidenceAgeSeconds == 0 {
 		return errors.New("Guarantor collateral terms are invalid")
 	}

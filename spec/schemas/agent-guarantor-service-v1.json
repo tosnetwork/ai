@@ -11510,6 +11510,14 @@
           "minimum": 0,
           "type": "integer"
         },
+        "maximum_late_ingress_recovery_window_seconds": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maximum_late_recovery_terminal_deadline_unix": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "maximum_nonterminal_resolution_window_seconds": {
           "minimum": 0,
           "type": "integer"
@@ -11523,6 +11531,10 @@
           "type": "integer"
         },
         "maximum_successor_decision_window_seconds": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maximum_terminal_resolution_deadline_unix": {
           "minimum": 0,
           "type": "integer"
         },
@@ -11601,6 +11613,9 @@
         "maximum_successor_decision_window_seconds",
         "maximum_payout_deadline_seconds",
         "maximum_adapter_recovery_window_seconds",
+        "maximum_late_ingress_recovery_window_seconds",
+        "maximum_terminal_resolution_deadline_unix",
+        "maximum_late_recovery_terminal_deadline_unix",
         "claim_trigger_profile",
         "claim_evidence_profile",
         "selected_assurance_level",
