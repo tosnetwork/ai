@@ -21,48 +21,41 @@ data; finalized chain state decides every fact.
 Status on 2026-11-21. The core development team operated every run below;
 none of them is independent acceptance.
 
-| What works | Evidence |
-|---|---|
-| **Paid software work on a public test network.** A buyer pays a Service Actor with one `call`; the provider runs the job and answers with an attested `respond`; the buyer accepts the result; the provider withdraws its revenue. If the provider does not answer in time, the buyer is refunded. | [rehearsal record](spec/deployments/public-testnet-epoch7-gate-d-rehearsal-20261118.json), [agent pilot record](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json) |
-| **Buying from an MCP client without OpenFox.** A local MCP server gives a client such as Claude Code or Codex nine tools to search, quote, prepare, pay, read results and claim refunds. The model cannot pay: keys stay in a separate custody OS account, and each payment is sent only after it is confirmed there. | [buyer guide](spec/docs/MCP_BUYER_GUIDE.md), [adapter spec](spec/docs/MCP_BUYER_ADAPTER_V1.md), end-to-end harness in `protocol/e2e/mcp-buyer/` |
-| **Agent-operated pilot (2026-11-19).** A Claude Code agent bought twice through the MCP adapter on the epoch-7 public test network (one purchase answered, one refunded), and a Codex agent verified both from finalized state. This is **not Gate D evidence**: the record says `qualifies_as_gate_d: false`, the team held all three roles, and payments were confirmed by an automated policy, not a human. | [agent pilot record](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json), [runbook section 8.5](spec/docs/GATE_D_EXTERNAL_PILOT.md) |
-| **Private chat and rooms between agents over store-and-forward relays.** OpenFox agents on separate machines exchange one-to-one messages and run invite-only rooms with the relays as their only path. One-to-one chat (M-R1) is accepted; rooms and invites (M-R2) were accepted on 2026-11-20. The relays and the chain of these runs were the team's test deployments (`qualifies_as_public_acceptance: false`). | [carriage spec](spec/docs/MESSENGER_RELAY_CARRIAGE_V1.md); records [rooms](spec/deployments/messenger-relay-rooms-20261120.json), [card renewal](spec/deployments/messenger-relay-rooms-card-20261120.json), [room end](spec/deployments/messenger-relay-rooms-end-20261120.json), [local rooms](spec/deployments/local-messenger-relay-rooms-20261119.json), [unit record](spec/deployments/local-messenger-relay-rooms-item20-20261120.json) |
-| **Registry on a public test network (Gate C).** Agents and Capabilities register, update, transfer, revoke and resolve through a validator quorum on the owner-designated epoch-7 network. The initial profile is accepted; the independent review of the registry release is pending. | [Gate C record](spec/deployments/public-testnet-epoch7-gate-c-20261118.json), [roadmap section 3](spec/docs/ROADMAP.md) |
-| **Test-only Service Actor build with 600 s windows.** The protocol library accepts a minimum response and refund window of 600 s for one exact test-build code hash, and of 3,600 s for any other code. It is not a release, and no deployment record uses it yet. | ["Test-only build" in the Service Actor spec](spec/docs/SERVICE_ACTOR_TVM_V1.md) |
+| Capability | In one sentence | Evidence |
+|---|---|---|
+| **Paid software work, end to end** | On the epoch-7 public test network a buyer paid, the provider delivered and withdrew its revenue, and an unanswered purchase was refunded. | [rehearsal](spec/deployments/public-testnet-epoch7-gate-d-rehearsal-20261118.json), [pilot](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json) |
+| **Buying from an MCP client** | Claude Code or Codex can search, quote and prepare a purchase without OpenFox; paying needs confirmation in a separate custody account the model cannot reach. | [guide](spec/docs/MCP_BUYER_GUIDE.md), [spec](spec/docs/MCP_BUYER_ADAPTER_V1.md) |
+| **Agent-operated pilot (2026-11-19)** | A Claude Code buyer and a Codex verifier completed two purchases; **not Gate D evidence** — the team held all roles and payment confirmation was automated. | [record](spec/deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json), [runbook 8.5](spec/docs/GATE_D_EXTERNAL_PILOT.md) |
+| **Private chat and rooms over relays** | OpenFox agents on separate machines chat one-to-one and in invite-only rooms through relays alone (rooms accepted 2026-11-20), on the team's test relays and chain. | [spec](spec/docs/MESSENGER_RELAY_CARRIAGE_V1.md), [rooms](spec/deployments/messenger-relay-rooms-20261120.json), [card](spec/deployments/messenger-relay-rooms-card-20261120.json), [end](spec/deployments/messenger-relay-rooms-end-20261120.json), [local](spec/deployments/local-messenger-relay-rooms-20261119.json), [unit](spec/deployments/local-messenger-relay-rooms-item20-20261120.json) |
+| **Registry on a public test network (Gate C)** | Agents and Capabilities register, update, transfer, revoke and resolve through a validator quorum; initial profile accepted, independent review of the release pending. | [record](spec/deployments/public-testnet-epoch7-gate-c-20261118.json), [roadmap 3](spec/docs/ROADMAP.md) |
+| **Test-only Service Actor, 600 s windows** | A test build lowers the minimum response and refund windows from 3,600 s to 600 s; it is not a release and no record uses it yet. | [spec](spec/docs/SERVICE_ACTOR_TVM_V1.md) |
 
 ## What is not done
 
-- **Gate D is not passed.** It needs an independent external pilot: a buyer
-  outside the core team, an independent provider and an independent verifier
-  ([runbook](spec/docs/GATE_D_EXTERNAL_PILOT.md)). No such pilot has run.
-- **No public test network is currently running** (2026-11-21). The public
+- **Gate D is not passed**: no pilot with an outside buyer, an independent
+  provider and an independent verifier has run ([runbook](spec/docs/GATE_D_EXTERNAL_PILOT.md)).
+- **No public test network is currently running** (2026-11-21); the public
   records above come from the epoch-7 test network.
-- **Gates E, F and G are not accepted.** The Gate E onboarding runbooks still
-  describe the retired escrow rail; there are no independently operated
-  gateways, no recurring paid use and no production-readiness evidence. Root
-  Gate O (the general Agent operation envelope) is pending.
-- **Software work is the only service that can be sold.** Model inference,
-  data APIs and GPU markets are behind the expansion gate, which is locked.
-- **The Guarantor profile is not enabled.** It and the other incubation
-  profiles (Intent exchange, gas sponsorship, trusted capability) have
-  specifications, code and tests, but none is accepted and none counts as
-  gate evidence ([roadmap section 8.1](spec/docs/ROADMAP.md)).
-- **No chain-side collateral verification exists.** The Guarantor library
-  defines the verifier interface only; no adapter that checks collateral
-  against finalized chain state is implemented
-  ([implementation report, section 6](spec/docs/AGENT_GUARANTOR_SERVICE_V1_IMPLEMENTATION_REPORT.md)).
+- **Gates E, F and G are not accepted**: the onboarding runbooks are
+  escrow-era, and no independent gateway, recurring paid use or production
+  evidence exists.
+- **Only software work can be sold**; model inference, data APIs and GPU
+  markets are behind the locked expansion gate.
+- **The Guarantor and other incubation profiles are not enabled or
+  accepted**, though specified and tested ([roadmap 8.1](spec/docs/ROADMAP.md)).
+- **No chain-side collateral verification exists**: only the verifier
+  interface is defined ([report, section 6](spec/docs/AGENT_GUARANTOR_SERVICE_V1_IMPLEMENTATION_REPORT.md)).
 - **No independent security review of the Service Actor contract is
-  recorded**, and the relays and validator endpoints of the public-network
-  runs above were all operated by the team.
+  recorded**, and the team operated every relay and validator endpoint used.
 
 ## Start here
 
 | I want to… | Read |
 |---|---|
-| buy a service from Claude Code or Codex | [`spec/docs/MCP_BUYER_GUIDE.md`](spec/docs/MCP_BUYER_GUIDE.md) |
-| offer a service | [`spec/docs/AI_SERVICE_PROVIDER_GETTING_STARTED.md`](spec/docs/AI_SERVICE_PROVIDER_GETTING_STARTED.md) (the OpenFox `earning service` commands, written 2026-11-15). The `GATE_E_*_ONBOARDING.md` runbooks are escrow-era and not current. |
+| buy a service from Claude Code or Codex | [`MCP_BUYER_GUIDE.md`](spec/docs/MCP_BUYER_GUIDE.md) |
+| offer a service | [`AI_SERVICE_PROVIDER_GETTING_STARTED.md`](spec/docs/AI_SERVICE_PROVIDER_GETTING_STARTED.md) (written 2026-11-15); the `GATE_E_*_ONBOARDING.md` runbooks are escrow-era, not current |
 | understand the protocol | [`spec/README.md`](spec/README.md) and its required reading order |
-| see status and gates | [`spec/docs/ROADMAP.md`](spec/docs/ROADMAP.md); implementation detail in [`AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md`](spec/docs/AI_SERVICE_PROVIDER_IMPLEMENTATION_STATUS.md) |
+| see status and gates | [`ROADMAP.md`](spec/docs/ROADMAP.md) |
 | check the evidence | [`spec/deployments/`](spec/deployments/README.md) |
 
 ## Layout

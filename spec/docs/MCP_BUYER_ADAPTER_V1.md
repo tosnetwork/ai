@@ -2,7 +2,11 @@
 
 ## Status and scope
 
-**Status:** design, partly implemented. This document specifies a buyer-side
+**Status:** design, implemented on ai main (ai #57 to #91, through merge
+`bde3b791`); not accepted by any gate. Its one public-network run is the
+agent-operated pilot of 2026-11-19
+(`../deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json`),
+which is not Gate D evidence. This document specifies a buyer-side
 MCP adapter on the Service Actor rail. The agent core (the re-validation of
 client requests, the prepared-call cap and the withdrawn phase, the agent
 socket with its peer-credential roles, and the confirmation code and

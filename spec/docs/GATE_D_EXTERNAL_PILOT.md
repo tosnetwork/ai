@@ -4,9 +4,12 @@
 Service Actor rail. It replaces the escrow-rail version of this document
 (rail change 2026-11-07); that version is git history and none of its
 escrow, stablecoin, two-stage Receipt signing or checker steps applies.
-Gate D is **not accepted**: no pilot under this runbook has run. Its
-prerequisites are listed in section 10; until every one of them is merged
-and recorded, no record under this runbook can carry the passing verdict.
+Gate D is **not accepted**: no independent pilot under this runbook has run.
+An agent-operated pilot (section 8.5), with all three roles held by the core
+development team, ran on 2026-11-19; its record
+(`../deployments/public-testnet-epoch7-gate-d-agent-pilot-20261119.json`,
+`qualifies_as_gate_d: false`) is not Gate D evidence. The code prerequisites
+of section 10 are merged.
 
 Where this runbook conflicts with the Service Actor documents
 ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md),
@@ -367,15 +370,16 @@ Merged on ai main (`ROADMAP.md` section 4):
 - the buyer's evidence export `tos-service-buyer evidence` and the
   third-party verifier `tos-service-verify` (ai #83,
   [`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md), mapped into the
-  record in section 8.4).
-
-Not merged:
-
+  record in section 8.4);
 - the bound on a Quote's lifetime and the search and quote rate limits
-  (ai #85, in review);
+  (ai #85, merge `69feee99`);
 - the end-to-end test of the MCP buyer against an OpenFox provider on a local
-  chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9), required before a
-  pilot record can pass.
+  chain (`MCP_BUYER_ADAPTER_V1.md` section 15, plan item 9; ai #91, merge
+  `bde3b791`, `protocol/e2e/mcp-buyer/`); and
+- the agent-operated pilot harness and record builder of section 8.5
+  (ai #89, merge `1ddf88a1`, `protocol/e2e/mcp-buyer-pilot/`).
+
+No code prerequisite of this section is unmerged.
 
 Operational prerequisites (endpoint access for the buyer and verifier,
 funding, the published global configuration) are decided by the operator and

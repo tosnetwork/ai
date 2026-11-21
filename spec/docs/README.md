@@ -32,7 +32,7 @@ These documents define currently implemented Agent and Capability authority.
 ## 3. Operation transport and propagation
 
 - [Agent Packet V1](AGENT_PACKET_V1.md)
-- [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) (design, vectors, relay program and client library; no OpenFox client yet)
+- [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md) (design, vectors, relay program, client library and OpenFox client; team-operated evidence only)
 - [Agent-Native Messenger V1](AGENT_NATIVE_MESSENGER_V1.md)
 - [Messenger Conversation Profile V1](AGENT_NATIVE_MESSENGER_CONVERSATION_AND_COMMERCE_V1.md) (commerce out of scope; retired negotiation and service-reference kinds reserved)
 - [Gateway Discovery V1](GATEWAY_DISCOVERY_V1.md)
