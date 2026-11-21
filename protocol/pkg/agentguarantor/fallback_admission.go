@@ -277,7 +277,36 @@ func bindLateFilingCloseToClaimAdmissionV1(filing AuthorizedClaimFilingCloseRece
 	if admittedErr != nil || filingErr != nil || admittedActivation != filingActivation {
 		return errors.New("late fallback filing-close receipt stands on another activation")
 	}
-	return nil
+	// The filing close's initial_claims cut records each claim's initial
+	// admission, so the timely ingress is matched against that admission.
+	initialAdmission, err := initialClaimAdmissionDigestV1(claimAdmission)
+	if err != nil {
+		return err
+	}
+	for _, entry := range filing.ClaimIngressAdmissionCutProof.Entries {
+		if entry.ResolutionKind == "claim_admitted" && entry.ClaimAdmissionReceiptDigest == initialAdmission &&
+			entry.ReceivedAtUnix <= filing.Body.FilingCutoffUnix {
+			return nil
+		}
+	}
+	return errors.New("late fallback does not identify a timely admitted ingress")
+}
+
+// initialClaimAdmissionDigestV1 is the digest of a claim's initial admission:
+// the receipt's own for an initial admission, and the one a revision admission
+// names.
+func initialClaimAdmissionDigestV1(claimAdmission AuthorizedClaimAdmissionReceiptV1) (string, error) {
+	switch claimAdmission.Body.AdmissionKind {
+	case "initial":
+		return ClaimAdmissionReceiptDigestV1(claimAdmission)
+	case "revision":
+		if !validDigest(claimAdmission.Body.InitialClaimAdmissionReceiptDigest) {
+			return "", errors.New("late fallback revision admission names no initial admission")
+		}
+		return claimAdmission.Body.InitialClaimAdmissionReceiptDigest, nil
+	default:
+		return "", errors.New("late fallback claim admission kind is unknown")
+	}
 }
 
 // resolveLateFilingCloseReceiptV1 retrieves the one late filing-close receipt
@@ -345,7 +374,6 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		authorityResolver, fenceResolver, now); err != nil {
 		return fmt.Errorf("claim decision fallback has an invalid claim admission: %w", err)
 	}
-	claimReceiptDigest := variant.AuthorizedClaimAdmissionReceiptDigest
 	claim := claimAdmission.AuthorizedClaimIngressReceipt.AuthorizedClaim
 	sameClaim := func(agreement, obligation, claimID string) bool {
 		return agreement == claim.Body.CoverageAgreementBodyDigest && obligation == claim.Body.CoverageObligationID &&
@@ -376,17 +404,6 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			filing.Body.ClosedAtUnix > terms.LateIngressRecoveryDeadlineUnix ||
 			filing.ClaimIngressAdmissionCutProof.PendingOrAmbiguousCount != 0 {
 			return errors.New("late fallback filing-close timing or ingress cut is invalid")
-		}
-		timelyClaimFound := false
-		for _, entry := range filing.ClaimIngressAdmissionCutProof.Entries {
-			if entry.ResolutionKind == "claim_admitted" && entry.ClaimAdmissionReceiptDigest == claimReceiptDigest &&
-				entry.ReceivedAtUnix <= filing.Body.FilingCutoffUnix {
-				timelyClaimFound = true
-				break
-			}
-		}
-		if !timelyClaimFound {
-			return errors.New("late fallback does not identify a timely admitted ingress")
 		}
 	}
 	wantPriorState, wantPath := "", "terminal_fallback"
