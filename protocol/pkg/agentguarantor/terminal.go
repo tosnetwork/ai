@@ -416,7 +416,7 @@ func VerifyClaimFilingCloseReceiptV1(value AuthorizedClaimFilingCloseReceiptV1,
 		return errors.New("normal claim filing close lacks its exclusive activation predecessor")
 	}
 	activation := *value.AuthorizedActivationEvidence
-	if err := VerifyCoverageActivationEvidenceV1(activation, offer, agreementVerifier,
+	if err := coverageActivationPredecessorVerifierV1(activation, offer, agreementVerifier,
 		authorityResolver, fenceResolver, collateralFinalityVerifierFromResolverV1(authorityResolver), now); err != nil {
 		return err
 	}

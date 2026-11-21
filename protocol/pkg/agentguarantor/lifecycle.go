@@ -197,6 +197,13 @@ func CoverageActivationEvidenceDigestV1(evidence AuthorizedCoverageActivationEvi
 	return guarantorCodec.Digest(ActivationEvidenceDomain, evidence)
 }
 
+// coverageActivationPredecessorVerifierV1 verifies the activation evidence a
+// claim admission or a claim filing close stands on. It is a variable only so
+// a test in this package can verify a signed claim history from the claim
+// onwards without rebuilding the coverage history before it; production never
+// reassigns it, which tests in this package assert.
+var coverageActivationPredecessorVerifierV1 = VerifyCoverageActivationEvidenceV1
+
 func VerifyCoverageActivationEvidenceV1(evidence AuthorizedCoverageActivationEvidenceV1, offer AuthorizedFirmCoverageOfferV1,
 	agreementVerifier agentcommerce.AgreementEvidenceVerifier, authorityResolver AuthorityKeyResolver,
 	fenceResolver agentcommerce.FenceAuthorityResolver, collateralFinalityVerifier CollateralAdapterFinalityVerifier,
