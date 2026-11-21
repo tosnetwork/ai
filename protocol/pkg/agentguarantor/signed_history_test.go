@@ -25,9 +25,11 @@ import (
 // It does not build the coverage history before the claim. The activation
 // evidence a claim admission or a filing close stands on is a structurally
 // valid stand-in, and withSignedHistorySeam replaces the activation
-// predecessor verifier for the duration of a test. Quote, firm offer,
-// exposure, acceptance and activation verification are covered by the
-// provider's end-to-end flow, not here.
+// predecessor verifier for the duration of a test. The quote, the exposure
+// receipt and the firm offer are signed beside it (signed_history_offer_test.go)
+// and verified by VerifyFirmOffer, but the claim history is not built on that
+// offer: acceptance and activation verification are covered by the provider's
+// end-to-end flow, not here.
 type signedHistory struct {
 	t             *testing.T
 	terms         CoverageTermsV1
