@@ -212,8 +212,9 @@ func TestSeamTestsNeverRunInParallel(t *testing.T) {
 	}
 }
 
-// testClaimProfileFor is a claim profile the terms select exactly; the
-// terms' selected claim profile digest is set to it.
+// testClaimProfileFor is a claim profile the terms select exactly, valid
+// inside a published service profile; the terms' selected claim profile
+// digest is set to it.
 func testClaimProfileFor(t *testing.T, terms *CoverageTermsV1) ClaimProfileV1 {
 	t.Helper()
 	capacity := terms.ClaimClosureCapacity
@@ -224,6 +225,7 @@ func testClaimProfileFor(t *testing.T, terms *CoverageTermsV1) ClaimProfileV1 {
 		AdmissionAuthoritySubjects: terms.ClaimAdmissionAuthoritySubjects, AdmissionQuorumRule: terms.ClaimAdmissionQuorumRule,
 		DecisionAdmissionProfile: terms.DecisionAdmissionProfile, DecisionAdmissionAuthoritySubjects: terms.DecisionAdmissionAuthoritySubjects,
 		DecisionAdmissionQuorumRule: terms.DecisionAdmissionQuorumRule, DecisionProfile: terms.DecisionProfile,
+		MaximumEvidenceItems: 4, MaximumEvidenceBytes: 64 << 10,
 		MaximumClaims: capacity.MaximumClaims, MaximumClaimIngressActions: capacity.MaximumClaimIngressActions,
 		MaximumClaimRevisionsPerClaim: capacity.MaximumClaimRevisionsPerClaim, MaximumDecisionAdmissionsPerClaim: capacity.MaximumDecisionAdmissionsPerClaim,
 		MaximumClaimStateTransitionsPerClaim: capacity.MaximumClaimStateTransitionsPerClaim,
