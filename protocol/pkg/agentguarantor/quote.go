@@ -36,6 +36,15 @@ func ValidateRequestedCoverageTerms(terms RequestedCoverageTermsV1) error {
 	if comparison, _ := compareAmount(terms.RequestedPerClaim, terms.RequestedAggregatePayout); comparison > 0 {
 		return errors.New("requested per-claim amount exceeds aggregate payout")
 	}
+	// The terminal resolution deadline is always bounded; a late-recovery
+	// contingency is requested by a later late-recovery maximum together with a
+	// positive late-ingress window maximum, and refused by leaving both zero.
+	lateRequested := terms.MaximumLateRecoveryTerminalDeadlineUnix != 0
+	if terms.MaximumTerminalResolutionDeadlineUnix < terms.RequestedClaimFilingEndsAtUnix ||
+		lateRequested != (terms.MaximumLateIngressRecoveryWindowSeconds != 0) ||
+		lateRequested && terms.MaximumLateRecoveryTerminalDeadlineUnix <= terms.MaximumTerminalResolutionDeadlineUnix {
+		return errors.New("requested Guarantor deadline maxima are invalid")
+	}
 	if err := ValidateClaimContinuationBudgetV1(terms.RequestedClosureCapacity,
 		terms.MaximumReviewDeadlineSeconds, terms.MaximumChallengeWindowSeconds,
 		terms.MaximumNonterminalResolutionWindowSeconds, terms.MaximumSuccessorDecisionWindowSeconds,
@@ -53,6 +62,38 @@ func ValidateRequestedCoverageTerms(terms RequestedCoverageTermsV1) error {
 		}
 	default:
 		return errors.New("Guarantor assurance level is invalid")
+	}
+	return nil
+}
+
+// claimProfilePermitsLateRecoveryV1 holds terms with a late-recovery
+// contingency to the selected claim profile: the profile permits the late
+// path by publishing a positive maximum late-ingress window, and the terms'
+// window is no greater than it. Terms without the contingency are always
+// permitted.
+func claimProfilePermitsLateRecoveryV1(claimProfile ClaimProfileV1, terms CoverageTermsV1) bool {
+	if terms.LateIngressRecoveryWindowSeconds == 0 && terms.LateRecoveryTerminalDeadlineUnix == 0 {
+		return true
+	}
+	return claimProfile.MaximumLateIngressRecoveryWindowSeconds != 0 &&
+		terms.LateIngressRecoveryWindowSeconds <= claimProfile.MaximumLateIngressRecoveryWindowSeconds
+}
+
+// validateTermsWithinRequestedDeadlinesV1 holds the accepted terms to the
+// requester's maxima: the terminal resolution deadline no later than
+// maximum_terminal_resolution_deadline_unix, and, with a late-recovery
+// contingency, the late-recovery terminal deadline no later than
+// maximum_late_recovery_terminal_deadline_unix and the late-ingress window no
+// greater than maximum_late_ingress_recovery_window_seconds. A request with
+// zero late maxima admits no late-recovery contingency.
+func validateTermsWithinRequestedDeadlinesV1(terms CoverageTermsV1, requested RequestedCoverageTermsV1) error {
+	if terms.TerminalResolutionDeadlineUnix > requested.MaximumTerminalResolutionDeadlineUnix {
+		return errors.New("Guarantor terms' terminal resolution deadline exceeds the requester's maximum")
+	}
+	if terms.LateRecoveryTerminalDeadlineUnix != 0 &&
+		(terms.LateRecoveryTerminalDeadlineUnix > requested.MaximumLateRecoveryTerminalDeadlineUnix ||
+			terms.LateIngressRecoveryWindowSeconds > requested.MaximumLateIngressRecoveryWindowSeconds) {
+		return errors.New("Guarantor terms' late-recovery deadline or window exceeds the requester's maximum")
 	}
 	return nil
 }
@@ -423,6 +464,7 @@ func ValidateCoverageTermsAgainstServiceProfile(terms CoverageTermsV1, profile S
 				terms.NonterminalResolutionWindowSeconds > claimProfile.MaximumNonterminalResolutionWindowSeconds ||
 				terms.SuccessorDecisionWindowSeconds > claimProfile.MaximumSuccessorDecisionWindowSeconds ||
 				terms.PayoutDeadlineSeconds > claimProfile.PayoutDeadlineSeconds ||
+				!claimProfilePermitsLateRecoveryV1(claimProfile, terms) ||
 				terms.LifecycleAuthorizationProfile != profile.LifecycleAuthorizationProfile {
 				return errors.New("Guarantor terms substitute the selected claim authorization profile")
 			}
@@ -539,6 +581,9 @@ func VerifyFirmOffer(offer AuthorizedFirmCoverageOfferV1, request AuthorizedCove
 		return err
 	}
 	if err := validateCoverageDeadlineAnchorV1(offer.CoverageTerms, agreement.ExpiresAtUnix); err != nil {
+		return err
+	}
+	if err := validateTermsWithinRequestedDeadlinesV1(offer.CoverageTerms, request.RequestedTerms); err != nil {
 		return err
 	}
 	agreementDigest, _ := agentcommerce.AgreementBodyDigest(agreement)

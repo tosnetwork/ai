@@ -335,14 +335,21 @@ type RequestedCoverageTermsV1 struct {
 	MaximumSuccessorDecisionWindowSeconds     uint64                 `json:"maximum_successor_decision_window_seconds"`
 	MaximumPayoutDeadlineSeconds              uint64                 `json:"maximum_payout_deadline_seconds"`
 	MaximumAdapterRecoveryWindowSeconds       uint64                 `json:"maximum_adapter_recovery_window_seconds"`
-	ClaimTriggerProfile                       ProfileRefV1           `json:"claim_trigger_profile"`
-	ClaimEvidenceProfile                      ProfileRefV1           `json:"claim_evidence_profile"`
-	SelectedAssuranceLevel                    AssuranceLevel         `json:"selected_assurance_level"`
-	SelectedClaimProfileDigest                string                 `json:"selected_claim_profile_digest"`
-	SelectedCollateralProfileDigest           string                 `json:"selected_collateral_profile_digest,omitempty"`
-	SelectedPayoutAdapterProfile              ProfileRefV1           `json:"selected_payout_adapter_profile"`
-	RequiredExtensions                        []ProfileRefV1         `json:"required_extensions,omitempty"`
-	OptionalExtensions                        []ProfileRefV1         `json:"optional_extensions,omitempty"`
+	// MaximumLateIngressRecoveryWindowSeconds, MaximumTerminalResolutionDeadlineUnix
+	// and MaximumLateRecoveryTerminalDeadlineUnix bound the accepted terms'
+	// late-ingress window and final deadlines. Zero late maxima request no
+	// late-recovery contingency.
+	MaximumLateIngressRecoveryWindowSeconds uint64         `json:"maximum_late_ingress_recovery_window_seconds"`
+	MaximumTerminalResolutionDeadlineUnix   uint64         `json:"maximum_terminal_resolution_deadline_unix"`
+	MaximumLateRecoveryTerminalDeadlineUnix uint64         `json:"maximum_late_recovery_terminal_deadline_unix"`
+	ClaimTriggerProfile                     ProfileRefV1   `json:"claim_trigger_profile"`
+	ClaimEvidenceProfile                    ProfileRefV1   `json:"claim_evidence_profile"`
+	SelectedAssuranceLevel                  AssuranceLevel `json:"selected_assurance_level"`
+	SelectedClaimProfileDigest              string         `json:"selected_claim_profile_digest"`
+	SelectedCollateralProfileDigest         string         `json:"selected_collateral_profile_digest,omitempty"`
+	SelectedPayoutAdapterProfile            ProfileRefV1   `json:"selected_payout_adapter_profile"`
+	RequiredExtensions                      []ProfileRefV1 `json:"required_extensions,omitempty"`
+	OptionalExtensions                      []ProfileRefV1 `json:"optional_extensions,omitempty"`
 }
 
 type CoverageQuoteRequestBodyV1 struct {
