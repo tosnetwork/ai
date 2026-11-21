@@ -6,12 +6,52 @@ import (
 	"go/token"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
 func signedHistoryTime(at uint64) time.Time { return time.Unix(int64(at), 0).UTC() }
+
+// TestGuarantorImportsNeitherUnsafeNorCgo: no non-test file of the package
+// imports unsafe or C. Either reaches memory and symbols past the type
+// system, and so past the unexported verifier seams and the registry digest
+// cache that the guards here check by syntax. Every file is parsed, whatever
+// its build constraints, and each import path is unquoted, so an alias, a raw
+// string, an escape or a comment inside the import does not hide it, and a
+// string literal elsewhere in a file is not an import.
+func TestGuarantorImportsNeitherUnsafeNorCgo(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	checked := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fileSet, file, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checked++
+		for _, spec := range parsed.Imports {
+			path, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				t.Errorf("%s: import path %s cannot be unquoted: %v", fileSet.Position(spec.Pos()), spec.Path.Value, err)
+				continue
+			}
+			if path == "unsafe" || path == "C" {
+				t.Errorf("%s: a non-test file of this package imports %q", fileSet.Position(spec.Pos()), path)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no non-test file of the package was found to check")
+	}
+}
 
 // TestActivationPredecessorSeamDefaultsToTheRealVerifier: the activation
 // predecessor seam is the real activation verifier unless a test in this

@@ -3,6 +3,7 @@ package agentguarantor
 import (
 	"errors"
 	"sort"
+	"sync"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
@@ -258,7 +259,25 @@ func VerifyMutationVerifierRegistryV1(registry MutationVerifierRegistryV1) error
 	return verifyMutationFactoriesMatchRegistryV1()
 }
 
+// MutationVerifierRegistryDigestV1 is the digest of the released mutation
+// verifier registry, after checking the registry against the dispatcher.
+//
+// Its inputs are fixed when the package is built: the released registry and
+// the decoder table are literals, and the semantic action registry and the
+// codec limits are never written after package initialization. Every terms
+// validation, terms digest and stage authority lookup asks for it, so it is
+// computed once and the same digest, or the same error, is returned to every
+// caller. A panic in the computation is raised again on every call.
 func MutationVerifierRegistryDigestV1() (string, error) {
+	return mutationVerifierRegistryDigestOnceV1()
+}
+
+// mutationVerifierRegistryDigestOnceV1 is not a test seam: nothing assigns it
+// and no test refers to it. TestMutationRegistryDigestCacheIsOnlyCalled holds
+// the package to that.
+var mutationVerifierRegistryDigestOnceV1 = sync.OnceValues(computeMutationVerifierRegistryDigestV1)
+
+func computeMutationVerifierRegistryDigestV1() (string, error) {
 	registry := ReleasedMutationVerifierRegistryV1()
 	if err := VerifyMutationVerifierRegistryV1(registry); err != nil {
 		return "", err
