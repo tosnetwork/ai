@@ -66,6 +66,26 @@ func ValidateRequestedCoverageTerms(terms RequestedCoverageTermsV1) error {
 	return nil
 }
 
+// validateCollateralReleaseAfterFinalDeadlineV1 enforces section 13's
+// "late_recovery_terminal_deadline_unix + collateral_terms.reorg_window_seconds
+// <= collateral_terms.release_not_before_unix" for collateralized terms.
+// Without a late contingency the terms' final deadline is the terminal
+// resolution deadline.
+func validateCollateralReleaseAfterFinalDeadlineV1(terms CoverageTermsV1) error {
+	if terms.CollateralTerms == nil {
+		return errors.New("collateralized terms lack collateral terms")
+	}
+	final := terms.LateRecoveryTerminalDeadlineUnix
+	if final == 0 {
+		final = terms.TerminalResolutionDeadlineUnix
+	}
+	if releasable, fits := checkedDurationAddV1(final, terms.CollateralTerms.ReorgWindowSeconds); !fits ||
+		releasable > terms.CollateralTerms.ReleaseNotBeforeUnix {
+		return errors.New("collateral may be released before the terms' final deadline and its reorg window")
+	}
+	return nil
+}
+
 // claimProfilePermitsLateRecoveryV1 holds terms with a late-recovery
 // contingency to the selected claim profile: the profile permits the late
 // path by publishing a positive maximum late-ingress window, and the terms'
@@ -414,6 +434,9 @@ func ValidateCoverageTerms(terms CoverageTermsV1) error {
 			terms.CollateralTerms.SelectedCollateralProfileDigest != terms.SelectedCollateralProfileDigest ||
 			terms.CollateralTerms.AssuranceLevel != terms.SelectedAssuranceLevel || terms.CollateralTerms.Asset != terms.CoverageAsset {
 			return errors.New("collateralized terms lack collateral binding")
+		}
+		if err := validateCollateralReleaseAfterFinalDeadlineV1(terms); err != nil {
+			return err
 		}
 	default:
 		return errors.New("Guarantor assurance level is invalid")

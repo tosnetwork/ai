@@ -119,6 +119,46 @@ func TestTermsStayWithinTheRequestersDeadlineMaxima(t *testing.T) {
 	}
 }
 
+// TestCollateralIsNotReleasableBeforeTheFinalDeadline: section 13 requires
+// "late_recovery_terminal_deadline_unix + collateral_terms.reorg_window_seconds
+// <= collateral_terms.release_not_before_unix"; without a late contingency the
+// final deadline is the terminal resolution deadline.
+func TestCollateralIsNotReleasableBeforeTheFinalDeadline(t *testing.T) {
+	const refused = "collateral may be released before the terms' final deadline"
+	withRelease := func(base CoverageTermsV1, offset int64) CoverageTermsV1 {
+		final := base.LateRecoveryTerminalDeadlineUnix
+		if final == 0 {
+			final = base.TerminalResolutionDeadlineUnix
+		}
+		base.CollateralTerms = &CollateralTermsV1{ReorgWindowSeconds: 60, ReleaseNotBeforeUnix: uint64(int64(final+60) + offset)}
+		return base
+	}
+	none, late := testCoverageTerms(t), testLateTerms(t)
+	for name, test := range map[string]struct {
+		terms CoverageTermsV1
+		want  string
+	}{
+		"late contingency, release at the final deadline plus reorg":  {withRelease(late, 0), ""},
+		"late contingency, release one second earlier":                {withRelease(late, -1), refused},
+		"no contingency, release at the terminal deadline plus reorg": {withRelease(none, 0), ""},
+		"no contingency, release one second earlier":                  {withRelease(none, -1), refused},
+		"late contingency, release before the late deadline only": {func() CoverageTermsV1 {
+			terms := late
+			terms.CollateralTerms = &CollateralTermsV1{ReorgWindowSeconds: 60,
+				ReleaseNotBeforeUnix: terms.TerminalResolutionDeadlineUnix + 60}
+			return terms
+		}(), refused},
+	} {
+		err := validateCollateralReleaseAfterFinalDeadlineV1(test.terms)
+		if test.want == "" && err != nil {
+			t.Errorf("%s: refused: %v", name, err)
+		}
+		if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+			t.Errorf("%s: got %v, want %q", name, err, test.want)
+		}
+	}
+}
+
 // TestClaimProfilePermitsTheLatePathByItsWindow: section 13 requires "The
 // selected claim profile must permit late_recovery_terminal_fallback" and the
 // window to be "no greater than both the request and selected claim-profile
