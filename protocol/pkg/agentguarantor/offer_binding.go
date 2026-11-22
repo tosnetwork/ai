@@ -11,18 +11,18 @@ import (
 const firmOfferIssuanceObjectKindV1 = "firm-offer-issuance"
 
 // firmOfferSelectedServiceProfileV1 returns the service profile a firm offer
-// embeds: the head of its artifact's revision lineage, held to the artifact's
-// selected profile digest. It reads the embedded bytes only and does not
-// verify the publication, so its result is authoritative only for comparisons
-// against digests that signed objects already carry.
+// embeds, the head of its artifact's revision lineage, with the digest
+// recomputed from those bytes. It does not verify the publication, so the
+// profile is authoritative only once that digest is found equal to the one
+// the signed quote request and offer body carry.
 func firmOfferSelectedServiceProfileV1(artifact GuarantorServiceProfileArtifactV1) (ServiceProfileV1, string, error) {
 	if len(artifact.Revisions) == 0 || len(artifact.Revisions) > MaxProfileRevisions {
-		return ServiceProfileV1{}, "", errors.New("firm Guarantor offer carries no service profile revision")
+		return ServiceProfileV1{}, "", errors.New("firm Guarantor offer carries no service profile revision or too many")
 	}
 	profile := artifact.Revisions[len(artifact.Revisions)-1].ServiceProfile
 	digest, err := ServiceProfileDigest(profile)
-	if err != nil || digest != artifact.SelectedServiceProfileDigest {
-		return ServiceProfileV1{}, "", errors.New("firm Guarantor offer's embedded service profile differs from its selected digest")
+	if err != nil {
+		return ServiceProfileV1{}, "", errors.New("firm Guarantor offer's embedded service profile is invalid")
 	}
 	return profile, digest, nil
 }

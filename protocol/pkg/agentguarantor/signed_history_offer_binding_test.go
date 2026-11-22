@@ -566,6 +566,53 @@ func TestSignedHistoryOfferExposureReceiptIsTheProfilesAdmission(t *testing.T) {
 	})
 }
 
+// TestSignedHistoryFirmOfferIsVerifiedAgainstItsOwnParts: VerifyFirmOffer
+// refuses a caller's quote request or coverage Agreement that is not the one
+// the offer embeds or commits, and an offer outside its acceptance window;
+// every verifier refuses an offer whose service profile artifact carries no
+// revision, which no signature of the offer covers.
+func TestSignedHistoryFirmOfferIsVerifiedAgainstItsOwnParts(t *testing.T) {
+	history := newSignedHistory(t)
+	signed := history.quoteToOffer(true, nil)
+	other := history.quoteToOffer(true, func(in *signedOfferInputs) {
+		in.agreementExpiresAt++
+		in.requestBody = func(body *CoverageQuoteRequestBodyV1) { body.RequestID = "request:other" }
+	})
+	expect := func(name string, err error, refusal string) {
+		if refusal == "" && err != nil {
+			t.Errorf("%s: the offer was refused: %v", name, err)
+		}
+		if refusal != "" && (err == nil || !strings.Contains(err.Error(), refusal)) {
+			t.Errorf("%s: got %v, want a refusal containing %q", name, err, refusal)
+		}
+	}
+	expect("the offer with its own request and Agreement", signed.verify(), "")
+	varied := signed
+	varied.request = other.request
+	expect("a caller's request that the offer does not embed", varied.verify(), "firm Guarantor offer embeds another quote request")
+	varied = signed
+	varied.agreement = other.agreement
+	expect("a caller's Agreement that the offer does not commit", varied.verify(),
+		"firm Guarantor offer commits another coverage Agreement body")
+
+	at := func(unix uint64) error {
+		return VerifyFirmOffer(signed.offer, signed.request, signed.agreement, signed.resolver, signed.keys, signed.underlying,
+			agentcommerce.AgentSignatureEvidenceVerifier{Resolver: signed.keys}, signedHistoryTime(unix))
+	}
+	const window = "firm Guarantor offer is outside its acceptance window"
+	expect("verified at the offer's valid-from time", at(signed.offer.Body.ValidFromUnix), "")
+	expect("verified one second before the accept-by time", at(signed.offer.Body.AcceptByUnix-1), "")
+	expect("verified one second before the valid-from time", at(signed.offer.Body.ValidFromUnix-1), window)
+	expect("verified at the accept-by time", at(signed.offer.Body.AcceptByUnix), window)
+
+	const revisions = "firm Guarantor offer carries no service profile revision"
+	varied = signed
+	varied.offer.ServiceProfileArtifact.Revisions = nil
+	expect("no profile revision, VerifyFirmOffer", varied.verify(), revisions)
+	expect("no profile revision, the intrinsic evidence verifier", varied.verifyIntrinsic(t), revisions)
+	expect("no profile revision, the acceptance request verifier", history.verifyAcceptance(varied, true), revisions)
+}
+
 // TestSignedHistoryAcceptanceReceiptCarriesTheOfferRefusal: an acceptance
 // receipt over an acceptance of an offer whose terms' final deadline is off
 // the Agreement's expiry is refused with that rule's refusal, so the rule
