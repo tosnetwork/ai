@@ -129,9 +129,17 @@ func CoverageAcceptanceReceiptDigestV1(receipt AuthorizedCoverageAcceptanceRecei
 func VerifyCoverageAcceptanceReceiptV1(receipt AuthorizedCoverageAcceptanceReceiptV1,
 	offer AuthorizedFirmCoverageOfferV1, agreementVerifier agentcommerce.AgreementEvidenceVerifier,
 	authorityResolver AuthorityKeyResolver, fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
-	acceptedAt := time.Unix(int64(receipt.Body.AcceptedAtUnix), 0).UTC()
-	if err := validateAcceptanceReceiptShape(receipt); err != nil || acceptedAt.After(now.UTC().Add(5*time.Minute)) {
+	if err := validateAcceptanceReceiptShape(receipt); err != nil {
 		return errors.New("Guarantor acceptance receipt is invalid")
+	}
+	// The receipt states two times. received_at_unix is when the authority
+	// sequenced the request and is bounded by the offer below; accepted_at_unix
+	// is the admission itself, so it is the one anchored to the stage admission
+	// evidence. The request is then judged at that time.
+	acceptedAt, err := anchoredReceiptTimeV1("coverage acceptance", receipt.Body.AcceptedAtUnix,
+		receipt.StageActionAdmissionEvidence, now)
+	if err != nil {
+		return err
 	}
 	if err := VerifyCoverageAcceptanceRequestV1(receipt.AuthorizedAcceptanceRequest, offer, agreementVerifier, authorityResolver,
 		acceptedAt); err != nil {

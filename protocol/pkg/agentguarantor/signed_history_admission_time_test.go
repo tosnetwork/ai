@@ -305,7 +305,7 @@ func TestSignedHistoryReviewCutoffRunsFromTheInitialAdmission(t *testing.T) {
 	}{
 		{"the initial terminal fallback on the revision at the initial admission's cutoff", cutoffAfter, ""},
 		{"the initial terminal fallback on the revision a second before the initial admission's cutoff", cutoffAfter - 1,
-			"claim decision fallback trigger cutoff is invalid"},
+			"initial terminal fallback is admitted before the claim review cutoff"},
 	} {
 		history, claimID := claimRevisedAt(t, 500)
 		at := signedHistoryStart + test.admittedAfter

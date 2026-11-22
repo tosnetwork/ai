@@ -72,10 +72,14 @@ func ValidateDecisionApplicationReceiptProofV1(proof DecisionApplicationReceiptP
 		seal.TerminalClaimStateTransitionReceiptDigest != proof.Body.TerminalClaimStateTransitionReceiptDigest ||
 		seal.MaterializedPayoutObligationSetDigest != proof.Body.MaterializedPayoutObligationSetDigest ||
 		seal.DecisionApplicationTokenDigest != proof.Body.DecisionApplicationTokenDigest ||
-		seal.CoverageTermsDigest != termsDigest || seal.SealedAtUnix < proof.Body.AppliedAtUnix ||
-		uint64(now.UTC().Unix()) < seal.SealedAtUnix || proof.SealAuthorization.AuthoritySubject != bound.ActionAuthorityID ||
+		seal.CoverageTermsDigest != termsDigest || proof.SealAuthorization.AuthoritySubject != bound.ActionAuthorityID ||
 		proof.SealAuthorization.ValidationTimeUnix != seal.SealedAtUnix {
 		return errors.New("decision application compact proof binding is invalid")
+	}
+	// As for every compact proof, the seal is not before the time the body
+	// states and not after the verifier's present plus the clock allowance.
+	if err := validateProofSealTimeV1("decision application compact proof", seal.SealedAtUnix, proof.Body.AppliedAtUnix, now); err != nil {
+		return err
 	}
 	if !verifySignatures {
 		return nil
@@ -99,9 +103,9 @@ func ValidateDecisionApplicationReceiptProofV1(proof DecisionApplicationReceiptP
 			return errors.New("decision application compact proof complete receipt is undecodable")
 		}
 		completeDigest, digestErr := ClaimDecisionApplicationReceiptDigestV1(complete)
-		completeSeal, completeDescriptor, sealErr := NewDecisionApplicationReceiptSealBodyV1(complete, terms,
-			time.Unix(int64(seal.SealedAtUnix), 0).UTC())
-		if digestErr != nil || sealErr != nil || completeDigest != proof.ReceiptEnvelopeDigest ||
+		sealedAt, inRange := protocolTimeV1(seal.SealedAtUnix)
+		completeSeal, completeDescriptor, sealErr := NewDecisionApplicationReceiptSealBodyV1(complete, terms, sealedAt)
+		if !inRange || digestErr != nil || sealErr != nil || completeDigest != proof.ReceiptEnvelopeDigest ||
 			!equalCanonical(completeSeal, seal) || !equalCanonical(completeDescriptor, proof.ReceiptDescriptor) {
 			return errors.New("decision application compact proof differs from its immutable complete receipt")
 		}

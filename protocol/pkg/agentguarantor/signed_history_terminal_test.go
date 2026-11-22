@@ -21,6 +21,16 @@ func (signedHistoryNoPayments) VerifyPaymentEvidence(agentcommerce.AgreementPaym
 
 // applicationProof seals a decision application into its compact proof at.
 func (history *signedHistory) applicationProof(receipt AuthorizedClaimDecisionApplicationReceiptV1, at uint64) DecisionApplicationReceiptProofV1 {
+	proof, err := history.sealApplication(receipt, at)
+	if err != nil {
+		history.t.Fatal(err)
+	}
+	return proof
+}
+
+// sealApplication is applicationProof that returns the builder's verdict
+// instead of failing the test.
+func (history *signedHistory) sealApplication(receipt AuthorizedClaimDecisionApplicationReceiptV1, at uint64) (DecisionApplicationReceiptProofV1, error) {
 	t := history.t
 	seal, descriptor, err := NewDecisionApplicationReceiptSealBodyV1(receipt, history.terms, time.Unix(int64(at), 0).UTC())
 	if err != nil {
@@ -37,11 +47,7 @@ func (history *signedHistory) applicationProof(receipt AuthorizedClaimDecisionAp
 	authorization := history.signObjectAs(bound.ActionAuthorityID, history.terms.LifecycleAuthorizationProfile,
 		"decision-application-receipt-seal", sealDigest,
 		"tos.service.agent-guarantor-decision-application-receipt-seal-signature.v1", at)
-	proof, err := BuildDecisionApplicationReceiptProofV1(receipt, history.terms, descriptor, seal, authorization)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return proof
+	return BuildDecisionApplicationReceiptProofV1(receipt, history.terms, descriptor, seal, authorization)
 }
 
 // carriedEvidenceItem names, by content-addressed descriptor, an object whose
@@ -211,6 +217,12 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		t.Fatal(err)
 	}
 	zero := history.amount(0)
+	// The set is created when its closure action is admitted, at. By default
+	// that is also when its claims became terminal and its release is allowed.
+	terminalAt := at
+	if history.vary.closureTerminalAt != 0 {
+		terminalAt = history.vary.closureTerminalAt
+	}
 	closureReason, targetState := filing.Body.CoverageEndReason, "closed"
 	closure := CoverageClosureEvidenceContextV1{SchemaVersion: 1, CoverageAgreementBodyDigest: history.agreement,
 		CoverageObligationID: history.obligation, ClaimFilingCloseReceiptDigest: filingDigest,
@@ -220,7 +232,7 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		CoverageClosureReason: closureReason, ResolutionTargetTerminalState: targetState, AdmissionHighWater: high,
 		ClaimAdmissionLogRoot: filing.Body.FrozenClaimAdmissionLogRoot, ClaimResolutionSetDigest: refSetDigest,
 		CumulativeApprovedAmount: zero, CumulativePaidAmount: zero, CumulativeDefaultedAmount: zero,
-		OutstandingApprovedAmount: zero, ReleaseNotBeforeUnix: at}
+		OutstandingApprovedAmount: zero, ReleaseNotBeforeUnix: terminalAt}
 	if history.vary.closureContext != nil {
 		history.vary.closureContext(&closure)
 	}
@@ -288,7 +300,7 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		AdmissionHighWater: high, ClaimAdmissionLogRoot: filing.Body.FrozenClaimAdmissionLogRoot, ClaimResolutions: refs,
 		CumulativeApprovedAmount: zero, CumulativePaidAmount: zero, CumulativeDefaultedAmount: zero,
 		OutstandingApprovedAmount: zero, ClaimSetRevision: 1, FilingClosedAtUnix: filing.Body.ClosedAtUnix,
-		AllClaimsTerminalAtUnix: at, ReleaseNotBeforeUnix: closure.ReleaseNotBeforeUnix, AuthorizedActionDigest: actionDigest,
+		AllClaimsTerminalAtUnix: terminalAt, ReleaseNotBeforeUnix: closure.ReleaseNotBeforeUnix, AuthorizedActionDigest: actionDigest,
 		StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
 		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, CreatedAtUnix: at,
 		RequiredExtensions: append([]ProfileRefV1(nil), terms.RequiredExtensions...),

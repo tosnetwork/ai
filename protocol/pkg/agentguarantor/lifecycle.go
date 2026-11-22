@@ -3,7 +3,9 @@ package agentguarantor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
+	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
@@ -197,6 +199,24 @@ func CoverageActivationEvidenceDigestV1(evidence AuthorizedCoverageActivationEvi
 	return guarantorCodec.Digest(ActivationEvidenceDomain, evidence)
 }
 
+// coverageActivationObjectKindV1 is the authorized object kind of the
+// eligibility proofs frozen when an activation is admitted.
+const coverageActivationObjectKindV1 = "coverage-activation"
+
+// coveragePartySubjectsV1 is the set an activation or a non-activation
+// checkpoint re-resolves: the Guarantor, the covered party and the
+// beneficiary of the offer, sorted and without duplicates. A subject that
+// holds several of those roles is named once.
+func coveragePartySubjectsV1(offer AuthorizedFirmCoverageOfferV1) []string {
+	parties := map[string]struct{}{offer.Body.GuarantorAgentID: {}, offer.Body.CoveredPartyAgentID: {}, offer.Body.BeneficiaryAgentID: {}}
+	subjects := make([]string, 0, len(parties))
+	for party := range parties {
+		subjects = append(subjects, party)
+	}
+	sort.Strings(subjects)
+	return subjects
+}
+
 // coverageActivationPredecessorVerifierV1 verifies the activation evidence a
 // claim admission or a claim filing close stands on. It is a variable only so
 // a test in this package can verify a signed claim history from the claim
@@ -218,6 +238,18 @@ func VerifyCoverageActivationEvidenceV1(evidence AuthorizedCoverageActivationEvi
 		return err
 	}
 	body := evidence.Body
+	// Activation is a permanent fact once admitted. Its time is anchored to the
+	// stage admission evidence, and everything that asks whether the coverage
+	// could be activated (the underlying Agreement's authorization, the
+	// prerequisites, the action's Writer Fence) is judged at that time. The
+	// verifier's present only bounds the activation time from above, so
+	// activation evidence verifies however long after those validity windows
+	// it is presented, and an activation admitted outside them never does.
+	activatedAt, err := anchoredReceiptTimeV1("coverage activation", body.ActivatedAtUnix,
+		evidence.StageActionAdmissionEvidence, now)
+	if err != nil {
+		return err
+	}
 	acceptance := evidence.AuthorizedAcceptanceReceipt
 	agreementDigest, _ := agentcommerce.AgreementBodyDigest(acceptance.AuthorizedAcceptanceRequest.CoverageAgreementBody)
 	underlyingDigest, _ := agentcommerce.AgreementBodyDigest(evidence.UnderlyingAgreementBody)
@@ -241,8 +273,8 @@ func VerifyCoverageActivationEvidenceV1(evidence AuthorizedCoverageActivationEvi
 	}
 	underlying := agentcommerce.AgentAgreement{Body: evidence.UnderlyingAgreementBody,
 		AuthorizationEvidence: evidence.UnderlyingAuthorizationEvidenceSet.Evidence}
-	if err := agentcommerce.ValidateAgreementAuthorization(underlying, agreementVerifier, now); err != nil {
-		return errors.New("underlying Agreement is not authorized")
+	if err := agentcommerce.ValidateAgreementAuthorization(underlying, agreementVerifier, activatedAt); err != nil {
+		return errors.New("underlying Agreement is not authorized at the activation time")
 	}
 	if offer.CoverageTerms.UnderlyingAgreementBodyDigest != underlyingDigest || evidence.CoverageEndCommitment.CoverageAgreementBodyDigest != agreementDigest ||
 		evidence.CoverageEndCommitment.CoverageObligationID != body.CoverageObligationID || evidence.CoverageEndCommitment.CoverageStateDomainDigest != body.CoverageStateDomainDigest ||
@@ -281,10 +313,27 @@ func VerifyCoverageActivationEvidenceV1(evidence AuthorizedCoverageActivationEvi
 		return errors.New("coverage activation substitutes Agreement-selected authority or profiles")
 	}
 	if offer.CoverageTerms.SelectedAssuranceLevel != AssuranceUnsecuredSigned {
+		// Lock, control and operational-independence evidence is current at the
+		// activation time; its age is not measured from the verifier's clock.
 		if err := verifyActivationCollateralPrerequisiteV1(evidence, offer.CoverageTerms, authorityResolver, fenceResolver,
-			collateralFinalityVerifier, now); err != nil {
+			collateralFinalityVerifier, activatedAt); err != nil {
 			return err
 		}
+	}
+	// The activation checkpoint re-resolves the three parties of the coverage,
+	// once each, and freezes the result in the activation admission domain at
+	// the activation time. The evidence body carries no sequence of that
+	// domain, so the proof set's sequence is held only to its own entries.
+	admissionDomainID, err := ActivationAdmissionDomainIDV1(agreementDigest)
+	if err != nil {
+		return err
+	}
+	proofs := evidence.AuthorityAdmissionEligibilityProofSet
+	if err := validateEligibilityProofSetAgainstV1(proofs, actionDigest, acceptanceDigest, coveragePartySubjectsV1(offer),
+		coverageActivationObjectKindV1, body.ExactRequestDigest, offer.CoverageTerms.CoverageStateDomainDigest,
+		offer.CoverageTerms.LifecycleAuthorizationProfile, admissionDomainID, proofs.AdmissionSequence,
+		body.ActivatedAtUnix); err != nil {
+		return fmt.Errorf("coverage activation evidence eligibility proofs: %w", err)
 	}
 	bodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-activation-evidence-body.v1", body)
 	return ValidateAuthorizationSet(evidence.Authorizations, "activation-evidence", bodyDigest,

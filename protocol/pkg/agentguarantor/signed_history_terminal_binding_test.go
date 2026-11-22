@@ -201,7 +201,9 @@ func TestSignedHistoryTerminalClaimSetFollowsItsFilingCloseAndOffer(t *testing.T
 		}), "terminal claim set closes the coverage at a revision before its filing close's"},
 		{"another filing-close time", body(func(body *TerminalClaimSetBodyV1) { body.FilingClosedAtUnix++ }),
 			"terminal claim set times do not follow its filing close"},
-		{"created a second before all claims were terminal", body(func(body *TerminalClaimSetBodyV1) { body.CreatedAtUnix-- }),
+		// The set is created when its closure action is admitted; it states that
+		// its claims became terminal, and its release is allowed, a second later.
+		{"created a second before all claims were terminal", signedHistoryVariation{closureTerminalAt: chain.closedAt + 1},
 			"terminal claim set times do not follow its filing close"},
 		{"terminal a second before filing closed", body(func(body *TerminalClaimSetBodyV1) {
 			body.AllClaimsTerminalAtUnix = body.FilingClosedAtUnix - 1

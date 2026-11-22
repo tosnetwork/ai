@@ -86,7 +86,6 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 		seal.ReceiptBodyDigest != bodyDigest || seal.AuthorizedActionDigest != body.AuthorizedActionDigest ||
 		seal.AuthorizedClaimDecisionDigest != decisionDigest || seal.AuthorizedClaimEnvelopeDigest != claimDigest ||
 		seal.CoverageEndCommitmentDigest != endDigest || seal.CoverageTermsDigest != termsDigest ||
-		seal.SealedAtUnix < body.AdmittedAtUnix ||
 		proof.ReceiptDescriptor.ContentDigest != proof.ReceiptEnvelopeDigest ||
 		proof.ReceiptDescriptor.RetrievalPolicyDigest != terms.DecisionAdmissionProfile.ProfileDigest ||
 		body.AuthorizedClaimDecisionDigest != decisionDigest || body.ClaimID != proof.AuthorizedClaim.Body.ClaimID ||
@@ -98,12 +97,22 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 	// The seal is not before the admission, so holding the seal time to the
 	// verifier's present, with the stage admission clock allowance, holds the
 	// admission time to it as well.
-	if !notAfterVerifierPresentV1(seal.SealedAtUnix, now) {
-		return errors.New("claim decision admission compact proof is sealed after the verifier's present")
+	if err := validateProofSealTimeV1("claim decision admission compact proof", seal.SealedAtUnix, body.AdmittedAtUnix, now); err != nil {
+		return err
 	}
 	if isFallbackDecisionPathV1(proof.AuthorizedClaimDecision.Body.DecisionPath) !=
 		(body.AdmissionMode == "deterministic_fallback") {
 		return errors.New("claim decision admission compact proof mixes its admission mode and decision path")
+	}
+	// The body restates its decision's path and revision. A holder of the
+	// proof may read them from the body, so a body that names another path or
+	// revision than the decision it admits is refused here as in the full
+	// receipt.
+	if body.DecisionPath != proof.AuthorizedClaimDecision.Body.DecisionPath {
+		return errors.New("claim decision admission compact proof states another decision path than its decision's")
+	}
+	if body.DecisionRevision != proof.AuthorizedClaimDecision.Body.DecisionRevision {
+		return errors.New("claim decision admission compact proof states another decision revision than its decision's")
 	}
 	// The candidate of the late-recovery path names its late filing close. Its
 	// successor is recognized by that digest alone, so a candidate proof
@@ -120,13 +129,20 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 	if err := validateDecisionAdmissionTimeV1(body, proof.AuthorizedClaimDecision.Body); err != nil {
 		return err
 	}
-	claimValidationTime := time.Unix(int64(proof.AuthorizedClaim.Body.CreatedAtUnix), 0).UTC()
+	claimValidationTime, inRange := protocolTimeV1(proof.AuthorizedClaim.Body.CreatedAtUnix)
+	if !inRange {
+		return errors.New("claim decision admission compact proof carries a claim whose creation time is absent or out of range")
+	}
 	if err := VerifyClaim(proof.AuthorizedClaim, terms, body.CoverageAgreementBodyDigest,
 		body.CoverageObligationID, authorityResolver, claimValidationTime); err != nil {
 		return err
 	}
-	// As in the full receipt, the decision is judged at its admission time.
-	decisionValidationTime := time.Unix(int64(body.AdmittedAtUnix), 0).UTC()
+	// As in the full receipt, the decision is judged at its admission time,
+	// which the time validation above holds in range.
+	decisionValidationTime, inRange := protocolTimeV1(body.AdmittedAtUnix)
+	if !inRange {
+		return errors.New("claim decision admission time is absent or out of range")
+	}
 	if err := ValidateClaimDecision(proof.AuthorizedClaimDecision, proof.AuthorizedClaim, terms,
 		authorityResolver, decisionAuthoritySubjectsForPathV1(terms, proof.AuthorizedClaimDecision.Body.DecisionPath),
 		decisionValidationTime); err != nil {
@@ -153,9 +169,9 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 			return errors.New("claim decision admission compact proof complete receipt is undecodable")
 		}
 		completeDigest, digestErr := ClaimDecisionAdmissionReceiptDigestV1(complete)
-		completeSeal, completeDescriptor, sealErr := NewClaimDecisionAdmissionReceiptSealBodyV1(complete, terms,
-			time.Unix(int64(seal.SealedAtUnix), 0).UTC())
-		if digestErr != nil || sealErr != nil || completeDigest != proof.ReceiptEnvelopeDigest ||
+		sealedAt, inRange := protocolTimeV1(seal.SealedAtUnix)
+		completeSeal, completeDescriptor, sealErr := NewClaimDecisionAdmissionReceiptSealBodyV1(complete, terms, sealedAt)
+		if !inRange || digestErr != nil || sealErr != nil || completeDigest != proof.ReceiptEnvelopeDigest ||
 			!equalCanonical(completeSeal, seal) || !equalCanonical(completeDescriptor, proof.ReceiptDescriptor) {
 			return errors.New("claim decision admission compact proof differs from its immutable complete receipt")
 		}

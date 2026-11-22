@@ -48,8 +48,9 @@ func initialClaimAdmissionBodyV1(claimAdmission AuthorizedClaimAdmissionReceiptV
 //     and leaves both within the Agreement's maxima;
 //   - a nonterminal result is admitted only while a nonterminal round remains
 //     and never in place of a challenged candidate;
-//   - off the late-recovery path, the admitted state's complete remaining
-//     closure ends by the terminal resolution deadline.
+//   - the admitted state's complete remaining closure ends by the deadline of
+//     its path: the terminal resolution deadline, or on the late-recovery path
+//     the late-recovery terminal deadline.
 //
 // The admission time itself is validated by validateDecisionAdmissionTimeV1,
 // which every caller runs first.
@@ -128,22 +129,44 @@ func validateDecisionAdmissionOutcomeV1(body ClaimDecisionAdmissionReceiptBodyV1
 			return errors.New("nonterminal claim decision admission replaces an application token: a challenge successor must be a challengeable candidate")
 		}
 	}
-	return validateOrdinaryDecisionClosureFitsV1(body, decision.Result, terms)
+	return validateDecisionClosureFitsV1(body, decision, terms)
 }
 
-// validateOrdinaryDecisionClosureFitsV1 holds a decision admission off the
-// late-recovery path to the terminal resolution deadline: the complete
-// remaining closure of the state it admits (every remaining window of the
-// continuation budget entry for that state and its remaining rounds, then
-// payout and Adapter recovery) must end by that deadline. Payout
+// validateLateRecoveryClosureFitsV1 holds a decision admission on the
+// late-recovery path to the late-recovery terminal deadline. The candidate may
+// still be challenged once, so it needs the closure of a challengeable
+// candidate with at most one remaining round. Its successor, authorized or the
+// fallback in its place, cannot be challenged again and needs the closure of a
+// candidate with none. The fallback has no latest admission time of its own,
+// so without this bound one admitted long after its trigger would still open a
+// challenge window that ends past the deadline.
+func validateLateRecoveryClosureFitsV1(body ClaimDecisionAdmissionReceiptBodyV1, decisionPath string,
+	terms CoverageTermsV1) error {
+	if decisionPath == "late_recovery_terminal_fallback" {
+		return lateRecoveryClosureFitsV1(terms, body.ChallengeRoundsUsedAfter, body.AdmittedAtUnix)
+	}
+	closureSeconds := lateRecoveryCandidateClosureSecondsV1(terms, terms.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim)
+	closesBy, fits := checkedDurationAddV1(body.AdmittedAtUnix, closureSeconds)
+	if closureSeconds == 0 || !fits || closesBy > terms.LateRecoveryTerminalDeadlineUnix {
+		return errors.New("late-recovery successor decision admission leaves no room to close by the late-recovery terminal deadline")
+	}
+	return nil
+}
+
+// validateDecisionClosureFitsV1 holds a decision admission to the deadline of
+// its path. Off the late-recovery path that is the terminal resolution
+// deadline: the complete remaining closure of the state it admits (every
+// remaining window of the continuation budget entry for that state and its
+// remaining rounds, then payout and Adapter recovery) must end by it. Payout
 // materialization caps every payout line there, so a decision admitted later
-// could never be applied. The late-recovery path is held to its own deadlines
-// where its candidate is admitted.
-func validateOrdinaryDecisionClosureFitsV1(body ClaimDecisionAdmissionReceiptBodyV1, result ClaimDecisionResult,
+// could never be applied. On the late-recovery path it is the late-recovery
+// terminal deadline, for the candidate and for what follows it.
+func validateDecisionClosureFitsV1(body ClaimDecisionAdmissionReceiptBodyV1, decision ClaimDecisionBodyV1,
 	terms CoverageTermsV1) error {
 	if OnLateRecoveryPathV1(body) {
-		return nil
+		return validateLateRecoveryClosureFitsV1(body, decision.DecisionPath, terms)
 	}
+	result := decision.Result
 	capacity := terms.ClaimClosureCapacity
 	// The outcome validation refuses counts past the maxima before it calls
 	// this; the guard is repeated so that the subtractions below cannot wrap
@@ -222,6 +245,17 @@ func bindReceiptTimeToStageAdmissionV1(subject string, bodyTimeUnix uint64,
 	return nil
 }
 
+// anchoredReceiptTimeV1 is bindReceiptTimeToStageAdmissionV1 for a receipt
+// whose verifier goes on to judge earlier objects at the receipt's time: it
+// returns the anchored time, which the binding holds in range.
+func anchoredReceiptTimeV1(subject string, bodyTimeUnix uint64,
+	stage PortableStageActionAdmissionEvidenceV1, now time.Time) (time.Time, error) {
+	if err := bindReceiptTimeToStageAdmissionV1(subject, bodyTimeUnix, stage, now); err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(int64(bodyTimeUnix), 0).UTC(), nil
+}
+
 // notAfterVerifierPresentV1 reports whether a receipt time is no later than
 // the verifier's present plus the stage admission clock allowance. Every
 // window is computed from the signed time, never from the verifier's clock, so
@@ -230,6 +264,36 @@ func bindReceiptTimeToStageAdmissionV1(subject string, bodyTimeUnix uint64,
 func notAfterVerifierPresentV1(timeUnix uint64, now time.Time) bool {
 	latest := now.UTC().Add(stageAdmissionClockAllowanceV1).Unix()
 	return latest >= 0 && timeUnix <= uint64(latest)
+}
+
+// protocolTimeV1 converts a protocol timestamp to a time. The wire value is a
+// uint64 and the conversion takes an int64, so a value outside the range of a
+// timestamp is refused here instead of wrapping into the past.
+func protocolTimeV1(unix uint64) (time.Time, bool) {
+	if !validUnixTimestampV1(unix) {
+		return time.Time{}, false
+	}
+	return time.Unix(int64(unix), 0).UTC(), true
+}
+
+// validateProofSealTimeV1 holds the seal time of a compact proof, for every
+// kind of proof: it is a protocol timestamp, it is not before the time the
+// sealed receipt body states, because a receipt is sealed once it exists, and
+// it is not after the verifier's present plus the stage admission clock
+// allowance. The seal is never before the body's time, so the last bound holds
+// the body's time to the verifier's present as well. subject names the proof
+// in each refusal.
+func validateProofSealTimeV1(subject string, sealedAtUnix, bodyTimeUnix uint64, now time.Time) error {
+	if !validUnixTimestampV1(sealedAtUnix) {
+		return errors.New(subject + " seal time is absent or out of range")
+	}
+	if sealedAtUnix < bodyTimeUnix {
+		return errors.New(subject + " is sealed before the time its receipt states")
+	}
+	if !notAfterVerifierPresentV1(sealedAtUnix, now) {
+		return errors.New(subject + " is sealed after the verifier's present")
+	}
+	return nil
 }
 
 // bindApplicationTimeToClosingTransitionV1 holds the time a terminal decision
@@ -290,12 +354,54 @@ func bindAuthorizedDecisionAdmissionToPredecessorV1(body ClaimDecisionAdmissionR
 		}
 		return nil
 	}
-	if body.AdmittedAtUnix < predecessor.Body.TransitionedAtUnix {
+	return bindSuccessorDecisionAdmissionToTransitionV1(body, predecessor.Body)
+}
+
+// bindSuccessorDecisionAdmissionToTransitionV1 holds a decision admission
+// that follows a transition to that transition, whichever object carries the
+// two: the full receipt of either admission mode, or a terminal bundle that
+// carries the transition beside the successor's compact proof. The round
+// counts the admission starts from are the transition's resulting counts. An
+// authorized successor is admitted between the transition and its successor
+// cutoff, both inclusive. The deterministic fallback in its place is triggered
+// by that cutoff: it names it and is admitted no earlier.
+func bindSuccessorDecisionAdmissionToTransitionV1(body ClaimDecisionAdmissionReceiptBodyV1,
+	transition ClaimStateTransitionReceiptBodyV1) error {
+	if body.ChallengeRoundsUsedBefore != transition.ChallengeRoundsUsedAfter ||
+		body.NonterminalRoundsUsedBefore != transition.NonterminalRoundsUsedAfter {
+		return errors.New("successor claim decision admission round counts differ from its predecessor transition")
+	}
+	if body.AdmissionMode == "deterministic_fallback" {
+		if transition.SuccessorDecisionDueAtUnix == 0 || body.FallbackTriggerCutoffUnix != transition.SuccessorDecisionDueAtUnix {
+			return errors.New("fallback in place of a successor names another trigger cutoff than its predecessor transition's successor cutoff")
+		}
+		if body.AdmittedAtUnix < transition.SuccessorDecisionDueAtUnix {
+			return errors.New("fallback in place of a successor is admitted before its predecessor transition's successor cutoff")
+		}
+		return nil
+	}
+	if body.AdmittedAtUnix < transition.TransitionedAtUnix {
 		return errors.New("successor claim decision is admitted before its predecessor transition")
 	}
-	if body.ChallengeRoundsUsedBefore != predecessor.Body.ChallengeRoundsUsedAfter ||
-		body.NonterminalRoundsUsedBefore != predecessor.Body.NonterminalRoundsUsedAfter {
-		return errors.New("successor claim decision admission round counts differ from its predecessor transition")
+	if body.AdmittedAtUnix > transition.SuccessorDecisionDueAtUnix {
+		return errors.New("successor claim decision is admitted after its predecessor transition's successor cutoff")
+	}
+	return nil
+}
+
+// bindInitialFallbackToReviewCutoffV1 holds an initial terminal fallback to
+// the claim review cutoff, which triggers it: the body names that cutoff and
+// the fallback is admitted no earlier. The cutoff runs from the claim's
+// initial admission, so the full receipt and a terminal bundle, which both
+// carry that admission, apply the same check.
+func bindInitialFallbackToReviewCutoffV1(body ClaimDecisionAdmissionReceiptBodyV1,
+	initialAdmission ClaimAdmissionReceiptBodyV1, terms CoverageTermsV1) error {
+	cutoff, fits := claimReviewCutoffV1(initialAdmission, terms)
+	if !fits || body.FallbackTriggerCutoffUnix != cutoff {
+		return errors.New("initial terminal fallback names another trigger cutoff than the claim review cutoff")
+	}
+	if body.AdmittedAtUnix < cutoff {
+		return errors.New("initial terminal fallback is admitted before the claim review cutoff")
 	}
 	return nil
 }

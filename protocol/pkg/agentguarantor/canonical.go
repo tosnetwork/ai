@@ -267,7 +267,9 @@ func VerifyObjectAuthorization(authorization ProfileQualifiedObjectAuthorization
 		len(authorization.Evidence.HistoricalAuthorityProof) > MaxHistoricalAuthorityProofBytes {
 		return errors.New("Guarantor object authorization does not match the expected body")
 	}
-	if statement.ValidationTimeUnix > uint64(now.UTC().Add(5*time.Minute).Unix()) {
+	// The verifier's clock may run behind the signer's by the same allowance
+	// the stage admission evidence is given.
+	if !notAfterVerifierPresentV1(statement.ValidationTimeUnix, now) {
 		return errors.New("Guarantor authorization validation time is in the future")
 	}
 	keyID, err := mldsa44.ParseKeyIDText(authorization.Evidence.KeyID)
@@ -335,7 +337,7 @@ func verifyStageActionAdmissionAuthorizationV1(authorization StageActionAdmissio
 	if statement.AuthoritySubject != action.AuthorityID || authorization.Evidence.KeyID != action.AuthorityKeyID {
 		return errors.New("Guarantor stage admission is not signed by the admitted action's authority key")
 	}
-	if statement.ValidationTimeUnix > uint64(now.UTC().Add(5*time.Minute).Unix()) {
+	if !notAfterVerifierPresentV1(statement.ValidationTimeUnix, now) {
 		return errors.New("Guarantor authorization validation time is in the future")
 	}
 	message, err := authorizationMessage(StageActionAdmissionSignatureDomain, statement)

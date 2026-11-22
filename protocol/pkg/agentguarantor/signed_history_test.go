@@ -113,6 +113,16 @@ type signedHistoryVariation struct {
 	closureAgreement string
 	closureContext   func(*CoverageClosureEvidenceContextV1)
 	closureBody      func(*TerminalClaimSetBodyV1)
+	// closureTerminalAt is the time the next terminal claim set states all its
+	// claims became terminal, and allows its release from, instead of the time
+	// its closure action is admitted at, which is its creation time.
+	closureTerminalAt uint64
+	// stageOf and stageAfter move the admission of every stage action of stage
+	// stageOf by stageAfter seconds past the time its receipt body states, so
+	// the Action Authority's evidence and the receipt's own quorum state two
+	// times for one admission.
+	stageOf    string
+	stageAfter uint64
 }
 
 // receiptTime is the time a receipt body states for a stage action admitted
@@ -375,6 +385,13 @@ func (history *signedHistory) stageFor(bound GuarantorStageActionAuthorityV1, co
 	fields map[string]agentcommerce.SemanticValue, expectedPriorState string, expiresAt, at uint64, sink string,
 	evidenceRefs []string) PortableStageActionAdmissionEvidenceV1 {
 	t, stage := history.t, bound.Stage
+	if history.vary.stageOf == stage {
+		at += history.vary.stageAfter
+	}
+	// An action is authorized under its Writer Fence and expires no later.
+	if fenceExpiry := history.fence.Body.ExpiresAtUnix; expiresAt > fenceExpiry {
+		expiresAt = fenceExpiry
+	}
 	operation, err := StageOperationBindingForAuthorityV1(bound)
 	if err != nil {
 		t.Fatal(err)
@@ -427,6 +444,19 @@ func (history *signedHistory) stageFor(bound GuarantorStageActionAuthorityV1, co
 			ValidationTimeUnix: statement.ValidationTimeUnix, EvidenceContentType: ActionAuthorityEvidenceContentType,
 			Evidence: ActionAuthorityMLDSA44EvidenceV1{KeyID: keyID, Signature: signature,
 				HistoricalAuthorityProof: append([]byte(nil), signedHistoryProof...)}}}
+}
+
+// useFenceUntil replaces the history's Writer Fence with the same fence
+// expiring at expiresAt, so the stage actions built next are authorized under
+// a fence whose validity ends there.
+func (history *signedHistory) useFenceUntil(expiresAt uint64) {
+	body := history.fence.Body
+	body.ExpiresAtUnix = expiresAt
+	fence, err := agentcommerce.SignWriterFence(context.Background(), body, nativeTestFake, signedHistoryActionController)
+	if err != nil {
+		history.t.Fatal(err)
+	}
+	history.fence = fence
 }
 
 // incidentKey is the incident the next claim is filed for.
