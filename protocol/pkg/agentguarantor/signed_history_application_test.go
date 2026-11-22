@@ -226,8 +226,10 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, AdmittedAtUnix: at,
 		AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
 	if state.token != nil {
-		if body.PriorApplicationTokenDigest, err = DecisionApplicationTokenDigestV1(*state.token); err != nil {
-			t.Fatal(err)
+		// A prior token that cannot be digested leaves the digest absent; a
+		// test presents such a receipt to show it is refused.
+		if digest, digestErr := DecisionApplicationTokenDigestV1(*state.token); digestErr == nil {
+			body.PriorApplicationTokenDigest = digest
 		}
 		body.PriorApplicationTokenTerminalState = "replaced"
 	}

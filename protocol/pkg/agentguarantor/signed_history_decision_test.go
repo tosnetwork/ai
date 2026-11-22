@@ -2,6 +2,7 @@ package agentguarantor
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -415,6 +416,14 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 	token := DecisionApplicationTokenV1{SchemaVersion: 1, TokenID: tokenID, CoverageAgreementBodyDigest: history.agreement,
 		CoverageObligationID: history.obligation, ClaimID: claimID, AuthorizedClaimDecisionDigest: decisionDigest,
 		DecisionSequence: sequence, DecisionRevision: 1, ReservedApprovedAmount: zero, TokenRevision: 1, State: "pending"}
+	// The zero-value denial reserves nothing and releases what the replaced
+	// pending token reserved.
+	replacedReserve := uint64(0)
+	if state.token != nil {
+		if replacedReserve, err = strconv.ParseUint(state.token.ReservedApprovedAmount.AmountAtomic, 10, 64); err != nil {
+			t.Fatal(err)
+		}
+	}
 	body := ClaimDecisionAdmissionReceiptBodyV1{SchemaVersion: 1, AuthorityID: action.AuthorityID,
 		CoverageAgreementBodyDigest: history.agreement, CoverageObligationID: history.obligation, ClaimID: claimID,
 		AuthorizedClaimDecisionDigest: decisionDigest, AdmissionMode: "deterministic_fallback", FallbackTriggerCutoffUnix: cutoff,
@@ -429,8 +438,9 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 		ChallengeRoundsUsedAfter: state.challengeRounds, NonterminalRoundsUsedBefore: state.nonterminalRounds,
 		NonterminalRoundsUsedAfter: state.nonterminalRounds, ChallengeStartsAtUnix: at, ChallengeEndsAtUnix: at + terms.ChallengeWindowSeconds,
 		ResultingApplicationToken:             &token,
-		AggregatePendingDecisionReserveBefore: zero, AggregatePendingDecisionReserveAfter: zero,
-		AuthorizedActionDigest: actionDigest, StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
+		AggregatePendingDecisionReserveBefore: history.amount(history.pendingReserve),
+		AggregatePendingDecisionReserveAfter:  history.amount(history.pendingReserve - replacedReserve),
+		AuthorizedActionDigest:                actionDigest, StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
 		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, AdmittedAtUnix: at,
 		AuthorityAdmissionEligibilityProofSetDigest:  eligibilityDigest,
 		PredecessorDecisionAdmissionReceiptDigest:    variant.CurrentDecisionAdmissionReceiptDigest,
@@ -441,8 +451,10 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 		body.LateFilingCloseReceiptDigest = marker
 	}
 	if state.token != nil {
-		if body.PriorApplicationTokenDigest, err = DecisionApplicationTokenDigestV1(*state.token); err != nil {
-			t.Fatal(err)
+		// A prior token that cannot be digested leaves the digest absent; a
+		// test presents such a receipt to show it is refused.
+		if digest, digestErr := DecisionApplicationTokenDigestV1(*state.token); digestErr == nil {
+			body.PriorApplicationTokenDigest = digest
 		}
 		body.PriorApplicationTokenTerminalState = "replaced"
 	}
@@ -464,6 +476,7 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 			terms.DecisionAdmissionProfile, "claim-decision-admission-receipt", bodyDigest,
 			"tos.service.agent-guarantor-claim-decision-admission-signature.v1", at)}}
 	history.coverageRevision++
+	history.pendingReserve -= replacedReserve
 	state.status, state.stateRevision, state.decisionSequence = "denied", state.stateRevision+1, sequence
 	if !state.epochFrozen {
 		state.epochFrozen, state.epochRevision, state.frozenCut = true, cut.FrozenEpochStateRevision, cut

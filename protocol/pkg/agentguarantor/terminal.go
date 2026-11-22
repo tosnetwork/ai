@@ -1101,14 +1101,3 @@ func ValidateTerminalClaimSetV1(value AuthorizedTerminalClaimSetEvidenceV1) erro
 	}
 	return nil
 }
-
-func sortTerminalBundles(bundles []ClaimTerminalResolutionBundleV1) bool {
-	for index := 1; index < len(bundles); index++ {
-		left, _ := guarantorCodec.Marshal(bundles[index-1].ResolutionRef)
-		right, _ := guarantorCodec.Marshal(bundles[index].ResolutionRef)
-		if bytes.Compare(left, right) >= 0 {
-			return false
-		}
-	}
-	return true
-}
