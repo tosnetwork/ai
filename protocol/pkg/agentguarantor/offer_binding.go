@@ -155,14 +155,16 @@ func validateCoveragePremiumV1(offer AuthorizedFirmCoverageOfferV1, agreement ag
 	if !valid || validateAmount(request.MaximumFee, false) != nil {
 		return errors.New("Guarantor quote request's maximum fee is invalid")
 	}
+	// named records, for each premium the terms name, whether the Agreement
+	// carries it. The caller has validated the Agreement body, so an
+	// obligation ID occurs in it at most once.
 	named := make(map[string]bool, len(offer.CoverageTerms.PremiumObligationIDs))
 	for _, obligationID := range offer.CoverageTerms.PremiumObligationIDs {
 		named[obligationID] = false
 	}
 	total := new(big.Int)
 	for _, obligation := range agreement.Obligations {
-		seen, isNamed := named[obligation.ObligationID]
-		if !isNamed {
+		if _, isNamed := named[obligation.ObligationID]; !isNamed {
 			if obligation.Kind == CoverageFeeObligationKindV1 {
 				return errors.New("coverage Agreement carries a guarantor.fee obligation the Guarantor terms do not name as premium")
 			}
@@ -171,9 +173,6 @@ func validateCoveragePremiumV1(offer AuthorizedFirmCoverageOfferV1, agreement ag
 				return errors.New("coverage Agreement carries a value transfer from the covered party to the Guarantor that the Guarantor terms do not name as premium")
 			}
 			continue
-		}
-		if seen {
-			return errors.New("coverage Agreement repeats a premium obligation ID")
 		}
 		named[obligation.ObligationID] = true
 		if obligation.Kind != CoverageFeeObligationKindV1 {
