@@ -106,7 +106,10 @@ func ValidateDecisionApplicationReceiptProofV1(proof DecisionApplicationReceiptP
 			return errors.New("decision application compact proof differs from its immutable complete receipt")
 		}
 	}
-	sealDigest, _ := guarantorCodec.Digest(DecisionApplicationReceiptSealDomainV1, seal)
+	sealDigest, err := guarantorCodec.Digest(DecisionApplicationReceiptSealDomainV1, seal)
+	if err != nil {
+		return err
+	}
 	return VerifyObjectAuthorization(proof.SealAuthorization, "decision-application-receipt-seal", sealDigest,
 		"tos.service.agent-guarantor-decision-application-receipt-seal-signature.v1", resolver, now)
 }

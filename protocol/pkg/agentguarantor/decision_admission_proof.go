@@ -139,7 +139,10 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 			return errors.New("claim decision admission compact proof differs from its immutable complete receipt")
 		}
 	}
-	sealDigest, _ := guarantorCodec.Digest(ClaimDecisionAdmissionReceiptSealDomainV1, seal)
+	sealDigest, err := guarantorCodec.Digest(ClaimDecisionAdmissionReceiptSealDomainV1, seal)
+	if err != nil {
+		return err
+	}
 	if proof.SealAuthorization.AuthoritySubject != bound.ActionAuthorityID ||
 		proof.SealAuthorization.ValidationTimeUnix != seal.SealedAtUnix {
 		return errors.New("claim decision admission receipt seal authority is substituted")

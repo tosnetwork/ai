@@ -76,8 +76,22 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 	if err != nil {
 		t.Fatal(err)
 	}
-	reason := ClaimDecisionReasonV1{SchemaVersion: 1, DecisionProfile: terms.DecisionProfile, Result: DecisionApproved,
-		ReasonCode: "benefit-approved", ApplicablePolicyClauseIDs: clauses, EvidencePredicateIDs: predicates}
+	// A nonterminal decision disputes the claim instead: no amount, no payout
+	// line and no application token, and a resolution window in place of the
+	// challenge window.
+	nonterminal := history.vary.nonterminal
+	result, reasonCode, admittedState := DecisionApproved, "benefit-approved", "approved"
+	payoutLines := []ClaimPayoutLineV1{{DecisionLineIndex: 1, Amount: approved,
+		PayoutDestinationDigest:      terms.PayoutTemplate.SettlementParameters.PayoutDestinationDigest,
+		DueAfterTerminalCloseSeconds: dueAfterClose, ExpiresAfterTerminalCloseSeconds: dueAfterClose + terms.AdapterRecoveryWindowSeconds}}
+	challengeWindow, resolutionWindow := terms.ChallengeWindowSeconds, uint64(0)
+	if nonterminal {
+		result, reasonCode, admittedState = DecisionDisputed, "benefit-disputed", "disputed"
+		approved, reserved, payoutLines = history.amount(0), 0, nil
+		challengeWindow, resolutionWindow = 0, terms.NonterminalResolutionWindowSeconds
+	}
+	reason := ClaimDecisionReasonV1{SchemaVersion: 1, DecisionProfile: terms.DecisionProfile, Result: result,
+		ReasonCode: reasonCode, ApplicablePolicyClauseIDs: clauses, EvidencePredicateIDs: predicates}
 	reasonDigest, err := ClaimDecisionReasonDigestV1(reason)
 	if err != nil {
 		t.Fatal(err)
@@ -88,12 +102,13 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 		DecisionSequence: sequence, DecisionRevision: 1, PredecessorAuthorizedClaimDecisionDigest: predecessorDecisionDigest,
 		DecisionPath: decisionPath, ExpectedClaimRevision: claim.Body.ClaimRevision, DecisionProfile: terms.DecisionProfile,
 		DecisionAuthoritySubjects: append([]string(nil), terms.DecisionAuthoritySubjects...),
-		DecisionQuorumRule:        terms.DecisionQuorumRule, Result: DecisionApproved, ApprovedAmount: approved,
+		DecisionQuorumRule:        terms.DecisionQuorumRule, Result: result, ApprovedAmount: approved,
 		EvidenceSetDigest: evidenceDigest, PolicyApplicationDigest: policyDigest, ReasonDigest: reasonDigest,
-		PayoutLines: []ClaimPayoutLineV1{{DecisionLineIndex: 1, Amount: approved,
-			PayoutDestinationDigest:      terms.PayoutTemplate.SettlementParameters.PayoutDestinationDigest,
-			DueAfterTerminalCloseSeconds: dueAfterClose, ExpiresAfterTerminalCloseSeconds: dueAfterClose + terms.AdapterRecoveryWindowSeconds}},
-		ChallengeWindowSeconds: terms.ChallengeWindowSeconds, DecidedAtUnix: at, ExpiresAtUnix: expiresAt}
+		PayoutLines: payoutLines, ChallengeWindowSeconds: challengeWindow, ResolutionWindowSeconds: resolutionWindow,
+		DecidedAtUnix: at, ExpiresAtUnix: expiresAt}
+	if history.vary.decision != nil {
+		history.vary.decision(&decisionBody)
+	}
 	decisionBodyDigest, err := ClaimDecisionBodyDigestV1(decisionBody, terms)
 	if err != nil {
 		t.Fatalf("authorized decision body is invalid: %v", err)
@@ -116,6 +131,9 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 		cut = history.revisionCut(claimID, at)
 		expectedState = "open"
 	}
+	if history.vary.cut != nil {
+		history.vary.cut(&cut)
+	}
 	variant := AuthorizedDecisionAdmissionVariantV1{AuthorizedClaimDecisionDigest: decisionDigest,
 		AuthorizedClaimAdmissionReceiptDigest: claimAdmissionDigest,
 		ClaimRevisionEpochExpectation: ClaimRevisionEpochExpectationV1{SchemaVersion: 1,
@@ -129,6 +147,9 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 			t.Fatal(err)
 		}
 		variant.PredecessorDecisionAdmissionReceiptDigest = state.transition.DecisionAdmissionProof.ReceiptEnvelopeDigest
+	}
+	if history.vary.epoch != nil {
+		history.vary.epoch(&variant.ClaimRevisionEpochExpectation)
 	}
 	actionBody := ClaimDecisionAdmissionActionBodyV1{SchemaVersion: 1, AdmissionMode: "authorized_decision",
 		AuthorizedDecisionVariant: &variant}
@@ -194,7 +215,7 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 		DecisionSequence: sequence, DecisionRevision: 1, DecisionPath: decisionPath,
 		PriorCoverageRevision: history.coverageRevision, AdmittedCoverageRevision: history.coverageRevision + 1,
 		PriorCoverageEndCommitmentDigest: endDigest, ResultingCoverageEndCommitmentDigest: endDigest,
-		PriorClaimState: priorState, AdmittedClaimState: "approved", PriorClaimStateRevision: state.stateRevision,
+		PriorClaimState: priorState, AdmittedClaimState: admittedState, PriorClaimStateRevision: state.stateRevision,
 		AdmittedClaimStateRevision: state.stateRevision + 1, ChallengeRoundsUsedBefore: state.challengeRounds,
 		ChallengeRoundsUsedAfter: state.challengeRounds, NonterminalRoundsUsedBefore: state.nonterminalRounds,
 		NonterminalRoundsUsedAfter: state.nonterminalRounds, ChallengeStartsAtUnix: at,
@@ -209,6 +230,16 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 			t.Fatal(err)
 		}
 		body.PriorApplicationTokenTerminalState = "replaced"
+	}
+	var resultingToken *DecisionApplicationTokenV1
+	if nonterminal {
+		body.ChallengeStartsAtUnix, body.ChallengeEndsAtUnix, body.ResultingApplicationToken = 0, 0, nil
+		body.ResolutionStartsAtUnix, body.ResolutionDueAtUnix = at, at+resolutionWindow
+	} else {
+		resultingToken = &token
+	}
+	if history.vary.admission != nil {
+		history.vary.admission(&body)
 	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-claim-decision-admission-receipt-body.v1", body)
 	if err != nil {
@@ -226,11 +257,11 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 			"tos.service.agent-guarantor-claim-decision-admission-signature.v1", at)}}
 	history.coverageRevision++
 	history.pendingReserve = pendingAfter
-	state.status, state.stateRevision, state.decisionSequence = "approved", state.stateRevision+1, sequence
+	state.status, state.stateRevision, state.decisionSequence = admittedState, state.stateRevision+1, sequence
 	if !state.epochFrozen {
 		state.epochFrozen, state.epochRevision, state.frozenCut = true, cut.FrozenEpochStateRevision, cut
 	}
-	state.decision, state.transition, state.token = &receipt, nil, &token
+	state.decision, state.transition, state.token = &receipt, nil, resultingToken
 	history.store(receipt)
 	return receipt
 }

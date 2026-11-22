@@ -60,6 +60,45 @@ type signedHistory struct {
 	cumulativeApproved uint64
 	payoutSequence     uint64
 	payoutLineDigest   string
+
+	// vary changes what the builders sign next; see signedHistoryVariation.
+	vary signedHistoryVariation
+}
+
+// signedHistoryVariation lets a test change one input of an object before the
+// history signs it. Every digest downstream of the changed input is
+// recomputed, so the varied object is complete and signed and differs from
+// the honest one only in what was changed. A nil or zero member changes
+// nothing.
+type signedHistoryVariation struct {
+	// incident is the incident key of the next claim filed; another key makes
+	// another claim ID.
+	incident string
+	// nonterminal makes the next authorized decision dispute the claim instead
+	// of approving it; decision changes its body before the Decision Authority
+	// signs it.
+	nonterminal bool
+	decision    func(*ClaimDecisionBodyV1)
+	// epoch changes the revision-epoch expectation of the next decision
+	// admission request, and cut its revision ingress cut.
+	epoch func(*ClaimRevisionEpochExpectationV1)
+	cut   func(*ClaimIngressAdmissionCutProofV1)
+	// admission changes the next decision admission receipt body before the
+	// admission authority signs it.
+	admission func(*ClaimDecisionAdmissionReceiptBodyV1)
+	// proofSealedAt is when the decision proof inside the next transitions is
+	// sealed, instead of the transition's own time.
+	proofSealedAt uint64
+	// filingCutEntry changes each admitted entry of the next filing close's
+	// ingress cut, and frozenRoot replaces the claim admission log root it
+	// freezes.
+	filingCutEntry func(*ClaimIngressResolutionEntryV1)
+	frozenRoot     string
+	// closureAgreement replaces the Agreement the next terminal claim set
+	// names in its body, context, references and action; closureBody changes
+	// its body last.
+	closureAgreement string
+	closureBody      func(*TerminalClaimSetBodyV1)
 }
 
 // signedHistoryClaim is the claim state the decision objects are built on.
@@ -176,6 +215,11 @@ func newSignedHistory(t *testing.T) *signedHistory {
 	}
 	history.offer = AuthorizedFirmCoverageOfferV1{CoverageTerms: terms}
 	history.offer.Body.GuarantorAgentID = signedHistoryGuarantor
+	// The stand-in offer names the history's coverage and carries a signed
+	// exposure admission, so the closure objects can be tied to both.
+	history.offer.Body.CoverageAgreementBodyDigest, history.offer.Body.CoverageObligationID = agreement, obligation
+	history.offer.ExposureAdmissionReceipt = history.standInExposureReceipt("retain")
+	history.offer.Body.ReservationID = history.offer.ExposureAdmissionReceipt.Body.ReservationID
 	history.activation = history.standInActivation()
 	history.coverageRevision = history.activation.Body.ActivatedCoverageRevision
 	claimLogID, err := ClaimAdmissionLogIDV1(agreement, obligation)
@@ -357,6 +401,14 @@ func (history *signedHistory) stageFor(bound GuarantorStageActionAuthorityV1, co
 				HistoricalAuthorityProof: append([]byte(nil), signedHistoryProof...)}}}
 }
 
+// incidentKey is the incident the next claim is filed for.
+func (history *signedHistory) incidentKey() string {
+	if history.vary.incident != "" {
+		return history.vary.incident
+	}
+	return testDigest("5")
+}
+
 // claim is a claimant-signed claim on the history's coverage. Revision 1
 // starts the claim; a later revision names its predecessor's body.
 func (history *signedHistory) claim(revision uint64, predecessor *AuthorizedCoverageClaimV1, createdAt uint64) AuthorizedCoverageClaimV1 {
@@ -371,7 +423,7 @@ func (history *signedHistory) claim(revision uint64, predecessor *AuthorizedCove
 	}
 	recovery := OtherRecoveryDeclarationV1{SchemaVersion: 1, CoverageAgreementBodyDigest: history.agreement,
 		CoverageObligationID: history.obligation, UnderlyingAgreementBodyDigest: terms.UnderlyingAgreementBodyDigest,
-		ClaimRevision: revision, BeneficiaryAgentID: terms.BeneficiaryAgentID, IncidentKeyDigest: testDigest("5"),
+		ClaimRevision: revision, BeneficiaryAgentID: terms.BeneficiaryAgentID, IncidentKeyDigest: history.incidentKey(),
 		CoverageAsset: terms.CoverageAsset, RecoveryItems: []OtherRecoveryItemV1{}, DeclaredAtUnix: createdAt}
 	recoveryDigest, err := ValidateOtherRecoveryDeclaration(recovery, manifest)
 	if err != nil {

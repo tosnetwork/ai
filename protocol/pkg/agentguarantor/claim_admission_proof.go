@@ -182,7 +182,10 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 			return errors.New("claim admission compact proof differs from its immutable complete receipt")
 		}
 	}
-	sealDigest, _ := guarantorCodec.Digest(ClaimAdmissionReceiptSealDomainV1, seal)
+	sealDigest, err := guarantorCodec.Digest(ClaimAdmissionReceiptSealDomainV1, seal)
+	if err != nil {
+		return err
+	}
 	return VerifyObjectAuthorization(proof.SealAuthorization, "claim-admission-receipt-seal", sealDigest,
 		"tos.service.agent-guarantor-claim-admission-receipt-seal-signature.v1", resolver, now)
 }
