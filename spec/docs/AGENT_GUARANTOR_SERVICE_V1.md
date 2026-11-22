@@ -3192,11 +3192,19 @@ acceptance request compares the terms with the embedded request under the
 rules below. A Guarantor that cannot offer a requested value declines; it
 never substitutes one. The table covers every field that both the released
 request schema and the terms carry. The request fields this section lists
-that the released schema does not yet carry (the claimant, ingress, admission
-and decision authority selections, the non-activation reason rules, the
-operational-independence requirements, the policy constraints and
-`maximum_claim_ingress_resolution_grace_seconds`) have no comparison until
-the schema carries them:
+that the released schema does not yet carry have no comparison until the
+schema carries them. Of the requested terms these are `deductible_range`,
+`coinsurance_ppm_range`, `claimant_authorization_profiles[]`,
+`claim_ingress_profile`, `claim_ingress_authority_subjects[]`,
+`claim_ingress_authority_quorum_rule`, `claim_admission_profile`,
+`decision_admission_profile`, `decision_profile` (the request body's
+`selected_decision_profile` is compared instead),
+`requested_decision_authority_subjects[]`, `requested_decision_quorum_rule`,
+`operational_independence_requirements`, `payout_destination_constraints`,
+`exclusions_constraints`, `cancellation_constraints`,
+`requested_non_activation_reason_rules[]`, `dispute_constraints` and
+`default_constraints`; of the request body, `required_extensions[]` and
+`optional_extensions[]`:
 
 | Coverage terms field | Rule against the embedded quote request |
 | --- | --- |
@@ -3215,6 +3223,7 @@ the schema carries them:
 | `maximum_per_claim` | equals `requested_per_claim` |
 | `coverage_starts_at_unix`, `coverage_ends_at_unix`, `claim_filing_ends_at_unix` | equal `requested_coverage_starts_at_unix`, `requested_coverage_ends_at_unix`, `requested_claim_filing_ends_at_unix` |
 | `review_deadline_seconds`, `challenge_window_seconds`, `nonterminal_resolution_window_seconds`, `successor_decision_window_seconds`, `payout_deadline_seconds`, `adapter_recovery_window_seconds` | each no greater than the request's corresponding `maximum_*_seconds` |
+| `claim_ingress_resolution_grace_seconds` | no greater than the request's `maximum_claim_ingress_resolution_grace_seconds` |
 | `terminal_resolution_deadline_unix`, `late_recovery_terminal_deadline_unix`, `late_ingress_recovery_window_seconds` | each no greater than the request's corresponding maximum (section 12.2) |
 | `maximum_claims` and every count and byte ceiling of `claim_closure_capacity` | each no greater than the same field of `requested_closure_capacity` |
 | `claim_closure_capacity.terminal_fallback` | byte-identical to the requested fallback |
@@ -3458,6 +3467,33 @@ Every subtraction and multiplication is checked; underflow, overflow, a
 missing state/round entry, or a zero-time ordering ambiguity invalidates the
 request before a firm offer. `release_not_before_unix` is only an earliest-
 release guard and never contributes processing time.
+
+The collateral chain is enforced where its operands are available. Terms
+validation, and with it the terms digest every verifier recomputes, enforces
+`lock_by_unix <= coverage_starts_at_unix`, the final deadline plus the reorg
+window against `release_not_before_unix`, and `release_not_before_unix <=
+lock_until_unix`; collateralized terms that break one have no digest, so no
+offer, receipt or proof exists over them. `lock_until_unix <=
+agreement.expires_at` needs the Agreement body and is enforced with the
+`hard_effect_deadline` anchor, by firm-offer verification and
+acceptance-request verification and through the latter by every object that
+embeds an acceptance. Together with that rule, `lock_until_unix -
+reorg_window_seconds` is never later than `agreement.expires_at`, so the
+`min` of the `hard_effect_deadline` derivation always selects it: for
+collateralized coverage the final deadline equals `lock_until_unix -
+reorg_window_seconds`, and the coverage Agreement expires no earlier than the
+lock ends.
+
+The guard is enforced at release time by two verifiers. A collateral
+`release` transition (section 18) has its stage action admitted, and its
+Adapter evidence finalized (`finalized_at_unix`), no earlier than
+`collateral_terms.release_not_before_unix`; no other transition kind
+releases the position, so none is held to it. The terminal claim set of a
+collateralized coverage has `release_not_before_unix >=
+collateral_terms.release_not_before_unix`, and the post-acceptance exposure
+release is held to the set's `release_not_before_unix` (section 19.6), so
+exposure capacity is not returned before the collateral could be released
+either.
 
 Every verifier of a firm offer, of Firm Offer Agreement evidence, and of an
 acceptance request enforces the first chain above on the offer it holds:
@@ -7850,6 +7886,17 @@ forbidden for `lock`, `encumber`, `release`, `reorg`, and
 `position_impairment`; `release` instead binds the complete authorized terminal
 claim set through its distinct prerequisite role. Request and evidence presence
 and bytes must match exactly.
+
+A verifier of `release` collateral evidence holds it to two rules of its own.
+The action's `prerequisite_evidence_set` names exactly one item of media type
+`application/vnd.tos.service.agent-guarantor-terminal-claim-set.v1+cbor`,
+which as a Guarantor object is content addressed; a release that names none,
+or more than one, is invalid. The collateral verifier holds no firm offer to
+verify that set against, so it checks that the release commits one; the
+Adapter that admits the release, and any holder of the set, verifies the set
+itself. And the release respects the earliest-release guard of section 12.2:
+its stage action is admitted, and its `finalized_at_unix` lies, no earlier
+than `collateral_terms.release_not_before_unix`.
 
 Exhaustion is not another transition kind: it is a `payout` whose verified
 resulting state is `depleted`. The action binding, body Adapter and evidence

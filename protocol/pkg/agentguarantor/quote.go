@@ -66,6 +66,20 @@ func ValidateRequestedCoverageTerms(terms RequestedCoverageTermsV1) error {
 	return nil
 }
 
+// validateCollateralLockedByCoverageStartV1 enforces section 12.2's
+// "collateral_terms.lock_by_unix <= coverage_starts_at_unix" for
+// collateralized terms: the lock is due no later than the activation cutoff,
+// so coverage that starts can have been activated on finalized lock evidence.
+func validateCollateralLockedByCoverageStartV1(terms CoverageTermsV1) error {
+	if terms.CollateralTerms == nil {
+		return errors.New("collateralized terms lack collateral terms")
+	}
+	if terms.CollateralTerms.LockByUnix > terms.CoverageStartsAtUnix {
+		return errors.New("collateral may be locked after the coverage starts")
+	}
+	return nil
+}
+
 // validateCollateralReleaseAfterFinalDeadlineV1 enforces section 13's
 // "late_recovery_terminal_deadline_unix + collateral_terms.reorg_window_seconds
 // <= collateral_terms.release_not_before_unix" for collateralized terms.
@@ -437,6 +451,9 @@ func ValidateCoverageTerms(terms CoverageTermsV1) error {
 			terms.CollateralTerms.SelectedCollateralProfileDigest != terms.SelectedCollateralProfileDigest ||
 			terms.CollateralTerms.AssuranceLevel != terms.SelectedAssuranceLevel || terms.CollateralTerms.Asset != terms.CoverageAsset {
 			return errors.New("collateralized terms lack collateral binding")
+		}
+		if err := validateCollateralLockedByCoverageStartV1(terms); err != nil {
+			return err
 		}
 		if err := validateCollateralReleaseAfterFinalDeadlineV1(terms); err != nil {
 			return err

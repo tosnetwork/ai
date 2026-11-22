@@ -489,11 +489,22 @@ func TestRegisteredKindsChooseTheirOwningProfileLimits(t *testing.T) {
 		got := registeredObjectCodecV1(value).Limits
 		want := codec.DefaultLimits()
 		if typeOf.PkgPath() == guarantorPackagePath {
-			want = GuarantorCodecLimitsV1
+			want = GuarantorCodecLimitsV1()
 		}
 		if got != want {
 			t.Fatalf("kind %s (%s) uses limits %+v, want %+v", kind, typeOf, got, want)
 		}
+	}
+	// The exported limits are a copy: changing what a caller received changes
+	// neither a later answer nor the limits the package's codec runs under.
+	received := GuarantorCodecLimitsV1()
+	received.CanonicalBytes, received.JSONBytes, received.StringBytes = 1, 1, 1
+	if GuarantorCodecLimitsV1() == received || guarantorCodec.Limits != GuarantorCodecLimitsV1() ||
+		guarantorCodec.Limits.CanonicalBytes != MaxCanonicalObjectBytes {
+		t.Fatalf("the Guarantor codec limits changed through an exported copy: %+v", guarantorCodec.Limits)
+	}
+	if _, err := Canonical(CoverageEndCommitmentV1{SchemaVersion: 1}); err != nil {
+		t.Fatalf("the Guarantor codec no longer encodes an object after an exported copy was changed: %v", err)
 	}
 	for key, factory := range guarantorMutationFactoriesV1() {
 		if reflect.TypeOf(factory()).Elem().PkgPath() != guarantorPackagePath {

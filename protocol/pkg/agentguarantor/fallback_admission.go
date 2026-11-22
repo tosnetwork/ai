@@ -260,6 +260,14 @@ func validateCoverageDeadlineAnchorV1(terms CoverageTermsV1, agreementExpiresAt 
 		if terms.CollateralTerms == nil || terms.CollateralTerms.LockUntilUnix < terms.CollateralTerms.ReorgWindowSeconds {
 			return errors.New("Guarantor collateral terms leave no hard-effect deadline")
 		}
+		// Section 12.2: "collateral_terms.lock_until_unix <= agreement.expires_at".
+		// A lock that outlives the Agreement would hold the position under terms
+		// no party is bound by any longer. With this rule the lock's end less the
+		// reorg window is never later than the Agreement's expiry, so it is the
+		// hard-effect deadline of every collateralized coverage.
+		if terms.CollateralTerms.LockUntilUnix > agreementExpiresAt {
+			return errors.New("Guarantor collateral lock ends after the coverage Agreement expires")
+		}
 		if lockAnchor := terms.CollateralTerms.LockUntilUnix - terms.CollateralTerms.ReorgWindowSeconds; lockAnchor < anchor {
 			anchor = lockAnchor
 		}

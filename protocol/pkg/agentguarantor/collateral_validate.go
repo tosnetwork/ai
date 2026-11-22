@@ -391,6 +391,53 @@ func CollateralEvidenceDigestV1(value AuthorizedCollateralEvidenceV1) (string, e
 	return guarantorCodec.Digest(CollateralDomain, value)
 }
 
+// validateCollateralReleaseGuardV1 holds a release transition to the
+// Agreement's earliest-release guard: its stage action is admitted, and its
+// Adapter evidence finalized, no earlier than release_not_before_unix. The
+// terms place that guard after the final deadline and its reorg window, so a
+// release that respects it cannot remove collateral a payout may still need.
+// No other transition kind releases the position, so none is held to it.
+func validateCollateralReleaseGuardV1(transitionKind string, finalizedAtUnix, admittedAtUnix uint64,
+	terms CollateralTermsV1) error {
+	if transitionKind != "release" {
+		return nil
+	}
+	if admittedAtUnix < terms.ReleaseNotBeforeUnix {
+		return errors.New("Guarantor collateral release is admitted before the Agreement's release guard")
+	}
+	if finalizedAtUnix < terms.ReleaseNotBeforeUnix {
+		return errors.New("Guarantor collateral release is finalized before the Agreement's release guard")
+	}
+	return nil
+}
+
+// terminalClaimSetContentTypeV1 is the media type of an authorized terminal
+// claim set, as an evidence item names it.
+const terminalClaimSetContentTypeV1 = GuarantorMediaTypePrefixV1 + "terminal-claim-set.v1+cbor"
+
+// validateCollateralReleasePrerequisiteV1 requires the prerequisite evidence
+// set of a release transition to name exactly one authorized terminal claim
+// set: collateral is released only against the coverage's closed claim cut.
+// The set is a Guarantor object, so the item is content addressed. The
+// collateral verifier holds no firm offer to verify that set against; it
+// checks that the release commits one, and the Adapter that admits the
+// release, or a holder of the set, verifies the set itself.
+func validateCollateralReleasePrerequisiteV1(transitionKind string, prerequisites CanonicalGuarantorEvidenceSetV1) error {
+	if transitionKind != "release" {
+		return nil
+	}
+	named := 0
+	for _, item := range prerequisites.Items {
+		if item.ContentType == terminalClaimSetContentTypeV1 {
+			named++
+		}
+	}
+	if named != 1 {
+		return errors.New("Guarantor collateral release does not name exactly one authorized terminal claim set as its prerequisite")
+	}
+	return nil
+}
+
 func VerifyCollateralEvidenceV1(value AuthorizedCollateralEvidenceV1, coverageTerms CoverageTermsV1,
 	authorityResolver AuthorityKeyResolver, fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time,
 	finalityVerifier CollateralAdapterFinalityVerifier, allowCompositePayout bool) error {
@@ -405,6 +452,13 @@ func VerifyCollateralEvidenceV1(value AuthorizedCollateralEvidenceV1, coverageTe
 	action := value.CollateralTransitionActionBody
 	binding := action.TransitionBinding
 	body := value.Body
+	if err := validateCollateralReleaseGuardV1(action.TransitionKind, body.FinalizedAtUnix,
+		value.StageActionAdmissionEvidence.Body.AdmittedAtUnix, terms); err != nil {
+		return err
+	}
+	if err := validateCollateralReleasePrerequisiteV1(action.TransitionKind, action.PrerequisiteEvidenceSet); err != nil {
+		return err
+	}
 	if body.FinalizedAtUnix > ^uint64(0)-terms.MaximumEvidenceAgeSeconds ||
 		uint64(now.UTC().Unix()) > body.FinalizedAtUnix+terms.MaximumEvidenceAgeSeconds {
 		return errors.New("Guarantor collateral evidence is stale")

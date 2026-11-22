@@ -335,6 +335,10 @@ type RequestedCoverageTermsV1 struct {
 	MaximumSuccessorDecisionWindowSeconds     uint64                 `json:"maximum_successor_decision_window_seconds"`
 	MaximumPayoutDeadlineSeconds              uint64                 `json:"maximum_payout_deadline_seconds"`
 	MaximumAdapterRecoveryWindowSeconds       uint64                 `json:"maximum_adapter_recovery_window_seconds"`
+	// MaximumClaimIngressResolutionGraceSeconds bounds the accepted terms'
+	// claim_ingress_resolution_grace_seconds: how long after the filing cutoff
+	// an ingress sequenced by the cutoff may still be resolved and admitted.
+	MaximumClaimIngressResolutionGraceSeconds uint64 `json:"maximum_claim_ingress_resolution_grace_seconds"`
 	// MaximumLateIngressRecoveryWindowSeconds, MaximumTerminalResolutionDeadlineUnix
 	// and MaximumLateRecoveryTerminalDeadlineUnix bound the accepted terms'
 	// late-ingress window and final deadlines. Zero late maxima request no

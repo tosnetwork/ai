@@ -361,6 +361,11 @@ func validateOfferedTermsAgainstQuoteRequestV1(terms CoverageTermsV1, request Au
 	if terms.AdapterRecoveryWindowSeconds > requested.MaximumAdapterRecoveryWindowSeconds {
 		return errors.New("Guarantor terms' adapter recovery window exceeds the requester's maximum")
 	}
+	// The grace lets an ingress sequenced by the filing cutoff still be
+	// admitted after it, so the requester bounds it like every other window.
+	if terms.ClaimIngressResolutionGraceSeconds > requested.MaximumClaimIngressResolutionGraceSeconds {
+		return errors.New("Guarantor terms' claim ingress resolution grace exceeds the requester's maximum")
+	}
 	return validateTermsWithinRequestedDeadlinesV1(terms, requested)
 }
 

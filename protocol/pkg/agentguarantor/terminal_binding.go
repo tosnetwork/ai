@@ -61,6 +61,13 @@ func bindTerminalClaimSetToFilingCloseV1(body TerminalClaimSetBodyV1, filing Cla
 	if body.ReleaseNotBeforeUnix < body.AllClaimsTerminalAtUnix {
 		return errors.New("terminal claim set allows its release before all claims were terminal")
 	}
+	// The set's release time accounts for the collateral disposition: for
+	// collateralized coverage it is not before the Agreement's earliest-release
+	// guard, so the exposure release that follows the set, which is held to
+	// this time, cannot precede the guard either.
+	if terms.CollateralTerms != nil && body.ReleaseNotBeforeUnix < terms.CollateralTerms.ReleaseNotBeforeUnix {
+		return errors.New("terminal claim set allows its release before the Agreement's collateral release guard")
+	}
 	return nil
 }
 
