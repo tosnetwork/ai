@@ -51,6 +51,15 @@ func signedOfferProjection(t *testing.T, purpose, agreementDigest, obligationID,
 // acceptanceReceipt is the Guarantor-signed acceptance receipt of the covered
 // party's acceptance of the offer, admitted one second after it was received.
 func (history *signedHistory) acceptanceReceipt(signed signedOffer) AuthorizedCoverageAcceptanceReceiptV1 {
+	return history.acceptanceReceiptWith(signed, nil)
+}
+
+// acceptanceReceiptWith is acceptanceReceipt whose eligibility proofs change
+// varies before the receipt is signed. By default the proofs re-resolve the
+// accepting subject and every authority subject of the coverage Agreement's
+// predicates.
+func (history *signedHistory) acceptanceReceiptWith(signed signedOffer,
+	change func(*signedOfferEligibility)) AuthorizedCoverageAcceptanceReceiptV1 {
 	t, offer := history.t, signed.offer
 	request := history.acceptanceRequest(signed)
 	requestDigest, err := CoverageAcceptanceRequestDigestV1(request)
@@ -90,9 +99,17 @@ func (history *signedHistory) acceptanceReceipt(signed signedOffer) AuthorizedCo
 	if err != nil {
 		t.Fatal(err)
 	}
-	eligibility := history.eligibility(actionDigest, requestDigest, []string{signedHistoryClaimant}, "coverage-acceptance-request",
-		stage.AuthorizedAction.ExactRequestDigest, testDigest("2"), offer.CoverageTerms.LifecycleAuthorizationProfile,
-		admissionDomain, 1, acceptedAt)
+	// The covered party accepts; the beneficiary and the Guarantor are the
+	// other authority subjects of the coverage Agreement's predicates.
+	proven := signedOfferEligibility{actionDigest: actionDigest, inputDigest: requestDigest,
+		subjects: []string{offer.Body.BeneficiaryAgentID, signedHistoryClaimant, signedHistoryGuarantor}, kind: "coverage-acceptance",
+		bodyDigest: stage.AuthorizedAction.ExactRequestDigest, scopeDigest: offer.CoverageTerms.CoverageStateDomainDigest,
+		domainID: admissionDomain, profile: offer.CoverageTerms.LifecycleAuthorizationProfile, at: acceptedAt}
+	if change != nil {
+		change(&proven)
+	}
+	eligibility := history.eligibility(proven.actionDigest, proven.inputDigest, proven.subjects, proven.kind, proven.bodyDigest,
+		proven.scopeDigest, proven.profile, proven.domainID, 1, proven.at)
 	eligibilityDigest, err := AuthorityAdmissionEligibilityProofSetDigestV1(eligibility)
 	if err != nil {
 		t.Fatal(err)
@@ -128,6 +145,29 @@ func (history *signedHistory) acceptanceReceipt(signed signedOffer) AuthorizedCo
 // activation admission cut, resolved one second after the cutoff.
 func (history *signedHistory) nonActivation(signed signedOffer,
 	acceptance AuthorizedCoverageAcceptanceReceiptV1) AuthorizedCoverageNonActivationEvidenceV1 {
+	return history.nonActivationWith(signed, acceptance, nil)
+}
+
+// nonActivationDisposition is the optional disposition evidence a
+// non-activation carries: the sets themselves, which the signed action
+// embeds, and the digests its signed body commits for them.
+type nonActivationDisposition struct {
+	fee, collateral             *CanonicalGuarantorEvidenceSetV1
+	feeDigest, collateralDigest string
+}
+
+// nonActivationWith is nonActivation whose eligibility proofs change varies
+// before the evidence is signed. By default the proofs re-resolve the
+// Guarantor, the covered party and the beneficiary.
+func (history *signedHistory) nonActivationWith(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
+	change func(*signedOfferEligibility)) AuthorizedCoverageNonActivationEvidenceV1 {
+	return history.nonActivationCarrying(signed, acceptance, change, nonActivationDisposition{})
+}
+
+// nonActivationCarrying is nonActivationWith carrying disposition evidence,
+// signed into the action and the body exactly as given.
+func (history *signedHistory) nonActivationCarrying(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
+	change func(*signedOfferEligibility), carried nonActivationDisposition) AuthorizedCoverageNonActivationEvidenceV1 {
 	t, offer, terms := history.t, signed.offer, signed.offer.CoverageTerms
 	agreementDigest, obligationID := offer.Body.CoverageAgreementBodyDigest, offer.Body.CoverageObligationID
 	logID, err := ActivationAdmissionDomainIDV1(agreementDigest)
@@ -159,6 +199,7 @@ func (history *signedHistory) nonActivation(signed signedOffer,
 	resolvedAt := terms.CoverageStartsAtUnix + 1
 	canonical, err := Canonical(CoverageNonActivationActionBodyV1{SchemaVersion: 1, AuthorizedAcceptanceReceipt: acceptance,
 		ActivationAdmissionCutProof: cut, NonActivationReasonEvidence: reason, TransitionEvidenceProjection: projection,
+		FeeResolutionEvidenceSet: carried.fee, CollateralNonActivationEvidenceSet: carried.collateral,
 		ExpectedCoverageRevision: 1, TargetCoverageRevision: 2, TargetCoverageState: "not_activated_confirmed",
 		ExpectedClaimFilingState: "not_open", TargetClaimFilingState: "not_open", ExpectedClaimFilingStateRevision: 1,
 		TargetClaimFilingStateRevision: 1})
@@ -184,8 +225,19 @@ func (history *signedHistory) nonActivation(signed signedOffer,
 	if err != nil {
 		t.Fatal(err)
 	}
-	eligibility := history.eligibility(actionDigest, acceptanceDigest, []string{signedHistoryGuarantor}, "non-activation-evidence",
-		stage.AuthorizedAction.ExactRequestDigest, testDigest("2"), terms.LifecycleAuthorizationProfile, testDigest("3"), 1, resolvedAt)
+	admissionDomain, err := CoverageNonActivationAdmissionDomainIDV1(agreementDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proven := signedOfferEligibility{actionDigest: actionDigest, inputDigest: acceptanceDigest,
+		subjects: []string{offer.Body.BeneficiaryAgentID, signedHistoryClaimant, signedHistoryGuarantor}, kind: "coverage-non-activation",
+		bodyDigest: stage.AuthorizedAction.ExactRequestDigest, scopeDigest: terms.CoverageStateDomainDigest,
+		domainID: admissionDomain, profile: terms.LifecycleAuthorizationProfile, at: resolvedAt}
+	if change != nil {
+		change(&proven)
+	}
+	eligibility := history.eligibility(proven.actionDigest, proven.inputDigest, proven.subjects, proven.kind, proven.bodyDigest,
+		proven.scopeDigest, proven.profile, proven.domainID, 1, proven.at)
 	eligibilityDigest, err := AuthorityAdmissionEligibilityProofSetDigestV1(eligibility)
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +254,7 @@ func (history *signedHistory) nonActivation(signed signedOffer,
 		WriterFenceDigest: stage.AuthorizedAction.WriterFenceDigest, PriorCoverageRevision: 1, ResolvedCoverageRevision: 2,
 		PriorClaimFilingState: "not_open", ResultingClaimFilingState: "not_open", PriorClaimFilingStateRevision: 1,
 		ResultingClaimFilingStateRevision: 1, ResolvedAtUnix: resolvedAt,
+		FeeResolutionEvidenceSetDigest: carried.feeDigest, CollateralNonActivationEvidenceSetDigest: carried.collateralDigest,
 		AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-non-activation-evidence-body.v1", body)
 	if err != nil {
@@ -209,10 +262,13 @@ func (history *signedHistory) nonActivation(signed signedOffer,
 	}
 	evidence := AuthorizedCoverageNonActivationEvidenceV1{Body: body, StageActionAdmissionEvidence: stage,
 		AuthorizedAcceptanceReceipt: acceptance, ActivationAdmissionCutProof: cut, NonActivationReasonEvidence: reason,
+		FeeResolutionEvidenceSet: carried.fee, CollateralNonActivationEvidenceSet: carried.collateral,
 		TransitionEvidenceProjection: projection, AuthorityAdmissionEligibilityProofSet: eligibility,
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObject("non-activation-evidence", bodyDigest,
 			"tos.service.agent-guarantor-non-activation-evidence-signature.v1", resolvedAt)}}
-	if _, err := CoverageNonActivationEvidenceDigestV1(evidence); err != nil {
+	// Evidence carrying disposition sets may be malformed on purpose; its
+	// test judges it.
+	if _, err := CoverageNonActivationEvidenceDigestV1(evidence); err != nil && carried == (nonActivationDisposition{}) {
 		t.Fatalf("signed-history non-activation evidence is malformed: %v", err)
 	}
 	return evidence

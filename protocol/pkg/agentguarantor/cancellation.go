@@ -235,11 +235,14 @@ func VerifyCoverageCancellationRequestV1(request AuthorizedCoverageCancellationR
 func validateCoverageCancellationRequestShapeV1(request AuthorizedCoverageCancellationRequestV1) error {
 	body := request.Body
 	agreementDigest, agreementErr := agentcommerce.AgreementBodyDigest(request.CoverageAgreementBody)
+	// A carried evidence set must be valid: its digest is empty only when the
+	// set is absent, so an invalid set cannot pass as an absent one.
 	evidenceDigest := ""
+	var evidenceErr error
 	if request.CancellationEvidenceSet != nil {
-		evidenceDigest, _ = CanonicalGuarantorEvidenceSetDigestV1(*request.CancellationEvidenceSet)
+		evidenceDigest, evidenceErr = CanonicalGuarantorEvidenceSetDigestV1(*request.CancellationEvidenceSet)
 	}
-	if agreementErr != nil || body.SchemaVersion != 1 || body.CoverageAgreementBodyDigest != agreementDigest ||
+	if agreementErr != nil || evidenceErr != nil || body.SchemaVersion != 1 || body.CoverageAgreementBodyDigest != agreementDigest ||
 		!validToken(body.CoverageObligationID, 128) || !validDigest(body.CancellationPolicyDigest) ||
 		!validToken(body.CancellationBranch, 128) || !validID(body.RequesterSubject) ||
 		body.EffectiveNotBeforeUnix == 0 || body.EffectiveNotAfterUnix < body.EffectiveNotBeforeUnix ||

@@ -17,9 +17,12 @@ import (
 // VerifyFirmOffer runs in this package's own tests.
 //
 // It stands beside the claim history rather than under it: the claim history
-// still rests on its stand-in activation. An acceptance request is built on
-// the firm offer (signed_history_offer_binding_test.go); no acceptance receipt
-// or activation is. The offer's issuance action is not built either: the
+// still rests on its stand-in activation. An acceptance request, an
+// acceptance receipt, non-activation evidence and activation evidence are
+// built on the firm offer (signed_history_offer_binding_test.go,
+// signed_history_nonactivation_release_test.go,
+// signed_history_offer_followups_test.go) and verified by the unreplaced
+// verifiers. The offer's issuance action is not built: the
 // offer and reservation identities and the exposure receipt's action digests
 // are well-formed values. A verifier cannot recompute them from the offer,
 // and holds the receipt's eligibility proofs to them.
@@ -94,6 +97,9 @@ type signedOfferInputs struct {
 	collateralLockUntil uint64
 	// requestSigner signs the quote request; by default the requester.
 	requestSigner string
+	// requestProfile is the profile the quote request is signed under; by
+	// default the fixed native Agent authorization profile.
+	requestProfile *ProfileRefV1
 	// publisher is the Agent whose key signs the service profile publication;
 	// by default the Guarantor.
 	publisher string
@@ -378,8 +384,9 @@ func (history *signedHistory) coverageAgreement(terms CoverageTermsV1, expiresAt
 			ConfidentialityPolicy: "participants", CancellationPolicy: "coverage-terms", DisputePolicy: "evidence",
 			SettlementAdapterURI: adapter, SettlementParameters: []byte("beneficiary-wallet"),
 			AuthorizationPredicateIDs: []string{"predicate:beneficiary", "predicate:guarantor"}},
-		{ObligationID: terms.PremiumObligationIDs[0], Kind: "payment", ObligorAgentID: terms.CoveredPartyAgentID,
-			BeneficiaryAgentID: terms.GuarantorAgentID, SubjectContentType: "text/plain", Subject: []byte("coverage premium"),
+		{ObligationID: terms.PremiumObligationIDs[0], Kind: CoverageFeeObligationKindV1, ObligorAgentID: terms.CoveredPartyAgentID,
+			BeneficiaryAgentID: terms.GuarantorAgentID, DependsOnObligationIDs: []string{history.obligation},
+			SubjectContentType: "text/plain", Subject: []byte("coverage premium"),
 			Amount:                signedOfferAgreementAmount(AtomicAmountV1{Asset: terms.CoverageAsset, AmountAtomic: "100"}),
 			ConfidentialityPolicy: "participants", CancellationPolicy: "before-activation", DisputePolicy: "evidence",
 			SettlementAdapterURI: adapter, SettlementParameters: []byte("premium-destination"),
@@ -421,7 +428,8 @@ func (history *signedHistory) coverageAgreement(terms CoverageTermsV1, expiresAt
 // quoteRequest is the requester's signed quote request for requested under
 // the published profile, on the underlying Agreement.
 func (history *signedHistory) quoteRequest(terms CoverageTermsV1, requested RequestedCoverageTermsV1, profileDigest,
-	intentDigest, underlyingDigest, signer string, change func(*CoverageQuoteRequestBodyV1)) AuthorizedCoverageQuoteRequestV1 {
+	intentDigest, underlyingDigest, signer string, signingProfile ProfileRefV1,
+	change func(*CoverageQuoteRequestBodyV1)) AuthorizedCoverageQuoteRequestV1 {
 	t := history.t
 	requestedDigest, err := RequestedCoverageTermsDigest(requested)
 	if err != nil {
@@ -445,7 +453,7 @@ func (history *signedHistory) quoteRequest(terms CoverageTermsV1, requested Requ
 		t.Fatal(err)
 	}
 	request := AuthorizedCoverageQuoteRequestV1{Body: body, RequestedTerms: requested,
-		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signer, testRef("d", "request-authority"),
+		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signer, signingProfile,
 			"coverage-quote-request", bodyDigest, "tos.service.agent-guarantor-quote-request-signature.v1", body.CreatedAtUnix)}}
 	if _, err := QuoteRequestDigest(request); err != nil {
 		t.Fatalf("signed-history quote request is malformed: %v", err)
@@ -586,8 +594,12 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 	artifact := history.publishServiceProfile(profile, inputs.publisher)
 	profileDigest, intentDigest := artifact.SelectedServiceProfileDigest, artifact.SelectedServiceIntentOperationDigest
 	underlying, underlyingDigest := history.underlyingAgreement(terms)
+	requestProfile := NativeAgentAuthorizationProfileV1()
+	if inputs.requestProfile != nil {
+		requestProfile = *inputs.requestProfile
+	}
 	request := history.quoteRequest(terms, requested, profileDigest, intentDigest, underlyingDigest, inputs.requestSigner,
-		inputs.requestBody)
+		requestProfile, inputs.requestBody)
 	requestDigest, err := QuoteRequestDigest(request)
 	if err != nil {
 		t.Fatal(err)

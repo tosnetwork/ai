@@ -2643,6 +2643,38 @@ constraints; any mismatch fails closed. The requester's Agent authorization is
 the fixed native Agent profile for V1 and is resolved as required by section
 9.1.
 
+That profile is the exact `ProfileRefV1` below. Every element of a quote
+request's `authorizations[]` carries its URI, version and digest; an
+authorization qualified by any other URI, version or digest fails closed even
+when its signature verifies. The quote-request verifier and every verifier of
+a firm offer, of Firm Offer Agreement evidence and of an acceptance request
+compare all three fields.
+
+```text
+profile_uri:     tos.service.agent-guarantor.authorization.native-agent.v1
+profile_version: 1
+profile_digest:  Digest(
+                   "tos.service.agent-guarantor.authorization-profile.native-agent.v1",
+                   NativeAgentAuthorizationProfileDescriptorV1)
+               = sha256:a54606630540e2289726ea3d4272b9f26a1b6782652c0b0142b40e59e374483f
+
+NativeAgentAuthorizationProfileDescriptorV1 {
+  profile_uri            # the URI above
+  profile_version        # 1
+  subject_kind           # agent
+  evidence_content_type  # application/vnd.tos.service.agent-guarantor-native-authorization.v1+cbor
+  signature_algorithm    # ML-DSA-44
+  signature_context      # TOS-AGENT-GUARANTOR-V1
+  key_purpose            # agent-control
+  verifier               # tos.service.agent-guarantor.verify.native-agent-authorization.v1
+}
+```
+
+The descriptor restates section 9.1: one Agent subject signing in its own
+name, native ML-DSA-44 evidence with a historical authority proof, an
+Agent-control key. The profile names how the requester signed; it grants no
+authority by itself, and the signer is still resolved under section 9.1.
+
 `selected_claim_profile_digest` and, when present,
 `selected_collateral_profile_digest` each resolve to exactly one canonical
 entry in the signed `GuarantorServiceProfileV1`. The request's trigger,
@@ -2844,17 +2876,40 @@ identical; an offer may reject a request but cannot silently weaken a rule.
 The quote request's `maximum_fee` is an exact `AtomicAmountV1`, not a display
 estimate. `premium_obligation_ids[]` is a canonical sorted unique set and equals
 the complete set of `guarantor.fee` obligations in the proposed coverage
-Agreement. Each named obligation has a fixed, finite atomic amount in exactly
+Agreement. Each named obligation has `kind` exactly `guarantor.fee`, has a
+fixed, finite atomic amount in exactly
 the same `AssetIdentityV1` as `maximum_fee`, names exactly the request's
 `covered_party_agent_id` as obligor, names exactly the request's
 `guarantor_agent_id` as beneficiary, and is dependency-bound to this exact
-coverage obligation. V1 deliberately forbids alternate premium payers and fee
+coverage obligation: its `depends_on_obligation_ids[]` contains the firm
+offer's `coverage_obligation_id`. It may name further dependencies. The edge
+runs from the premium to the coverage obligation, so a premium is owed for
+this coverage and for no other obligation; the coverage obligation never
+depends on a premium, and whether a premium is an up-front activation
+prerequisite is stated by the activation rules of section 15.3, not by this
+edge. V1 deliberately forbids alternate premium payers and fee
 recipients because the quote request has no separate authority surface for
 them; support for either role requires a new request/profile version that binds
 the exact subjects and their authorization predicates. Installments may use
 several IDs, but each
 amount is fixed before Agreement authorization. Variable, unbounded, foreign-
 asset, or dynamically recurring premium obligations are invalid in V1.
+
+The obligation's `amount` is therefore everything a premium can charge, and
+a verifier refuses each generic obligation field that could make it
+otherwise:
+
+| Obligation field of a named premium | Rule |
+| --- | --- |
+| `billing_terms` | absent. Any billing terms, of any `billing_kind` (`one_time`, `deposit`, `milestone`, `installment`, `accumulated`, `periodic`), carry their own `maximum_aggregate_amount` and recurrence and are refused, including terms whose cap equals the amount; an installment plan is several premium obligations |
+| `amount.amount_decimal` | absent; the amount is atomic |
+| `required_extensions[]` | empty. A required extension may redefine the amount in a way a V1 verifier does not know |
+| `optional_extensions[]` | not constrained: an optional extension may be ignored and so cannot change what the amount means |
+| `settlement_adapter_uri`, `settlement_parameters` | not constrained and opaque to this profile. They select how and where the fixed amount is paid; under the generic Agreement an Adapter settles at most the obligation's `amount`. A parameter encoding that scaled, converted or conditioned the amount would be an Adapter-profile defect that this profile cannot detect |
+| `not_before`, `due_at`, `expires_at`, `acceptance_evidence_requirements[]`, the policy fields | not constrained; they do not change the amount |
+
+The Agreement body's own `required_extensions[]` and `optional_extensions`
+are likewise not interpreted here.
 
 Every verifier computes with checked same-asset addition:
 
@@ -2877,11 +2932,36 @@ quote request, recomputes the sum, and rejects an omitted, duplicated,
 substituted, excess, or asset-mismatched fee before authorizing the offer.
 The acceptance-request verifier applies the same rule to its embedded
 Agreement body. For every ID in `premium_obligation_ids[]` both require the
-obligation to exist, to carry a fixed atomic amount in `maximum_fee`'s asset,
+obligation to exist exactly once, to have kind `guarantor.fee`, to carry a
+fixed atomic amount in `maximum_fee`'s asset,
 to name the request's covered party as obligor and its Guarantor as
-beneficiary, and the checked sum to be no greater than `maximum_fee`. The
+beneficiary, to depend on the offer's coverage obligation, and the checked
+sum to be no greater than `maximum_fee`. The
 intrinsic verification of Firm Offer Agreement evidence holds only the
 Agreement body's digest and cannot apply it.
+
+Both also require the named set to be complete, by two independent tests over
+every obligation of the Agreement body that `premium_obligation_ids[]` does
+not name:
+
+- it does not have kind `guarantor.fee`; and
+- whatever its kind, it is not a value-bearing obligation (one that carries
+  an `amount`, atomic or decimal) whose obligor is the request's covered
+  party and whose beneficiary is its Guarantor, or whose obligor is the
+  covered party and whose `beneficiary_agent_id` is absent: with no named
+  beneficiary the recipient is fixed only by the opaque settlement
+  parameters, which may name the Guarantor.
+
+The second test does not rely on the open `kind` token: a transfer from the
+covered party to the Guarantor that is labelled `payment`, or anything else,
+is an omitted premium and fails closed, so the sum above cannot be escaped by
+choosing another kind or another obligation ID. An obligation of the covered
+party to the Guarantor that carries no value, and a value-bearing obligation
+of the covered party to another beneficiary, are not premiums. A value
+transfer to the Guarantor from another obligor, or to a Guarantor-controlled
+recipient that is not the Guarantor Agent, is forbidden by the paragraph
+above but is not detectable from the Agreement body's obligor and beneficiary
+fields alone; V1 verifiers do not test for it.
 
 `coverage_state_domain_digest` is an immutable Agreement field, not a runtime
 locator or a Provider-local database name. It is the exact Adapter- or
@@ -2950,6 +3030,15 @@ object. Their continuation entries have the same canonical state keys. Final
 required slot counts and durations are derived from the final round counts and
 exact timing windows and are no greater than their corresponding requested
 maxima; equality is required wherever the final terms did not tighten an input.
+A verifier does not compare the entries' slot counts and durations one by
+one, because the rules it does apply imply that bound: the state keys
+enumerate the challenge and nonterminal round counts, so equal keys mean
+equal round counts and therefore equal slot counts; each object's entries
+are recomputed from its own round counts and windows; every duration is a
+sum of those windows with non-negative coefficients fixed by the round
+counts; and each final window is no greater than the request's maximum. A
+final duration is therefore no greater than the requested entry's, with
+equality wherever no window was tightened.
 The final `continuation_budget_profile` equals the selected claim-profile
 entry, and its exact `terminal_fallback` is byte-identical to the requested
 fallback and occurs exactly once in that entry's permitted set. The fallback
@@ -3129,7 +3218,7 @@ the schema carries them:
 | `terminal_resolution_deadline_unix`, `late_recovery_terminal_deadline_unix`, `late_ingress_recovery_window_seconds` | each no greater than the request's corresponding maximum (section 12.2) |
 | `maximum_claims` and every count and byte ceiling of `claim_closure_capacity` | each no greater than the same field of `requested_closure_capacity` |
 | `claim_closure_capacity.terminal_fallback` | byte-identical to the requested fallback |
-| `claim_closure_capacity.continuation_budget_entries[]` | the same canonical state keys, in the same order, as the requested entries; durations and slot counts are each object's own |
+| `claim_closure_capacity.continuation_budget_entries[]` | the same canonical state keys, in the same order, as the requested entries; durations and slot counts are each object's own, recomputed from its round counts and windows, which with the window rule above keeps each no greater than the requested entry's |
 | `required_extensions[]`, `optional_extensions[]` | each equals the requested terms' set, element for element |
 
 The firm-offer body's `required_extensions[]` and `optional_extensions[]`
@@ -3409,7 +3498,7 @@ A typical obligation DAG contains:
 | Obligation kind | Obligors and purpose | Value semantics |
 | --- | --- | --- |
 | `guarantor.coverage` | Guarantor owes the bounded contingent service to the beneficiary | non-current-value; subject is exact `GuarantorCoverageTermsV1` |
-| `guarantor.fee` | fee payer pays the Guarantor | ordinary fixed value-bearing obligation |
+| `guarantor.fee` | fee payer pays the Guarantor | ordinary fixed value-bearing obligation; depends on the `guarantor.coverage` obligation (section 12.1) |
 | `guarantor.collateral.lock` | collateral principal locks an exact position | specialized Adapter transition, not a payout |
 | `guarantor.claim.review` | selected Decision Authority reviews admitted claims | service obligation; any review fee is separate |
 | `guarantor.payout.template` | Guarantor exposes the finite conditional settlement template | non-current-value until a terminal decision materializes exact lines |
@@ -4185,9 +4274,14 @@ which proof happened to arrive.
 The acceptance-request verifier itself applies every firm-offer rule that
 needs no resolver and no clock, against the offer and the embedded Agreement
 body: the section 12.1 comparison of the terms with the embedded quote
-request, the section 12.2 deadline maxima and `hard_effect_deadline` anchor,
+request, the section 12.1 premium rule with its completeness tests, the
+section 12 quote-request authorization profile, the section 12.2 deadline
+maxima and `hard_effect_deadline` anchor,
 the section 14.2 exposure-receipt rules, and the section 14.3 offer-body and
-authorization-profile rules. It does not leave them to the Agreement evidence
+authorization-profile rules. It also requires the offer's
+`coverage_obligation_id`, `payout_template_obligation_id` and, when present,
+`collateral_obligation_id` each to name an obligation of the embedded
+Agreement body, as firm-offer verification does. It does not leave them to the Agreement evidence
 verifier a caller supplies, so a party that verifies an acceptance receipt,
 activation evidence or any later object by its embedded acceptance alone
 enforces them. The signatures of the offer, the quote request and the
@@ -4219,6 +4313,42 @@ The authority admits acceptance only when:
 - the reservation remains live and matches the admitted portfolio revision;
 - the current writer and action authorization are valid; and
 - the same offer has no conflicting accepted Agreement or request.
+
+A verifier of the acceptance receipt holds the frozen proof set to the
+acceptance it admits:
+
+- `admitted_action_digest` equals the receipt's `authorized_action_digest`,
+  which is the digest of the embedded acceptance action, and
+  `admission_time_unix` equals `accepted_at_unix`;
+- `admission_domain_id` is the offer's acceptance admission domain:
+
+  ```text
+  coverage_acceptance_admission_domain_id = Digest(
+    "tos.service.agent-guarantor-acceptance-admission-domain.v1",
+    { bound_domain_digest, offer_id })
+  ```
+
+  where `bound_domain_digest` is the `admission_state_domain_digest` of the
+  terms' `coverage_activation` stage, whose authority the acceptance action
+  uses;
+- every proof entry has `input_authorized_envelope_digest` equal to the
+  acceptance-request envelope digest, `authorized_object_kind` equal to
+  `coverage-acceptance`, `authorized_body_digest` equal to the receipt's
+  `exact_request_digest` (the digest of the embedded acceptance action
+  request, which a verifier recomputes), `required_scope_digest` equal to the
+  terms' `coverage_state_domain_digest`, and `authority_resolver_profile`
+  equal to the terms' `lifecycle_authorization_profile`;
+- there is exactly one proof entry for the request's `accepting_subject` and
+  for the authority subject (`subject_identifier`) of every authorization
+  predicate of the embedded coverage Agreement body, the Guarantor's
+  included: these are the accepting subject and every Agreement-authorization
+  principal named above. A subject that holds several of those roles has one
+  entry. A missing subject, a second entry for a subject, or an entry for any
+  other subject fails closed.
+
+The receipt body carries no sequence of the acceptance admission domain, so
+the proof set's `admission_sequence` is held only to its own entries, as for
+the exposure receipt in section 14.2.
 
 A request sequenced by `accept_by_unix` but not linearized by its own
 `expires_at_unix` is terminally rejected. If the exact action outcome is pending
@@ -4479,10 +4609,59 @@ equal `transition_evidence_projection_digest`, and verifies that the projection
 contains exactly the prerequisite roles released in section 20.1.
 The activation or non-activation authority re-resolves every newly admitted
 prerequisite, collateral-control, and operational-independence signer against
-fresh finalized authority state at its authority-generated result time and
-freezes the exact section 9.1 eligibility proof set. Evidence signed before a
+fresh finalized authority state at its authority-generated result time, so
+evidence signed before a
 revocation but first presented afterward cannot activate coverage or prove the
-opposite branch.
+opposite branch. That re-resolution is an admission duty of the authority.
+What it freezes in the result is narrower and exact: the section 9.1
+eligibility proof set of non-activation evidence carries the entries listed
+below, for the three parties of the coverage and for no other subject, so a
+set that also names a prerequisite, collateral-control or
+operational-independence signer is refused by a verifier. In V1 those
+signers' freshness is not portable in the proof set; a verifier relies on
+their own profile-qualified authorizations in the evidence they signed.
+
+A verifier of non-activation evidence holds its frozen proof set to the
+non-activation it admits:
+
+- `admitted_action_digest` equals the body's `authorized_action_digest` and
+  `admission_time_unix` equals `resolved_at_unix`;
+- `admission_domain_id` is the coverage's non-activation admission domain,
+  which a holder of the evidence recomputes:
+
+  ```text
+  coverage_non_activation_admission_domain_id = Digest(
+    "tos.service.agent-guarantor-non-activation-admission-domain.v1",
+    { coverage_agreement_body_digest })
+  ```
+
+- every proof entry has `input_authorized_envelope_digest` equal to the
+  acceptance-receipt envelope digest, `authorized_object_kind` equal to
+  `coverage-non-activation`, `authorized_body_digest` equal to the body's
+  `exact_request_digest`, `required_scope_digest` equal to the terms'
+  `coverage_state_domain_digest`, and `authority_resolver_profile` equal to
+  the terms' `lifecycle_authorization_profile`;
+- there is exactly one proof entry for each of the offer's
+  `guarantor_agent_id`, `covered_party_agent_id` and `beneficiary_agent_id`
+  (one entry for a subject that holds several of those roles), whatever the
+  non-activation reason. A missing party, a second entry for a party, or an
+  entry for any other subject fails closed.
+
+The body carries no sequence of that domain, so the proof set's
+`admission_sequence` is held only to its own entries. The signers of
+prerequisite terminal-failure evidence and of mutual-cancellation Agreement
+evidence are verified under their own Agreement rule (the matrix below); the
+V1 proof set carries no separate entry for a terminal-failure authority
+subject that is not one of the three parties, so their freshness at
+`resolved_at_unix` rests on that evidence's own authorization. The proof set
+of activation evidence is not yet held to its admission beyond its digest.
+
+`fee_resolution_evidence_set` and `collateral_non_activation_evidence_set`
+are optional, but a set that is carried is a valid canonical evidence set
+whose recomputed digest equals the body's corresponding digest field, and a
+body digest without its set is invalid. A carried set that fails validation
+is never treated as an absent one; the same holds for a cancellation
+request's `cancellation_evidence_set`.
 
 Both branches mutate the Agreement's exact `coverage_state_domain_digest`.
 Activation requires the action's `target_coverage_end_commitment` to be the

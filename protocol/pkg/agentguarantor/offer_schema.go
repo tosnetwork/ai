@@ -230,8 +230,8 @@ func VerifyFirmOfferAgreementEvidenceIntrinsicV1(wrapper agentcommerce.Agreement
 		!equalCanonical(value.SatisfiedPredicateTargets, offer.Body.GuarantorPredicateTargets) {
 		return errors.New("firm-offer Agreement evidence intrinsic body is invalid")
 	}
-	offerDigest, _ := FirmOfferDigest(offer)
-	if value.AuthorizedFirmOfferEnvelopeDigest != offerDigest || len(wrapper.PredicateIDs) != len(value.SatisfiedPredicateTargets) ||
+	offerDigest, offerErr := FirmOfferDigest(offer)
+	if offerErr != nil || value.AuthorizedFirmOfferEnvelopeDigest != offerDigest || len(wrapper.PredicateIDs) != len(value.SatisfiedPredicateTargets) ||
 		len(wrapper.EvidenceTargetProjectionDigests) != len(value.SatisfiedPredicateTargets) {
 		return errors.New("firm-offer Agreement evidence intrinsic digest or target count differs")
 	}
