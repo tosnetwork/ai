@@ -228,35 +228,50 @@ def actor_transactions(actor: str) -> list:
     return answer.get("result") or []
 
 
-def message_opcode(message: dict):
-    """The first 32 bits of an inbound message body, or None."""
-    from pytosiq_core import Cell
-    body = ((message or {}).get("msg_data") or {}).get("body")
-    if not body:
-        return None
+def inbound_opcode(transaction: dict):
+    """The first 32 bits of a transaction's inbound message body, decoded from
+    the transaction BOC the endpoint returns, or None."""
+    from pytosiq_core import Cell, Transaction
     try:
-        return Cell.one_from_boc(body).begin_parse().load_uint(32)
-    except Exception:  # noqa: BLE001 - an empty or short body has no opcode
+        decoded = Transaction.deserialize(Cell.one_from_boc(transaction["data"]).begin_parse())
+        return decoded.in_msg.body.begin_parse().load_uint(32)
+    except Exception:  # noqa: BLE001 - no inbound message or an empty body has no opcode
         return None
 
 
 def responds(actor: str) -> list:
-    """The actor's transactions whose inbound message is a respond."""
-    return [tx for tx in actor_transactions(actor) if message_opcode(tx.get("in_msg")) == RESPOND_OPCODE]
+    """Every transaction of the actor whose inbound message is a respond,
+    whether or not the actor accepted it: a second respond would be one."""
+    return [tx for tx in actor_transactions(actor) if inbound_opcode(tx) == RESPOND_OPCODE]
 
 
 # --- Scenario 1: a paid call, serve killed between execution and respond -------
 
 WATCHER = """
 import json, os, signal, sys, time
-path, pid, deadline = sys.argv[1], int(sys.argv[2]), time.monotonic() + float(sys.argv[3])
+directory, request_hash = sys.argv[1], sys.argv[2]
+pid, deadline = int(sys.argv[3]), time.monotonic() + float(sys.argv[4])
 seen = []
-while time.monotonic() < deadline:
+def current_state():
+    # A record is named by its slot, not its request hash: find it by the
+    # request hash it holds.
     try:
-        with open(path) as handle:
-            state = json.load(handle).get("state")
-    except (OSError, ValueError):
-        state = None
+        names = os.listdir(directory)
+    except OSError:
+        return None
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(directory, name)) as handle:
+                record = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        if record.get("request_hash") == request_hash:
+            return record.get("state")
+    return None
+while time.monotonic() < deadline:
+    state = current_state()
     if state and (not seen or seen[-1] != state):
         seen.append(state)
     if state == "executed":
@@ -292,17 +307,28 @@ def quote_and_prepare(offer: dict, label: str) -> str:
 
 
 def provider_record(request_hash: str) -> dict:
-    path = PROVIDER_RAIL / "provider" / f"{request_hash}.json"
-    result = base.as_account("provider", ["/bin/cat", str(path)], check=False)
-    return json.loads(result.stdout) if result.returncode == 0 else {}
+    """The provider's local record of a request, found by the request hash it
+    holds (records are named by their slot)."""
+    records = PROVIDER_RAIL / "provider"
+    names = base.as_account("provider", ["/usr/bin/find", str(records), "-maxdepth", "1", "-name", "*.json"],
+                            check=False).stdout
+    for name in names.split():
+        result = base.as_account("provider", ["/bin/cat", name], check=False)
+        try:
+            entry = json.loads(result.stdout) if result.returncode == 0 else {}
+        except json.JSONDecodeError:
+            continue
+        if entry.get("request_hash") == request_hash:
+            return entry
+    return {}
 
 
 def scenario_paid_call(offer: dict, serve: subprocess.Popen) -> subprocess.Popen:
     request_hash = quote_and_prepare(offer, "paid call")
-    record_path = PROVIDER_RAIL / "provider" / f"{request_hash}.json"
     HOLD["seconds"] = 2.0
-    watcher = base.start("provider", [str(MOUNTS / "venv" / "bin" / "python3"), "-I", "-c", WATCHER, str(record_path),
-                                      str(serve.pid), "1500"], "kill-watcher.log")
+    watcher = base.start("provider", [str(MOUNTS / "venv" / "bin" / "python3"), "-I", "-c", WATCHER,
+                                      str(PROVIDER_RAIL / "provider"), request_hash, str(serve.pid), "1500"],
+                         "kill-watcher.log")
     paid = base.confirm_payment(request_hash)
     paid_state = structured(paid).get("purchase", {}).get("state")
     record("paid call: the confirmed purchase is paid with one call",
