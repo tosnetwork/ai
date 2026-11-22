@@ -3,10 +3,29 @@ package agentguarantor
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
+
+// coverageNonActivationObjectKindV1 is the authorized object kind of the
+// eligibility proofs frozen when a non-activation is admitted.
+const coverageNonActivationObjectKindV1 = "coverage-non-activation"
+
+// CoverageNonActivationAdmissionDomainIDV1 is the admission domain in which
+// the non-activation of an accepted coverage, and the eligibility proofs
+// frozen with it, are sequenced. It is derived from the coverage Agreement
+// body digest alone, so a holder of the evidence can recompute it.
+func CoverageNonActivationAdmissionDomainIDV1(coverageAgreementBodyDigest string) (string, error) {
+	if !validDigest(coverageAgreementBodyDigest) {
+		return "", errors.New("non-activation admission domain input is invalid")
+	}
+	return guarantorCodec.Digest("tos.service.agent-guarantor-non-activation-admission-domain.v1", struct {
+		CoverageAgreementBodyDigest string `json:"coverage_agreement_body_digest"`
+	}{coverageAgreementBodyDigest})
+}
 
 type ActivationAdmissionCutProofV1 struct {
 	SchemaVersion               uint16                         `json:"schema_version"`
@@ -356,6 +375,21 @@ func validateCoverageNonActivationEvidenceShapeV1(evidence AuthorizedCoverageNon
 	acceptanceDigest, acceptanceErr := CoverageAcceptanceReceiptDigestV1(evidence.AuthorizedAcceptanceReceipt)
 	projectionDigest, projectionErr := TransitionEvidenceProjectionDigestV1(evidence.TransitionEvidenceProjection)
 	proofDigest, proofErr := AuthorityAdmissionEligibilityProofSetDigestV1(evidence.AuthorityAdmissionEligibilityProofSet)
+	// An optional evidence set that is carried must be valid and committed by
+	// the body. Its digest is empty only when the set is absent, so a set
+	// that fails validation cannot pass as an absent one.
+	feeDigest, collateralDigest := "", ""
+	var feeErr, collateralErr error
+	if evidence.FeeResolutionEvidenceSet != nil {
+		feeDigest, feeErr = CanonicalGuarantorEvidenceSetDigestV1(*evidence.FeeResolutionEvidenceSet)
+	}
+	if evidence.CollateralNonActivationEvidenceSet != nil {
+		collateralDigest, collateralErr = CanonicalGuarantorEvidenceSetDigestV1(*evidence.CollateralNonActivationEvidenceSet)
+	}
+	if feeErr != nil || collateralErr != nil || body.FeeResolutionEvidenceSetDigest != feeDigest ||
+		body.CollateralNonActivationEvidenceSetDigest != collateralDigest {
+		return errors.New("Guarantor non-activation evidence carries an invalid or uncommitted disposition evidence set")
+	}
 	if cutErr != nil || reasonErr != nil || acceptanceErr != nil || projectionErr != nil || proofErr != nil ||
 		body.SchemaVersion != 1 || !validID(body.AuthorityID) || !validDigest(body.CoverageAgreementBodyDigest) ||
 		!validToken(body.CoverageObligationID, 128) || !validDigest(body.CoverageStateDomainDigest) ||
@@ -409,19 +443,13 @@ func VerifyCoverageNonActivationEvidenceV1(evidence AuthorizedCoverageNonActivat
 	cutDigest, _ := ActivationAdmissionCutProofDigestV1(evidence.ActivationAdmissionCutProof)
 	reasonDigest, _ := CoverageNonActivationReasonEvidenceDigestV1(evidence.NonActivationReasonEvidence)
 	projectionDigest, _ := TransitionEvidenceProjectionDigestV1(evidence.TransitionEvidenceProjection)
-	feeDigest, collateralDigest := "", ""
-	if evidence.FeeResolutionEvidenceSet != nil {
-		feeDigest, _ = CanonicalGuarantorEvidenceSetDigestV1(*evidence.FeeResolutionEvidenceSet)
-	}
-	if evidence.CollateralNonActivationEvidenceSet != nil {
-		collateralDigest, _ = CanonicalGuarantorEvidenceSetDigestV1(*evidence.CollateralNonActivationEvidenceSet)
-	}
+	// The two optional disposition evidence sets were held to the body's
+	// digests by the shape validation above.
 	if body.AuthorityID != bound.ActionAuthorityID || body.CoverageAgreementBodyDigest != offer.Body.CoverageAgreementBodyDigest ||
 		body.CoverageObligationID != offer.Body.CoverageObligationID || body.CoverageStateDomainDigest != offer.CoverageTerms.CoverageStateDomainDigest ||
 		body.AuthorizedFirmOfferEnvelopeDigest != offerDigest || body.AcceptanceReceiptDigest != acceptanceDigest ||
 		body.ExposureReceiptDigest != exposureDigest || body.ActivationAdmissionCutProofDigest != cutDigest ||
-		body.NonActivationReasonEvidenceDigest != reasonDigest || body.TransitionEvidenceProjectionDigest != projectionDigest ||
-		body.FeeResolutionEvidenceSetDigest != feeDigest || body.CollateralNonActivationEvidenceSetDigest != collateralDigest {
+		body.NonActivationReasonEvidenceDigest != reasonDigest || body.TransitionEvidenceProjectionDigest != projectionDigest {
 		return errors.New("Guarantor non-activation lineage or prerequisite disposition is substituted")
 	}
 	if body.Reason == "activation_window_expired" && body.ActivationCutoffUnix != offer.CoverageTerms.CoverageStartsAtUnix ||
@@ -466,7 +494,31 @@ func VerifyCoverageNonActivationEvidenceV1(evidence AuthorizedCoverageNonActivat
 		evidence.AuthorityAdmissionEligibilityProofSet.AdmittedActionDigest != actionDigest {
 		return errors.New("non-activation action or authority proof is substituted")
 	}
-	bodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-non-activation-evidence-body.v1", body)
+	// The non-activation checkpoint re-resolves the three parties of the
+	// coverage, once each. The evidence body carries no sequence of the
+	// non-activation admission domain, so the proof set's sequence is held only
+	// to its own entries.
+	admissionDomainID, err := CoverageNonActivationAdmissionDomainIDV1(body.CoverageAgreementBodyDigest)
+	if err != nil {
+		return err
+	}
+	parties := map[string]struct{}{offer.Body.GuarantorAgentID: {}, offer.Body.CoveredPartyAgentID: {}, offer.Body.BeneficiaryAgentID: {}}
+	subjects := make([]string, 0, len(parties))
+	for party := range parties {
+		subjects = append(subjects, party)
+	}
+	sort.Strings(subjects)
+	proofs := evidence.AuthorityAdmissionEligibilityProofSet
+	if err := validateEligibilityProofSetAgainstV1(proofs, actionDigest, body.AcceptanceReceiptDigest, subjects,
+		coverageNonActivationObjectKindV1, body.ExactRequestDigest, offer.CoverageTerms.CoverageStateDomainDigest,
+		offer.CoverageTerms.LifecycleAuthorizationProfile, admissionDomainID, proofs.AdmissionSequence,
+		body.ResolvedAtUnix); err != nil {
+		return fmt.Errorf("Guarantor non-activation evidence eligibility proofs: %w", err)
+	}
+	bodyDigest, err := guarantorCodec.Digest("tos.service.agent-guarantor-non-activation-evidence-body.v1", body)
+	if err != nil {
+		return err
+	}
 	return ValidateAuthorizationSet(evidence.Authorizations, "non-activation-evidence", bodyDigest,
 		"tos.service.agent-guarantor-non-activation-evidence-signature.v1", []string{offer.Body.GuarantorAgentID}, authorityResolver, now)
 }

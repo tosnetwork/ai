@@ -213,6 +213,9 @@ func VerifyQuoteRequest(request AuthorizedCoverageQuoteRequestV1, profile Servic
 	if !profileSupportsRequest(profile, request.RequestedTerms, body.SelectedDecisionProfile, body.MaximumFee) {
 		return errors.New("Guarantor quote request selects an unsupported tuple")
 	}
+	if !validateAuthorizationProfileV1(request.Authorizations, NativeAgentAuthorizationProfileV1()) {
+		return errors.New(quoteRequestProfileRefusalV1)
+	}
 	if err := resolveAndVerifyCoveredUnderlyingAgreementV1(underlyingResolver, agreementVerifier,
 		body.UnderlyingAgreementBodyDigest, body.CoveredPartyAgentID, body.GuarantorAgentID,
 		body.CoveredObligationIDs, now); err != nil {
@@ -616,19 +619,6 @@ func VerifyFirmOffer(offer AuthorizedFirmCoverageOfferV1, request AuthorizedCove
 	body := offer.Body
 	if body.ValidFromUnix > uint64(now.UTC().Unix()) || uint64(now.UTC().Unix()) >= body.AcceptByUnix {
 		return errors.New("firm Guarantor offer is outside its acceptance window")
-	}
-	obligations := make(map[string]agentcommerce.AgreementObligation, len(agreement.Obligations))
-	for _, obligation := range agreement.Obligations {
-		obligations[obligation.ObligationID] = obligation
-	}
-	referencedObligations := append([]string{body.CoverageObligationID, body.PayoutTemplateObligationID}, body.PremiumObligationIDs...)
-	if body.CollateralObligationID != "" {
-		referencedObligations = append(referencedObligations, body.CollateralObligationID)
-	}
-	for _, obligationID := range referencedObligations {
-		if _, found := obligations[obligationID]; !found {
-			return errors.New("firm Guarantor offer references an absent Agreement obligation")
-		}
 	}
 	expectedTargets := make(map[string]string)
 	var expectedProfile agentcommerce.ProfileRefV1

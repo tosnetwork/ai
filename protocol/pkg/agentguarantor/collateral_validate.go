@@ -409,7 +409,10 @@ func VerifyCollateralEvidenceV1(value AuthorizedCollateralEvidenceV1, coverageTe
 		uint64(now.UTC().Unix()) > body.FinalizedAtUnix+terms.MaximumEvidenceAgeSeconds {
 		return errors.New("Guarantor collateral evidence is stale")
 	}
-	actionBodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-collateral-transition-action-body.v1", action)
+	actionBodyDigest, actionBodyErr := guarantorCodec.Digest("tos.service.agent-guarantor-collateral-transition-action-body.v1", action)
+	if actionBodyErr != nil {
+		return errors.New("Guarantor collateral transition action body cannot be encoded")
+	}
 	requestDigest, _ := CollateralAdapterRequestDigestV1(action.AdapterRequest, binding, terms)
 	adapterEvidenceDigest, adapterErr := CollateralAdapterEvidenceDigestV1(value.AdapterEvidence)
 	expectedResult, resultErr := ApplyCollateralAdapterTransitionV1(action.AdapterRequest, binding, terms)

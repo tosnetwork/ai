@@ -315,9 +315,13 @@ func TestSignedHistoryCoveragePremiumStaysWithinTheMaximumFee(t *testing.T) {
 				obligation.BeneficiaryAgentID = "agent:beneficiary"
 			}),
 			refusal: "coverage premium obligation is not owed to the Guarantor", agreementRule: true},
-		{name: "terms naming a premium obligation the Agreement lacks", late: true,
+		// The Agreement's own premium stays named: an Agreement fee the terms
+		// omit is a different refusal.
+		{name: "terms naming a premium obligation the Agreement lacks beside the one it carries", late: true,
 			change: func(in *signedOfferInputs) {
-				in.offeredTerms = func(terms *CoverageTermsV1) { terms.PremiumObligationIDs = []string{"obligation:absent"} }
+				in.offeredTerms = func(terms *CoverageTermsV1) {
+					terms.PremiumObligationIDs = []string{"obligation:absent", premiumID}
+				}
 			},
 			refusal: "Guarantor terms name a premium obligation the coverage Agreement lacks", agreementRule: true},
 	})

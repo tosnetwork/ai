@@ -279,6 +279,17 @@ func TestCancellationRequestBindsPolicyAgreementEvidenceAndRequester(t *testing.
 	if err := VerifyCoverageCancellationRequestV1(request, policy, allowAuthorityResolver{}, now); err != nil {
 		t.Fatal(err)
 	}
+	// A carried evidence set that fails validation is not an absent one: the
+	// request's envelope digest is refused although the body commits no set.
+	if _, err := CoverageCancellationRequestDigestV1(request); err != nil {
+		t.Fatalf("the cancellation request without an evidence set has no digest: %v", err)
+	}
+	invalidSet := request
+	invalidSet.CancellationEvidenceSet = &CanonicalGuarantorEvidenceSetV1{}
+	if _, err := CoverageCancellationRequestDigestV1(invalidSet); err == nil ||
+		!strings.Contains(err.Error(), "Guarantor cancellation request is invalid") {
+		t.Fatalf("a cancellation request carrying an invalid evidence set: got %v, want a refusal", err)
+	}
 	request.Body.RequesterSubject = "agent:attacker"
 	if VerifyCoverageCancellationRequestV1(request, policy, allowAuthorityResolver{}, now) == nil {
 		t.Fatal("substituted cancellation requester was accepted")
