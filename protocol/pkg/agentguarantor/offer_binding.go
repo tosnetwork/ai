@@ -172,6 +172,12 @@ func validateCoveragePremiumV1(offer AuthorizedFirmCoverageOfferV1, agreement ag
 				obligation.BeneficiaryAgentID == request.GuarantorAgentID {
 				return errors.New("coverage Agreement carries a value transfer from the covered party to the Guarantor that the Guarantor terms do not name as premium")
 			}
+			// Without a beneficiary the recipient is fixed only by the opaque
+			// settlement parameters, which may name the Guarantor.
+			if obligation.Amount != nil && obligation.ObligorAgentID == request.CoveredPartyAgentID &&
+				obligation.BeneficiaryAgentID == "" {
+				return errors.New("coverage Agreement carries a value transfer from the covered party to no named beneficiary that the Guarantor terms do not name as premium")
+			}
 			continue
 		}
 		named[obligation.ObligationID] = true
@@ -180,6 +186,17 @@ func validateCoveragePremiumV1(offer AuthorizedFirmCoverageOfferV1, agreement ag
 		}
 		if obligation.Amount == nil || obligation.Amount.AmountDecimal != "" {
 			return errors.New("coverage premium obligation has no fixed atomic amount")
+		}
+		// The summed amount must be everything the obligation can charge.
+		// Billing terms carry their own aggregate cap and recurrence, and an
+		// obligation-level required extension may redefine the amount in a
+		// way this verifier does not know; either would make the sum below
+		// meaningless.
+		if obligation.BillingTerms != nil {
+			return errors.New("coverage premium obligation carries billing terms")
+		}
+		if len(obligation.RequiredExtensions) != 0 {
+			return errors.New("coverage premium obligation carries a required extension")
 		}
 		amount := AtomicAmountV1{Asset: AssetIdentityV1{AssetNamespace: obligation.Amount.AssetNamespace,
 			AssetIdentifier: obligation.Amount.AssetIdentifier, Unit: obligation.Amount.Unit},

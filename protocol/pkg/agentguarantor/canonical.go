@@ -63,6 +63,14 @@ type NativeAgentAuthorizationProfileDescriptorV1 struct {
 // fixed native Agent authorization profile: one Agent subject, the native
 // authorization evidence of this profile, a Pure ML-DSA-44 signature under the
 // Guarantor signing context by an Agent-control key.
+//
+// Its verifier name is not an entry of ReleasedObjectVerifierRegistryV1. That
+// registry lists the object kinds a party can carry and dispatch on, each
+// with an envelope or digest binding, and is closed for V1. A native
+// authorization is never carried on its own: it is a member of an object's
+// authorizations and is checked by VerifyObjectAuthorization while that
+// object's registered verifier runs. The name identifies that procedure
+// inside the descriptor so the digest commits it; it adds no object kind.
 func NativeAgentAuthorizationProfileDescriptor() NativeAgentAuthorizationProfileDescriptorV1 {
 	return NativeAgentAuthorizationProfileDescriptorV1{ProfileURI: NativeAgentAuthorizationProfileURI, ProfileVersion: 1,
 		SubjectKind: "agent", EvidenceContentType: NativeAuthorizationContentType, SignatureAlgorithm: "ML-DSA-44",

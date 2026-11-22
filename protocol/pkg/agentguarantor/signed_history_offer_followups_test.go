@@ -107,7 +107,20 @@ func TestSignedHistoryCoveragePremiumSetIsComplete(t *testing.T) {
 		unnamedTransfer = "coverage Agreement carries a value transfer from the covered party to the Guarantor that the Guarantor terms do not name as premium"
 		notFeeKind      = "coverage premium obligation is not of the guarantor.fee kind"
 		notDependent    = "coverage premium obligation does not depend on the offer's coverage obligation"
+		billingTerms    = "coverage premium obligation carries billing terms"
+
+		unnamedNoBeneficiary = "coverage Agreement carries a value transfer from the covered party to no named beneficiary that the Guarantor terms do not name as premium"
 	)
+	// billed gives the premium billing terms whose aggregate cap is limit
+	// units of the premium's own asset.
+	billed := func(terms agentcommerce.BillingTerms, limit string) func(*agentcommerce.AgreementObligation) {
+		return func(obligation *agentcommerce.AgreementObligation) {
+			aggregate := *obligation.Amount
+			aggregate.AmountAtomic = limit
+			terms.MaximumAggregateAmount = aggregate
+			obligation.BillingTerms = &terms
+		}
+	}
 	checkOfferBinding(t, []offerBindingCase{
 		{name: "one named guarantor.fee premium depending on the coverage obligation", late: true},
 		{name: "named premium of the payment kind", late: true,
@@ -145,6 +158,40 @@ func TestSignedHistoryCoveragePremiumSetIsComplete(t *testing.T) {
 		{name: "named premium depending on the coverage and the payout template obligations", late: true,
 			change: premium(func(obligation *agentcommerce.AgreementObligation) {
 				obligation.DependsOnObligationIDs = []string{coverageID, payoutID}
+			})},
+		// The premium's amount stays 100, the maximum fee; billing terms would
+		// let it be charged up to their own aggregate cap.
+		{name: "named premium billed periodically 10000 times up to 1000000", late: true,
+			change: premium(billed(agentcommerce.BillingTerms{BillingKind: "periodic", FirstSequence: 1,
+				RecurrenceStartUnix: signedHistoryStart, RecurrenceEndUnix: signedHistoryStart + 3600, RecurrenceCount: 10000,
+				RecurrenceIntervalSecs: 1, CancellationCutoffPolicy: "none"}, "1000000")),
+			refusal: billingTerms, agreementRule: true},
+		{name: "named premium with accumulated billing up to 1000000", late: true,
+			change: premium(billed(agentcommerce.BillingTerms{BillingKind: "accumulated", FirstSequence: 1,
+				CancellationCutoffPolicy: "none"}, "1000000")),
+			refusal: billingTerms, agreementRule: true},
+		{name: "named premium with one-time billing capped at its own amount", late: true,
+			change: premium(billed(agentcommerce.BillingTerms{BillingKind: "one_time", FirstSequence: 1,
+				CancellationCutoffPolicy: "none"}, "100")),
+			refusal: billingTerms, agreementRule: true},
+		{name: "named premium with a required extension", late: true,
+			change: premium(func(obligation *agentcommerce.AgreementObligation) {
+				obligation.RequiredExtensions = []string{"tos.test.extension.amount-multiplier.v1"}
+			}),
+			refusal: "coverage premium obligation carries a required extension", agreementRule: true},
+		{name: "named premium with an optional extension", late: true,
+			change: premium(func(obligation *agentcommerce.AgreementObligation) {
+				obligation.OptionalExtensions = []string{"tos.test.extension.amount-multiplier.v1"}
+			})},
+		{name: "unnamed payment obligation of the covered party with no beneficiary", late: true,
+			change: extra(func(obligation *agentcommerce.AgreementObligation) {
+				obligation.Kind, obligation.BeneficiaryAgentID = "payment", ""
+			}),
+			refusal: unnamedNoBeneficiary, agreementRule: true},
+		{name: "unnamed obligation of the covered party with no beneficiary that carries no value", late: true,
+			change: extra(func(obligation *agentcommerce.AgreementObligation) {
+				obligation.Kind, obligation.BeneficiaryAgentID = "disclosure", ""
+				obligation.Amount, obligation.SettlementAdapterURI, obligation.SettlementParameters = nil, "", nil
 			})},
 	})
 }
@@ -447,6 +494,13 @@ func TestSignedHistoryNonActivationDispositionEvidenceIsValidAndCommitted(t *tes
 // scheduled end commitment and the coverage_activation stage action.
 func (history *signedHistory) offerActivation(signed signedOffer,
 	acceptance AuthorizedCoverageAcceptanceReceiptV1) AuthorizedCoverageActivationEvidenceV1 {
+	return history.offerActivationBy(signed, acceptance, signedHistoryGuarantor, nil)
+}
+
+// offerActivationBy is offerActivation signed by signer, whose end commitment
+// change varies before it enters the action and the body.
+func (history *signedHistory) offerActivationBy(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
+	signer string, change func(*CoverageEndCommitmentV1)) AuthorizedCoverageActivationEvidenceV1 {
 	t, offer, terms := history.t, signed.offer, signed.offer.CoverageTerms
 	agreementDigest, obligationID := offer.Body.CoverageAgreementBodyDigest, offer.Body.CoverageObligationID
 	underlying, held := signed.underlying[terms.UnderlyingAgreementBodyDigest]
@@ -463,6 +517,9 @@ func (history *signedHistory) offerActivation(signed signedOffer,
 	commitment := CoverageEndCommitmentV1{SchemaVersion: 1, CoverageAgreementBodyDigest: agreementDigest,
 		CoverageObligationID: obligationID, CoverageStateDomainDigest: terms.CoverageStateDomainDigest,
 		EndBranch: "scheduled", IncidentEligibilityEndsAtUnix: terms.CoverageEndsAtUnix}
+	if change != nil {
+		change(&commitment)
+	}
 	endDigest, err := CoverageEndCommitmentDigestV1(commitment)
 	if err != nil {
 		t.Fatal(err)
@@ -536,8 +593,8 @@ func (history *signedHistory) offerActivation(signed signedOffer,
 		UnderlyingAgreementBody: underlying.Body, AuthorizedAcceptanceReceipt: acceptance, CoverageEndCommitment: commitment,
 		UnderlyingAuthorizationEvidenceSet: underlyingSet, TransitionEvidenceProjection: projection,
 		AuthorityAdmissionEligibilityProofSet: eligibility,
-		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObject("activation-evidence", bodyDigest,
-			"tos.service.agent-guarantor-activation-evidence-signature.v1", activatedAt)}}
+		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signer, terms.LifecycleAuthorizationProfile,
+			"activation-evidence", bodyDigest, "tos.service.agent-guarantor-activation-evidence-signature.v1", activatedAt)}}
 	if _, err := CoverageActivationEvidenceDigestV1(evidence); err != nil {
 		t.Fatalf("signed-history activation evidence is malformed: %v", err)
 	}
@@ -603,8 +660,24 @@ func TestSignedHistoryActivationOnTheSignedOffer(t *testing.T) {
 		}
 	}
 
-	// The same activation against another offer of the same Guarantor.
+	// Activation evidence on the valid offer that is not the offer's own:
+	// an end commitment one second short of the terms' coverage end, and a
+	// signer that is not the Guarantor. Each is signed over consistent
+	// digests.
 	signed := history.quoteToOffer(true, nil)
+	acceptance := history.acceptanceReceipt(signed)
+	shortened := history.offerActivationBy(signed, acceptance, signedHistoryGuarantor,
+		func(commitment *CoverageEndCommitmentV1) { commitment.IncidentEligibilityEndsAtUnix-- })
+	if err := verify(signed, shortened); err == nil || !strings.Contains(err.Error(), "coverage activation end commitment is substituted") {
+		t.Errorf("activation with an end commitment one second before the coverage end: got %v, want an end-commitment refusal", err)
+	}
+	bySomeoneElse := history.offerActivationBy(signed, acceptance, signedHistoryClaimant, nil)
+	if err := verify(signed, bySomeoneElse); err == nil ||
+		!strings.Contains(err.Error(), `required Guarantor authority "agent:guarantor" is missing`) {
+		t.Errorf("activation signed by the covered party: got %v, want the Guarantor's authorization to be missing", err)
+	}
+
+	// The same activation against another offer of the same Guarantor.
 	other := history.quoteToOffer(true, func(in *signedOfferInputs) {
 		in.requestBody = func(body *CoverageQuoteRequestBodyV1) { body.RequestID = "request:other" }
 	})

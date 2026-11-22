@@ -2895,6 +2895,22 @@ several IDs, but each
 amount is fixed before Agreement authorization. Variable, unbounded, foreign-
 asset, or dynamically recurring premium obligations are invalid in V1.
 
+The obligation's `amount` is therefore everything a premium can charge, and
+a verifier refuses each generic obligation field that could make it
+otherwise:
+
+| Obligation field of a named premium | Rule |
+| --- | --- |
+| `billing_terms` | absent. Any billing terms, of any `billing_kind` (`one_time`, `deposit`, `milestone`, `installment`, `accumulated`, `periodic`), carry their own `maximum_aggregate_amount` and recurrence and are refused, including terms whose cap equals the amount; an installment plan is several premium obligations |
+| `amount.amount_decimal` | absent; the amount is atomic |
+| `required_extensions[]` | empty. A required extension may redefine the amount in a way a V1 verifier does not know |
+| `optional_extensions[]` | not constrained: an optional extension may be ignored and so cannot change what the amount means |
+| `settlement_adapter_uri`, `settlement_parameters` | not constrained and opaque to this profile. They select how and where the fixed amount is paid; under the generic Agreement an Adapter settles at most the obligation's `amount`. A parameter encoding that scaled, converted or conditioned the amount would be an Adapter-profile defect that this profile cannot detect |
+| `not_before`, `due_at`, `expires_at`, `acceptance_evidence_requirements[]`, the policy fields | not constrained; they do not change the amount |
+
+The Agreement body's own `required_extensions[]` and `optional_extensions`
+are likewise not interpreted here.
+
 Every verifier computes with checked same-asset addition:
 
 ```text
@@ -2931,7 +2947,10 @@ not name:
 - it does not have kind `guarantor.fee`; and
 - whatever its kind, it is not a value-bearing obligation (one that carries
   an `amount`, atomic or decimal) whose obligor is the request's covered
-  party and whose beneficiary is its Guarantor.
+  party and whose beneficiary is its Guarantor, or whose obligor is the
+  covered party and whose `beneficiary_agent_id` is absent: with no named
+  beneficiary the recipient is fixed only by the opaque settlement
+  parameters, which may name the Guarantor.
 
 The second test does not rely on the open `kind` token: a transfer from the
 covered party to the Guarantor that is labelled `payment`, or anything else,
@@ -4590,10 +4609,17 @@ equal `transition_evidence_projection_digest`, and verifies that the projection
 contains exactly the prerequisite roles released in section 20.1.
 The activation or non-activation authority re-resolves every newly admitted
 prerequisite, collateral-control, and operational-independence signer against
-fresh finalized authority state at its authority-generated result time and
-freezes the exact section 9.1 eligibility proof set. Evidence signed before a
+fresh finalized authority state at its authority-generated result time, so
+evidence signed before a
 revocation but first presented afterward cannot activate coverage or prove the
-opposite branch.
+opposite branch. That re-resolution is an admission duty of the authority.
+What it freezes in the result is narrower and exact: the section 9.1
+eligibility proof set of non-activation evidence carries the entries listed
+below, for the three parties of the coverage and for no other subject, so a
+set that also names a prerequisite, collateral-control or
+operational-independence signer is refused by a verifier. In V1 those
+signers' freshness is not portable in the proof set; a verifier relies on
+their own profile-qualified authorizations in the evidence they signed.
 
 A verifier of non-activation evidence holds its frozen proof set to the
 non-activation it admits:
