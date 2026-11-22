@@ -139,6 +139,14 @@ type signedHistoryVariation struct {
 	// instead of with the claim, so the two times can be on either side of the
 	// claim's expiry.
 	ingressReceivedAt uint64
+	// collateralBinding changes the transition binding of the next collateral
+	// transition before anything is digested under it, collateralObligation is
+	// the obligation that transition names instead of the terms' collateral
+	// obligation, and collateralPrerequisites changes its prerequisite evidence
+	// set before the set is digested.
+	collateralBinding       func(*CollateralTransitionBindingV1)
+	collateralObligation    string
+	collateralPrerequisites func(*CanonicalGuarantorEvidenceSetV1)
 }
 
 // receiptTime is the time a receipt body states for a stage action admitted

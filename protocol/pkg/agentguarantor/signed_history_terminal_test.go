@@ -276,8 +276,14 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		"obligation_id":           agentcommerce.ID(history.obligation),
 		"expected_state_revision": agentcommerce.U64(history.coverageRevision), "target_state": agentcommerce.State("release_pending"),
 		"evidence_set_digest": agentcommerce.Digest32(evidenceDigest)}
+	// The closure action expires at the terms' final deadline, or ten minutes
+	// after its admission when a set is created after that deadline.
+	actionExpiresAt := terms.LateRecoveryTerminalDeadlineUnix
+	if at >= actionExpiresAt {
+		actionExpiresAt = at + 600
+	}
 	stage := history.stage("coverage_closure", "application/vnd.tos.service.agent-guarantor-coverage-closure-action.v1+cbor",
-		canonical, fields, filingDigest, terms.LateRecoveryTerminalDeadlineUnix, at, "", nil)
+		canonical, fields, filingDigest, actionExpiresAt, at, "", nil)
 	action := stage.AuthorizedAction
 	actionDigest, err := agentcommerce.AuthorizedActionDigest(action)
 	if err != nil {
