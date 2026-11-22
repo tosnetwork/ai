@@ -1,7 +1,8 @@
 #!/bin/sh
 # Component boundaries: gateway/ must not depend on execution/; protocol/
 # must depend on neither gateway/ nor execution/; messenger/ may depend on
-# protocol/ only; and no component depends on messenger/.
+# protocol/ only; provider/ may depend on protocol/ and execution/ only; and
+# no component depends on messenger/ or on provider/.
 #
 # The package graph is followed transitively, test-only imports included, for
 # the host platform and for every other platform the tree has build-tagged
@@ -60,15 +61,17 @@ text() {
 }
 
 for platform in host windows darwin; do
-  graph "$platform" gateway execution messenger
-  graph "$platform" protocol gateway execution messenger
-  graph "$platform" execution messenger
-  graph "$platform" messenger gateway execution
+  graph "$platform" gateway execution messenger provider
+  graph "$platform" protocol gateway execution messenger provider
+  graph "$platform" execution messenger provider
+  graph "$platform" messenger gateway execution provider
+  graph "$platform" provider gateway messenger
 done
-text gateway execution messenger
-text protocol gateway execution messenger
-text execution messenger
-text messenger gateway execution
+text gateway execution messenger provider
+text protocol gateway execution messenger provider
+text execution messenger provider
+text messenger gateway execution provider
+text provider gateway messenger
 
 # No Go file may use //go:linkname. It reaches unexported identifiers of
 # another package, so it would let code outside a package reassign a test-only
@@ -143,6 +146,6 @@ for platform in host windows darwin; do
 done
 
 if [ "$status" = 0 ]; then
-  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither; messenger/ depends on protocol/ only; nothing depends on messenger/; no //go:linkname; no symlinked Go file; no assembly, C or object file in a Go package directory; no unsafe or cgo in the loaded $guarantor"
+  echo "boundaries hold (host, windows, darwin, source text): gateway/ does not depend on execution/; protocol/ depends on neither; messenger/ depends on protocol/ only; provider/ depends on protocol/ and execution/ only; nothing depends on messenger/ or provider/; no //go:linkname; no symlinked Go file; no assembly, C or object file in a Go package directory; no unsafe or cgo in the loaded $guarantor"
 fi
 exit "$status"

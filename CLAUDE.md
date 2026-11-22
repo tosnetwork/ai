@@ -8,13 +8,15 @@ root before proposing a change; do not rely on CI as the verification.
 
 ## Boundaries
 
-`spec/`, `protocol/`, `gateway/`, `execution/` and `messenger/` are separate
-components, and the programs built from them stay separate processes.
+`spec/`, `protocol/`, `gateway/`, `execution/`, `messenger/` and `provider/`
+are separate components, and the programs built from them stay separate
+processes.
 
 - `gateway/` must not import `execution/`.
 - `protocol/` must import neither `gateway/` nor `execution/`.
 - `messenger/` may import `protocol/` only.
-- No component imports `messenger/`.
+- `provider/` may import `protocol/` and `execution/` only.
+- No component imports `messenger/` or `provider/`.
 
 `make boundary-lint` enforces these rules. Go's `internal/` rule keeps each
 component's internal packages private to it.

@@ -42,7 +42,8 @@ conformance:
 	python3 -I protocol/tests/conformance/agent_guarantor_registry_verify.py < $(GUARANTOR_CORPUS)
 
 # gateway/ must not import execution/; protocol/ imports neither; messenger/
-# imports protocol/ only; nothing imports messenger/.
+# imports protocol/ only; provider/ imports protocol/ and execution/ only;
+# nothing imports messenger/ or provider/.
 boundary-lint:
 	GOWORK=off scripts/check-boundaries.sh
 
