@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
@@ -22,6 +23,27 @@ func CoverageAcceptanceAdmissionDomainIDV1(boundDomainDigest, offerID string) (s
 		BoundDomainDigest string `json:"bound_domain_digest"`
 		OfferID           string `json:"offer_id"`
 	}{boundDomainDigest, offerID})
+}
+
+// coverageAcceptanceObjectKindV1 is the authorized object kind of the
+// eligibility proofs frozen when an acceptance is admitted.
+const coverageAcceptanceObjectKindV1 = "coverage-acceptance"
+
+// acceptanceEligibilitySubjectsV1 is the set the acceptance admission
+// re-resolves: the accepting subject and the authority subject of every
+// authorization predicate of the coverage Agreement, sorted and without
+// duplicates. A subject that holds several of those roles is named once.
+func acceptanceEligibilitySubjectsV1(request AuthorizedCoverageAcceptanceRequestV1) []string {
+	unique := map[string]struct{}{request.Body.AcceptingSubject: {}}
+	for _, predicate := range request.CoverageAgreementBody.AuthorizationPredicates {
+		unique[predicate.AuthoritySubject.SubjectIdentifier] = struct{}{}
+	}
+	subjects := make([]string, 0, len(unique))
+	for subject := range unique {
+		subjects = append(subjects, subject)
+	}
+	sort.Strings(subjects)
+	return subjects
 }
 
 func CoverageAcceptanceRequestDigestV1(request AuthorizedCoverageAcceptanceRequestV1) (string, error) {
@@ -171,7 +193,19 @@ func VerifyCoverageAcceptanceReceiptV1(receipt AuthorizedCoverageAcceptanceRecei
 		receipt.AuthorityAdmissionEligibilityProofSet.AdmissionTimeUnix != body.AcceptedAtUnix {
 		return errors.New("Guarantor acceptance admission authority or CAS proof is substituted")
 	}
-	bodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-acceptance-receipt-body.v1", receipt.Body)
+	// The receipt body carries no sequence of the acceptance admission domain,
+	// so the proof set's sequence is held only to its own entries.
+	proofs := receipt.AuthorityAdmissionEligibilityProofSet
+	if err := validateEligibilityProofSetAgainstV1(proofs, actionDigest, body.AuthorizedAcceptanceRequestEnvelopeDigest,
+		acceptanceEligibilitySubjectsV1(receipt.AuthorizedAcceptanceRequest), coverageAcceptanceObjectKindV1,
+		body.ExactRequestDigest, offer.CoverageTerms.CoverageStateDomainDigest, offer.CoverageTerms.LifecycleAuthorizationProfile,
+		admissionDomainID, proofs.AdmissionSequence, body.AcceptedAtUnix); err != nil {
+		return fmt.Errorf("Guarantor acceptance receipt eligibility proofs: %w", err)
+	}
+	bodyDigest, err := guarantorCodec.Digest("tos.service.agent-guarantor-acceptance-receipt-body.v1", receipt.Body)
+	if err != nil {
+		return err
+	}
 	return ValidateAuthorizationSet(receipt.Authorizations, "coverage-acceptance-receipt", bodyDigest,
 		"tos.service.agent-guarantor-acceptance-receipt-signature.v1", []string{offer.Body.GuarantorAgentID}, authorityResolver, now)
 }

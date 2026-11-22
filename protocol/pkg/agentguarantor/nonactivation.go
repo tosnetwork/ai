@@ -3,10 +3,29 @@ package agentguarantor
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
+
+// coverageNonActivationObjectKindV1 is the authorized object kind of the
+// eligibility proofs frozen when a non-activation is admitted.
+const coverageNonActivationObjectKindV1 = "coverage-non-activation"
+
+// CoverageNonActivationAdmissionDomainIDV1 is the admission domain in which
+// the non-activation of an accepted coverage, and the eligibility proofs
+// frozen with it, are sequenced. It is derived from the coverage Agreement
+// body digest alone, so a holder of the evidence can recompute it.
+func CoverageNonActivationAdmissionDomainIDV1(coverageAgreementBodyDigest string) (string, error) {
+	if !validDigest(coverageAgreementBodyDigest) {
+		return "", errors.New("non-activation admission domain input is invalid")
+	}
+	return guarantorCodec.Digest("tos.service.agent-guarantor-non-activation-admission-domain.v1", struct {
+		CoverageAgreementBodyDigest string `json:"coverage_agreement_body_digest"`
+	}{coverageAgreementBodyDigest})
+}
 
 type ActivationAdmissionCutProofV1 struct {
 	SchemaVersion               uint16                         `json:"schema_version"`
@@ -466,7 +485,31 @@ func VerifyCoverageNonActivationEvidenceV1(evidence AuthorizedCoverageNonActivat
 		evidence.AuthorityAdmissionEligibilityProofSet.AdmittedActionDigest != actionDigest {
 		return errors.New("non-activation action or authority proof is substituted")
 	}
-	bodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-non-activation-evidence-body.v1", body)
+	// The non-activation checkpoint re-resolves the three parties of the
+	// coverage, once each. The evidence body carries no sequence of the
+	// non-activation admission domain, so the proof set's sequence is held only
+	// to its own entries.
+	admissionDomainID, err := CoverageNonActivationAdmissionDomainIDV1(body.CoverageAgreementBodyDigest)
+	if err != nil {
+		return err
+	}
+	parties := map[string]struct{}{offer.Body.GuarantorAgentID: {}, offer.Body.CoveredPartyAgentID: {}, offer.Body.BeneficiaryAgentID: {}}
+	subjects := make([]string, 0, len(parties))
+	for party := range parties {
+		subjects = append(subjects, party)
+	}
+	sort.Strings(subjects)
+	proofs := evidence.AuthorityAdmissionEligibilityProofSet
+	if err := validateEligibilityProofSetAgainstV1(proofs, actionDigest, body.AcceptanceReceiptDigest, subjects,
+		coverageNonActivationObjectKindV1, body.ExactRequestDigest, offer.CoverageTerms.CoverageStateDomainDigest,
+		offer.CoverageTerms.LifecycleAuthorizationProfile, admissionDomainID, proofs.AdmissionSequence,
+		body.ResolvedAtUnix); err != nil {
+		return fmt.Errorf("Guarantor non-activation evidence eligibility proofs: %w", err)
+	}
+	bodyDigest, err := guarantorCodec.Digest("tos.service.agent-guarantor-non-activation-evidence-body.v1", body)
+	if err != nil {
+		return err
+	}
 	return ValidateAuthorizationSet(evidence.Authorizations, "non-activation-evidence", bodyDigest,
 		"tos.service.agent-guarantor-non-activation-evidence-signature.v1", []string{offer.Body.GuarantorAgentID}, authorityResolver, now)
 }

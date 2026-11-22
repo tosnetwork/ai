@@ -31,6 +31,56 @@ var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 const NativeAuthorizationContentType = "application/vnd.tos.service.agent-guarantor-native-authorization.v1+cbor"
 
+const (
+	// NativeAgentAuthorizationProfileURI names the fixed V1 profile under
+	// which an Agent authorizes a Guarantor object in its own name with
+	// native ML-DSA-44 evidence (section 9.1).
+	NativeAgentAuthorizationProfileURI = "tos.service.agent-guarantor.authorization.native-agent.v1"
+	// NativeAgentAuthorizationProfileDescriptorDomain is the digest domain of
+	// the profile's descriptor.
+	NativeAgentAuthorizationProfileDescriptorDomain = "tos.service.agent-guarantor.authorization-profile.native-agent.v1"
+	// NativeAgentAuthorizationProfileDigest is the digest of
+	// NativeAgentAuthorizationProfileDescriptor under that domain. It is a
+	// constant so that naming the profile cannot fail; a test recomputes it.
+	NativeAgentAuthorizationProfileDigest = "sha256:a54606630540e2289726ea3d4272b9f26a1b6782652c0b0142b40e59e374483f"
+)
+
+// NativeAgentAuthorizationProfileDescriptorV1 states what the fixed native
+// Agent authorization profile means, so that its digest commits the meaning
+// and not only a name.
+type NativeAgentAuthorizationProfileDescriptorV1 struct {
+	ProfileURI          string `json:"profile_uri"`
+	ProfileVersion      uint64 `json:"profile_version"`
+	SubjectKind         string `json:"subject_kind"`
+	EvidenceContentType string `json:"evidence_content_type"`
+	SignatureAlgorithm  string `json:"signature_algorithm"`
+	SignatureContext    string `json:"signature_context"`
+	KeyPurpose          string `json:"key_purpose"`
+	Verifier            string `json:"verifier"`
+}
+
+// NativeAgentAuthorizationProfileDescriptor is the released descriptor of the
+// fixed native Agent authorization profile: one Agent subject, the native
+// authorization evidence of this profile, a Pure ML-DSA-44 signature under the
+// Guarantor signing context by an Agent-control key.
+func NativeAgentAuthorizationProfileDescriptor() NativeAgentAuthorizationProfileDescriptorV1 {
+	return NativeAgentAuthorizationProfileDescriptorV1{ProfileURI: NativeAgentAuthorizationProfileURI, ProfileVersion: 1,
+		SubjectKind: "agent", EvidenceContentType: NativeAuthorizationContentType, SignatureAlgorithm: "ML-DSA-44",
+		SignatureContext: "TOS-AGENT-GUARANTOR-V1", KeyPurpose: "agent-control",
+		Verifier: "tos.service.agent-guarantor.verify.native-agent-authorization.v1"}
+}
+
+// NativeAgentAuthorizationProfileV1 is the exact ProfileRef a quote request's
+// authorizations carry.
+func NativeAgentAuthorizationProfileV1() ProfileRefV1 {
+	return ProfileRefV1{ProfileURI: NativeAgentAuthorizationProfileURI, ProfileVersion: 1,
+		ProfileDigest: NativeAgentAuthorizationProfileDigest}
+}
+
+// quoteRequestProfileRefusalV1 is the refusal of a quote request authorized
+// under any other profile than the fixed native Agent profile.
+const quoteRequestProfileRefusalV1 = "Guarantor quote request is not authorized under the native Agent authorization profile"
+
 // NativeAuthorizationSignaturePrefix prefixes the only text form of a native
 // ML-DSA-44 signature.
 const NativeAuthorizationSignaturePrefix = "mldsa44:"

@@ -114,25 +114,70 @@ func validateOfferScheduleV1(offer AuthorizedFirmCoverageOfferV1) error {
 	return nil
 }
 
+// CoverageFeeObligationKindV1 is the obligation kind of a coverage premium in
+// the coverage Agreement (section 13). The Agreement's kind is an open token;
+// the Guarantor profile fixes this value for premiums.
+const CoverageFeeObligationKindV1 = "guarantor.fee"
+
+// validateOfferReferencedObligationsV1 requires the coverage, payout-template
+// and, when named, collateral obligations of a firm offer to exist in the
+// coverage Agreement. The premium obligations are held to the Agreement by
+// validateCoveragePremiumV1.
+func validateOfferReferencedObligationsV1(offer AuthorizedFirmCoverageOfferV1, agreement agentcommerce.AgentAgreementBody) error {
+	referenced := []string{offer.Body.CoverageObligationID, offer.Body.PayoutTemplateObligationID}
+	if offer.Body.CollateralObligationID != "" {
+		referenced = append(referenced, offer.Body.CollateralObligationID)
+	}
+	present := make(map[string]struct{}, len(agreement.Obligations))
+	for _, obligation := range agreement.Obligations {
+		present[obligation.ObligationID] = struct{}{}
+	}
+	for _, obligationID := range referenced {
+		if _, found := present[obligationID]; !found {
+			return errors.New("firm Guarantor offer references an absent Agreement obligation")
+		}
+	}
+	return nil
+}
+
 // validateCoveragePremiumV1 enforces the premium rule of section 12.1 on the
-// coverage Agreement: every premium obligation the terms name exists, has a
-// fixed amount in the maximum fee's asset, is owed by the covered party to
-// the Guarantor, and together they do not exceed the request's maximum fee.
+// coverage Agreement. Every premium obligation the terms name exists once, is
+// of the fee kind, has a fixed amount in the maximum fee's asset, is owed by
+// the covered party to the Guarantor and depends on the offer's coverage
+// obligation; together they do not exceed the request's maximum fee. The named
+// set is complete: the Agreement carries no other obligation of the fee kind
+// and, whatever its kind, no other value-bearing obligation owed by the
+// covered party to the Guarantor. Without the completeness rules a fee could
+// be charged under an ID the terms omit and escape the sum.
 func validateCoveragePremiumV1(offer AuthorizedFirmCoverageOfferV1, agreement agentcommerce.AgentAgreementBody) error {
 	request := offer.AuthorizedQuoteRequest.Body
 	maximum, valid := new(big.Int).SetString(request.MaximumFee.AmountAtomic, 10)
 	if !valid || validateAmount(request.MaximumFee, false) != nil {
 		return errors.New("Guarantor quote request's maximum fee is invalid")
 	}
-	obligations := make(map[string]agentcommerce.AgreementObligation, len(agreement.Obligations))
-	for _, obligation := range agreement.Obligations {
-		obligations[obligation.ObligationID] = obligation
+	named := make(map[string]bool, len(offer.CoverageTerms.PremiumObligationIDs))
+	for _, obligationID := range offer.CoverageTerms.PremiumObligationIDs {
+		named[obligationID] = false
 	}
 	total := new(big.Int)
-	for _, obligationID := range offer.CoverageTerms.PremiumObligationIDs {
-		obligation, found := obligations[obligationID]
-		if !found {
-			return errors.New("Guarantor terms name a premium obligation the coverage Agreement lacks")
+	for _, obligation := range agreement.Obligations {
+		seen, isNamed := named[obligation.ObligationID]
+		if !isNamed {
+			if obligation.Kind == CoverageFeeObligationKindV1 {
+				return errors.New("coverage Agreement carries a guarantor.fee obligation the Guarantor terms do not name as premium")
+			}
+			if obligation.Amount != nil && obligation.ObligorAgentID == request.CoveredPartyAgentID &&
+				obligation.BeneficiaryAgentID == request.GuarantorAgentID {
+				return errors.New("coverage Agreement carries a value transfer from the covered party to the Guarantor that the Guarantor terms do not name as premium")
+			}
+			continue
+		}
+		if seen {
+			return errors.New("coverage Agreement repeats a premium obligation ID")
+		}
+		named[obligation.ObligationID] = true
+		if obligation.Kind != CoverageFeeObligationKindV1 {
+			return errors.New("coverage premium obligation is not of the guarantor.fee kind")
 		}
 		if obligation.Amount == nil || obligation.Amount.AmountDecimal != "" {
 			return errors.New("coverage premium obligation has no fixed atomic amount")
@@ -153,7 +198,15 @@ func validateCoveragePremiumV1(offer AuthorizedFirmCoverageOfferV1, agreement ag
 		if obligation.BeneficiaryAgentID != request.GuarantorAgentID {
 			return errors.New("coverage premium obligation is not owed to the Guarantor")
 		}
+		if !containsString(obligation.DependsOnObligationIDs, offer.Body.CoverageObligationID) {
+			return errors.New("coverage premium obligation does not depend on the offer's coverage obligation")
+		}
 		total.Add(total, value)
+	}
+	for _, seen := range named {
+		if !seen {
+			return errors.New("Guarantor terms name a premium obligation the coverage Agreement lacks")
+		}
 	}
 	if total.Cmp(maximum) > 0 {
 		return errors.New("total coverage fee exceeds the quote request's maximum fee")
@@ -456,6 +509,9 @@ func validateFirmOfferBindingV1(offer AuthorizedFirmCoverageOfferV1) error {
 	if err := validateOfferScheduleV1(offer); err != nil {
 		return err
 	}
+	if !validateAuthorizationProfileV1(request.Authorizations, NativeAgentAuthorizationProfileV1()) {
+		return errors.New(quoteRequestProfileRefusalV1)
+	}
 	if !validateAuthorizationProfileV1(offer.Authorizations, profile.ExposureAuthorizationProfile) {
 		return errors.New("firm Guarantor offer is not authorized under the service profile's exposure authorization profile")
 	}
@@ -464,8 +520,9 @@ func validateFirmOfferBindingV1(offer AuthorizedFirmCoverageOfferV1) error {
 
 // validateFirmOfferAgreementBindingV1 is validateFirmOfferBindingV1 together
 // with the rules that need the coverage Agreement body: the offer commits
-// that exact body, its premium obligations stay within the request's maximum
-// fee, and the terms' final deadline is its hard-effect deadline.
+// that exact body, the obligations it references exist in it, its premium
+// obligations are the Agreement's complete fee set within the request's
+// maximum fee, and the terms' final deadline is its hard-effect deadline.
 func validateFirmOfferAgreementBindingV1(offer AuthorizedFirmCoverageOfferV1, agreement agentcommerce.AgentAgreementBody) error {
 	if err := validateFirmOfferBindingV1(offer); err != nil {
 		return err
@@ -473,6 +530,9 @@ func validateFirmOfferAgreementBindingV1(offer AuthorizedFirmCoverageOfferV1, ag
 	agreementDigest, err := agentcommerce.AgreementBodyDigest(agreement)
 	if err != nil || offer.Body.CoverageAgreementBodyDigest != agreementDigest {
 		return errors.New("firm Guarantor offer commits another coverage Agreement body")
+	}
+	if err := validateOfferReferencedObligationsV1(offer, agreement); err != nil {
+		return err
 	}
 	if err := validateCoveragePremiumV1(offer, agreement); err != nil {
 		return err
