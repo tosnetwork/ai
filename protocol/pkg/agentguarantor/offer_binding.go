@@ -75,15 +75,20 @@ func validateOfferedClosureCapacityV1(offered, requested ClaimClosureCapacityV1)
 	if !equalCanonical(offered.TerminalFallback, requested.TerminalFallback) {
 		return errors.New("Guarantor terms' terminal fallback differs from the requested fallback")
 	}
-	if len(offered.ContinuationBudgetEntries) != len(requested.ContinuationBudgetEntries) {
+	if !equalStrings(continuationStateKeysV1(offered), continuationStateKeysV1(requested)) {
 		return errors.New("Guarantor terms' continuation states differ from the requested capacity's")
 	}
-	for index, entry := range offered.ContinuationBudgetEntries {
-		if entry.ProfileStateKey != requested.ContinuationBudgetEntries[index].ProfileStateKey {
-			return errors.New("Guarantor terms' continuation states differ from the requested capacity's")
-		}
-	}
 	return nil
+}
+
+// continuationStateKeysV1 is the state key of every continuation budget
+// entry of a capacity, in entry order.
+func continuationStateKeysV1(capacity ClaimClosureCapacityV1) []string {
+	keys := make([]string, 0, len(capacity.ContinuationBudgetEntries))
+	for _, entry := range capacity.ContinuationBudgetEntries {
+		keys = append(keys, entry.ProfileStateKey)
+	}
+	return keys
 }
 
 // validateOfferScheduleV1 enforces the offer's place in the section 12.2
