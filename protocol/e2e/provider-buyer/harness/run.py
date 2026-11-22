@@ -283,7 +283,8 @@ def quote_and_prepare(offer: dict, label: str) -> str:
         base.diagnose_discovery(offer)
         raise RuntimeError(f"{label}: no Quote")
     prepared = base.mcp("tos_buyer_prepare", {"quote_id": quote["quote_id"], "source_path": str(base.source_tree()),
-                                              "idempotency_key": f"e2e-{label}-" + secrets.token_hex(4)})
+                                              "idempotency_key": "e2e-" + label.replace(" ", "-") + "-" +
+                                                                 secrets.token_hex(4)})
     purchase = structured(prepared).get("purchase", {})
     record(f"{label}: prepare reserves the purchase and pays nothing",
            not prepared["is_error"] and purchase.get("state") == "awaiting_confirmation", purchase.get("state"))
