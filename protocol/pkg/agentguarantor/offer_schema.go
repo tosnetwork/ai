@@ -205,9 +205,13 @@ func verifyFirmOfferAgreementEvidenceAgainstOfferV1(wrapper agentcommerce.Agreem
 }
 
 // VerifyFirmOfferAgreementEvidenceIntrinsicV1 validates everything carried by
-// the evidence itself. The containing Agreement verifier must additionally
-// call VerifyFirmOfferAgreementEvidenceV1 (or the acceptance verifier, which
-// does so against its embedded Agreement body) to validate predicate targets.
+// the evidence itself, including every rule that binds the offered terms, the
+// offer body and the exposure receipt to the embedded quote request and
+// service profile. The evidence carries the Agreement body's digest but not
+// the body, so the two rules that need the body are enforced where it is
+// present: VerifyFirmOfferAgreementEvidenceV1 and the acceptance verifier
+// both hold the terms' final deadline to the Agreement's hard-effect deadline,
+// and the former also validates the predicate targets.
 func VerifyFirmOfferAgreementEvidenceIntrinsicV1(wrapper agentcommerce.AgreementAuthorizationEvidence,
 	resolver AuthorityKeyResolver, publicationResolver agentcommerce.AgentOperationAuthorityResolver,
 	underlyingResolver UnderlyingAgreementResolver, agreementVerifier agentcommerce.AgreementEvidenceVerifier,
@@ -235,6 +239,9 @@ func VerifyFirmOfferAgreementEvidenceIntrinsicV1(wrapper agentcommerce.Agreement
 		if wrapper.PredicateIDs[index] != target.PredicateID || wrapper.EvidenceTargetProjectionDigests[index] != target.TargetProjectionDigest {
 			return errors.New("firm-offer Agreement evidence intrinsic targets differ")
 		}
+	}
+	if err := validateFirmOfferBindingV1(offer); err != nil {
+		return err
 	}
 	profile, err := ResolveServiceProfileArtifactV1(offer.ServiceProfileArtifact, publicationResolver, now)
 	if err != nil || VerifyQuoteRequest(offer.AuthorizedQuoteRequest, profile, resolver,
