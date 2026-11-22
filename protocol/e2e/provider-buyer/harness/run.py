@@ -192,6 +192,21 @@ def setup_provider(tosctl_sha256: str) -> dict:
         attempts.append({"exit": result.returncode, "last_stderr_line": (result.stderr.strip().splitlines() or [""])[-1]})
         if result.returncode == 0 and offered.get("confirmed") is True:
             break
+        if "update-policy failed" in result.stderr and "policy_diagnosis" not in base.evidence:
+            # The library keeps tosctl's own message to itself; the same send,
+            # made once by the harness as the provider, records it.
+            preview = offered.get("preview") or {}
+            diagnosis = base.tosctl(
+                "provider", "agent", "service", "send", "--operation", "update-policy", "--address",
+                preview.get("actor", ""), "--from", "provider", "--price-per-call", "0.1", "--storage-fee", "0.2",
+                "--cleanup-bounty", "0.1", "--response-sla", str(WINDOW), "--refund-claim-window", str(WINDOW),
+                "--rate-limit-per-day", "0", "--active", "true", "--open-access", "--metadata-hash",
+                preview.get("metadata_hash", ""), "--proof-scheme-hash", preview.get("proof_scheme_hash", ""),
+                "--yes", check=False)
+            base.evidence["policy_diagnosis"] = {"exit": diagnosis.returncode,
+                                                 "stdout": diagnosis.stdout[-1500:], "stderr": diagnosis.stderr[-1500:]}
+            record("diagnosis: the policy send made directly with tosctl", diagnosis.returncode == 0,
+                   base.evidence["policy_diagnosis"])
         time.sleep(20)
     record("offer completed (runs of the command: %d)" % len(attempts), offered.get("confirmed") is True, attempts)
     offer = json.loads(base.as_account("provider", ["/bin/cat", str(PROVIDER_RAIL / "setup" / "offer.json")]).stdout)
