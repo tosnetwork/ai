@@ -70,12 +70,14 @@ team's validators through SSH port forwards, not public HTTPS endpoints.
 | `gateway/` | Stateless public gateway: transport authentication, forwarding, discovery and retrieval; it holds no business authority |
 | `execution/` | Local execution base: fail-closed container execution bound by an Accepted Quote, and the evidence it produces for on-chain receipts |
 | `messenger/` | Agent-native Messenger: identities, conversations, groups (with the OpenMLS driver in `messenger/rust/openmls-driver`), mailboxes, public channels and encrypted attachments for Agents |
+| `provider/` | The Service Actor rail node: the selling side (setup, offer, preflight, relay and direct carriage, execution through the executor service, receipts, status and withdrawal) and the rail's buyer counterpart, which the two-sided node and the tests use; a library with no program yet |
 
 The public gateway, the executor service, the Messenger daemon and the
 protocol library remain separate programs. `make boundary-lint` enforces that
 `gateway/` does not import `execution/`, that `protocol/` imports neither,
-that `messenger/` imports `protocol/` only, and that nothing imports
-`messenger/`.
+that `messenger/` imports `protocol/` only, that `provider/` imports
+`protocol/` and `execution/` only, and that nothing imports `messenger/` or
+`provider/`.
 
 ## Build and test
 
