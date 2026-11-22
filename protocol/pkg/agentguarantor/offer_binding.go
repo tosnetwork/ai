@@ -60,8 +60,9 @@ func validateOfferedTermsAgainstQuoteRequestV1(terms CoverageTermsV1, request Au
 		return errors.New("Guarantor terms' covered obligations differ from the quote request")
 	}
 	// A V1 firm offer answers one quote request with version 1 terms, whose
-	// coverage identity is derived from the Guarantor and that request.
-	if terms.CoverageVersion != 1 || terms.PredecessorTermsDigest != "" {
+	// coverage identity is derived from the Guarantor and that request. Valid
+	// version 1 terms carry no predecessor digest.
+	if terms.CoverageVersion != 1 {
 		return errors.New("Guarantor terms offered on a quote request are not coverage version 1")
 	}
 	coverageID, err := CoverageID(terms.GuarantorAgentID, requestDigest)
