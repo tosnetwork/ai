@@ -721,8 +721,11 @@ func RunInit(ctx context.Context, in InitInput, env SetupEnv) (*InitResult, erro
 		in.RailConfigPath)
 	result.Confirmed = true
 	result.NextSteps = []string{
-		"provider: openfox earning service offer --rail-config " + in.RailConfigPath + " --price <TOS> ...",
-		"buyer: openfox earning service buy --rail-config " + in.RailConfigPath + " --offer <file> --source <archive>",
+		"provider: " + serviceCommand("offer") + " --rail-config " + in.RailConfigPath + " --price <TOS> ...",
+	}
+	if buy := currentCommandLine().Buy; buy != "" {
+		result.NextSteps = append(result.NextSteps,
+			"buyer: "+buy+" --rail-config "+in.RailConfigPath+" --offer <file> --source <archive>")
 	}
 	if handler := registeredRelayLane(); config.Chat != nil && handler != nil {
 		result.NextSteps = append(result.NextSteps, handler.InitNextStep(in.RailConfigPath))
@@ -732,11 +735,11 @@ func RunInit(ctx context.Context, in InitInput, env SetupEnv) (*InitResult, erro
 	// be established without a transport; it cannot serve or buy until one
 	// is added.
 	if config.MessengerSocket == "" && len(config.DirectPeers) == 0 && len(config.RelayURLs) == 0 {
+		flagList, flagUsage := transportFlags()
 		run.notef("transport", SetupMissing, "no packet transport is configured: serve and buy refuse to start "+
-			"until this command is run again with --direct-peer, --relay-url or --messenger-socket")
+			"until this command is run again with %s", flagList)
 		result.NextSteps = append([]string{
-			"add a packet transport: run init again with --direct-peer agent_<hex>=<socket> (the peer's Agent id " +
-				"and receiver socket), --relay-url <https URL> or --messenger-socket <socket>",
+			"add a packet transport: run init again with " + flagUsage,
 		}, result.NextSteps...)
 	}
 	return result, nil

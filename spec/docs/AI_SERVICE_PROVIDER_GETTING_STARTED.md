@@ -11,6 +11,21 @@ Every command, flag and configuration field below exists in the named
 repository. Where no command exists for a step, the guide says
 **not yet implemented** instead of inventing one.
 
+**Selling without OpenFox (added 2026-11-22).** The provider commands of this
+guide also exist in this repository as `tos-service-provider <verb>`
+(`provider/cmd/tos-service-provider`): `init`, `offer`, `preflight`, `serve`,
+`status`, `pause`, `resume`, `withdraw`, `manifest` and `metadata`, with the
+same flag names and the same `--rail-config` file, so wherever a provider
+step below says `openfox earning service <verb>`, `tos-service-provider
+<verb>` does the same. It differs in three ways: it carries packets over
+direct sockets and relays only (no `--messenger-socket` and no chat flags,
+and a configuration that has either is refused); it has no `buy` or
+`purchases` (buying is `tos-service-buyer` and the MCP buyer server); and
+`init` names its packet controller `service-packet` unless the flag or an
+existing configuration says otherwise. See
+[`provider/README.md`](../../provider/README.md). Rewriting this guide around
+that program is a follow-up; no public-network run of it is recorded.
+
 `openfox earning service` is the entry point for both roles (sections 3 to 5).
 The step-by-step `tosctl`, `tos-service-buyer` and
 `tos-service-provider-publish` commands remain available and are described in

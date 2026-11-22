@@ -562,7 +562,7 @@ func RunOffer(ctx context.Context, in OfferInput, env SetupEnv) (*OfferResult, e
 		return result, err
 	}
 	if err != nil {
-		return result, fmt.Errorf("%w; run `openfox earning service init` first", err)
+		return result, fmt.Errorf("%w; run `%s` first", err, serviceCommand("init"))
 	}
 	defer release()
 	in.fill(config.StateDir)
@@ -582,7 +582,7 @@ func RunOffer(ctx context.Context, in OfferInput, env SetupEnv) (*OfferResult, e
 		!cleanAbsolute(config.GlobalConfigFile) || !cleanAbsolute(config.StateDir) ||
 		!walletNamePattern.MatchString(config.PacketController) {
 		return result, errors.New("servicebridge: the rail configuration lacks the Agent, wallet address or chain " +
-			"global configuration `init` records; run `openfox earning service init` first")
+			"global configuration `init` records; run `" + serviceCommand("init") + "` first")
 	}
 	var executorPin, executorHow string
 	if in.ExecutorSocket != "" {
@@ -905,8 +905,8 @@ func RunOffer(ctx context.Context, in OfferInput, env SetupEnv) (*OfferResult, e
 	}
 	result.Confirmed = true
 	result.NextSteps = []string{
-		"openfox earning service preflight --rail-config " + in.RailConfigPath,
-		"openfox earning service serve --rail-config " + in.RailConfigPath,
+		serviceCommand("preflight") + " --rail-config " + in.RailConfigPath,
+		serviceCommand("serve") + " --rail-config " + in.RailConfigPath,
 	}
 	return result, nil
 }
