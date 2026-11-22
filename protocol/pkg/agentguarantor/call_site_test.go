@@ -249,6 +249,7 @@ func testClaimProfileFor(t *testing.T, terms *CoverageTermsV1) ClaimProfileV1 {
 		ReviewDeadlineSeconds:                       terms.ReviewDeadlineSeconds,
 		MaximumNonterminalResolutionWindowSeconds:   terms.NonterminalResolutionWindowSeconds,
 		MaximumSuccessorDecisionWindowSeconds:       terms.SuccessorDecisionWindowSeconds,
+		MaximumClaimIngressResolutionGraceSeconds:   terms.ClaimIngressResolutionGraceSeconds,
 		MaximumLateIngressRecoveryWindowSeconds:     terms.LateIngressRecoveryWindowSeconds,
 		PayoutDeadlineSeconds:                       terms.PayoutDeadlineSeconds}
 	digest, err := Digest("tos.service.agent-guarantor-claim-profile.v1", profile)

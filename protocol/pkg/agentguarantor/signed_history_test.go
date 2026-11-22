@@ -123,6 +123,22 @@ type signedHistoryVariation struct {
 	// times for one admission.
 	stageOf    string
 	stageAfter uint64
+	// activatedAt is the time the next activation on a signed offer is admitted
+	// at and states, instead of one second after its acceptance.
+	activatedAt uint64
+	// activationPrerequisites is the prerequisite evidence set the next
+	// activation on a signed offer carries in its action and commits in its
+	// body; by default it carries none.
+	activationPrerequisites *CanonicalGuarantorEvidenceSetV1
+	// claimExpiresAt is when the next claim built expires, instead of at the
+	// claim filing cutoff.
+	claimExpiresAt uint64
+	// ingressReceivedAt is the time the ingress receipt of the next claim
+	// admitted is received at, instead of the time the claim is admitted at.
+	// The admission action then expires ten minutes after its admission
+	// instead of with the claim, so the two times can be on either side of the
+	// claim's expiry.
+	ingressReceivedAt uint64
 }
 
 // receiptTime is the time a receipt body states for a stage action admitted
@@ -507,6 +523,9 @@ func (history *signedHistory) claim(revision uint64, predecessor *AuthorizedCove
 		OtherRecoveryDeclarationDigest: recoveryDigest,
 		PayoutDestinationDigest:        terms.PayoutTemplate.SettlementParameters.PayoutDestinationDigest,
 		CreatedAtUnix:                  createdAt, ExpiresAtUnix: terms.ClaimFilingEndsAtUnix}
+	if history.vary.claimExpiresAt != 0 {
+		body.ExpiresAtUnix = history.vary.claimExpiresAt
+	}
 	if predecessor != nil {
 		if body.PredecessorClaimDigest, err = ClaimBodyDigest(predecessor.Body); err != nil {
 			t.Fatal(err)
@@ -602,7 +621,11 @@ func (history *signedHistory) ingress(claim AuthorizedCoverageClaimV1, at uint64
 // proof, sealed at.
 func (history *signedHistory) admit(claim AuthorizedCoverageClaimV1, at uint64) AuthorizedClaimAdmissionReceiptV1 {
 	t, terms := history.t, history.terms
-	ingress := history.ingress(claim, at)
+	receivedAt, actionExpiresAt := at, claim.Body.ExpiresAtUnix
+	if history.vary.ingressReceivedAt != 0 {
+		receivedAt, actionExpiresAt = history.vary.ingressReceivedAt, at+600
+	}
+	ingress := history.ingress(claim, receivedAt)
 	claimDigest, err := ClaimEnvelopeDigest(claim)
 	if err != nil {
 		t.Fatal(err)
@@ -655,7 +678,7 @@ func (history *signedHistory) admit(claim AuthorizedCoverageClaimV1, at uint64) 
 		"obligation_id": agentcommerce.ID(history.obligation), "authority_instance_id": agentcommerce.Digest32(instanceID),
 		"claim_body_digest": agentcommerce.Digest32(claimBodyDigest)}
 	stage := history.stage(stageName, "application/vnd.tos.service.agent-guarantor-claim-admission-action.v1+cbor",
-		request, fields, ingressDigest, claim.Body.ExpiresAtUnix, at, claimDigest, []string{claimDigest})
+		request, fields, ingressDigest, actionExpiresAt, at, claimDigest, []string{claimDigest})
 	action := stage.AuthorizedAction
 	actionDigest, err := agentcommerce.AuthorizedActionDigest(action)
 	if err != nil {
