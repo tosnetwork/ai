@@ -478,6 +478,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	wantSequence := uint64(0)
 	cutoff := uint64(0)
 	var ok bool
+	// A head at the top of the sequence range has no successor decision.
+	sequenceFits := true
 	var predecessorDecisionDigest string
 	var predecessorAdmissionDigest string
 	var predecessorTransitionDigest string
@@ -496,8 +498,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			body.AdmittedClaimState != variant.SourceClaimState || body.ResolutionDueAtUnix == 0 {
 			return errors.New("nonterminal fallback decision head is invalid")
 		}
-		wantPriorState, cutoff = variant.SourceClaimState, body.ResolutionDueAtUnix
-		wantSequence, ok = checkedAdd(body.DecisionSequence, 1)
+		wantPriorState, cutoff, ok = variant.SourceClaimState, body.ResolutionDueAtUnix, true
+		wantSequence, sequenceFits = checkedAdd(body.DecisionSequence, 1)
 		predecessorDecisionDigest = body.AuthorizedClaimDecisionDigest
 		predecessorAdmissionDigest = current.ReceiptEnvelopeDigest
 	case "reviewing_after_challenge", "reviewing_after_nonterminal_response":
@@ -518,8 +520,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			transition.Body.SuccessorDecisionDueAtUnix == 0 {
 			return errors.New("reviewing fallback transition head is substituted")
 		}
-		wantPriorState, cutoff = "reviewing", transition.Body.SuccessorDecisionDueAtUnix
-		wantSequence, ok = checkedAdd(current.ReceiptBody.DecisionSequence, 1)
+		wantPriorState, cutoff, ok = "reviewing", transition.Body.SuccessorDecisionDueAtUnix, true
+		wantSequence, sequenceFits = checkedAdd(current.ReceiptBody.DecisionSequence, 1)
 		predecessorDecisionDigest = current.ReceiptBody.AuthorizedClaimDecisionDigest
 		if wantKind == "challenge_admission" {
 			priorPendingToken = current.ReceiptBody.ResultingApplicationToken
@@ -536,7 +538,7 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		cutoff = source.lateFilingClose.Body.ClosedAtUnix
 		ok = cutoff > terms.TerminalResolutionDeadlineUnix && cutoff <= terms.LateIngressRecoveryDeadlineUnix
 	}
-	if !ok || decision.Body.DecisionPath != wantPath || variant.DecisionSequence != wantSequence ||
+	if !ok || !sequenceFits || decision.Body.DecisionPath != wantPath || variant.DecisionSequence != wantSequence ||
 		decision.Body.DecisionSequence != wantSequence || decision.Body.PredecessorAuthorizedClaimDecisionDigest != predecessorDecisionDigest ||
 		variant.SourceClaimStateRevision != receipt.Body.PriorClaimStateRevision {
 		return errors.New("claim decision fallback source lineage is invalid")
