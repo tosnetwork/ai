@@ -173,9 +173,12 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The stage action is admitted at at; the receipt body states the same
+	// time unless a test varies it.
+	stated, signedAt := history.receiptTime(at)
 	eligibility := history.eligibility(actionDigest, decisionDigest, terms.DecisionAdmissionAuthoritySubjects,
 		"claim-decision-admission-receipt", decisionDigest, terms.DecisionAdmissionProfile.ProfileDigest,
-		terms.DecisionAdmissionProfile, terms.CoverageStateDomainDigest, sequence, at)
+		terms.DecisionAdmissionProfile, terms.CoverageStateDomainDigest, sequence, stated)
 	eligibilityDigest, err := AuthorityAdmissionEligibilityProofSetDigestV1(eligibility)
 	if err != nil {
 		t.Fatal(err)
@@ -218,12 +221,12 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 		PriorClaimState: priorState, AdmittedClaimState: admittedState, PriorClaimStateRevision: state.stateRevision,
 		AdmittedClaimStateRevision: state.stateRevision + 1, ChallengeRoundsUsedBefore: state.challengeRounds,
 		ChallengeRoundsUsedAfter: state.challengeRounds, NonterminalRoundsUsedBefore: state.nonterminalRounds,
-		NonterminalRoundsUsedAfter: state.nonterminalRounds, ChallengeStartsAtUnix: at,
-		ChallengeEndsAtUnix: at + terms.ChallengeWindowSeconds, ResultingApplicationToken: &token,
+		NonterminalRoundsUsedAfter: state.nonterminalRounds, ChallengeStartsAtUnix: stated,
+		ChallengeEndsAtUnix: stated + terms.ChallengeWindowSeconds, ResultingApplicationToken: &token,
 		AggregatePendingDecisionReserveBefore: history.amount(history.pendingReserve),
 		AggregatePendingDecisionReserveAfter:  history.amount(pendingAfter),
 		AuthorizedActionDigest:                actionDigest, StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
-		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, AdmittedAtUnix: at,
+		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, AdmittedAtUnix: stated,
 		AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
 	if state.token != nil {
 		// A prior token that cannot be digested leaves the digest absent; a
@@ -236,7 +239,7 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 	var resultingToken *DecisionApplicationTokenV1
 	if nonterminal {
 		body.ChallengeStartsAtUnix, body.ChallengeEndsAtUnix, body.ResultingApplicationToken = 0, 0, nil
-		body.ResolutionStartsAtUnix, body.ResolutionDueAtUnix = at, at+resolutionWindow
+		body.ResolutionStartsAtUnix, body.ResolutionDueAtUnix = stated, stated+resolutionWindow
 	} else {
 		resultingToken = &token
 	}
@@ -256,7 +259,7 @@ func (history *signedHistory) decide(claimID string, dueAfterClose, at uint64) A
 		PredecessorClaimStateTransitionReceipt: state.transition, AuthorityAdmissionEligibilityProofSet: eligibility,
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signedHistoryGuarantor,
 			terms.DecisionAdmissionProfile, "claim-decision-admission-receipt", bodyDigest,
-			"tos.service.agent-guarantor-claim-decision-admission-signature.v1", at)}}
+			"tos.service.agent-guarantor-claim-decision-admission-signature.v1", signedAt)}}
 	history.coverageRevision++
 	history.pendingReserve = pendingAfter
 	state.status, state.stateRevision, state.decisionSequence = admittedState, state.stateRevision+1, sequence
@@ -403,6 +406,7 @@ func (history *signedHistory) apply(claimID string, payouts MaterializedPayoutOb
 		}
 	}
 	lines := uint64(len(payouts.MaterializedLines))
+	stated, signedAt := history.receiptTime(at)
 	body := ClaimDecisionApplicationReceiptBodyV1{SchemaVersion: 1, AuthorityID: action.AuthorityID,
 		CoverageAgreementBodyDigest: history.agreement, CoverageObligationID: history.obligation, ClaimID: claimID,
 		AuthorizedClaimDecisionDigest: decisionDigest, ClaimDecisionAdmissionReceiptDigest: admissionDigest,
@@ -420,7 +424,7 @@ func (history *signedHistory) apply(claimID string, payouts MaterializedPayoutOb
 		CumulativeApprovedBefore:              history.amount(history.cumulativeApproved),
 		CumulativeApprovedAfter:               history.amount(history.cumulativeApproved + reserved),
 		AggregatePendingDecisionReserveBefore: pendingBefore, AggregatePendingDecisionReserveAfter: pendingAfter,
-		AppliedAtUnix: at}
+		AppliedAtUnix: stated}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-claim-decision-application-receipt-body.v1", body)
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +435,7 @@ func (history *signedHistory) apply(claimID string, payouts MaterializedPayoutOb
 	receipt := AuthorizedClaimDecisionApplicationReceiptV1{Body: body, StageActionAdmissionEvidence: stage,
 		CoverageEndCommitment: admission.CoverageEndCommitment, AuthorizedTerminalClaimStateTransitionReceipt: transition,
 		DecisionApplicationToken: token, MaterializedPayoutObligationSet: payouts,
-		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.applicationAuthorization(body, at)}}
+		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.applicationAuthorization(body, signedAt)}}
 	history.coverageRevision++
 	history.pendingReserve -= reserved
 	history.cumulativeApproved += reserved

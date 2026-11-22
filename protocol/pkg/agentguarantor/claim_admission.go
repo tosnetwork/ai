@@ -301,7 +301,7 @@ func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, te
 		body.AuthorizedClaimEnvelopeDigest != claimDigest || body.ClaimSubmissionIngressReceiptDigest != ingressDigest ||
 		body.AuthorizedActionDigest != actionDigest || body.StableActionID != action.StableActionID ||
 		body.ExactRequestDigest != action.ExactRequestDigest || body.PriorCoverageRevision == 0 ||
-		body.AdmittedCoverageRevision != body.PriorCoverageRevision+1 || body.PriorCoverageEndCommitmentDigest != endDigest ||
+		!isNextRevisionV1(body.AdmittedCoverageRevision, body.PriorCoverageRevision) || body.PriorCoverageEndCommitmentDigest != endDigest ||
 		body.ResultingCoverageEndCommitmentDigest != endDigest || body.AdmittedClaimRevision != claim.Body.ClaimRevision ||
 		body.ClaimAdmissionLogID != claimLogID || body.ClaimRevisionLogID != revisionLogID ||
 		body.WriterGeneration != action.WriterGeneration || body.WriterFenceDigest != action.WriterFenceDigest ||
@@ -326,7 +326,7 @@ func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, te
 			return errors.New("initial Guarantor claim admission roots are invalid")
 		}
 	} else if body.AdmissionKind == "revision" {
-		if claim.Body.ClaimRevision <= 1 || body.PriorClaimRevision+1 != body.AdmittedClaimRevision ||
+		if claim.Body.ClaimRevision <= 1 || !isNextRevisionV1(body.AdmittedClaimRevision, body.PriorClaimRevision) ||
 			body.ClaimRevisionAdmissionSequence != body.AdmittedClaimRevision || !validDigest(body.InitialClaimAdmissionReceiptDigest) ||
 			!validDigest(body.PredecessorRevisionAdmissionReceiptDigest) || body.PriorClaimAdmissionLogRoot != body.AdmittedClaimAdmissionLogRoot {
 			return errors.New("revised Guarantor claim admission lineage is invalid")

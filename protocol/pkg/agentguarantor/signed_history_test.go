@@ -86,6 +86,14 @@ type signedHistoryVariation struct {
 	// admission changes the next decision admission receipt body before the
 	// admission authority signs it.
 	admission func(*ClaimDecisionAdmissionReceiptBodyV1)
+	// receiptAt is the time the next decision admission, transition or
+	// application receipt body states (with the windows and the eligibility
+	// proofs that follow it), instead of the time its stage action is admitted
+	// at.
+	receiptAt uint64
+	// transitionBody changes the next transition receipt body before the
+	// admission authority signs it.
+	transitionBody func(*ClaimStateTransitionReceiptBodyV1)
 	// proofSealedAt is when the decision proof inside the next transitions is
 	// sealed, instead of the transition's own time.
 	proofSealedAt uint64
@@ -95,10 +103,26 @@ type signedHistoryVariation struct {
 	filingCutEntry func(*ClaimIngressResolutionEntryV1)
 	frozenRoot     string
 	// closureAgreement replaces the Agreement the next terminal claim set
-	// names in its body, context, references and action; closureBody changes
-	// its body last.
+	// names in its body, context, references and action; closureContext
+	// changes its closure context before the context is digested, and the
+	// body restates the changed context; closureBody changes its body last.
 	closureAgreement string
+	closureContext   func(*CoverageClosureEvidenceContextV1)
 	closureBody      func(*TerminalClaimSetBodyV1)
+}
+
+// receiptTime is the time a receipt body states for a stage action admitted
+// at, and the time its authority signs it at: the varied receipt time when
+// one is set. An authorization cannot be signed at a time out of range, so a
+// body stating one is signed at the stage time.
+func (history *signedHistory) receiptTime(at uint64) (stated, signedAt uint64) {
+	if history.vary.receiptAt == 0 {
+		return at, at
+	}
+	if history.vary.receiptAt > 1<<62 {
+		return history.vary.receiptAt, at
+	}
+	return history.vary.receiptAt, history.vary.receiptAt
 }
 
 // signedHistoryClaim is the claim state the decision objects are built on.

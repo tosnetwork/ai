@@ -1,6 +1,10 @@
 package agentguarantor
 
-import "errors"
+import (
+	"errors"
+	"strings"
+	"time"
+)
 
 // claimReviewCutoffV1 is the claim-relative review cutoff: the latest
 // admission time of an ordinary initial decision and the trigger of the
@@ -26,7 +30,14 @@ func claimReviewCutoffV1(claimAdmission ClaimAdmissionReceiptBodyV1, terms Cover
 //     window;
 //   - admission never changes the challenge round count, changes the
 //     nonterminal count only by the one round a deterministic fallback closes,
-//     and leaves both within the Agreement's maxima.
+//     and leaves both within the Agreement's maxima;
+//   - a nonterminal result is admitted only while a nonterminal round remains
+//     and never in place of a challenged candidate;
+//   - off the late-recovery path, the admitted state's complete remaining
+//     closure ends by the terminal resolution deadline.
+//
+// The admission time itself is validated by validateDecisionAdmissionTimeV1,
+// which every caller runs first.
 //
 // The decision's window lengths are held to the terms by the decision body
 // validation. Later transitions read the windows and counts from the sealed
@@ -40,9 +51,6 @@ func validateDecisionAdmissionOutcomeV1(body ClaimDecisionAdmissionReceiptBodyV1
 	}
 	if body.AdmittedClaimState != target {
 		return errors.New("claim decision admission state differs from its decision's result")
-	}
-	if body.AdmittedAtUnix == 0 {
-		return errors.New("claim decision admission has no admission time")
 	}
 	switch decision.Result {
 	case DecisionApproved, DecisionPartiallyApproved, DecisionDenied:
@@ -89,7 +97,122 @@ func validateDecisionAdmissionOutcomeV1(body ClaimDecisionAdmissionReceiptBodyV1
 		body.NonterminalRoundsUsedAfter > terms.ClaimClosureCapacity.MaximumNonterminalRoundsPerClaim {
 		return errors.New("claim decision admission round count exceeds the Agreement's maximum")
 	}
+	if decision.Result == DecisionEvidenceRequired || decision.Result == DecisionDisputed {
+		// A nonterminal result is resolved by a response transition or by the
+		// fallback at its deadline, and either consumes a nonterminal round, so
+		// one must remain when the result is admitted. Terms that allow no
+		// nonterminal round therefore admit only challengeable candidates.
+		if body.NonterminalRoundsUsedAfter >= terms.ClaimClosureCapacity.MaximumNonterminalRoundsPerClaim {
+			return errors.New("nonterminal claim decision is admitted with no nonterminal round remaining")
+		}
+		// A decision replaces an application token only as the successor of a
+		// challenged candidate, and that successor must itself be a challengeable
+		// candidate. The receipt body records the replacement, so a compact proof
+		// shows it without the predecessor transition.
+		if body.PriorApplicationTokenDigest != "" || body.PriorApplicationTokenTerminalState != "" {
+			return errors.New("nonterminal claim decision admission replaces an application token: a challenge successor must be a challengeable candidate")
+		}
+	}
+	return validateOrdinaryDecisionClosureFitsV1(body, decision.Result, terms)
+}
+
+// validateOrdinaryDecisionClosureFitsV1 holds a decision admission off the
+// late-recovery path to the terminal resolution deadline: the complete
+// remaining closure of the state it admits (every remaining window of the
+// continuation budget entry for that state and its remaining rounds, then
+// payout and Adapter recovery) must end by that deadline. Payout
+// materialization caps every payout line there, so a decision admitted later
+// could never be applied. The late-recovery path is held to its own deadlines
+// where its candidate is admitted.
+func validateOrdinaryDecisionClosureFitsV1(body ClaimDecisionAdmissionReceiptBodyV1, result ClaimDecisionResult,
+	terms CoverageTermsV1) error {
+	if OnLateRecoveryPathV1(body) {
+		return nil
+	}
+	capacity := terms.ClaimClosureCapacity
+	// The outcome validation refuses counts past the maxima before it calls
+	// this; the guard is repeated so that the subtractions below cannot wrap
+	// whoever the caller is.
+	if body.ChallengeRoundsUsedAfter > capacity.MaximumChallengeRoundsPerClaim ||
+		body.NonterminalRoundsUsedAfter > capacity.MaximumNonterminalRoundsPerClaim {
+		return errors.New("claim decision admission round count exceeds the Agreement's maximum")
+	}
+	challengeRemaining := capacity.MaximumChallengeRoundsPerClaim - body.ChallengeRoundsUsedAfter
+	state, nonterminalRemaining := "challengeable_candidate", uint64(0)
+	if result == DecisionEvidenceRequired || result == DecisionDisputed {
+		state = string(result)
+		nonterminalRemaining = capacity.MaximumNonterminalRoundsPerClaim - body.NonterminalRoundsUsedAfter
+	}
+	for _, entry := range capacity.ContinuationBudgetEntries {
+		if !strings.HasPrefix(entry.ProfileStateKey, state+":") || entry.ChallengeRoundsRemaining != challengeRemaining ||
+			entry.NonterminalRoundsRemaining != nonterminalRemaining {
+			continue
+		}
+		closesBy, fits := checkedDurationAddV1(body.AdmittedAtUnix, entry.MaximumRemainingClosureSeconds)
+		if !fits || closesBy > terms.TerminalResolutionDeadlineUnix {
+			return errors.New("claim decision admission leaves no room to close by the terminal resolution deadline")
+		}
+		return nil
+	}
+	return errors.New("claim decision admission has no continuation budget entry for the state it admits")
+}
+
+// validateDecisionAdmissionTimeV1 holds the admission time of a decision to
+// the decision it admits, in the full receipt and in a compact proof alike;
+// both values are in either. The time is a protocol timestamp, so it lies in
+// the range a signed 64-bit Unix time holds: a larger value would wrap into
+// the past when converted and void every bound derived from it. An authorized
+// decision is admitted no earlier than it was decided and no later than it
+// expires; the expiry limits admission only, and a decision admitted in time
+// stays valid evidence after it. A deterministic fallback is materialized by
+// its admission, so it is decided at its admission time.
+func validateDecisionAdmissionTimeV1(body ClaimDecisionAdmissionReceiptBodyV1, decision ClaimDecisionBodyV1) error {
+	if !validUnixTimestampV1(body.AdmittedAtUnix) {
+		return errors.New("claim decision admission time is absent or out of range")
+	}
+	if body.AdmissionMode == "deterministic_fallback" {
+		if body.AdmittedAtUnix != decision.DecidedAtUnix {
+			return errors.New("deterministic fallback decision is not decided at its admission time")
+		}
+		return nil
+	}
+	if body.AdmittedAtUnix < decision.DecidedAtUnix {
+		return errors.New("authorized claim decision is admitted before it was decided")
+	}
+	if body.AdmittedAtUnix > decision.ExpiresAtUnix {
+		return errors.New("authorized claim decision is admitted after its expiry")
+	}
 	return nil
+}
+
+// bindReceiptTimeToStageAdmissionV1 anchors the time a receipt body states to
+// the stage action admission evidence the receipt carries. The body is signed
+// by the receipt's own quorum and the evidence by the Action Authority; both
+// record one admission, so they state one time. Without the tie, a body could
+// be signed with another time than its action was admitted at, and every
+// window and deadline computed from the body's time would move with it. The
+// time is in range and not after the verifier's present.
+func bindReceiptTimeToStageAdmissionV1(subject string, bodyTimeUnix uint64,
+	stage PortableStageActionAdmissionEvidenceV1, now time.Time) error {
+	if !validUnixTimestampV1(bodyTimeUnix) {
+		return errors.New(subject + " time is absent or out of range")
+	}
+	if bodyTimeUnix != stage.Body.AdmittedAtUnix {
+		return errors.New(subject + " time differs from its stage action admission evidence's")
+	}
+	present := now.UTC().Unix()
+	if present < 0 || bodyTimeUnix > uint64(present) {
+		return errors.New(subject + " time is after the verifier's present")
+	}
+	return nil
+}
+
+// isNextRevisionV1 reports whether next is exactly one past prior, for
+// revisions and sequences. A prior value at the top of the range has no
+// successor: unchecked, its successor would wrap to zero.
+func isNextRevisionV1(next, prior uint64) bool {
+	successor, fits := checkedAdd(prior, 1)
+	return fits && next == successor
 }
 
 // bindAuthorizedDecisionAdmissionToPredecessorV1 holds an authorized decision
@@ -102,14 +225,10 @@ func validateDecisionAdmissionOutcomeV1(body ClaimDecisionAdmissionReceiptBodyV1
 func bindAuthorizedDecisionAdmissionToPredecessorV1(body ClaimDecisionAdmissionReceiptBodyV1,
 	claimAdmission ClaimAdmissionReceiptBodyV1, predecessor *AuthorizedClaimStateTransitionReceiptV1,
 	terms CoverageTermsV1) error {
-	if body.AdmittedAtUnix < claimAdmission.AdmittedAtUnix {
-		return errors.New("claim decision is admitted before its claim admission")
+	if err := bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body, claimAdmission, predecessor == nil, terms); err != nil {
+		return err
 	}
 	if predecessor == nil {
-		cutoff, fits := claimReviewCutoffV1(claimAdmission, terms)
-		if !fits || body.AdmittedAtUnix > cutoff {
-			return errors.New("initial claim decision is admitted after the claim review cutoff")
-		}
 		if body.ChallengeRoundsUsedBefore != 0 || body.NonterminalRoundsUsedBefore != 0 {
 			return errors.New("initial claim decision admission starts with consumed rounds")
 		}
@@ -192,19 +311,23 @@ func bindDecisionRevisionEpochV1(subject string, body ClaimDecisionAdmissionRece
 	return nil
 }
 
-// validateAuthorizedDecisionAdmissionTimeV1 holds the admission time of an
-// authorized decision to the decision's own validity: no earlier than it was
-// decided and no later than it expires. The expiry limits admission only; a
-// decision admitted in time stays valid evidence after it.
-func validateAuthorizedDecisionAdmissionTimeV1(body ClaimDecisionAdmissionReceiptBodyV1, decision ClaimDecisionBodyV1) error {
-	if body.AdmittedAtUnix == 0 {
-		return errors.New("claim decision admission has no admission time")
+// bindAuthorizedDecisionAdmissionToClaimAdmissionV1 holds the admission time
+// of an authorized decision to the admission of the claim revision it decides:
+// not before it and, for the claim's initial decision, no later than the claim
+// review cutoff, where the initial terminal fallback becomes eligible. It needs
+// only the two receipt bodies, so it also runs where a compact decision proof
+// travels beside the compact proof of its claim admission, in a terminal
+// bundle.
+func bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body ClaimDecisionAdmissionReceiptBodyV1,
+	claimAdmission ClaimAdmissionReceiptBodyV1, initial bool, terms CoverageTermsV1) error {
+	if body.AdmittedAtUnix < claimAdmission.AdmittedAtUnix {
+		return errors.New("claim decision is admitted before its claim admission")
 	}
-	if body.AdmittedAtUnix < decision.DecidedAtUnix {
-		return errors.New("authorized claim decision is admitted before it was decided")
-	}
-	if body.AdmittedAtUnix > decision.ExpiresAtUnix {
-		return errors.New("authorized claim decision is admitted after its expiry")
+	if initial {
+		cutoff, fits := claimReviewCutoffV1(claimAdmission, terms)
+		if !fits || body.AdmittedAtUnix > cutoff {
+			return errors.New("initial claim decision is admitted after the claim review cutoff")
+		}
 	}
 	return nil
 }

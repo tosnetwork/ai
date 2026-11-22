@@ -27,24 +27,39 @@ func bindTerminalClaimSetToFilingCloseV1(body TerminalClaimSetBodyV1, filing Cla
 		!equalStrings(body.ClaimAdmissionAuthoritySubjects, terms.ClaimAdmissionAuthoritySubjects) {
 		return errors.New("terminal claim set names another claim admission authority than the Agreement's")
 	}
-	if body.FilingCloseReason != filing.FilingCloseReason || body.CoverageEndReason != filing.CoverageEndReason ||
-		body.IncidentEligibilityEndsAtUnix != filing.IncidentEligibilityEndsAtUnix ||
-		body.CoverageEndEvidenceDigest != filing.CoverageEndEvidenceDigest ||
-		body.CoverageCancellationReceiptDigest != filing.CoverageCancellationReceiptDigest ||
-		body.NonActivationEvidenceDigest != filing.NonActivationEvidenceDigest ||
-		body.ClaimAdmissionLogID != filing.ClaimAdmissionLogID {
-		return errors.New("terminal claim set restates its filing close differently")
+	for _, restated := range []struct {
+		field   string
+		differs bool
+	}{
+		{"filing close reason", body.FilingCloseReason != filing.FilingCloseReason},
+		{"coverage end reason", body.CoverageEndReason != filing.CoverageEndReason},
+		{"incident eligibility end", body.IncidentEligibilityEndsAtUnix != filing.IncidentEligibilityEndsAtUnix},
+		{"coverage end evidence", body.CoverageEndEvidenceDigest != filing.CoverageEndEvidenceDigest},
+		{"cancellation receipt", body.CoverageCancellationReceiptDigest != filing.CoverageCancellationReceiptDigest},
+		{"non-activation evidence", body.NonActivationEvidenceDigest != filing.NonActivationEvidenceDigest},
+		{"claim admission log", body.ClaimAdmissionLogID != filing.ClaimAdmissionLogID},
+	} {
+		if restated.differs {
+			return errors.New("terminal claim set restates its filing close's " + restated.field + " differently")
+		}
 	}
 	releasePending, fits := checkedAdd(body.PriorCoverageRevision, 1)
 	if body.FilingCloseCoverageRevision == 0 || body.FilingCloseCoverageRevision != filing.ClosedCoverageRevision ||
-		body.PriorCoverageRevision < body.FilingCloseCoverageRevision || !fits ||
-		body.ReleasePendingCoverageRevision != releasePending {
+		!fits || body.ReleasePendingCoverageRevision != releasePending {
 		return errors.New("terminal claim set coverage revisions do not follow its filing close")
 	}
+	if body.PriorCoverageRevision < body.FilingCloseCoverageRevision {
+		return errors.New("terminal claim set closes the coverage at a revision before its filing close's")
+	}
 	if body.FilingClosedAtUnix == 0 || body.FilingClosedAtUnix != filing.ClosedAtUnix ||
-		body.AllClaimsTerminalAtUnix < body.FilingClosedAtUnix || body.CreatedAtUnix < body.AllClaimsTerminalAtUnix ||
-		body.ReleaseNotBeforeUnix < body.AllClaimsTerminalAtUnix {
+		body.CreatedAtUnix < body.AllClaimsTerminalAtUnix {
 		return errors.New("terminal claim set times do not follow its filing close")
+	}
+	if body.AllClaimsTerminalAtUnix < body.FilingClosedAtUnix {
+		return errors.New("terminal claim set is terminal before its filing close")
+	}
+	if body.ReleaseNotBeforeUnix < body.AllClaimsTerminalAtUnix {
+		return errors.New("terminal claim set allows its release before all claims were terminal")
 	}
 	return nil
 }
@@ -119,8 +134,14 @@ func bindTerminalClaimsToFilingCutV1(bundles []ClaimTerminalResolutionBundleV1, 
 //
 // A decision on the late-recovery path names a late filing close. A coverage
 // closes filing once, so that digest is the set's own filing close.
+//
+// A compact decision proof cannot show when its claim was admitted; the bundle
+// carries that admission beside it. An authorized decision admission is
+// therefore held here to the carried claim admission it stands on: admitted
+// not before it and, as the claim's initial decision, by the claim review
+// cutoff.
 func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissions []ClaimAdmissionReceiptProofV1,
-	filingCloseDigest string, allClaimsTerminalAtUnix uint64) error {
+	filingCloseDigest string, allClaimsTerminalAtUnix uint64, terms CoverageTermsV1) error {
 	proofs, transitions := bundle.DecisionAdmissionReceiptProofs, bundle.ClaimStateTransitionReceipts
 	if len(admissions) == 0 || len(proofs) == 0 || len(transitions) == 0 || !validDigest(filingCloseDigest) {
 		return errors.New("terminal claim omits its admission, decision or state-transition history")
@@ -131,9 +152,9 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 	if err != nil {
 		return errors.New("terminal claim's final claim cannot be digested")
 	}
-	carriedAdmissions := make(map[string]struct{}, len(admissions))
+	carriedAdmissions := make(map[string]ClaimAdmissionReceiptBodyV1, len(admissions))
 	for _, admission := range admissions {
-		carriedAdmissions[admission.ReceiptEnvelopeDigest] = struct{}{}
+		carriedAdmissions[admission.ReceiptEnvelopeDigest] = admission.ReceiptBody
 	}
 	proofIndex := make(map[string]int, len(proofs))
 	for index, proof := range proofs {
@@ -154,8 +175,15 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 				return errors.New("terminal claim decision admissions are not a predecessor-linked chain")
 			}
 		}
-		if _, found := carriedAdmissions[body.AuthorizedClaimAdmissionReceiptDigest]; !found {
+		claimAdmission, found := carriedAdmissions[body.AuthorizedClaimAdmissionReceiptDigest]
+		if !found {
 			return errors.New("terminal claim decision admission stands on a claim admission outside its bundle")
+		}
+		if body.AdmissionMode == "authorized_decision" {
+			if err := bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body, claimAdmission,
+				proof.AuthorizedClaimDecision.Body.DecisionSequence == 1, terms); err != nil {
+				return err
+			}
 		}
 		if body.LateFilingCloseReceiptDigest != "" && body.LateFilingCloseReceiptDigest != filingCloseDigest {
 			return errors.New("terminal claim's late-path decision names another filing close than its set's")
@@ -174,9 +202,16 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 	for index, transition := range transitions {
 		digest, digestErr := ClaimStateTransitionReceiptDigestV1(transition)
 		decided, found := proofIndex[transition.DecisionAdmissionProof.ReceiptEnvelopeDigest]
-		if digestErr != nil || !found || transition.Body.ClaimID != initial.ClaimID ||
-			!equalCanonical(transition.DecisionAdmissionProof, proofs[decided]) {
+		if digestErr != nil || !found {
 			return errors.New("terminal claim carries a transition of a decision outside its bundle")
+		}
+		if transition.Body.ClaimID != initial.ClaimID {
+			return errors.New("terminal claim carries a transition of another claim")
+		}
+		// One receipt has one sealed proof: the proof a transition embeds is the
+		// carried one, byte for byte, not a second sealing of the same receipt.
+		if !equalCanonical(transition.DecisionAdmissionProof, proofs[decided]) {
+			return errors.New("terminal claim carries a transition whose decision admission proof is not the carried one")
 		}
 		if index == len(transitions)-1 {
 			if transition.Body.TransitionKind != "challenge_close" || decided != len(proofs)-1 {
@@ -199,13 +234,20 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 		return errors.New("terminal claim's application proof applies another admission, transition or token")
 	}
 	ref := bundle.ResolutionRef
-	if string(ref.TerminalClaimState) != closing.ResultingClaimState ||
-		ref.ClaimStateRevision != closing.ResultingClaimStateRevision ||
-		application.AppliedClaimStateRevision != closing.ResultingClaimStateRevision {
+	if string(ref.TerminalClaimState) != closing.ResultingClaimState {
+		return errors.New("terminal claim state differs from its closing transition's resulting state")
+	}
+	if ref.ClaimStateRevision != closing.ResultingClaimStateRevision {
 		return errors.New("terminal claim state differs from its closing transition")
 	}
-	if application.AppliedAtUnix < closing.TransitionedAtUnix || application.AppliedAtUnix > allClaimsTerminalAtUnix {
-		return errors.New("terminal claim's decision is applied before its close or after the set became terminal")
+	if application.AppliedClaimStateRevision != closing.ResultingClaimStateRevision {
+		return errors.New("terminal claim's application proof applies at another claim state revision than its closing transition's")
+	}
+	if application.AppliedAtUnix < closing.TransitionedAtUnix {
+		return errors.New("terminal claim's decision is applied before its challenge close")
+	}
+	if application.AppliedAtUnix > allClaimsTerminalAtUnix {
+		return errors.New("terminal claim's decision is applied after the set became terminal")
 	}
 	return nil
 }
@@ -225,13 +267,20 @@ func bindExposureReleaseToOfferV1(value AuthorizedExposureReleaseReceiptV1, offe
 	if body.CoverageAgreementBodyDigest != offer.Body.CoverageAgreementBodyDigest ||
 		body.CoverageObligationID != offer.Body.CoverageObligationID ||
 		body.CoverageAgreementBodyDigest != terminal.CoverageAgreementBodyDigest ||
-		body.CoverageObligationID != terminal.CoverageObligationID ||
-		body.GuarantorAgentID != offer.Body.GuarantorAgentID || body.AuthorityID != bound.ActionAuthorityID {
-		return errors.New("exposure release names another coverage, Guarantor or authority than the firm offer's")
+		body.CoverageObligationID != terminal.CoverageObligationID {
+		return errors.New("exposure release names another coverage than the firm offer's")
 	}
-	if body.ReleasedAtUnix == 0 || body.ReleasedAtUnix < terminal.ReleaseNotBeforeUnix ||
-		body.ReleasedAtUnix < terminal.CreatedAtUnix {
+	if body.GuarantorAgentID != offer.Body.GuarantorAgentID {
+		return errors.New("exposure release names another Guarantor than the firm offer's")
+	}
+	if body.AuthorityID != bound.ActionAuthorityID {
+		return errors.New("exposure release names another authority than the Agreement's release authority")
+	}
+	if body.ReleasedAtUnix == 0 || body.ReleasedAtUnix < terminal.ReleaseNotBeforeUnix {
 		return errors.New("exposure release precedes the terminal claim set's release time")
+	}
+	if body.ReleasedAtUnix < terminal.CreatedAtUnix {
+		return errors.New("exposure release precedes the creation of its terminal claim set")
 	}
 	return nil
 }
@@ -244,8 +293,11 @@ func bindExposureReleaseToOfferV1(value AuthorizedExposureReleaseReceiptV1, offe
 func bindCoverageResolutionToReleaseV1(body CoverageResolutionBodyV1, release ExposureReleaseReceiptBodyV1,
 	terminal TerminalClaimSetBodyV1, bound GuarantorStageActionAuthorityV1) error {
 	if body.CoverageAgreementBodyDigest != release.CoverageAgreementBodyDigest ||
-		body.CoverageObligationID != release.CoverageObligationID || body.AuthorityID != bound.ActionAuthorityID {
-		return errors.New("coverage resolution names another coverage or authority than its exposure release")
+		body.CoverageObligationID != release.CoverageObligationID {
+		return errors.New("coverage resolution names another coverage than its exposure release")
+	}
+	if body.AuthorityID != bound.ActionAuthorityID {
+		return errors.New("coverage resolution names another authority than the Agreement's resolution authority")
 	}
 	if body.PriorCoverageRevision != terminal.ReleasePendingCoverageRevision {
 		return errors.New("coverage resolution does not follow the terminal claim set's release-pending revision")

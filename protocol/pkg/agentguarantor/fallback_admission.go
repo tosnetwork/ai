@@ -496,8 +496,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			body.AdmittedClaimState != variant.SourceClaimState || body.ResolutionDueAtUnix == 0 {
 			return errors.New("nonterminal fallback decision head is invalid")
 		}
-		wantPriorState, wantSequence, cutoff, ok = variant.SourceClaimState, body.DecisionSequence+1,
-			body.ResolutionDueAtUnix, true
+		wantPriorState, cutoff = variant.SourceClaimState, body.ResolutionDueAtUnix
+		wantSequence, ok = checkedAdd(body.DecisionSequence, 1)
 		predecessorDecisionDigest = body.AuthorizedClaimDecisionDigest
 		predecessorAdmissionDigest = current.ReceiptEnvelopeDigest
 	case "reviewing_after_challenge", "reviewing_after_nonterminal_response":
@@ -518,8 +518,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			transition.Body.SuccessorDecisionDueAtUnix == 0 {
 			return errors.New("reviewing fallback transition head is substituted")
 		}
-		wantPriorState, wantSequence, cutoff, ok = "reviewing", current.ReceiptBody.DecisionSequence+1,
-			transition.Body.SuccessorDecisionDueAtUnix, true
+		wantPriorState, cutoff = "reviewing", transition.Body.SuccessorDecisionDueAtUnix
+		wantSequence, ok = checkedAdd(current.ReceiptBody.DecisionSequence, 1)
 		predecessorDecisionDigest = current.ReceiptBody.AuthorizedClaimDecisionDigest
 		if wantKind == "challenge_admission" {
 			priorPendingToken = current.ReceiptBody.ResultingApplicationToken
@@ -551,6 +551,9 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		if err := lateRecoveryClosureFitsV1(terms, receipt.Body.ChallengeRoundsUsedAfter, receipt.Body.AdmittedAtUnix); err != nil {
 			return err
 		}
+	}
+	if err := validateDecisionAdmissionTimeV1(receipt.Body, decision.Body); err != nil {
+		return err
 	}
 	if err := ValidateClaimDecision(decision, claim, terms, authorityResolver,
 		terms.ClaimClosureCapacity.TerminalFallback.FallbackAuthoritySubjects,
@@ -588,14 +591,15 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		body.PredecessorDecisionAdmissionReceiptDigest != predecessorAdmissionDigest ||
 		body.PredecessorClaimStateTransitionReceiptDigest != predecessorTransitionDigest ||
 		body.DecisionSequence != wantSequence || body.DecisionRevision != 1 || body.DecisionPath != wantPath ||
-		body.PriorClaimState != wantPriorState || body.AdmittedClaimState != target || body.AdmittedClaimStateRevision != body.PriorClaimStateRevision+1 ||
-		body.AdmittedCoverageRevision != body.PriorCoverageRevision+1 || body.PriorCoverageEndCommitmentDigest != endDigest ||
+		body.PriorClaimState != wantPriorState || body.AdmittedClaimState != target ||
+		!isNextRevisionV1(body.AdmittedClaimStateRevision, body.PriorClaimStateRevision) ||
+		!isNextRevisionV1(body.AdmittedCoverageRevision, body.PriorCoverageRevision) || body.PriorCoverageEndCommitmentDigest != endDigest ||
 		body.ResultingCoverageEndCommitmentDigest != endDigest || body.AuthorizedActionDigest != actionDigest ||
 		body.StableActionID != receipt.StageActionAdmissionEvidence.AuthorizedAction.StableActionID ||
 		body.ExactRequestDigest != receipt.StageActionAdmissionEvidence.AuthorizedAction.ExactRequestDigest ||
 		body.WriterGeneration != receipt.StageActionAdmissionEvidence.AuthorizedAction.WriterGeneration ||
 		body.WriterFenceDigest != receipt.StageActionAdmissionEvidence.AuthorizedAction.WriterFenceDigest ||
-		body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest || body.AdmittedAtUnix != decision.Body.DecidedAtUnix {
+		body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest {
 		return errors.New("claim decision fallback admission receipt binding is invalid")
 	}
 	if priorPendingToken != nil {

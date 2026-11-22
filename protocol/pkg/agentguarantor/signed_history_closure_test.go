@@ -1,6 +1,7 @@
 package agentguarantor
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -255,10 +256,60 @@ func TestSignedHistoryExposureReleaseIsOfTheOffersReservationAndClaimSet(t *test
 	refusedFor(t, "another obligation",
 		history.verifyRelease(history.releaseAfterClosure(set, own, releasedAt, func(body *ExposureReleaseReceiptBodyV1) {
 			body.CoverageObligationID = "obligation:other"
-		}), releasedAt), "exposure release names another coverage, Guarantor or authority than the firm offer's")
+		}), releasedAt), "exposure release names another coverage than the firm offer's")
+	refusedFor(t, "another Guarantor",
+		history.verifyRelease(history.releaseAfterClosure(set, own, releasedAt, func(body *ExposureReleaseReceiptBodyV1) {
+			body.GuarantorAgentID = "agent:other"
+		}), releasedAt), "exposure release names another Guarantor than the firm offer's")
+	refusedFor(t, "another authority",
+		history.verifyRelease(history.releaseAfterClosure(set, own, releasedAt, func(body *ExposureReleaseReceiptBodyV1) {
+			body.AuthorityID = "authority:other"
+		}), releasedAt), "exposure release names another authority than the Agreement's release authority")
 	refusedFor(t, "released a second before the claim set allows",
 		history.verifyRelease(history.releaseAfterClosure(set, own, set.Body.ReleaseNotBeforeUnix-1, nil), releasedAt),
 		"exposure release precedes the terminal claim set's release time")
+	refusedFor(t, "remaining reserved exposure in another asset",
+		history.verifyRelease(history.releaseAfterClosure(set, own, releasedAt, func(body *ExposureReleaseReceiptBodyV1) {
+			body.RemainingReservedExposure.Asset.AssetIdentifier += "-other"
+		}), releasedAt), "exposure release states its remaining reserved exposure in another asset than the reservation's")
+	refusedFor(t, "one atomic unit left reserved",
+		history.verifyRelease(history.releaseAfterClosure(set, own, releasedAt, func(body *ExposureReleaseReceiptBodyV1) {
+			body.RemainingReservedExposure.AmountAtomic = "1"
+		}), releasedAt), "exposure release leaves exposure reserved")
+	// A release-state revision at the top of the range has no successor.
+	refusedFor(t, "a released revision that wraps to zero",
+		history.verifyRelease(history.releaseAfterClosure(set, own, releasedAt, func(body *ExposureReleaseReceiptBodyV1) {
+			body.BaseReleaseStateRevision, body.ReleasedReleaseStateRevision = math.MaxUint64, 0
+		}), releasedAt), "exposure release receipt binding is invalid")
+
+	// A claim set created after the time it allows its release from: the
+	// release is not before the set exists either.
+	history.vary = signedHistoryVariation{closureBody: func(body *TerminalClaimSetBodyV1) { body.CreatedAtUnix += 50 }}
+	createdLater := history.terminalSet(claim.filing, []ClaimTerminalResolutionBundleV1{bundle}, claim.closedAt)
+	history.vary = signedHistoryVariation{}
+	created := createdLater.Body.CreatedAtUnix
+	if createdLater.Body.ReleaseNotBeforeUnix >= created {
+		t.Fatalf("the set allows its release at %d, not before it was created at %d", createdLater.Body.ReleaseNotBeforeUnix, created)
+	}
+	if err := history.verifyRelease(history.releaseAfterClosure(createdLater, own, created, nil), created); err != nil {
+		t.Errorf("an exposure release at the instant its claim set was created is refused: %v", err)
+	}
+	refusedFor(t, "released a second before its claim set was created",
+		history.verifyRelease(history.releaseAfterClosure(createdLater, own, created-1, nil), created),
+		"exposure release precedes the creation of its terminal claim set")
+
+	// The offer's own exposure admission, carried byte for byte, whose only
+	// authorization is the Guarantor's signature over another body: the
+	// release reads the reservation from it, so it is verified, not only
+	// compared.
+	unsigned := own
+	unsigned.Authorizations = []ProfileQualifiedObjectAuthorizationV1{history.signObject("exposure-admission-receipt",
+		testDigest("7"), "tos.service.agent-guarantor-exposure-receipt-signature.v1", signedHistoryStart)}
+	history.offer.ExposureAdmissionReceipt = unsigned
+	refusedFor(t, "the offer's exposure admission authorized over another body",
+		history.verifyRelease(history.releaseAfterClosure(set, unsigned, releasedAt, nil), releasedAt),
+		"exposure release carries an exposure admission that does not verify")
+	history.offer.ExposureAdmissionReceipt = own
 }
 
 // TestSignedHistoryCoverageResolutionFollowsItsReleaseAndClaimSet: the
@@ -284,7 +335,11 @@ func TestSignedHistoryCoverageResolutionFollowsItsReleaseAndClaimSet(t *testing.
 	refusedFor(t, "another obligation",
 		history.verifyResolution(history.resolveAfterRelease(release, resolvedAt, func(body *CoverageResolutionBodyV1) {
 			body.CoverageObligationID = "obligation:other"
-		}), resolvedAt), "coverage resolution names another coverage or authority than its exposure release")
+		}), resolvedAt), "coverage resolution names another coverage than its exposure release")
+	refusedFor(t, "another authority",
+		history.verifyResolution(history.resolveAfterRelease(release, resolvedAt, func(body *CoverageResolutionBodyV1) {
+			body.AuthorityID = "authority:other"
+		}), resolvedAt), "coverage resolution names another authority than the Agreement's resolution authority")
 	refusedFor(t, "another prior revision",
 		history.verifyResolution(history.resolveAfterRelease(release, resolvedAt, func(body *CoverageResolutionBodyV1) {
 			body.PriorCoverageRevision++

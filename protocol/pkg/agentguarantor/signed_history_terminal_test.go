@@ -221,6 +221,9 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		ClaimAdmissionLogRoot: filing.Body.FrozenClaimAdmissionLogRoot, ClaimResolutionSetDigest: refSetDigest,
 		CumulativeApprovedAmount: zero, CumulativePaidAmount: zero, CumulativeDefaultedAmount: zero,
 		OutstandingApprovedAmount: zero, ReleaseNotBeforeUnix: at}
+	if history.vary.closureContext != nil {
+		history.vary.closureContext(&closure)
+	}
 	closureDigest, err := CoverageClosureEvidenceContextDigestV1(closure)
 	if err != nil {
 		t.Fatal(err)
@@ -273,17 +276,19 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		CoverageObligationID: history.obligation, ClaimAdmissionProfileDigest: policyDigest,
 		ClaimAdmissionAuthoritySubjects: append([]string(nil), terms.ClaimAdmissionAuthoritySubjects...),
 		ClaimAdmissionLogID:             filing.Body.ClaimAdmissionLogID, ClaimFilingCloseReceiptDigest: filingDigest,
-		CoverageEndCommitmentDigest: filing.Body.CoverageEndCommitmentDigest, FilingCloseReason: filing.Body.FilingCloseReason,
-		CoverageEndReason: filing.Body.CoverageEndReason, IncidentEligibilityEndsAtUnix: filing.Body.IncidentEligibilityEndsAtUnix,
-		CoverageEndEvidenceDigest: filing.Body.CoverageEndEvidenceDigest, ActivationEvidenceDigest: filing.Body.ActivationEvidenceDigest,
-		CoverageClosureReason: closureReason, ResolutionTargetTerminalState: targetState,
+		CoverageEndCommitmentDigest: filing.Body.CoverageEndCommitmentDigest, FilingCloseReason: closure.FilingCloseReason,
+		CoverageEndReason: closure.CoverageEndReason, IncidentEligibilityEndsAtUnix: closure.IncidentEligibilityEndsAtUnix,
+		CoverageEndEvidenceDigest:         closure.CoverageEndEvidenceDigest,
+		CoverageCancellationReceiptDigest: closure.CoverageCancellationReceiptDigest,
+		ActivationEvidenceDigest:          filing.Body.ActivationEvidenceDigest,
+		CoverageClosureReason:             closureReason, ResolutionTargetTerminalState: targetState,
 		CoverageClosureContextDigest: closureDigest, CoverageClosureEvidenceSetDigest: evidenceDigest,
 		TransitionEvidenceProjectionDigest: projectionDigest, FilingCloseCoverageRevision: filing.Body.ClosedCoverageRevision,
 		PriorCoverageRevision: history.coverageRevision, ReleasePendingCoverageRevision: history.coverageRevision + 1,
 		AdmissionHighWater: high, ClaimAdmissionLogRoot: filing.Body.FrozenClaimAdmissionLogRoot, ClaimResolutions: refs,
 		CumulativeApprovedAmount: zero, CumulativePaidAmount: zero, CumulativeDefaultedAmount: zero,
 		OutstandingApprovedAmount: zero, ClaimSetRevision: 1, FilingClosedAtUnix: filing.Body.ClosedAtUnix,
-		AllClaimsTerminalAtUnix: at, ReleaseNotBeforeUnix: at, AuthorizedActionDigest: actionDigest,
+		AllClaimsTerminalAtUnix: at, ReleaseNotBeforeUnix: closure.ReleaseNotBeforeUnix, AuthorizedActionDigest: actionDigest,
 		StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
 		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, CreatedAtUnix: at,
 		RequiredExtensions: append([]ProfileRefV1(nil), terms.RequiredExtensions...),

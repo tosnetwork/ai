@@ -93,19 +93,35 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 		body.CoverageAgreementBodyDigest != proof.AuthorizedClaim.Body.CoverageAgreementBodyDigest ||
 		body.CoverageObligationID != proof.AuthorizedClaim.Body.CoverageObligationID ||
 		body.DecisionSequence != proof.AuthorizedClaimDecision.Body.DecisionSequence ||
-		body.AdmittedAtUnix == 0 || uint64(now.UTC().Unix()) < body.AdmittedAtUnix {
+		uint64(now.UTC().Unix()) < body.AdmittedAtUnix {
 		return errors.New("claim decision admission compact proof binding is invalid")
 	}
 	if isFallbackDecisionPathV1(proof.AuthorizedClaimDecision.Body.DecisionPath) !=
 		(body.AdmissionMode == "deterministic_fallback") {
 		return errors.New("claim decision admission compact proof mixes its admission mode and decision path")
 	}
+	// The candidate of the late-recovery path names its late filing close. Its
+	// successor is recognized by that digest alone, so a candidate proof
+	// without it would let the successor pass for an ordinary one.
+	if proof.AuthorizedClaimDecision.Body.DecisionPath == "late_recovery_terminal_fallback" &&
+		!validDigest(body.LateFilingCloseReceiptDigest) {
+		return errors.New("late-recovery candidate compact proof names no late filing close")
+	}
+	// The proof carries the decision and the admission time, so the decision's
+	// own bounds on that time hold here as in the full receipt. What the proof
+	// does not carry (the claim admission, the predecessor transition and the
+	// revision cut) is bound only by the full receipt or by a bundle that
+	// carries those objects beside the proof.
+	if err := validateDecisionAdmissionTimeV1(body, proof.AuthorizedClaimDecision.Body); err != nil {
+		return err
+	}
 	claimValidationTime := time.Unix(int64(proof.AuthorizedClaim.Body.CreatedAtUnix), 0).UTC()
 	if err := VerifyClaim(proof.AuthorizedClaim, terms, body.CoverageAgreementBodyDigest,
 		body.CoverageObligationID, authorityResolver, claimValidationTime); err != nil {
 		return err
 	}
-	decisionValidationTime := time.Unix(int64(proof.AuthorizedClaimDecision.Body.DecidedAtUnix), 0).UTC()
+	// As in the full receipt, the decision is judged at its admission time.
+	decisionValidationTime := time.Unix(int64(body.AdmittedAtUnix), 0).UTC()
 	if err := ValidateClaimDecision(proof.AuthorizedClaimDecision, proof.AuthorizedClaim, terms,
 		authorityResolver, decisionAuthoritySubjectsForPathV1(terms, proof.AuthorizedClaimDecision.Body.DecisionPath),
 		decisionValidationTime); err != nil {

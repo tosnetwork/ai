@@ -315,6 +315,9 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 		EvidenceSetDigest: evidenceDigest, PolicyApplicationDigest: policyDigest, ReasonDigest: reasonDigest,
 		ChallengeWindowSeconds: terms.ChallengeWindowSeconds, DecidedAtUnix: at, ExpiresAtUnix: expiresAt},
 		DecisionEvidenceSet: evidence, PolicyApplication: policy, DecisionReason: reason}
+	if history.vary.decision != nil {
+		history.vary.decision(&decision.Body)
+	}
 	decisionDigest, err := ClaimDecisionDigestV1(decision)
 	if err != nil {
 		t.Fatal(err)
@@ -504,7 +507,11 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 	t, terms := history.t, history.terms
 	state := history.claims[claimID]
 	purpose, resultingState := "claim-challenge-admission", "reviewing"
-	challengeRoundsAfter, successorDue := state.challengeRounds+1, at+terms.SuccessorDecisionWindowSeconds
+	// The stage action is admitted at at; the receipt body states the same
+	// time unless a test varies it, and the successor cutoff follows the
+	// stated time.
+	stated, signedAt := history.receiptTime(at)
+	challengeRoundsAfter, successorDue := state.challengeRounds+1, stated+terms.SuccessorDecisionWindowSeconds
 	switch kind {
 	case "challenge_admission":
 	case "challenge_close":
@@ -571,7 +578,7 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 	}
 	eligibility := history.eligibility(actionDigest, decisionDigest, terms.DecisionAdmissionAuthoritySubjects,
 		"claim-state-transition-receipt", projectionDigest, terms.DecisionAdmissionProfile.ProfileDigest,
-		terms.DecisionAdmissionProfile, bound.AdmissionStateDomainDigest, state.stateRevision+1, at)
+		terms.DecisionAdmissionProfile, bound.AdmissionStateDomainDigest, state.stateRevision+1, stated)
 	eligibilityDigest, err := AuthorityAdmissionEligibilityProofSetDigestV1(eligibility)
 	if err != nil {
 		t.Fatal(err)
@@ -584,7 +591,10 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 		PriorClaimStateRevision: state.stateRevision, ResultingClaimStateRevision: state.stateRevision + 1,
 		ChallengeRoundsUsedBefore: state.challengeRounds, ChallengeRoundsUsedAfter: challengeRoundsAfter,
 		NonterminalRoundsUsedBefore: state.nonterminalRounds, NonterminalRoundsUsedAfter: state.nonterminalRounds,
-		SuccessorDecisionDueAtUnix: successorDue, TransitionedAtUnix: at, AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
+		SuccessorDecisionDueAtUnix: successorDue, TransitionedAtUnix: stated, AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
+	if history.vary.transitionBody != nil {
+		history.vary.transitionBody(&body)
+	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-claim-state-transition-receipt-body.v1", body)
 	if err != nil {
 		t.Fatal(err)
@@ -596,7 +606,7 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 		TransitionEvidenceProjection: projection, TransitionEvidenceSet: evidence, AuthorityAdmissionEligibilityProofSet: eligibility,
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signedHistoryGuarantor,
 			terms.DecisionAdmissionProfile, "claim-state-transition-receipt", bodyDigest,
-			"tos.service.agent-guarantor-claim-state-transition-signature.v1", at)}}
+			"tos.service.agent-guarantor-claim-state-transition-signature.v1", signedAt)}}
 	state.status, state.stateRevision, state.challengeRounds = resultingState, state.stateRevision+1, challengeRoundsAfter
 	state.transition = &receipt
 	if kind == "challenge_admission" && decision.AuthorizedClaimDecision.Body.DecisionPath != "late_recovery_terminal_fallback" {

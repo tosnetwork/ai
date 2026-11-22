@@ -13,7 +13,8 @@ import (
 
 // lateChainOptions varies how a lateChain is built.
 type lateChainOptions struct {
-	// vary applies while the claim history is signed, up to the application.
+	// vary applies while the claim history is signed, up to the terminal
+	// decision.
 	vary signedHistoryVariation
 	// agreement, when set, is the Agreement the whole history is signed on.
 	agreement string
@@ -28,6 +29,12 @@ type lateChainOptions struct {
 	candidateOnSecondRevision bool
 	// unchallenged ends the claim on the candidate itself.
 	unchallenged bool
+	// closing applies while the terminal decision's challenge close is
+	// signed.
+	closing signedHistoryVariation
+	// appliedAt is when the terminal decision is applied, given the time of its
+	// challenge close; nil means ten seconds after the close.
+	appliedAt func(closeAt uint64) uint64
 }
 
 // lateChain is one claim of three revisions taken to its terminal denial on
@@ -86,10 +93,15 @@ func newLateChain(t *testing.T, options lateChainOptions) lateChain {
 		denied = history.fallback(claimID, nil, chain.challenge.Body.SuccessorDecisionDueAtUnix)
 	}
 	closeAt := denied.Body.ChallengeEndsAtUnix
+	history.vary = options.closing
 	history.challengeClose(claimID, closeAt)
-	chain.application = history.apply(claimID, history.materialize(claimID, history.terms), closeAt+10)
-	chain.closedAt = closeAt + 20
 	history.vary = signedHistoryVariation{}
+	appliedAt := closeAt + 10
+	if options.appliedAt != nil {
+		appliedAt = options.appliedAt(closeAt)
+	}
+	chain.application = history.apply(claimID, history.materialize(claimID, history.terms), appliedAt)
+	chain.closedAt = closeAt + 20
 	return chain
 }
 
@@ -135,6 +147,14 @@ func TestSignedHistoryTerminalClaimSetFollowsItsFilingCloseAndOffer(t *testing.T
 	body := func(change func(*TerminalClaimSetBodyV1)) signedHistoryVariation {
 		return signedHistoryVariation{closureBody: change}
 	}
+	contextAndBody := func(change func(*CoverageClosureEvidenceContextV1)) signedHistoryVariation {
+		return signedHistoryVariation{closureContext: change}
+	}
+	// The honest set allows its release exactly when all claims are terminal.
+	if set := history.terminalSet(chain.filing, []ClaimTerminalResolutionBundleV1{bundle}, chain.closedAt); set.Body.ReleaseNotBeforeUnix != set.Body.AllClaimsTerminalAtUnix {
+		t.Fatalf("the honest set allows its release at %d, want the time all claims were terminal, %d",
+			set.Body.ReleaseNotBeforeUnix, set.Body.AllClaimsTerminalAtUnix)
+	}
 	for _, test := range []struct {
 		name string
 		vary signedHistoryVariation
@@ -146,19 +166,50 @@ func TestSignedHistoryTerminalClaimSetFollowsItsFilingCloseAndOffer(t *testing.T
 			body.ClaimAdmissionAuthoritySubjects = []string{"agent:other"}
 		}), "terminal claim set names another claim admission authority than the Agreement's"},
 		{"another claim admission log", body(func(body *TerminalClaimSetBodyV1) { body.ClaimAdmissionLogID = "claim-log:other" }),
-			"terminal claim set restates its filing close differently"},
+			"terminal claim set restates its filing close's claim admission log differently"},
+		// The closure context states each of the next five values as well, and
+		// the set's shape holds the body to its context, so both are signed with
+		// the changed value: the set is refused for the filing close alone.
+		{"another filing close reason", contextAndBody(func(closure *CoverageClosureEvidenceContextV1) {
+			closure.FilingCloseReason = "accepted_cancellation"
+		}), "terminal claim set restates its filing close's filing close reason differently"},
+		{"another coverage end reason", contextAndBody(func(closure *CoverageClosureEvidenceContextV1) {
+			closure.CoverageEndReason = "accepted_cancellation"
+		}), "terminal claim set restates its filing close's coverage end reason differently"},
+		{"another incident eligibility end", contextAndBody(func(closure *CoverageClosureEvidenceContextV1) {
+			closure.IncidentEligibilityEndsAtUnix--
+		}), "terminal claim set restates its filing close's incident eligibility end differently"},
+		{"another coverage end evidence", contextAndBody(func(closure *CoverageClosureEvidenceContextV1) {
+			closure.CoverageEndEvidenceDigest = testDigest("7")
+		}), "terminal claim set restates its filing close's coverage end evidence differently"},
+		{"a cancellation receipt the filing close does not name", contextAndBody(func(closure *CoverageClosureEvidenceContextV1) {
+			closure.CoverageCancellationReceiptDigest = testDigest("7")
+		}), "terminal claim set restates its filing close's cancellation receipt differently"},
+		{"non-activation evidence the filing close does not name", body(func(body *TerminalClaimSetBodyV1) {
+			body.NonActivationEvidenceDigest = testDigest("7")
+		}), "terminal claim set restates its filing close's non-activation evidence differently"},
 		{"another filing-close revision", body(func(body *TerminalClaimSetBodyV1) { body.FilingCloseCoverageRevision++ }),
 			"terminal claim set coverage revisions do not follow its filing close"},
 		{"a release-pending revision two past the prior one", body(func(body *TerminalClaimSetBodyV1) {
 			body.ReleasePendingCoverageRevision++
 		}), "terminal claim set coverage revisions do not follow its filing close"},
+		{"closed at the revision before the filing close's", body(func(body *TerminalClaimSetBodyV1) {
+			body.PriorCoverageRevision = body.FilingCloseCoverageRevision - 1
+			body.ReleasePendingCoverageRevision = body.FilingCloseCoverageRevision
+		}), "terminal claim set closes the coverage at a revision before its filing close's"},
 		{"another filing-close time", body(func(body *TerminalClaimSetBodyV1) { body.FilingClosedAtUnix++ }),
 			"terminal claim set times do not follow its filing close"},
 		{"created a second before all claims were terminal", body(func(body *TerminalClaimSetBodyV1) { body.CreatedAtUnix-- }),
 			"terminal claim set times do not follow its filing close"},
+		{"terminal a second before filing closed", body(func(body *TerminalClaimSetBodyV1) {
+			body.AllClaimsTerminalAtUnix = body.FilingClosedAtUnix - 1
+		}), "terminal claim set is terminal before its filing close"},
+		{"a release allowed a second before all claims were terminal", contextAndBody(func(closure *CoverageClosureEvidenceContextV1) {
+			closure.ReleaseNotBeforeUnix--
+		}), "terminal claim set allows its release before all claims were terminal"},
 		{"terminal a second before the claim's decision was applied", body(func(body *TerminalClaimSetBodyV1) {
 			body.AllClaimsTerminalAtUnix = chain.application.Body.AppliedAtUnix - 1
-		}), "terminal claim's decision is applied before its close or after the set became terminal"},
+		}), "terminal claim's decision is applied after the set became terminal"},
 	} {
 		history.vary = test.vary
 		refusedFor(t, test.name, chain.verdictOf(t, test.name, bundle), test.want)
@@ -322,4 +373,61 @@ func TestSignedHistoryTerminalDecisionStandsOnTheFinalRevisionAndFilingClose(t *
 	})})
 	refusedFor(t, "a late-recovery candidate naming another filing close", otherClose.verdictOf(t, "another close", otherClose.bundle()),
 		"terminal claim's late-path decision names another filing close than its set's")
+}
+
+// TestSignedHistoryTerminalBundleClosesAndAppliesItsOwnDecision: the closing
+// transition of a bundle is this claim's, embeds the carried decision proof
+// byte for byte and states the claim state the reference states; the
+// application proof applies at the closing transition's claim state revision
+// and not before the close. Each bundle below is signed in full and differs
+// from the accepted one in the one value its refusal names.
+func TestSignedHistoryTerminalBundleClosesAndAppliesItsOwnDecision(t *testing.T) {
+	chain := newLateChain(t, lateChainOptions{unchallenged: true})
+	history := chain.history
+	honest := chain.bundle()
+	if err := chain.verdictOf(t, "the honest bundle", honest); err != nil {
+		t.Fatalf("the honest bundle does not verify: %v", err)
+	}
+
+	atClose := newLateChain(t, lateChainOptions{unchallenged: true, appliedAt: func(closeAt uint64) uint64 { return closeAt }})
+	if err := atClose.verdictOf(t, "applied at the close", atClose.bundle()); err != nil {
+		t.Errorf("a decision applied at the instant of its challenge close is refused: %v", err)
+	}
+	early := newLateChain(t, lateChainOptions{unchallenged: true, appliedAt: func(closeAt uint64) uint64 { return closeAt - 1 }})
+	refusedFor(t, "a decision applied a second before its challenge close", early.verdictOf(t, "applied early", early.bundle()),
+		"terminal claim's decision is applied before its challenge close")
+
+	otherClaim := newLateChain(t, lateChainOptions{unchallenged: true, closing: signedHistoryVariation{
+		transitionBody: func(body *ClaimStateTransitionReceiptBodyV1) { body.ClaimID = testDigest("6") }}})
+	refusedFor(t, "a closing transition signed for another claim", otherClaim.verdictOf(t, "another claim", otherClaim.bundle()),
+		"terminal claim carries a transition of another claim")
+
+	otherState := newLateChain(t, lateChainOptions{unchallenged: true, closing: signedHistoryVariation{
+		transitionBody: func(body *ClaimStateTransitionReceiptBodyV1) { body.ResultingClaimState = "final_approved" }}})
+	refusedFor(t, "a closing transition signed with another resulting state", otherState.verdictOf(t, "another state", otherState.bundle()),
+		"terminal claim state differs from its closing transition's resulting state")
+
+	// The terminal decision's receipt sealed a second time: the same receipt
+	// and envelope digest, another seal than the one the closing transition
+	// embeds.
+	resealed := honest
+	resealed.DecisionAdmissionReceiptProofs = []ClaimDecisionAdmissionReceiptProofV1{
+		history.decisionProof(*history.claims[chain.claimID].decision, chain.closedAt)}
+	if resealed.DecisionAdmissionReceiptProofs[0].ReceiptEnvelopeDigest != honest.DecisionAdmissionReceiptProofs[0].ReceiptEnvelopeDigest ||
+		equalCanonical(resealed.DecisionAdmissionReceiptProofs[0], honest.DecisionAdmissionReceiptProofs[0]) {
+		t.Fatal("the second sealing is not another proof of the same receipt")
+	}
+	refusedFor(t, "a second sealing of the terminal decision's receipt", chain.verdict(t, "resealed", resealed),
+		"terminal claim carries a transition whose decision admission proof is not the carried one")
+
+	// An application receipt signed and sealed in full, as the claim's own,
+	// over a body that states another applied claim state revision.
+	forged := chain.application
+	forged.Body.AppliedClaimStateRevision++
+	forged.Authorizations = []ProfileQualifiedObjectAuthorizationV1{
+		history.applicationAuthorization(forged.Body, forged.Body.AppliedAtUnix)}
+	history.store(forged)
+	refusedFor(t, "an application proof at another claim state revision",
+		chain.verdictOf(t, "another revision", history.terminalBundle(chain.claimID, forged, chain.closedAt)),
+		"terminal claim's application proof applies at another claim state revision than its closing transition's")
 }

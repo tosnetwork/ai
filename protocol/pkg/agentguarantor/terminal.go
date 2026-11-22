@@ -3,6 +3,7 @@ package agentguarantor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -476,8 +477,8 @@ func VerifyClaimFilingCloseReceiptV1(value AuthorizedClaimFilingCloseReceiptV1,
 		body.FilingCloseReason != wantFilingReason || body.CoverageEndReason != wantEndReason || body.PriorCoverageState != wantPriorState ||
 		body.PriorClaimFilingState != "open" || body.ResultingClaimFilingState != "frozen" ||
 		body.FilingCutoffUnix != wantFilingCutoff || body.PriorCoverageRevision < wantPriorRevision ||
-		body.ClosedCoverageRevision != body.PriorCoverageRevision+1 ||
-		body.ResultingClaimFilingStateRevision != body.PriorClaimFilingStateRevision+1 ||
+		!isNextRevisionV1(body.ClosedCoverageRevision, body.PriorCoverageRevision) ||
+		!isNextRevisionV1(body.ResultingClaimFilingStateRevision, body.PriorClaimFilingStateRevision) ||
 		body.ClosedAtUnix < body.FilingCutoffUnix || body.IncidentEligibilityEndsAtUnix != wantIncidentEnd {
 		return errors.New("claim filing close receipt binding is invalid")
 	}
@@ -585,7 +586,8 @@ func VerifyTerminalClaimSetV1(value AuthorizedTerminalClaimSetEvidenceV1, offer 
 		if err := bindTerminalClaimAdmissionChainV1(admissions); err != nil {
 			return err
 		}
-		if err := bindTerminalClaimDecisionV1(bundle, admissions, filingDigest, body.AllClaimsTerminalAtUnix); err != nil {
+		if err := bindTerminalClaimDecisionV1(bundle, admissions, filingDigest, body.AllClaimsTerminalAtUnix,
+			offer.CoverageTerms); err != nil {
 			return err
 		}
 		for _, admission := range admissions {
@@ -758,8 +760,15 @@ func VerifyExposureReleaseReceiptV1(value AuthorizedExposureReleaseReceiptV1, of
 	if err := bindExposureReleaseToOfferV1(value, offer, bound); err != nil {
 		return err
 	}
+	// The carried admission is the offer's, byte for byte, and this verifier
+	// reads the reservation's scope and amount from it, so its shape and the
+	// Guarantor's authorization are checked here. The activation predecessor
+	// of the claim set's filing close verifies the acceptance of this same
+	// offer, and with it this admission, so on a complete history this repeats
+	// that check; it is the one that refuses when the activation predecessor
+	// is verified by other means.
 	if err := VerifyExposureAdmissionReceiptV1(value.AuthorizedExposureAdmissionReceipt, authorityResolver, now); err != nil {
-		return err
+		return fmt.Errorf("exposure release carries an exposure admission that does not verify: %w", err)
 	}
 	body := value.Body
 	terminalDigest, terminalErr := TerminalClaimSetDigestV1(value.AuthorizedTerminalClaimSetEvidence)
@@ -767,19 +776,26 @@ func VerifyExposureReleaseReceiptV1(value AuthorizedExposureReleaseReceiptV1, of
 	if terminalErr != nil || exposureErr != nil {
 		return errors.New("exposure release terminal claim set or exposure receipt cannot be digested")
 	}
-	zero := AtomicAmountV1{Asset: offer.ExposureAdmissionReceipt.Body.ReservedExposure.Asset, AmountAtomic: "0"}
+	// A post-acceptance release ends the whole reservation: nothing stays
+	// reserved, and that nothing is stated in the reservation's own asset.
+	if body.RemainingReservedExposure.Asset != offer.ExposureAdmissionReceipt.Body.ReservedExposure.Asset {
+		return errors.New("exposure release states its remaining reserved exposure in another asset than the reservation's")
+	}
+	if body.RemainingReservedExposure.AmountAtomic != "0" {
+		return errors.New("exposure release leaves exposure reserved")
+	}
 	computed, computationErr := ComputeExposureDispositionV1(value.AuthorizedExposureAdmissionReceipt,
 		value.AuthorizedTerminalClaimSetEvidence.Body)
 	computationDigest, digestErr := ExposureDispositionComputationDigestV1(value.ExposureDispositionComputation)
 	if body.TerminalClaimSetEvidenceDigest != terminalDigest || body.ExposureAdmissionReceiptDigest != exposureDigest ||
 		body.ReservationID != offer.Body.ReservationID || body.CoverageAgreementBodyDigest != offer.Body.CoverageAgreementBodyDigest ||
-		body.ReleasedExposure != offer.ExposureAdmissionReceipt.Body.ReservedExposure || body.RemainingReservedExposure != zero ||
+		body.ReleasedExposure != offer.ExposureAdmissionReceipt.Body.ReservedExposure ||
 		computationErr != nil || digestErr != nil || !equalCanonical(computed, value.ExposureDispositionComputation) ||
 		body.ExposureDispositionComputationDigest != computationDigest ||
 		body.PortfolioDisposition != computed.PortfolioDisposition ||
 		body.ReturnedToAvailableExposure != computed.ReturnedToAvailableExposure || body.RealizedLoss != computed.RealizedLoss ||
 		body.RetainedDefaultedLiability != computed.RetainedDefaultedLiability ||
-		body.ReleasedReleaseStateRevision != body.BaseReleaseStateRevision+1 {
+		!isNextRevisionV1(body.ReleasedReleaseStateRevision, body.BaseReleaseStateRevision) {
 		return errors.New("exposure release receipt binding is invalid")
 	}
 	request := ExposureReleaseActionBodyV1{ReservationID: body.ReservationID, AgreementDigest: body.CoverageAgreementBodyDigest,
@@ -833,7 +849,8 @@ func VerifyCoverageResolutionV1(value AuthorizedCoverageResolutionV1, offer Auth
 	}
 	if body.ExposureReleaseReceiptDigest != releaseDigest || body.TerminalClaimSetEvidenceDigest != value.AuthorizedExposureReleaseReceipt.Body.TerminalClaimSetEvidenceDigest ||
 		body.CoverageEndCommitmentDigest != terminal.CoverageEndCommitmentDigest || body.ActivationEvidenceDigest != terminal.ActivationEvidenceDigest ||
-		body.TerminalState != terminal.ResolutionTargetTerminalState || body.ResolvedCoverageRevision != body.PriorCoverageRevision+1 {
+		body.TerminalState != terminal.ResolutionTargetTerminalState ||
+		!isNextRevisionV1(body.ResolvedCoverageRevision, body.PriorCoverageRevision) {
 		return errors.New("coverage resolution binding is invalid")
 	}
 	request := CoverageResolutionActionBodyV1{SchemaVersion: 1, ExposureReleaseReceiptDigest: releaseDigest,
