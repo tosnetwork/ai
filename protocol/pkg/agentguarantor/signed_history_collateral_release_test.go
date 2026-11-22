@@ -469,7 +469,8 @@ func (closure collateralClosure) verifyRelease(release AuthorizedCollateralEvide
 // coverage's verified terminal claim set, admitted at the time the set allows
 // its release, is accepted. It is refused when the set presented is another
 // one than the release names, when the set it names does not verify, when the
-// release is of another coverage Agreement than the offer's, when it is
+// release itself does not verify as collateral evidence, when the release is
+// of another coverage Agreement than the offer's, when it is
 // admitted a second before the set allows its release or a second before the
 // set was created, and when the evidence presented as a release is a lock.
 func TestSignedHistoryCollateralReleaseStandsOnItsTerminalClaimSet(t *testing.T) {
@@ -496,6 +497,10 @@ func TestSignedHistoryCollateralReleaseStandsOnItsTerminalClaimSet(t *testing.T)
 		early.verifyRelease(early.releaseAgainst(early.set, agreement, guard), early.set),
 		"Guarantor collateral release stands on an invalid terminal claim set: "+
 			"terminal claim set allows its release before the Agreement's collateral release guard")
+
+	expectVerdict(t, "a release that does not verify as collateral evidence, admitted a second before the Agreement's guard",
+		closure.verifyRelease(closure.releaseAgainst(closure.set, agreement, guard-1), closure.set),
+		"Guarantor collateral release is admitted before the Agreement's release guard")
 
 	expectVerdict(t, "a release of another coverage Agreement than the offer's",
 		closure.verifyRelease(closure.releaseAgainst(closure.set, testDigest("9"), guard), closure.set),
