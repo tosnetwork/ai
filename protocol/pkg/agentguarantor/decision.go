@@ -383,8 +383,14 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 	if err := validateDecisionAdmissionOutcomeV1(receipt.Body, decisionBody, terms); err != nil {
 		return err
 	}
-	if err := bindAuthorizedDecisionAdmissionToPredecessorV1(receipt.Body,
-		receipt.AuthorizedClaimAdmissionReceipt.Body, receipt.PredecessorClaimStateTransitionReceipt, terms); err != nil {
+	// The review cutoff runs from the claim's initial admission, which a
+	// revision admission carries as a compact proof verified with it above.
+	initialAdmission, err := initialClaimAdmissionBodyV1(receipt.AuthorizedClaimAdmissionReceipt)
+	if err != nil {
+		return err
+	}
+	if err := bindAuthorizedDecisionAdmissionToPredecessorV1(receipt.Body, receipt.AuthorizedClaimAdmissionReceipt.Body,
+		initialAdmission, receipt.PredecessorClaimStateTransitionReceipt, terms); err != nil {
 		return err
 	}
 	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(receipt.ClaimRevisionIngressCutProof)
@@ -558,6 +564,9 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 	if request.AuthorizedClaimDecisionAdmissionReceiptDigest != decisionAdmissionDigest {
 		return errors.New("claim transition action references a substituted decision admission")
 	}
+	if err := bindTransitionToDecisionAdmissionV1(request, decisionAdmission); err != nil {
+		return err
+	}
 	projectionDigest, err := TransitionEvidenceProjectionDigestV1(receipt.TransitionEvidenceProjection)
 	if err != nil {
 		return err
@@ -711,6 +720,9 @@ func VerifyClaimDecisionApplicationReceiptV1(receipt AuthorizedClaimDecisionAppl
 	}
 	if err := bindReceiptTimeToStageAdmissionV1("decision application", receipt.Body.AppliedAtUnix,
 		receipt.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
+	if err := bindApplicationTimeToClosingTransitionV1(receipt.Body.AppliedAtUnix, transition.Body); err != nil {
 		return err
 	}
 	var request ClaimDecisionApplicationActionBodyV1

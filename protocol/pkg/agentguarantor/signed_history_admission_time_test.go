@@ -58,6 +58,29 @@ type ordinaryChain struct {
 func newOrdinaryChain(t *testing.T, decidedAfter uint64, vary signedHistoryVariation) ordinaryChain {
 	t.Helper()
 	history, claimID := claimFiledAt(t, 40, nil)
+	return ordinaryChainOn(t, history, claimID, decidedAfter, vary)
+}
+
+// claimRevisedAt is a fresh history with one claim admitted 40 seconds after
+// the history's start and its second revision admitted revisedAfter seconds
+// after the start.
+func claimRevisedAt(t *testing.T, revisedAfter uint64) (*signedHistory, string) {
+	t.Helper()
+	history := newSignedHistory(t)
+	withSignedHistorySeam(t, history)
+	claim := history.claim(1, nil, signedHistoryStart+30)
+	history.admit(claim, signedHistoryStart+40)
+	revised := history.claim(2, &claim, signedHistoryStart+revisedAfter-10)
+	history.admit(revised, signedHistoryStart+revisedAfter)
+	return history, claim.Body.ClaimID
+}
+
+// ordinaryChainOn takes the history's admitted claim through an ordinaryChain
+// whose initial decision, signed under vary, is admitted decidedAfter seconds
+// after the history's start.
+func ordinaryChainOn(t *testing.T, history *signedHistory, claimID string, decidedAfter uint64,
+	vary signedHistoryVariation) ordinaryChain {
+	t.Helper()
 	decidedAt := signedHistoryStart + decidedAfter
 	history.vary = vary
 	history.decide(claimID, history.terms.PayoutDeadlineSeconds, decidedAt)
@@ -242,6 +265,65 @@ func TestSignedHistoryTerminalBundleHoldsAnInitialDecisionToItsClaimAdmission(t 
 	}
 }
 
+// TestSignedHistoryReviewCutoffRunsFromTheInitialAdmission: the claim review
+// cutoff is the claim's initial admission time plus the review deadline, and
+// a revision admitted later does not move it. The claim is admitted at 40 s
+// and revised at 500 s, so with a 600 s deadline the cutoff is 640 s, not
+// 1100 s. An authorized initial decision on the revision is accepted exactly
+// at 640 s and refused a second later, as a full receipt and inside a
+// terminal bundle; the initial terminal fallback is eligible exactly at 640 s
+// and refused a second earlier.
+func TestSignedHistoryReviewCutoffRunsFromTheInitialAdmission(t *testing.T) {
+	const pastCutoff = "initial claim decision is admitted after the claim review cutoff"
+	const cutoffAfter = 40 + 600
+	for _, test := range []struct {
+		name         string
+		decidedAfter uint64
+		want         string
+	}{
+		{"a decision on the revision at the initial admission's cutoff", cutoffAfter, ""},
+		{"a decision on the revision a second after the initial admission's cutoff", cutoffAfter + 1, pastCutoff},
+	} {
+		history, claimID := claimRevisedAt(t, 500)
+		at := signedHistoryStart + test.decidedAfter
+		receiptErr := history.verifyDecisionAdmission(history.decide(claimID, history.terms.PayoutDeadlineSeconds, at), at)
+		bundled, bundledID := claimRevisedAt(t, 500)
+		_, setErr := ordinaryChainOn(t, bundled, bundledID, test.decidedAfter, signedHistoryVariation{}).verdict(t, test.name)
+		if test.want == "" {
+			if receiptErr != nil || setErr != nil {
+				t.Errorf("%s is refused: receipt %v, terminal claim set %v", test.name, receiptErr, setErr)
+			}
+			continue
+		}
+		refusedFor(t, test.name+": the full receipt", receiptErr, test.want)
+		refusedFor(t, test.name+": the terminal claim set", setErr, test.want)
+	}
+	for _, test := range []struct {
+		name          string
+		admittedAfter uint64
+		want          string
+	}{
+		{"the initial terminal fallback on the revision at the initial admission's cutoff", cutoffAfter, ""},
+		{"the initial terminal fallback on the revision a second before the initial admission's cutoff", cutoffAfter - 1,
+			"claim decision fallback trigger cutoff is invalid"},
+	} {
+		history, claimID := claimRevisedAt(t, 500)
+		at := signedHistoryStart + test.admittedAfter
+		fallback := history.fallback(claimID, nil, at)
+		if fallback.Body.FallbackTriggerCutoffUnix != signedHistoryStart+cutoffAfter {
+			t.Fatalf("the fallback's trigger cutoff is %d, want %d", fallback.Body.FallbackTriggerCutoffUnix, uint64(signedHistoryStart+cutoffAfter))
+		}
+		err := history.verifyDecisionAdmission(fallback, at)
+		if test.want == "" {
+			if err != nil {
+				t.Errorf("%s is refused: %v", test.name, err)
+			}
+			continue
+		}
+		refusedFor(t, test.name, err, test.want)
+	}
+}
+
 // TestSignedHistoryNonterminalResultNeedsARemainingRound: evidence_required
 // and disputed are admitted only while a nonterminal round remains, and never
 // as the successor of a challenged candidate. Under terms that allow one
@@ -391,6 +473,7 @@ func TestSignedHistoryOrdinaryDecisionAdmissionFitsTheTerminalResolutionDeadline
 // application) is refused for the difference.
 func TestSignedHistoryReceiptTimeIsItsStageAdmissionTime(t *testing.T) {
 	at := uint64(signedHistoryStart + 100)
+	const clockAllowance = uint64(stageAdmissionClockAllowanceV1 / time.Second)
 	backdated := decidedBetween(-60, -50)
 	backdated.receiptAt = at - 50
 	for _, test := range []struct {
@@ -402,7 +485,8 @@ func TestSignedHistoryReceiptTimeIsItsStageAdmissionTime(t *testing.T) {
 		{"a decision admission verified at its admission time", signedHistoryVariation{}, at, ""},
 		{"a decision admission whose body is signed 50 s before its stage admission, at the decision's expiry", backdated, at,
 			"claim decision admission time differs from its stage action admission evidence's"},
-		{"a decision admission verified a second before its admission time", signedHistoryVariation{}, at - 1,
+		{"a decision admission verified by a clock the whole allowance behind", signedHistoryVariation{}, at - clockAllowance, ""},
+		{"a decision admission verified by a clock a second further behind", signedHistoryVariation{}, at - clockAllowance - 1,
 			"claim decision admission time is after the verifier's present"},
 		{"a decision admission time past the range of a timestamp", signedHistoryVariation{receiptAt: 1 << 63}, at,
 			"claim decision admission time is absent or out of range"},

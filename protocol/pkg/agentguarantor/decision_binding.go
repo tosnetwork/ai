@@ -8,14 +8,29 @@ import (
 
 // claimReviewCutoffV1 is the claim-relative review cutoff: the latest
 // admission time of an ordinary initial decision and the trigger of the
-// initial terminal fallback. It is derived from the admission of the claim
-// revision under review, so the ordinary decision and the fallback race on one
-// value.
-func claimReviewCutoffV1(claimAdmission ClaimAdmissionReceiptBodyV1, terms CoverageTermsV1) (uint64, bool) {
-	if claimAdmission.AdmittedAtUnix == 0 || terms.ReviewDeadlineSeconds == 0 {
+// initial terminal fallback. It runs from the claim's initial admission, on
+// every path, so the ordinary decision and the fallback race on one value and
+// a later revision of the claim neither resets nor extends it.
+func claimReviewCutoffV1(initialAdmission ClaimAdmissionReceiptBodyV1, terms CoverageTermsV1) (uint64, bool) {
+	if initialAdmission.AdmissionKind != "initial" || initialAdmission.AdmittedAtUnix == 0 || terms.ReviewDeadlineSeconds == 0 {
 		return 0, false
 	}
-	return checkedDurationAddV1(claimAdmission.AdmittedAtUnix, terms.ReviewDeadlineSeconds)
+	return checkedDurationAddV1(initialAdmission.AdmittedAtUnix, terms.ReviewDeadlineSeconds)
+}
+
+// initialClaimAdmissionBodyV1 is the body of a claim's initial admission as a
+// claim admission receipt carries it: the receipt's own body for an initial
+// admission, and for a revision the body in the compact proof of the initial
+// admission the revision names. The proof is bound to the revision here; its
+// seal and authorization are verified with the claim admission receipt.
+func initialClaimAdmissionBodyV1(claimAdmission AuthorizedClaimAdmissionReceiptV1) (ClaimAdmissionReceiptBodyV1, error) {
+	if err := bindRevisionInitialAdmissionProofV1(claimAdmission.Body, claimAdmission.InitialClaimAdmissionProof); err != nil {
+		return ClaimAdmissionReceiptBodyV1{}, err
+	}
+	if claimAdmission.InitialClaimAdmissionProof != nil {
+		return claimAdmission.InitialClaimAdmissionProof.ReceiptBody, nil
+	}
+	return claimAdmission.Body, nil
 }
 
 // validateDecisionAdmissionOutcomeV1 holds a decision admission receipt body
@@ -191,7 +206,8 @@ func validateDecisionAdmissionTimeV1(body ClaimDecisionAdmissionReceiptBodyV1, d
 // record one admission, so they state one time. Without the tie, a body could
 // be signed with another time than its action was admitted at, and every
 // window and deadline computed from the body's time would move with it. The
-// time is in range and not after the verifier's present.
+// time is in range and not after the verifier's present, with the allowance
+// the stage evidence itself is given.
 func bindReceiptTimeToStageAdmissionV1(subject string, bodyTimeUnix uint64,
 	stage PortableStageActionAdmissionEvidenceV1, now time.Time) error {
 	if !validUnixTimestampV1(bodyTimeUnix) {
@@ -200,9 +216,49 @@ func bindReceiptTimeToStageAdmissionV1(subject string, bodyTimeUnix uint64,
 	if bodyTimeUnix != stage.Body.AdmittedAtUnix {
 		return errors.New(subject + " time differs from its stage action admission evidence's")
 	}
-	present := now.UTC().Unix()
-	if present < 0 || bodyTimeUnix > uint64(present) {
+	if !notAfterVerifierPresentV1(bodyTimeUnix, now) {
 		return errors.New(subject + " time is after the verifier's present")
+	}
+	return nil
+}
+
+// notAfterVerifierPresentV1 reports whether a receipt time is no later than
+// the verifier's present plus the stage admission clock allowance. Every
+// window is computed from the signed time, never from the verifier's clock, so
+// the allowance admits an honest fresh receipt to a verifier whose clock runs
+// slightly behind and gives a dishonest one nothing.
+func notAfterVerifierPresentV1(timeUnix uint64, now time.Time) bool {
+	latest := now.UTC().Add(stageAdmissionClockAllowanceV1).Unix()
+	return latest >= 0 && timeUnix <= uint64(latest)
+}
+
+// bindApplicationTimeToClosingTransitionV1 holds the time a terminal decision
+// is applied to the challenge close that made it terminal: not before it. It
+// is the one check for the full application receipt, which carries that
+// transition, and for a terminal bundle, which carries it beside the
+// application proof.
+func bindApplicationTimeToClosingTransitionV1(appliedAtUnix uint64, closing ClaimStateTransitionReceiptBodyV1) error {
+	if appliedAtUnix < closing.TransitionedAtUnix {
+		return errors.New("claim decision is applied before its challenge close")
+	}
+	return nil
+}
+
+// bindTransitionToDecisionAdmissionV1 holds the claim and coverage a
+// transition request names to the decision admission the transition embeds.
+// The receipt body is held to the request, so a transition signed for another
+// claim over this claim's decision is refused here and not only where a
+// bundle or a fallback compares it with the claim.
+func bindTransitionToDecisionAdmissionV1(request ClaimStateTransitionActionBodyV1,
+	admission ClaimDecisionAdmissionReceiptBodyV1) error {
+	if request.ClaimID != admission.ClaimID {
+		return errors.New("claim transition is of another claim than its decision admission")
+	}
+	if request.CoverageAgreementBodyDigest != admission.CoverageAgreementBodyDigest {
+		return errors.New("claim transition is on another Agreement than its decision admission")
+	}
+	if request.CoverageObligationID != admission.CoverageObligationID {
+		return errors.New("claim transition is on another obligation than its decision admission")
 	}
 	return nil
 }
@@ -223,9 +279,9 @@ func isNextRevisionV1(next, prior uint64) bool {
 // transition's resulting counts for a successor. The successor's upper bound,
 // the transition's successor cutoff, is checked with its lineage.
 func bindAuthorizedDecisionAdmissionToPredecessorV1(body ClaimDecisionAdmissionReceiptBodyV1,
-	claimAdmission ClaimAdmissionReceiptBodyV1, predecessor *AuthorizedClaimStateTransitionReceiptV1,
+	claimAdmission, initialAdmission ClaimAdmissionReceiptBodyV1, predecessor *AuthorizedClaimStateTransitionReceiptV1,
 	terms CoverageTermsV1) error {
-	if err := bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body, claimAdmission, predecessor == nil, terms); err != nil {
+	if err := bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body, claimAdmission, initialAdmission, predecessor == nil, terms); err != nil {
 		return err
 	}
 	if predecessor == nil {
@@ -314,17 +370,18 @@ func bindDecisionRevisionEpochV1(subject string, body ClaimDecisionAdmissionRece
 // bindAuthorizedDecisionAdmissionToClaimAdmissionV1 holds the admission time
 // of an authorized decision to the admission of the claim revision it decides:
 // not before it and, for the claim's initial decision, no later than the claim
-// review cutoff, where the initial terminal fallback becomes eligible. It needs
-// only the two receipt bodies, so it also runs where a compact decision proof
-// travels beside the compact proof of its claim admission, in a terminal
-// bundle.
+// review cutoff, where the initial terminal fallback becomes eligible. The
+// cutoff runs from the claim's initial admission, whichever revision is
+// decided. It needs only receipt bodies, so it also runs where a compact
+// decision proof travels beside the compact proofs of its claim admissions, in
+// a terminal bundle.
 func bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body ClaimDecisionAdmissionReceiptBodyV1,
-	claimAdmission ClaimAdmissionReceiptBodyV1, initial bool, terms CoverageTermsV1) error {
+	claimAdmission, initialAdmission ClaimAdmissionReceiptBodyV1, initial bool, terms CoverageTermsV1) error {
 	if body.AdmittedAtUnix < claimAdmission.AdmittedAtUnix {
 		return errors.New("claim decision is admitted before its claim admission")
 	}
 	if initial {
-		cutoff, fits := claimReviewCutoffV1(claimAdmission, terms)
+		cutoff, fits := claimReviewCutoffV1(initialAdmission, terms)
 		if !fits || body.AdmittedAtUnix > cutoff {
 			return errors.New("initial claim decision is admitted after the claim review cutoff")
 		}

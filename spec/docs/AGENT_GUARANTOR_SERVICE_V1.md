@@ -7054,7 +7054,12 @@ state, the windows and the round counts from the sealed body alone:
 The full receipt of either admission mode anchors its admission time:
 `admitted_at_unix` equals the `admitted_at_unix` of the embedded
 `PortableStageActionAdmissionEvidenceV1` body and is not after the verifier's
-present. The receipt body is signed by the decision-admission quorum and the
+present plus the clock allowance the stage admission evidence itself is
+verified with (five minutes). A compact proof's `sealed_at_unix`, which is
+never before `admitted_at_unix`, is held to the same bound. The allowance
+lets a verifier whose clock runs behind the authority's accept a fresh
+receipt; it widens no window, because every window is computed from the
+signed time and never from the verifier's clock. The receipt body is signed by the decision-admission quorum and the
 stage evidence by the Action Authority; both record one admission, so they
 state one time. The same holds for `transitioned_at_unix` of a claim
 state-transition receipt and `applied_at_unix` of a decision application
@@ -7067,10 +7072,14 @@ full receipt carries:
 
 - `admitted_at_unix` is not before the `admitted_at_unix` of the claim
   admission it decides. An `initial` decision is admitted no later than
-  `claim_review_cutoff = checked_add(claim admission admitted_at_unix,
-  review_deadline_seconds)`, the same value that makes the
-  `initial_terminal_fallback` eligible, and its two round counts before
-  admission are zero. A `successor` is admitted no earlier than its
+  `claim_review_cutoff = checked_add(initial claim admission
+  admitted_at_unix, review_deadline_seconds)`, the same value that makes the
+  `initial_terminal_fallback` eligible: the decision is admitted at or before
+  it, the fallback at or after it. The cutoff runs from the claim's initial
+  admission whichever revision is decided; a decision on a revision reads it
+  from the compact proof of the initial admission that the revision's
+  admission receipt carries, and a later revision neither resets nor extends
+  it. The initial decision's two round counts before admission are zero. A `successor` is admitted no earlier than its
   predecessor transition's `transitioned_at_unix` and no later than that
   transition's `successor_decision_due_at_unix`, and its round counts before
   admission equal that transition's counts after it.
@@ -7498,7 +7507,12 @@ admission), so a challenge cannot rely on a window that the admission's signed
 body states longer than the Agreement allows, nor a challenge close or an
 application on a decision admitted outside its own `decided_at_unix` to
 `expires_at_unix` bounds. `transitioned_at_unix` and `applied_at_unix` equal
-the admission time of the receipt's own stage admission evidence.
+the admission time of the receipt's own stage admission evidence. A
+transition's request, and with it its receipt body, names the claim ID,
+Agreement and obligation of the decision admission it embeds; a transition
+signed for another claim over this claim's decision is invalid on its own,
+not only inside a bundle. A decision application's `applied_at_unix` is not
+before the `transitioned_at_unix` of the challenge close it carries.
 
 ## 18. Collateral
 
@@ -8872,8 +8886,9 @@ of that decision as its last transition:
   `predecessor_claim_state_transition_receipt_digest`.
 - A carried proof in `authorized_decision` mode is held to the carried claim
   admission it names: its `admitted_at_unix` is not before that admission's
-  and, when it is decision sequence 1, not after `checked_add(claim admission
-  admitted_at_unix, review_deadline_seconds)`. A lone compact proof cannot
+  and, when it is decision sequence 1, not after `checked_add(initial claim
+  admission admitted_at_unix, review_deadline_seconds)`, with the bundle's
+  initial admission proof as the source. A lone compact proof cannot
   show this (section 17.4, limit of a compact proof).
 - The application proof's `claim_decision_admission_receipt_digest` is the
   last proof's envelope digest, its

@@ -397,7 +397,7 @@ func TestSignedHistoryTerminalBundleClosesAndAppliesItsOwnDecision(t *testing.T)
 	}
 	early := newLateChain(t, lateChainOptions{unchallenged: true, appliedAt: func(closeAt uint64) uint64 { return closeAt - 1 }})
 	refusedFor(t, "a decision applied a second before its challenge close", early.verdictOf(t, "applied early", early.bundle()),
-		"terminal claim's decision is applied before its challenge close")
+		"claim decision is applied before its challenge close")
 
 	otherClaim := newLateChain(t, lateChainOptions{unchallenged: true, closing: signedHistoryVariation{
 		transitionBody: func(body *ClaimStateTransitionReceiptBodyV1) { body.ClaimID = testDigest("6") }}})

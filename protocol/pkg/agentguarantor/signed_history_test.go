@@ -94,6 +94,10 @@ type signedHistoryVariation struct {
 	// transitionBody changes the next transition receipt body before the
 	// admission authority signs it.
 	transitionBody func(*ClaimStateTransitionReceiptBodyV1)
+	// transitionRequest changes the next transition's action request before
+	// it is authorized; the receipt body names the claim and coverage the
+	// changed request names.
+	transitionRequest func(*ClaimStateTransitionActionBodyV1)
 	// proofSealedAt is when the decision proof inside the next transitions is
 	// sealed, instead of the transition's own time.
 	proofSealedAt uint64

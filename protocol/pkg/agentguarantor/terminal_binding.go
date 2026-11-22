@@ -180,7 +180,7 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 			return errors.New("terminal claim decision admission stands on a claim admission outside its bundle")
 		}
 		if body.AdmissionMode == "authorized_decision" {
-			if err := bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body, claimAdmission,
+			if err := bindAuthorizedDecisionAdmissionToClaimAdmissionV1(body, claimAdmission, initial,
 				proof.AuthorizedClaimDecision.Body.DecisionSequence == 1, terms); err != nil {
 				return err
 			}
@@ -243,8 +243,8 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 	if application.AppliedClaimStateRevision != closing.ResultingClaimStateRevision {
 		return errors.New("terminal claim's application proof applies at another claim state revision than its closing transition's")
 	}
-	if application.AppliedAtUnix < closing.TransitionedAtUnix {
-		return errors.New("terminal claim's decision is applied before its challenge close")
+	if err := bindApplicationTimeToClosingTransitionV1(application.AppliedAtUnix, closing); err != nil {
+		return err
 	}
 	if application.AppliedAtUnix > allClaimsTerminalAtUnix {
 		return errors.New("terminal claim's decision is applied after the set became terminal")

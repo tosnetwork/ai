@@ -86,15 +86,20 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 		seal.ReceiptBodyDigest != bodyDigest || seal.AuthorizedActionDigest != body.AuthorizedActionDigest ||
 		seal.AuthorizedClaimDecisionDigest != decisionDigest || seal.AuthorizedClaimEnvelopeDigest != claimDigest ||
 		seal.CoverageEndCommitmentDigest != endDigest || seal.CoverageTermsDigest != termsDigest ||
-		seal.SealedAtUnix < body.AdmittedAtUnix || uint64(now.UTC().Unix()) < seal.SealedAtUnix ||
+		seal.SealedAtUnix < body.AdmittedAtUnix ||
 		proof.ReceiptDescriptor.ContentDigest != proof.ReceiptEnvelopeDigest ||
 		proof.ReceiptDescriptor.RetrievalPolicyDigest != terms.DecisionAdmissionProfile.ProfileDigest ||
 		body.AuthorizedClaimDecisionDigest != decisionDigest || body.ClaimID != proof.AuthorizedClaim.Body.ClaimID ||
 		body.CoverageAgreementBodyDigest != proof.AuthorizedClaim.Body.CoverageAgreementBodyDigest ||
 		body.CoverageObligationID != proof.AuthorizedClaim.Body.CoverageObligationID ||
-		body.DecisionSequence != proof.AuthorizedClaimDecision.Body.DecisionSequence ||
-		uint64(now.UTC().Unix()) < body.AdmittedAtUnix {
+		body.DecisionSequence != proof.AuthorizedClaimDecision.Body.DecisionSequence {
 		return errors.New("claim decision admission compact proof binding is invalid")
+	}
+	// The seal is not before the admission, so holding the seal time to the
+	// verifier's present, with the stage admission clock allowance, holds the
+	// admission time to it as well.
+	if !notAfterVerifierPresentV1(seal.SealedAtUnix, now) {
+		return errors.New("claim decision admission compact proof is sealed after the verifier's present")
 	}
 	if isFallbackDecisionPathV1(proof.AuthorizedClaimDecision.Body.DecisionPath) !=
 		(body.AdmissionMode == "deterministic_fallback") {

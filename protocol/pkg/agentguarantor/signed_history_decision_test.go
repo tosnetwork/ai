@@ -237,7 +237,8 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 	switch state.status {
 	case "admitted":
 		sourceState, decisionPath = "initial_reviewing", "initial_terminal_fallback"
-		cutoff = claimAdmission.Body.AdmittedAtUnix + terms.ReviewDeadlineSeconds
+		// The review cutoff runs from the claim's initial admission.
+		cutoff = history.initialReceipts[claimID].Body.AdmittedAtUnix + terms.ReviewDeadlineSeconds
 	case "reviewing":
 		sourceState = "reviewing_after_challenge"
 		cutoff = state.transition.Body.SuccessorDecisionDueAtUnix
@@ -560,6 +561,9 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 		TargetNonterminalRoundsUsed: state.nonterminalRounds, SuccessorDecisionDueAtUnix: successorDue,
 		AuthorizedClaimDecisionAdmissionReceiptDigest: decisionDigest, TransitionEvidenceProjection: projection,
 		TransitionEvidenceSet: evidence}
+	if history.vary.transitionRequest != nil {
+		history.vary.transitionRequest(&requestBody)
+	}
 	request, err := Canonical(requestBody)
 	if err != nil {
 		t.Fatal(err)
@@ -584,7 +588,8 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 		t.Fatal(err)
 	}
 	body := ClaimStateTransitionReceiptBodyV1{SchemaVersion: 1, AuthorityID: action.AuthorityID,
-		CoverageAgreementBodyDigest: history.agreement, CoverageObligationID: history.obligation, ClaimID: claimID,
+		CoverageAgreementBodyDigest: requestBody.CoverageAgreementBodyDigest,
+		CoverageObligationID:        requestBody.CoverageObligationID, ClaimID: requestBody.ClaimID,
 		TransitionKind: kind, TransitionEvidenceProjectionDigest: projectionDigest, AuthorizedActionDigest: actionDigest,
 		StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest, WriterGeneration: action.WriterGeneration,
 		WriterFenceDigest: action.WriterFenceDigest, PriorClaimState: state.status, ResultingClaimState: resultingState,

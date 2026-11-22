@@ -487,7 +487,13 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	switch variant.SourceClaimState {
 	case "initial_reviewing":
 		wantPriorState, wantPath, wantSequence = "admitted", "initial_terminal_fallback", 1
-		cutoff, ok = claimReviewCutoffV1(claimAdmission.Body, terms)
+		// The cutoff runs from the claim's initial admission, which a revision
+		// admission carries as a compact proof verified with it above.
+		initialAdmission, initialErr := initialClaimAdmissionBodyV1(claimAdmission)
+		if initialErr != nil {
+			return initialErr
+		}
+		cutoff, ok = claimReviewCutoffV1(initialAdmission, terms)
 	case "disputed", "evidence_required":
 		current := *source.currentDecision
 		if err := VerifyClaimDecisionAdmissionReceiptProofV1(current, terms, authorityResolver, now); err != nil {
