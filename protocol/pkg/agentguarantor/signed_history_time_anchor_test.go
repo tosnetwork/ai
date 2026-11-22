@@ -3,6 +3,8 @@ package agentguarantor
 import (
 	"testing"
 	"time"
+
+	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
 
 // Which time each check is about, on signed history. A receipt is a permanent
@@ -324,6 +326,28 @@ func TestSignedHistoryStageActionIsJudgedAtItsAdmissionTime(t *testing.T) {
 		receipt := history.admit(history.claim(1, nil, admittedAt-10), admittedAt)
 		expectVerdict(t, test.name+", verified ten years later", history.verifyClaimAdmission(receipt, admittedAt+signedHistoryLater), test.want)
 	}
+
+	// The stage evidence alone: its admission time is not after the verifier's
+	// present plus the allowance, whichever receipt carries it.
+	fresh := newSignedHistory(t)
+	withSignedHistorySeam(t, fresh)
+	filed := fresh.claim(1, nil, admittedAt-10)
+	stage := fresh.admit(filed, admittedAt).AuthorizedClaimIngressReceipt.StageActionAdmissionEvidence
+	ingressBound, err := FindStageActionAuthorityV1(fresh.terms.StageActionAuthorityBinding, "claim_submission_ingress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string]agentcommerce.SemanticValue{"owner_id": agentcommerce.ID(ingressBound.ActionOwnerID),
+		"agent_id": agentcommerce.ID(ingressBound.ActionAgentID), "agreement_body_digest": agentcommerce.Digest32(fresh.agreement),
+		"obligation_id": agentcommerce.ID(fresh.obligation), "claim_id": agentcommerce.ID(filed.Body.ClaimID),
+		"claim_revision": agentcommerce.U64(filed.Body.ClaimRevision)}
+	verifyStage := func(at uint64) error {
+		return VerifyPortableStageActionAdmissionEvidenceV1(stage, ingressBound, stage.CanonicalRequest, fields, fresh.resolver,
+			fresh.fenceResolver, signedHistoryTime(at))
+	}
+	expectVerdict(t, "stage evidence admitted the whole allowance after the verifier's present", verifyStage(admittedAt-signedHistoryAllowance), "")
+	expectVerdict(t, "stage evidence admitted a second beyond the allowance", verifyStage(admittedAt-signedHistoryAllowance-1),
+		"Guarantor portable stage admission time or resolver is invalid")
 
 	claim := newLateDeniedClaim(t, true, nil)
 	history := claim.history

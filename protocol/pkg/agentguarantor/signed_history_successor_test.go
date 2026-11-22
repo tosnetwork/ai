@@ -123,33 +123,41 @@ func TestSignedHistoryTerminalBundleHoldsAnInitialFallbackToTheReviewCutoff(t *t
 // the successor was admitted exactly at the challenge's successor cutoff with
 // the challenge's resulting round counts, and is refused when that fallback
 // was admitted a second before the cutoff, names a cutoff a second earlier, or
-// starts from other round counts than the challenge left.
+// starts from other round counts than the challenge left. The fallback's full
+// receipt, which carries the same challenge, is refused for the same cutoff
+// and time by the same check; its round counts are refused earlier, where its
+// references are bound.
 func TestSignedHistoryTerminalBundleHoldsASuccessorToItsPredecessorTransition(t *testing.T) {
 	const decidedAfter = 100
 	for _, test := range []struct {
-		name   string
-		vary   signedHistoryVariation
-		before uint64
-		want   string
+		name          string
+		vary          signedHistoryVariation
+		before        uint64
+		want, receipt string
 	}{
-		{"a fallback admitted at its predecessor challenge's successor cutoff", signedHistoryVariation{}, 0, ""},
+		{"a fallback admitted at its predecessor challenge's successor cutoff", signedHistoryVariation{}, 0, "", ""},
 		{"a fallback admitted a second before its predecessor challenge's successor cutoff", signedHistoryVariation{}, 1,
+			"fallback in place of a successor is admitted before its predecessor transition's successor cutoff",
 			"fallback in place of a successor is admitted before its predecessor transition's successor cutoff"},
 		{"a fallback whose body names a cutoff a second before its predecessor challenge's successor cutoff",
 			varyAdmission(func(body *ClaimDecisionAdmissionReceiptBodyV1) { body.FallbackTriggerCutoffUnix-- }), 0,
+			"fallback in place of a successor names another trigger cutoff than its predecessor transition's successor cutoff",
 			"fallback in place of a successor names another trigger cutoff than its predecessor transition's successor cutoff"},
 		{"a fallback whose body starts from no consumed challenge round",
 			varyAdmission(func(body *ClaimDecisionAdmissionReceiptBodyV1) {
 				body.ChallengeRoundsUsedBefore, body.ChallengeRoundsUsedAfter = 0, 0
-			}), 0, "successor claim decision admission round counts differ from its predecessor transition"},
+			}), 0, "successor claim decision admission round counts differ from its predecessor transition",
+			"claim decision fallback round counts differ from its head"},
 	} {
 		history, claimID := claimFiledAt(t, 40, nil)
 		decidedAt := uint64(signedHistoryStart + decidedAfter)
 		history.decide(claimID, history.terms.PayoutDeadlineSeconds, decidedAt)
 		chain := ordinaryChain{history: history, claimID: claimID, challenge: history.challenge(claimID, decidedAt+10)}
 		history.vary = test.vary
-		denied := history.fallback(claimID, nil, chain.challenge.Body.SuccessorDecisionDueAtUnix-test.before)
+		admittedAt := chain.challenge.Body.SuccessorDecisionDueAtUnix - test.before
+		denied := history.fallback(claimID, nil, admittedAt)
 		history.vary = signedHistoryVariation{}
+		expectVerdict(t, "the full receipt of "+test.name, history.verifyDecisionAdmission(denied, admittedAt), test.receipt)
 		closeAt := denied.Body.ChallengeEndsAtUnix
 		history.challengeClose(claimID, closeAt)
 		chain.application = history.apply(claimID, history.materialize(claimID, history.terms), closeAt+10)
