@@ -17,10 +17,12 @@ import (
 // VerifyFirmOffer runs in this package's own tests.
 //
 // It stands beside the claim history rather than under it: the claim history
-// still rests on its stand-in activation, and no acceptance or activation is
-// built on the firm offer here. The offer's issuance action is not built
-// either: the offer and reservation identities and the exposure receipt's
-// action digests are well-formed values, which VerifyFirmOffer does not open.
+// still rests on its stand-in activation. An acceptance request is built on
+// the firm offer (signed_history_offer_binding_test.go); no acceptance receipt
+// or activation is. The offer's issuance action is not built either: the
+// offer and reservation identities and the exposure receipt's action digests
+// are well-formed values. A verifier cannot recompute them from the offer,
+// and holds the receipt's eligibility proofs to them.
 
 const (
 	// signedOfferIssuedAt is when the quote is answered: before the coverage
@@ -98,6 +100,42 @@ type signedOfferInputs struct {
 	// reserved is the exposure the receipt reserves; by default the terms'
 	// maximum aggregate payout.
 	reserved AtomicAmountV1
+	// admittedAt is when the exposure is admitted and its eligibility proofs
+	// are frozen; by default the offer's valid-from time.
+	admittedAt uint64
+	// receiptProfile and offerProfile are the profiles the Guarantor signs
+	// the exposure receipt and the firm offer under; by default the service
+	// profile's exposure authorization profile.
+	receiptProfile, offerProfile *ProfileRefV1
+	// The hooks below, when given, vary one object after its defaults are
+	// set and before its digest is taken or it is signed.
+	//
+	// requestedTerms varies the requested terms after any collateral
+	// selection is copied into them.
+	requestedTerms func(*RequestedCoverageTermsV1)
+	// requestBody varies the quote request body.
+	requestBody func(*CoverageQuoteRequestBodyV1)
+	// offeredTerms varies the offered terms after their profile, request and
+	// underlying Agreement digests and their coverage ID are set.
+	offeredTerms func(*CoverageTermsV1)
+	// eligibility varies what the exposure receipt's eligibility proofs bind.
+	eligibility func(*signedOfferEligibility)
+	// receiptBody varies the exposure receipt body.
+	receiptBody func(*ProviderExposureAdmissionReceiptBodyV1)
+	// offerBody varies the firm offer body.
+	offerBody func(*FirmCoverageOfferBodyV1)
+}
+
+// signedOfferEligibility is what the eligibility proofs frozen with an
+// exposure admission bind: the admitted action, the input envelope, the
+// re-resolved subjects, the object kind and body, the resolver profile and
+// the admission time.
+type signedOfferEligibility struct {
+	actionDigest, inputDigest string
+	subjects                  []string
+	kind, bodyDigest          string
+	profile                   ProfileRefV1
+	at                        uint64
 }
 
 // signedOffer is a signed firm offer with everything VerifyFirmOffer takes.
@@ -371,7 +409,7 @@ func (history *signedHistory) coverageAgreement(terms CoverageTermsV1, expiresAt
 // quoteRequest is the requester's signed quote request for requested under
 // the published profile, on the underlying Agreement.
 func (history *signedHistory) quoteRequest(terms CoverageTermsV1, requested RequestedCoverageTermsV1, profileDigest,
-	intentDigest, underlyingDigest, signer string) AuthorizedCoverageQuoteRequestV1 {
+	intentDigest, underlyingDigest, signer string, change func(*CoverageQuoteRequestBodyV1)) AuthorizedCoverageQuoteRequestV1 {
 	t := history.t
 	requestedDigest, err := RequestedCoverageTermsDigest(requested)
 	if err != nil {
@@ -387,6 +425,9 @@ func (history *signedHistory) quoteRequest(terms CoverageTermsV1, requested Requ
 		SelectedDecisionProfile: terms.DecisionProfile, SelectedCollateralProfileDigest: requested.SelectedCollateralProfileDigest,
 		SelectedPayoutAdapterProfile: requested.SelectedPayoutAdapterProfile,
 		CreatedAtUnix:                signedOfferIssuedAt - 30, ExpiresAtUnix: signedOfferIssuedAt + 600}
+	if change != nil {
+		change(&body)
+	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-quote-request-body.v1", body)
 	if err != nil {
 		t.Fatal(err)
@@ -401,11 +442,13 @@ func (history *signedHistory) quoteRequest(terms CoverageTermsV1, requested Requ
 }
 
 // exposureReceipt is the Guarantor-signed exposure-admission receipt that
-// reserves reserved for the offered terms on the coverage Agreement. offerID
-// stands for the issuance authority instance.
+// reserves inputs.reserved for the offered terms on the coverage Agreement.
+// offerID stands for the issuance authority instance. Its eligibility proofs
+// re-resolve the parties request names.
 func (history *signedHistory) exposureReceipt(terms CoverageTermsV1, profile ServiceProfileV1, profileDigest, requestDigest,
-	agreementDigest, termsDigest, offerID string, reserved AtomicAmountV1, expiresAt uint64) AuthorizedProviderExposureAdmissionReceiptV1 {
-	t := history.t
+	agreementDigest, termsDigest, offerID string, request CoverageQuoteRequestBodyV1, inputs signedOfferInputs,
+	expiresAt uint64) AuthorizedProviderExposureAdmissionReceiptV1 {
+	t, reserved := history.t, inputs.reserved
 	scope := ProviderExposureReservationScopeV1{SchemaVersion: 1, OwnerID: "owner:guarantor", GuarantorAgentID: terms.GuarantorAgentID,
 		CoverageAgreementBodyDigest: agreementDigest, CoverageObligationID: history.obligation, CoverageAsset: terms.CoverageAsset,
 		MaximumAggregatePayout: terms.MaximumAggregatePayout, SelectedAssuranceLevel: terms.SelectedAssuranceLevel,
@@ -435,9 +478,19 @@ func (history *signedHistory) exposureReceipt(terms CoverageTermsV1, profile Ser
 		t.Fatal(err)
 	}
 	actionDigest, stableActionID, exactRequestDigest := testDigest("3"), testDigest("4"), testDigest("5")
-	subjects := []string{terms.BeneficiaryAgentID, terms.CoveredPartyAgentID}
-	eligibility := history.eligibility(actionDigest, requestDigest, subjects, "firm-offer-issuance", exactRequestDigest,
-		profile.AuthorityDomainDigest, profile.ExposureAuthorizationProfile, testDigest("6"), 1, signedOfferIssuedAt)
+	parties := map[string]struct{}{request.RequesterAgentID: {}, request.CoveredPartyAgentID: {}, request.BeneficiaryAgentID: {}}
+	subjects := make([]string, 0, len(parties))
+	for party := range parties {
+		subjects = append(subjects, party)
+	}
+	bound := signedOfferEligibility{actionDigest: actionDigest, inputDigest: requestDigest, subjects: subjects,
+		kind: "firm-offer-issuance", bodyDigest: exactRequestDigest, profile: profile.ExposureAuthorizationProfile,
+		at: inputs.admittedAt}
+	if inputs.eligibility != nil {
+		inputs.eligibility(&bound)
+	}
+	eligibility := history.eligibility(bound.actionDigest, bound.inputDigest, bound.subjects, bound.kind, bound.bodyDigest,
+		profile.AuthorityDomainDigest, bound.profile, testDigest("6"), 1, bound.at)
 	eligibilityDigest, err := AuthorityAdmissionEligibilityProofSetDigestV1(eligibility)
 	if err != nil {
 		t.Fatal(err)
@@ -446,16 +499,23 @@ func (history *signedHistory) exposureReceipt(terms CoverageTermsV1, profile Ser
 		GuarantorAgentID: terms.GuarantorAgentID, DescriptorDigest: descriptorDigest, AuthorizedActionDigest: actionDigest,
 		ReservationID: reservationID, StableActionID: stableActionID, ExactRequestDigest: exactRequestDigest, WriterGeneration: 1,
 		WriterFenceDigest: fenceDigest, BasePortfolioRevision: 1, AdmittedPortfolioRevision: 2, ReservedExposure: reserved,
-		State: "reserved", AdmittedAtUnix: signedOfferIssuedAt, ExpiresAtUnix: expiresAt,
+		State: "reserved", AdmittedAtUnix: inputs.admittedAt, ExpiresAtUnix: expiresAt,
 		AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
+	if inputs.receiptBody != nil {
+		inputs.receiptBody(&body)
+	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-exposure-receipt-body.v1", body)
 	if err != nil {
 		t.Fatal(err)
 	}
+	signingProfile := profile.ExposureAuthorizationProfile
+	if inputs.receiptProfile != nil {
+		signingProfile = *inputs.receiptProfile
+	}
 	receipt := AuthorizedProviderExposureAdmissionReceiptV1{Body: body, Descriptor: descriptor,
 		AuthorityAdmissionEligibilityProofSet: eligibility,
-		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObject("exposure-admission-receipt", bodyDigest,
-			"tos.service.agent-guarantor-exposure-receipt-signature.v1", signedOfferIssuedAt)}}
+		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(terms.GuarantorAgentID, signingProfile,
+			"exposure-admission-receipt", bodyDigest, "tos.service.agent-guarantor-exposure-receipt-signature.v1", signedOfferIssuedAt)}}
 	if _, err := ExposureAdmissionReceiptDigestV1(receipt); err != nil {
 		t.Fatalf("signed-history exposure receipt is malformed: %v", err)
 	}
@@ -480,7 +540,8 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 	requested.MaximumLateRecoveryTerminalDeadlineUnix = terms.LateRecoveryTerminalDeadlineUnix
 	requested.MaximumLateIngressRecoveryWindowSeconds = terms.LateIngressRecoveryWindowSeconds
 	inputs := signedOfferInputs{terms: terms, requested: requested, agreementExpiresAt: signedOfferFinalDeadline(terms),
-		requestSigner: terms.CoveredPartyAgentID, publisher: terms.GuarantorAgentID, reserved: terms.MaximumAggregatePayout}
+		requestSigner: terms.CoveredPartyAgentID, publisher: terms.GuarantorAgentID, reserved: terms.MaximumAggregatePayout,
+		admittedAt: signedOfferIssuedAt}
 	if change != nil {
 		change(&inputs)
 	}
@@ -493,6 +554,9 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 		terms.CollateralObligationID, terms.CollateralTerms = "obligation:collateral", &collateral
 		requested.SelectedAssuranceLevel, requested.SelectedCollateralProfileDigest = terms.SelectedAssuranceLevel, terms.SelectedCollateralProfileDigest
 	}
+	if inputs.requestedTerms != nil {
+		inputs.requestedTerms(&requested)
+	}
 	keys := signedOfferKeys{}
 	for _, agentID := range []string{terms.GuarantorAgentID, terms.CoveredPartyAgentID, terms.BeneficiaryAgentID} {
 		keys[agentID] = signedOfferKey(agentID).Public().(ed25519.PublicKey)
@@ -501,7 +565,8 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 	artifact := history.publishServiceProfile(profile, inputs.publisher)
 	profileDigest, intentDigest := artifact.SelectedServiceProfileDigest, artifact.SelectedServiceIntentOperationDigest
 	underlying, underlyingDigest := history.underlyingAgreement(terms)
-	request := history.quoteRequest(terms, requested, profileDigest, intentDigest, underlyingDigest, inputs.requestSigner)
+	request := history.quoteRequest(terms, requested, profileDigest, intentDigest, underlyingDigest, inputs.requestSigner,
+		inputs.requestBody)
 	requestDigest, err := QuoteRequestDigest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -524,6 +589,9 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 			terms.StageActionAuthorityBinding.Stages[index].AdmissionStateDomainDigest = ingressDomain
 		}
 	}
+	if inputs.offeredTerms != nil {
+		inputs.offeredTerms(&terms)
+	}
 	termsDigest, err := CoverageTermsDigest(terms)
 	if err != nil {
 		t.Fatalf("signed-history offered terms are invalid: %v", err)
@@ -534,7 +602,7 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 	}
 	acceptBy, grace := uint64(signedOfferIssuedAt+300), profile.AdmissionLimits.MaximumAcceptanceProcessingGraceSeconds
 	receipt := history.exposureReceipt(terms, profile, profileDigest, requestDigest, agreementDigest, termsDigest, offerID,
-		inputs.reserved, acceptBy+grace)
+		request.Body, inputs, acceptBy+grace)
 	receiptDigest, err := ExposureAdmissionReceiptDigestV1(receipt)
 	if err != nil {
 		t.Fatal(err)
@@ -558,14 +626,21 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 		GuarantorEvidenceProfile: evidenceProfile, ExposureAdmissionReceiptDigest: receiptDigest,
 		ReservationID: receipt.Body.ReservationID, MaxAcceptances: 1, ValidFromUnix: signedOfferIssuedAt, AcceptByUnix: acceptBy,
 		AcceptanceProcessingGraceSeconds: grace, WithdrawalPolicy: "forbidden", ExpiresAtUnix: acceptBy + grace}
+	if inputs.offerBody != nil {
+		inputs.offerBody(&body)
+	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-firm-offer-body.v1", body)
 	if err != nil {
 		t.Fatal(err)
 	}
+	offerProfile := profile.ExposureAuthorizationProfile
+	if inputs.offerProfile != nil {
+		offerProfile = *inputs.offerProfile
+	}
 	offer := AuthorizedFirmCoverageOfferV1{Body: body, CoverageTerms: terms, ExposureAdmissionReceipt: receipt,
 		AuthorizedQuoteRequest: request, ServiceProfileArtifact: artifact,
-		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObject("firm-coverage-offer", bodyDigest,
-			"tos.service.agent-guarantor-firm-offer-signature.v1", signedOfferIssuedAt)}}
+		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(terms.GuarantorAgentID, offerProfile,
+			"firm-coverage-offer", bodyDigest, "tos.service.agent-guarantor-firm-offer-signature.v1", signedOfferIssuedAt)}}
 	if _, err := FirmOfferDigest(offer); err != nil {
 		t.Fatalf("signed-history firm offer is malformed: %v", err)
 	}

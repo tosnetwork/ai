@@ -56,7 +56,7 @@ func VerifyCoverageAcceptanceRequestV1(request AuthorizedCoverageAcceptanceReque
 	if err := validateFirmOfferAgreementBindingV1(offer, request.CoverageAgreementBody); err != nil {
 		return err
 	}
-	agreement :=agentcommerce.AgentAgreement{Body: request.CoverageAgreementBody,
+	agreement := agentcommerce.AgentAgreement{Body: request.CoverageAgreementBody,
 		AuthorizationEvidence: append([]agentcommerce.AgreementAuthorizationEvidence(nil), request.AuthorizationEvidenceSet.Evidence...)}
 	firmOfferEvidenceCount := 0
 	for _, evidence := range request.AuthorizationEvidenceSet.Evidence {
