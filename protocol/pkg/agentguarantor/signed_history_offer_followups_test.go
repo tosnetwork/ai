@@ -501,6 +501,19 @@ func (history *signedHistory) offerActivation(signed signedOffer,
 // change varies before it enters the action and the body.
 func (history *signedHistory) offerActivationBy(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
 	signer string, change func(*CoverageEndCommitmentV1)) AuthorizedCoverageActivationEvidenceV1 {
+	return history.offerActivationProving(signed, acceptance, signer, change, nil)
+}
+
+// offerActivationWith is offerActivation whose eligibility proofs proven
+// varies before the evidence is signed. By default the proofs re-resolve the
+// Guarantor, the covered party and the beneficiary.
+func (history *signedHistory) offerActivationWith(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
+	proven func(*signedOfferEligibility)) AuthorizedCoverageActivationEvidenceV1 {
+	return history.offerActivationProving(signed, acceptance, signedHistoryGuarantor, nil, proven)
+}
+
+func (history *signedHistory) offerActivationProving(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
+	signer string, change func(*CoverageEndCommitmentV1), proven func(*signedOfferEligibility)) AuthorizedCoverageActivationEvidenceV1 {
 	t, offer, terms := history.t, signed.offer, signed.offer.CoverageTerms
 	agreementDigest, obligationID := offer.Body.CoverageAgreementBodyDigest, offer.Body.CoverageObligationID
 	underlying, held := signed.underlying[terms.UnderlyingAgreementBodyDigest]
@@ -562,10 +575,15 @@ func (history *signedHistory) offerActivationBy(signed signedOffer, acceptance A
 	if err != nil {
 		t.Fatal(err)
 	}
-	eligibility := history.eligibility(actionDigest, acceptanceDigest,
-		[]string{offer.Body.BeneficiaryAgentID, signedHistoryClaimant, signedHistoryGuarantor}, "coverage-activation",
-		stage.AuthorizedAction.ExactRequestDigest, terms.CoverageStateDomainDigest, terms.LifecycleAuthorizationProfile,
-		admissionDomain, 1, activatedAt)
+	frozen := signedOfferEligibility{actionDigest: actionDigest, inputDigest: acceptanceDigest,
+		subjects: []string{offer.Body.BeneficiaryAgentID, signedHistoryClaimant, signedHistoryGuarantor}, kind: "coverage-activation",
+		bodyDigest: stage.AuthorizedAction.ExactRequestDigest, scopeDigest: terms.CoverageStateDomainDigest,
+		domainID: admissionDomain, profile: terms.LifecycleAuthorizationProfile, at: activatedAt}
+	if proven != nil {
+		proven(&frozen)
+	}
+	eligibility := history.eligibility(frozen.actionDigest, frozen.inputDigest, frozen.subjects, frozen.kind, frozen.bodyDigest,
+		frozen.scopeDigest, frozen.profile, frozen.domainID, 1, frozen.at)
 	eligibilityDigest, err := AuthorityAdmissionEligibilityProofSetDigestV1(eligibility)
 	if err != nil {
 		t.Fatal(err)

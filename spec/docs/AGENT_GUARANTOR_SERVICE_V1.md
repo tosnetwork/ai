@@ -4653,8 +4653,64 @@ prerequisite terminal-failure evidence and of mutual-cancellation Agreement
 evidence are verified under their own Agreement rule (the matrix below); the
 V1 proof set carries no separate entry for a terminal-failure authority
 subject that is not one of the three parties, so their freshness at
-`resolved_at_unix` rests on that evidence's own authorization. The proof set
-of activation evidence is not yet held to its admission beyond its digest.
+`resolved_at_unix` rests on that evidence's own authorization.
+
+A verifier of activation evidence holds its frozen proof set to the
+activation it admits, by the same rule:
+
+- `admitted_action_digest` equals the body's `authorized_action_digest`, the
+  digest of the embedded `coverage_activation` stage action, and
+  `admission_time_unix` equals `activated_at_unix`;
+- `admission_domain_id` is the coverage's activation admission domain, which
+  a holder of the evidence recomputes:
+
+  ```text
+  activation_admission_domain_id = Digest(
+    "tos.service.agent-guarantor-activation-admission-domain.v1",
+    { coverage_agreement_body_digest })
+  ```
+
+- every proof entry has `input_authorized_envelope_digest` equal to the
+  acceptance-receipt envelope digest, `authorized_object_kind` equal to
+  `coverage-activation`, `authorized_body_digest` equal to the body's
+  `exact_request_digest`, `required_scope_digest` equal to the terms'
+  `coverage_state_domain_digest`, and `authority_resolver_profile` equal to
+  the terms' `lifecycle_authorization_profile`;
+- there is exactly one proof entry for each of the offer's
+  `guarantor_agent_id`, `covered_party_agent_id` and `beneficiary_agent_id`
+  (one entry for a subject that holds several of those roles). A missing
+  party, a second entry for a party, or an entry for any other subject fails
+  closed.
+
+The activation body carries no sequence of that domain, so the proof set's
+`admission_sequence` is held only to its own entries. As for non-activation,
+the signers of prerequisite, collateral-control and operational-independence
+evidence have no entry of their own.
+
+**Activation time.** Activation is a permanent fact once admitted (section
+19.6, "Receipt times"). `activated_at_unix` is anchored to the
+`coverage_activation` stage admission evidence, and every activation
+requirement above is judged at that time, never at the verifier's present:
+
+- the underlying Agreement is authorized at `activated_at_unix`: that time is
+  within the Agreement body's validity window and every predicate's, and its
+  authorization evidence verifies at that time. An Agreement is authorized
+  until its expiry and not at it;
+- the acceptance receipt is verified as the historical fact it is, its
+  request at `accepted_at_unix`;
+- the `coverage_activation` action, its Writer Fence and the Action Authority
+  key are judged at the stage `admitted_at_unix`, which is
+  `activated_at_unix`;
+- collateral lock, collateral-control and operational-independence evidence
+  is current at `activated_at_unix`: its maximum age and its own expiry are
+  measured from that time.
+
+Activation evidence therefore verifies however long after the underlying
+Agreement's authorization, the Writer Fence or the coverage Agreement has
+expired, which is when a claim admission, a filing close and a terminal claim
+set that stand on it are verified. An activation admitted when the underlying
+Agreement was no longer authorized, or when its action or Writer Fence had
+expired, is refused whenever it is verified.
 
 `fee_resolution_evidence_set` and `collateral_non_activation_evidence_set`
 are optional, but a set that is carried is a valid canonical evidence set
@@ -7035,6 +7091,18 @@ state, the windows and the round counts from the sealed body alone:
   fallback alike. Payout materialization caps every payout line at the same
   deadline, so a decision admitted later could never be applied. A missing
   entry or an overflow is a refusal.
+- On the late-recovery path (a `late_filing_close_receipt_digest` is present)
+  the admitted state's complete remaining closure fits
+  `late_recovery_terminal_deadline_unix` instead, for every admission on the
+  path and in a compact proof as in the full receipt. The
+  `late_recovery_terminal_fallback` candidate may still be challenged once:
+  its entry is `challengeable_candidate` with `r = min(remaining challenge
+  rounds, 1)`. Its `successor`, and the `terminal_fallback` in that
+  successor's place, cannot be challenged again: their entry is
+  `challengeable_candidate` with `r = 0`. For the authorized successor this
+  follows from the candidate's own fit and the challenge and successor
+  windows; the fallback in its place has no latest admission time of its own,
+  so this bound is what refuses one admitted too late to close.
 - `admitted_at_unix` is a protocol timestamp: positive and at most
   `2^63 - 1`. For `authorized_decision`,
   `decided_at_unix <= admitted_at_unix <= expires_at_unix`, both ends
@@ -7055,16 +7123,33 @@ The full receipt of either admission mode anchors its admission time:
 `admitted_at_unix` equals the `admitted_at_unix` of the embedded
 `PortableStageActionAdmissionEvidenceV1` body and is not after the verifier's
 present plus the clock allowance the stage admission evidence itself is
-verified with (five minutes). A compact proof's `sealed_at_unix`, which is
-never before `admitted_at_unix`, is held to the same bound. The allowance
+verified with (five minutes). The allowance
 lets a verifier whose clock runs behind the authority's accept a fresh
 receipt; it widens no window, because every window is computed from the
 signed time and never from the verifier's clock. The receipt body is signed by the decision-admission quorum and the
 stage evidence by the Action Authority; both record one admission, so they
 state one time. The same holds for `transitioned_at_unix` of a claim
 state-transition receipt and `applied_at_unix` of a decision application
-receipt. Without this tie a body signed with another time than its action was
-admitted at moves every window, cutoff and deadline computed from it.
+receipt, and for every other receipt that embeds stage admission evidence
+(section 19.6, "Receipt times"). Without this tie a body signed with another
+time than its action was admitted at moves every window, cutoff and deadline
+computed from it.
+
+The seal of every compact proof (`ClaimAdmissionReceiptProofV1`,
+`ClaimDecisionAdmissionReceiptProofV1`, `DecisionApplicationReceiptProofV1`)
+is held by one rule: `sealed_at_unix` is a protocol timestamp, is not before
+the time the sealed receipt body states (`admitted_at_unix`, or
+`applied_at_unix` for an application), because a receipt is sealed once it
+exists, and is not after the verifier's present plus the same clock
+allowance. The seal is never before the body's time, so the last bound holds
+the body's time to the verifier's present as well. A decision on a claim
+revision carries the compact proof of the claim's initial admission; with one
+allowance for every proof, a verifier whose clock runs behind accepts that
+decision exactly when it accepts the same decision on an initial claim.
+
+A compact decision proof's receipt body restates the decision it admits:
+`decision_path` and `decision_revision` equal the carried decision's, as
+`decision_sequence` does. A holder of the proof may read them from the body.
 
 An authorized decision admission is in addition held to the head it follows.
 These rules need the claim admission or the predecessor transition, which the
@@ -7513,6 +7598,32 @@ Agreement and obligation of the decision admission it embeds; a transition
 signed for another claim over this claim's decision is invalid on its own,
 not only inside a bundle. A decision application's `applied_at_unix` is not
 before the `transitioned_at_unix` of the challenge close it carries.
+
+The section 10.1 closure inequality and transitions. Section 10.1 names
+challenges, responses and state transitions among the admissions the closure
+inequality governs. A verifier applies it where a decision is admitted, and
+for a `challenge_admission` it then holds without a separate check: the
+candidate was admitted with `admitted_at_unix + challengeable_candidate(r)
+<= deadline`, a challenge is admitted no later than `challenge_ends_at_unix =
+admitted_at_unix + C`, and `C + reviewing_after_challenge(r - 1) =
+challengeable_candidate(r)` for the base profile's table, so
+`transitioned_at_unix + reviewing_after_challenge(r - 1) <= deadline` follows,
+on the ordinary path and, with the one-round late entries, on the
+late-recovery path. Two cases are open in V1 and a verifier applies no
+closure inequality to them:
+
+- `nonterminal_response_admission`. The released table's
+  `reviewing_after_nonterminal_response(r, n)` row is `(n + 1) * N` plus the
+  challenge tail, an ex-ante bound that is longer than the row of the
+  `evidence_required` or `disputed` state the response leaves. Applied at the
+  response it would refuse a response to a decision that was itself admitted
+  at its latest permitted time. The response inherits the decision's
+  `resolution_due_at_unix`, so it starts no window of its own.
+- `challenge_close`. The table has no entry for a final state. A close has no
+  latest admission time; for an approving decision, payout materialization
+  refuses a payout line that would expire after the path's deadline, so a
+  close admitted too late cannot be applied, and a denial has no remaining
+  closure.
 
 ## 18. Collateral
 
@@ -8644,6 +8755,50 @@ profile, or offer expiry does not erase that fact. Expiry fields remain only on
 requests, offers, reservations, provisional evidence, and other objects whose
 initial admissibility genuinely ends.
 
+**Receipt times.** Every receipt that embeds
+`PortableStageActionAdmissionEvidenceV1` states the time of its admission, and
+a verifier anchors that time before anything is computed from it: the body
+time equals the stage evidence body's `admitted_at_unix`, is a protocol
+timestamp (positive and no greater than the largest signed 64-bit value), and
+is not after the verifier's present plus the clock allowance (five minutes).
+The anchored body time of each receipt is:
+
+| Receipt | Anchored body time | Other times the body states |
+| --- | --- | --- |
+| claim-submission ingress receipt | `received_at_unix` | none |
+| claim admission receipt | `admitted_at_unix` | none |
+| claim decision admission receipt | `admitted_at_unix` | window ends, derived from it |
+| claim state-transition receipt | `transitioned_at_unix` | `successor_decision_due_at_unix`, derived from it |
+| decision application receipt | `applied_at_unix` | none |
+| claim-filing close receipt | `closed_at_unix` | `filing_cutoff_unix`, the Agreement's; `closed_at_unix` is not before it |
+| terminal claim set | `created_at_unix` | `all_claims_terminal_at_unix` and `release_not_before_unix`, facts the set derives about its claims; `filing_closed_at_unix <= all_claims_terminal_at_unix <= created_at_unix` and `release_not_before_unix >= all_claims_terminal_at_unix` |
+| post-acceptance exposure release receipt | `released_at_unix` | none |
+| non-activation exposure release receipt | `released_at_unix` | none |
+| coverage resolution | `resolved_at_unix` | none |
+| acceptance receipt | `accepted_at_unix` | `received_at_unix`, when the authority sequenced the request; `received_at_unix <= accepted_at_unix` and it is bounded by the offer |
+| activation evidence | `activated_at_unix` | `coverage_ends_at_unix`, the Agreement's |
+| cancellation receipt | `admitted_at_unix` | `effective_at_unix` and `incident_eligibility_ends_at_unix`, both equal to it |
+| non-activation evidence | `resolved_at_unix` | `activation_cutoff_unix`, the Agreement's; `resolved_at_unix` is not before it |
+
+The pre-acceptance exposure release receipt and the exposure admission
+receipt embed no stage admission evidence in V1, so their `released_at_unix`
+and `admitted_at_unix` are held only by their own authorization.
+
+The verifier's present is used for that upper bound and for nothing else in
+these receipts. The stage evidence is itself a historical fact: the authorized
+action, its Writer Fence and the Action Authority key are judged at the stage
+`admitted_at_unix`. An action admitted while its fence and its own
+`expires_at` were current remains valid evidence however long afterwards it
+is verified, and after the fence, the action or the key has expired or been
+replaced; an action admitted at or after either expiry is refused whenever it
+is verified. Every object a receipt stands on is judged at the receipt's
+anchored time, not at the verifier's present: the claim at
+`received_at_unix`, the acceptance request at `accepted_at_unix`, the
+cancellation request at `admitted_at_unix`, a decision at its admission's
+`admitted_at_unix`, and for activation the rules of section 15.3. The clock
+allowance of object authorizations (`validation_time_unix`), of a service
+profile's `created_at_unix` and of proof seals is the same allowance.
+
 For `unsecured-signed` and `collateral-attested`, the release receipt is
 produced by the same rollback-resistant Provider exposure authority that
 admitted the reservation. For `independently-enforceable`, it is instead
@@ -8890,6 +9045,21 @@ of that decision as its last transition:
   admission admitted_at_unix, review_deadline_seconds)`, with the bundle's
   initial admission proof as the source. A lone compact proof cannot
   show this (section 17.4, limit of a compact proof).
+- A carried proof on the `initial_terminal_fallback` path is held to the same
+  `claim_review_cutoff`: its `fallback_trigger_cutoff_unix` equals the cutoff
+  and its `admitted_at_unix` is not before it.
+- A carried proof whose predecessor transition the bundle carries is held to
+  that transition, as its full receipt is. Its two round counts before
+  admission equal the transition's counts after it. In `authorized_decision`
+  mode its `admitted_at_unix` is not before the transition's
+  `transitioned_at_unix` and not after its `successor_decision_due_at_unix`.
+  In `deterministic_fallback` mode on the `terminal_fallback` path its
+  `fallback_trigger_cutoff_unix` equals that `successor_decision_due_at_unix`
+  and its `admitted_at_unix` is not before it. A `late_recovery_terminal_fallback`
+  candidate is triggered by its filing close, not by the transition it follows,
+  and is excepted. A `terminal_fallback` from a `disputed` or
+  `evidence_required` head follows no transition; a bundle does not yet hold
+  it to that head's `resolution_due_at_unix`.
 - The application proof's `claim_decision_admission_receipt_digest` is the
   last proof's envelope digest, its
   `terminal_claim_state_transition_receipt_digest` is the last transition's

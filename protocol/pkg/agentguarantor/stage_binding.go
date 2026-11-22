@@ -270,6 +270,26 @@ func FindStageActionAuthorityV1(binding GuarantorStageActionAuthorityBindingV1, 
 // anchored to it use this one allowance.
 const stageAdmissionClockAllowanceV1 = 5 * time.Minute
 
+// verifyStageActionAtAdmissionV1 verifies the authorized action of a portable
+// stage admission as the historical fact it is. The admission time is a
+// protocol timestamp and is not after the verifier's present plus the clock
+// allowance; that is the only use of the verifier's clock. The action, its
+// Writer Fence and the Action Authority key are judged at the admission time
+// the Action Authority signed: an action admitted while its fence was current
+// stays valid evidence after the fence, the action or the key has expired or
+// been replaced, and an action admitted at or after either expiry is refused
+// whenever it is verified. It is the one check for every stage verifier.
+func verifyStageActionAtAdmissionV1(evidence PortableStageActionAdmissionEvidenceV1,
+	semanticFields map[string]agentcommerce.SemanticValue, expectedRequest []byte,
+	fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
+	admittedAt, inRange := protocolTimeV1(evidence.Body.AdmittedAtUnix)
+	if !inRange || !notAfterVerifierPresentV1(evidence.Body.AdmittedAtUnix, now) {
+		return errors.New("Guarantor portable stage admission time or resolver is invalid")
+	}
+	return agentcommerce.VerifyAuthorizedActionAtAuthorityTime(evidence.AuthorizedAction, semanticFields,
+		expectedRequest, evidence.WriterFence, fenceResolver, admittedAt, admittedAt)
+}
+
 // VerifyPortableStageActionAdmissionEvidenceV1 reproduces the complete side-
 // effect admission decision from Agreement-bound authority metadata.  It is
 // intentionally independent of any provider journal or transport database.
@@ -311,12 +331,10 @@ func VerifyPortableStageActionAdmissionEvidenceV1(evidence PortableStageActionAd
 		evidence.AuthorizedAction.ExactRequestDigest != requestDigest || evidence.AuthorizedAction.WriterFenceDigest != fenceDigest {
 		return errors.New("Guarantor portable stage admission body is invalid")
 	}
-	admittedAt := time.Unix(int64(body.AdmittedAtUnix), 0).UTC()
-	if admittedAt.After(now.UTC().Add(stageAdmissionClockAllowanceV1)) || authorityResolver == nil || fenceResolver == nil {
+	if authorityResolver == nil || fenceResolver == nil {
 		return errors.New("Guarantor portable stage admission time or resolver is invalid")
 	}
-	if err := agentcommerce.VerifyAuthorizedActionAtAuthorityTime(evidence.AuthorizedAction, semanticFields,
-		expectedRequest, evidence.WriterFence, fenceResolver, admittedAt, now); err != nil {
+	if err := verifyStageActionAtAdmissionV1(evidence, semanticFields, expectedRequest, fenceResolver, now); err != nil {
 		return err
 	}
 	if agentcommerce.ValidateActionResolution(evidence.ActionResolution) != nil ||

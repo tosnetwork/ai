@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
@@ -437,6 +436,12 @@ func VerifyCoverageNonActivationEvidenceV1(evidence AuthorizedCoverageNonActivat
 		return err
 	}
 	body := evidence.Body
+	// resolved_at_unix is compared with the activation cutoff and is the time
+	// the eligibility proofs are frozen at.
+	if err := bindReceiptTimeToStageAdmissionV1("coverage non-activation", body.ResolvedAtUnix,
+		evidence.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
 	offerDigest, _ := FirmOfferDigest(offer)
 	acceptanceDigest, _ := CoverageAcceptanceReceiptDigestV1(evidence.AuthorizedAcceptanceReceipt)
 	exposureDigest, _ := ExposureAdmissionReceiptDigestV1(offer.ExposureAdmissionReceipt)
@@ -502,14 +507,8 @@ func VerifyCoverageNonActivationEvidenceV1(evidence AuthorizedCoverageNonActivat
 	if err != nil {
 		return err
 	}
-	parties := map[string]struct{}{offer.Body.GuarantorAgentID: {}, offer.Body.CoveredPartyAgentID: {}, offer.Body.BeneficiaryAgentID: {}}
-	subjects := make([]string, 0, len(parties))
-	for party := range parties {
-		subjects = append(subjects, party)
-	}
-	sort.Strings(subjects)
 	proofs := evidence.AuthorityAdmissionEligibilityProofSet
-	if err := validateEligibilityProofSetAgainstV1(proofs, actionDigest, body.AcceptanceReceiptDigest, subjects,
+	if err := validateEligibilityProofSetAgainstV1(proofs, actionDigest, body.AcceptanceReceiptDigest, coveragePartySubjectsV1(offer),
 		coverageNonActivationObjectKindV1, body.ExactRequestDigest, offer.CoverageTerms.CoverageStateDomainDigest,
 		offer.CoverageTerms.LifecycleAuthorizationProfile, admissionDomainID, proofs.AdmissionSequence,
 		body.ResolvedAtUnix); err != nil {

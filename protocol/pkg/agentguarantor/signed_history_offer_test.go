@@ -136,6 +136,9 @@ type signedOfferInputs struct {
 	// agreement varies the coverage Agreement body before its authorization
 	// targets are computed.
 	agreement func(*agentcommerce.AgentAgreementBody)
+	// underlyingExpiresAt, when not zero, is when the underlying Agreement and
+	// its authorization predicate expire; by default the coverage end.
+	underlyingExpiresAt uint64
 }
 
 // signedOfferEligibility is what the eligibility proofs frozen with an
@@ -321,8 +324,9 @@ func (history *signedHistory) publishServiceProfile(profile ServiceProfileV1, pu
 }
 
 // underlyingAgreement is the Agreement whose covered obligations the covered
-// party owes the beneficiary, with the covered party's signed acceptance.
-func (history *signedHistory) underlyingAgreement(terms CoverageTermsV1) (agentcommerce.AgentAgreement, string) {
+// party owes the beneficiary, with the covered party's signed acceptance. It
+// and its authorization predicate expire at expiresAt.
+func (history *signedHistory) underlyingAgreement(terms CoverageTermsV1, expiresAt uint64) (agentcommerce.AgentAgreement, string) {
 	t := history.t
 	covered := signedOfferAgentSubject(terms.CoveredPartyAgentID)
 	body, err := agentcommerce.PrepareAgreementTargets(agentcommerce.AgentAgreementBody{SchemaVersion: 1,
@@ -337,8 +341,8 @@ func (history *signedHistory) underlyingAgreement(terms CoverageTermsV1) (agentc
 		AuthorizationPredicates: []agentcommerce.AgreementAuthorizationPredicate{{PredicateID: "predicate:underlying-covered",
 			AuthoritySubject: covered, ObligationIDs: []string{terms.CoveredObligationIDs[0]},
 			EvidenceProfileURI: agentcommerce.EvidenceProfileAgentSignature, EvidenceProfileVersion: 1,
-			EvidenceProfileDigest: agentcommerce.AgentSignatureProfileDigest(), ExpiresAtUnix: terms.CoverageEndsAtUnix}},
-		ValidFromUnix: signedOfferIssuedAt - 60, ExpiresAtUnix: terms.CoverageEndsAtUnix})
+			EvidenceProfileDigest: agentcommerce.AgentSignatureProfileDigest(), ExpiresAtUnix: expiresAt}},
+		ValidFromUnix: signedOfferIssuedAt - 60, ExpiresAtUnix: expiresAt})
 	if err != nil {
 		t.Fatalf("signed-history underlying Agreement is invalid: %v", err)
 	}
@@ -593,7 +597,11 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 	profile := history.offerServiceProfile(terms, claimProfile, collateralProfile)
 	artifact := history.publishServiceProfile(profile, inputs.publisher)
 	profileDigest, intentDigest := artifact.SelectedServiceProfileDigest, artifact.SelectedServiceIntentOperationDigest
-	underlying, underlyingDigest := history.underlyingAgreement(terms)
+	underlyingExpiresAt := terms.CoverageEndsAtUnix
+	if inputs.underlyingExpiresAt != 0 {
+		underlyingExpiresAt = inputs.underlyingExpiresAt
+	}
+	underlying, underlyingDigest := history.underlyingAgreement(terms, underlyingExpiresAt)
 	requestProfile := NativeAgentAuthorizationProfileV1()
 	if inputs.requestProfile != nil {
 		requestProfile = *inputs.requestProfile

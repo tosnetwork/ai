@@ -310,9 +310,14 @@ func VerifyCoverageCancellationReceiptV1(receipt AuthorizedCoverageCancellationR
 		return err
 	}
 	body := receipt.Body
-	admittedAt := time.Unix(int64(body.AdmittedAtUnix), 0).UTC()
-	if admittedAt.After(now.UTC().Add(5 * time.Minute)) {
-		return errors.New("Guarantor cancellation admission time is in the future")
+	// The receipt states the admission time twice: the shape validation holds
+	// effective_at_unix equal to admitted_at_unix, and admitted_at_unix is
+	// anchored to the stage admission evidence. The cancellation request is
+	// judged at that time.
+	admittedAt, err := anchoredReceiptTimeV1("coverage cancellation", body.AdmittedAtUnix,
+		receipt.StageActionAdmissionEvidence, now)
+	if err != nil {
+		return err
 	}
 	if err := VerifyCoverageCancellationRequestV1(receipt.AuthorizedCancellationRequest,
 		terms.CancellationPolicy, authorityResolver, admittedAt); err != nil {

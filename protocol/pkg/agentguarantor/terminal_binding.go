@@ -185,6 +185,13 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 				return err
 			}
 		}
+		// The initial terminal fallback races the initial decision on the same
+		// cutoff, which the carried initial admission fixes.
+		if proof.AuthorizedClaimDecision.Body.DecisionPath == "initial_terminal_fallback" {
+			if err := bindInitialFallbackToReviewCutoffV1(body, initial, terms); err != nil {
+				return err
+			}
+		}
 		if body.LateFilingCloseReceiptDigest != "" && body.LateFilingCloseReceiptDigest != filingCloseDigest {
 			return errors.New("terminal claim's late-path decision names another filing close than its set's")
 		}
@@ -223,6 +230,16 @@ func bindTerminalClaimDecisionV1(bundle ClaimTerminalResolutionBundleV1, admissi
 		if decided >= len(proofs)-1 ||
 			proofs[decided+1].ReceiptBody.PredecessorClaimStateTransitionReceiptDigest != digest {
 			return errors.New("terminal claim carries a transition its successor decision does not name")
+		}
+		// The successor's compact proof does not carry this transition; the
+		// bundle does, so the successor is held to it here as in its full
+		// receipt. A late-recovery candidate is triggered by its filing close,
+		// not by the transition it follows.
+		successor := proofs[decided+1]
+		if successor.AuthorizedClaimDecision.Body.DecisionPath != "late_recovery_terminal_fallback" {
+			if err := bindSuccessorDecisionAdmissionToTransitionV1(successor.ReceiptBody, transition.Body); err != nil {
+				return err
+			}
 		}
 	}
 	closing := transitions[len(transitions)-1].Body

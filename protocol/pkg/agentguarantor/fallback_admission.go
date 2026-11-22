@@ -494,6 +494,13 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			return initialErr
 		}
 		cutoff, ok = claimReviewCutoffV1(initialAdmission, terms)
+		// Off the late-recovery path the review cutoff is the trigger; a late
+		// candidate is triggered by its filing close instead, below.
+		if !lateRecovery {
+			if err := bindInitialFallbackToReviewCutoffV1(receipt.Body, initialAdmission, terms); err != nil {
+				return err
+			}
+		}
 	case "disputed", "evidence_required":
 		current := *source.currentDecision
 		if err := VerifyClaimDecisionAdmissionReceiptProofV1(current, terms, authorityResolver, now); err != nil {
@@ -525,6 +532,15 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			transition.Body.TransitionKind != wantKind || transition.Body.ResultingClaimState != "reviewing" ||
 			transition.Body.SuccessorDecisionDueAtUnix == 0 {
 			return errors.New("reviewing fallback transition head is substituted")
+		}
+		// The reference binding already held the starting round counts to this
+		// transition; the cutoff and the admission time are held here, by the
+		// check a terminal bundle also applies. A late candidate is triggered
+		// by its filing close instead.
+		if !lateRecovery {
+			if err := bindSuccessorDecisionAdmissionToTransitionV1(receipt.Body, transition.Body); err != nil {
+				return err
+			}
 		}
 		wantPriorState, cutoff, ok = "reviewing", transition.Body.SuccessorDecisionDueAtUnix, true
 		wantSequence, sequenceFits = checkedAdd(current.ReceiptBody.DecisionSequence, 1)

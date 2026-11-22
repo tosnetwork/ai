@@ -138,7 +138,7 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 		seal.AuthorizedActionDigest != body.AuthorizedActionDigest || seal.AuthorizedClaimEnvelopeDigest != claimDigest ||
 		seal.ClaimIngressReceiptDigest != ingressDigest || seal.CoverageEndCommitmentDigest != endDigest ||
 		seal.AuthorityInstanceRecordDigest != instanceDigest || seal.EligibilityProofSetDigest != eligibilityDigest ||
-		seal.CoverageTermsDigest != termsDigest || seal.SealedAtUnix < body.AdmittedAtUnix || uint64(now.UTC().Unix()) < seal.SealedAtUnix ||
+		seal.CoverageTermsDigest != termsDigest ||
 		proof.ReceiptDescriptor.RetrievalPolicyDigest != terms.ClaimAdmissionProfile.ProfileDigest ||
 		body.AuthorizedClaimEnvelopeDigest != claimDigest || body.ClaimSubmissionIngressReceiptDigest != ingressDigest ||
 		body.ClaimID != claim.Body.ClaimID || body.CoverageAgreementBodyDigest != claim.Body.CoverageAgreementBodyDigest ||
@@ -148,13 +148,25 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 		proof.SealAuthorization.ValidationTimeUnix != seal.SealedAtUnix {
 		return errors.New("claim admission compact proof binding is invalid")
 	}
+	// The seal time is held to the verifier's present with the allowance every
+	// other proof and receipt time is given, so a verifier whose clock runs
+	// slightly behind accepts a revision's initial admission proof as it
+	// accepts the revision's own admission.
+	if err := validateProofSealTimeV1("claim admission compact proof", seal.SealedAtUnix, body.AdmittedAtUnix, now); err != nil {
+		return err
+	}
 	if !verifySignatures {
 		return nil
 	}
 	if resolver == nil {
 		return errors.New("claim admission compact proof resolver is unavailable")
 	}
-	ingressValidationTime := time.Unix(int64(proof.AuthorizedClaimIngressReceipt.Body.ReceivedAtUnix), 0).UTC()
+	// The proof carries the complete ingress receipt, which is verified at the
+	// time it states it received the claim.
+	ingressValidationTime, inRange := protocolTimeV1(proof.AuthorizedClaimIngressReceipt.Body.ReceivedAtUnix)
+	if !inRange {
+		return errors.New("claim admission compact proof carries an ingress receipt whose time is absent or out of range")
+	}
 	if err := VerifyClaimSubmissionIngressReceiptV1(proof.AuthorizedClaimIngressReceipt, terms,
 		mustStageActionAuthorityV1(terms, "claim_submission_ingress"), resolver, fenceResolver, ingressValidationTime); err != nil {
 		return errors.New("claim admission proof has an invalid ingress receipt")
@@ -175,9 +187,9 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 			return errors.New("claim admission compact proof complete receipt is undecodable")
 		}
 		completeDigest, digestErr := ClaimAdmissionReceiptDigestV1(complete)
-		completeSeal, completeDescriptor, sealErr := NewClaimAdmissionReceiptSealBodyV1(complete, terms,
-			time.Unix(int64(seal.SealedAtUnix), 0).UTC())
-		if digestErr != nil || sealErr != nil || completeDigest != proof.ReceiptEnvelopeDigest ||
+		sealedAt, inRange := protocolTimeV1(seal.SealedAtUnix)
+		completeSeal, completeDescriptor, sealErr := NewClaimAdmissionReceiptSealBodyV1(complete, terms, sealedAt)
+		if !inRange || digestErr != nil || sealErr != nil || completeDigest != proof.ReceiptEnvelopeDigest ||
 			!equalCanonical(completeSeal, seal) || !equalCanonical(completeDescriptor, proof.ReceiptDescriptor) {
 			return errors.New("claim admission compact proof differs from its immutable complete receipt")
 		}

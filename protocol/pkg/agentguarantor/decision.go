@@ -337,10 +337,12 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		predecessor := receipt.PredecessorClaimStateTransitionReceipt
 		if predecessor == nil || decisionBody.DecisionPath != "successor" || receipt.Body.PriorClaimState != "reviewing" ||
 			predecessor.Body.ResultingClaimState != "reviewing" ||
-			predecessor.Body.ResultingClaimStateRevision != receipt.Body.PriorClaimStateRevision ||
-			receipt.Body.AdmittedAtUnix > predecessor.Body.SuccessorDecisionDueAtUnix {
+			predecessor.Body.ResultingClaimStateRevision != receipt.Body.PriorClaimStateRevision {
 			return errors.New("successor decision admission has no current reviewing predecessor")
 		}
+		// The successor's time bounds and starting round counts against this
+		// transition are held with its other bounds below, by the check a
+		// terminal bundle also applies.
 		if err := VerifyClaimStateTransitionReceiptV1(*predecessor, terms, agreementVerifier,
 			authorityResolver, fenceResolver, now); err != nil {
 			return fmt.Errorf("successor decision transition predecessor is invalid: %w", err)

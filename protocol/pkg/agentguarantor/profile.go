@@ -29,7 +29,7 @@ func ValidateServiceProfile(profile ServiceProfileV1, now time.Time) error {
 		profile.PolicyRevision == 0 || !validUnixTimestampV1(profile.CreatedAtUnix) ||
 		!validUnixTimestampV1(profile.ExpiresAtUnix) || profile.ExpiresAtUnix <= profile.CreatedAtUnix ||
 		profile.ExpiresAtUnix-profile.CreatedAtUnix > uint64((90*24*time.Hour)/time.Second) ||
-		profile.CreatedAtUnix > uint64(now.UTC().Add(5*time.Minute).Unix()) || uint64(now.UTC().Unix()) >= profile.ExpiresAtUnix {
+		!notAfterVerifierPresentV1(profile.CreatedAtUnix, now) || uint64(now.UTC().Unix()) >= profile.ExpiresAtUnix {
 		return errors.New("Guarantor service profile is invalid")
 	}
 	if err := validateAdmissionLimits(profile.AdmissionLimits); err != nil || validateEndpoints(profile.Endpoints) != nil {

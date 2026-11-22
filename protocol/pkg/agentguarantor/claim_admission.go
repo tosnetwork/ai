@@ -61,6 +61,13 @@ func VerifyClaimSubmissionIngressReceiptV1(receipt AuthorizedClaimSubmissionIngr
 	if err := validateClaimRevisionWithinCapacityV1(terms, claim.Body.ClaimRevision); err != nil {
 		return err
 	}
+	// received_at_unix is the time the ingress action was admitted at. It is a
+	// leaf of the ingress log and the time the claim is judged at, so it is
+	// anchored before either use.
+	receivedAt, err := anchoredReceiptTimeV1("claim ingress", body.ReceivedAtUnix, receipt.StageActionAdmissionEvidence, now)
+	if err != nil {
+		return err
+	}
 	claimDigest, claimErr := ClaimEnvelopeDigest(claim)
 	claimBodyDigest, bodyErr := ClaimBodyDigest(claim.Body)
 	stateDomain, stateErr := ClaimIngressStateDomainDigestV1(body.CoverageAgreementBodyDigest, body.CoverageObligationID)
@@ -96,7 +103,7 @@ func VerifyClaimSubmissionIngressReceiptV1(receipt AuthorizedClaimSubmissionIngr
 		return errors.New("Guarantor claim ingress receipt binding is invalid")
 	}
 	if err := VerifyClaim(claim, terms, body.CoverageAgreementBodyDigest, body.CoverageObligationID,
-		authorityResolver, time.Unix(int64(body.ReceivedAtUnix), 0).UTC()); err != nil {
+		authorityResolver, receivedAt); err != nil {
 		return err
 	}
 	requestBody := ClaimSubmissionIngressActionBodyV1{SchemaVersion: 1, AuthorizedClaim: claim, TargetIngressState: "received"}
@@ -203,6 +210,12 @@ func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, te
 		return err
 	}
 	if err := bindRevisionInitialAdmissionProofV1(body, receipt.InitialClaimAdmissionProof); err != nil {
+		return err
+	}
+	// The claim review cutoff, the lower bound of every decision on the claim
+	// and the closure fit all start from admitted_at_unix.
+	if err := bindReceiptTimeToStageAdmissionV1("claim admission", body.AdmittedAtUnix,
+		receipt.StageActionAdmissionEvidence, now); err != nil {
 		return err
 	}
 	claim := ingress.AuthorizedClaim

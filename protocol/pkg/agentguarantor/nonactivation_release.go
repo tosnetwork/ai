@@ -76,6 +76,10 @@ func VerifyNonActivationExposureReleaseReceiptV1(value AuthorizedNonActivationEx
 		return err
 	}
 	body := value.Body
+	if err := bindReceiptTimeToStageAdmissionV1("non-activation exposure release", body.ReleasedAtUnix,
+		value.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
 	nonActivationDigest, _ := CoverageNonActivationEvidenceDigestV1(value.AuthorizedNonActivationEvidence)
 	exposureDigest, _ := ExposureAdmissionReceiptDigestV1(value.AuthorizedExposureAdmissionReceipt)
 	zero := AtomicAmountV1{Asset: offer.CoverageTerms.CoverageAsset, AmountAtomic: "0"}

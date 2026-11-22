@@ -287,8 +287,10 @@ func TestSignedHistoryExposureReleaseIsOfTheOffersReservationAndClaimSet(t *test
 
 	// A claim set created after the time it allows its release from: the
 	// release is not before the set exists either.
-	history.vary = signedHistoryVariation{closureBody: func(body *TerminalClaimSetBodyV1) { body.CreatedAtUnix += 50 }}
-	createdLater := history.terminalSet(claim.filing, []ClaimTerminalResolutionBundleV1{bundle}, claim.closedAt)
+	// The set's closure action is admitted, and the set created, 50 seconds
+	// after its claims became terminal.
+	history.vary = signedHistoryVariation{closureTerminalAt: claim.closedAt}
+	createdLater := history.terminalSet(claim.filing, []ClaimTerminalResolutionBundleV1{bundle}, claim.closedAt+50)
 	history.vary = signedHistoryVariation{}
 	created := createdLater.Body.CreatedAtUnix
 	if createdLater.Body.ReleaseNotBeforeUnix >= created {

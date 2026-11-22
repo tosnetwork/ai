@@ -617,8 +617,9 @@ func TestSignedHistoryFirmOfferIsVerifiedAgainstItsOwnParts(t *testing.T) {
 // receipt over an acceptance of an offer whose terms' final deadline is off
 // the Agreement's expiry is refused with that rule's refusal, so the rule
 // reaches every verifier that stands on an acceptance receipt. The receipt is
-// well-formed and otherwise unverified: the refusal comes before any of its
-// own evidence is opened.
+// well-formed and otherwise unverified: its stage admission evidence states
+// nothing but the acceptance time, which the verifier reads to judge the
+// request at, and the refusal comes before any of its own evidence is opened.
 func TestSignedHistoryAcceptanceReceiptCarriesTheOfferRefusal(t *testing.T) {
 	history := newSignedHistory(t)
 	signed := history.quoteToOffer(true, func(in *signedOfferInputs) { in.agreementExpiresAt++ })
@@ -649,6 +650,7 @@ func TestSignedHistoryAcceptanceReceiptCarriesTheOfferRefusal(t *testing.T) {
 		AuthorizedAcceptanceRequest: request, AuthorityAdmissionEligibilityProofSet: eligibility,
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObject("coverage-acceptance-receipt", testDigest("8"),
 			"tos.service.agent-guarantor-acceptance-receipt-signature.v1", acceptedAt)}}
+	receipt.StageActionAdmissionEvidence.Body.AdmittedAtUnix = acceptedAt
 	if _, err := CoverageAcceptanceReceiptDigestV1(receipt); err != nil {
 		t.Fatalf("signed-history acceptance receipt is malformed: %v", err)
 	}

@@ -422,6 +422,12 @@ func VerifyClaimFilingCloseReceiptV1(value AuthorizedClaimFilingCloseReceiptV1,
 		return err
 	}
 	body := value.Body
+	// closed_at_unix is compared with the filing cutoff below, bounds the
+	// terminal claim set and is the trigger of a late-recovery fallback.
+	if err := bindReceiptTimeToStageAdmissionV1("claim filing close", body.ClosedAtUnix,
+		value.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
 	activationDigest, activationErr := CoverageActivationEvidenceDigestV1(activation)
 	endDigest, endErr := CoverageEndCommitmentDigestV1(value.CoverageEndCommitment)
 	if activationErr != nil || endErr != nil {
@@ -558,6 +564,15 @@ func VerifyTerminalClaimSetV1(value AuthorizedTerminalClaimSetEvidenceV1, offer 
 		return err
 	}
 	body := value.Body
+	// The set states three times. created_at_unix is when the closure action
+	// was admitted and is the one anchored to the stage admission evidence.
+	// all_claims_terminal_at_unix and release_not_before_unix are facts the
+	// set derives about its claims; the filing-close binding below holds them
+	// between the filing close and the creation time and after it.
+	if err := bindReceiptTimeToStageAdmissionV1("terminal claim set creation", body.CreatedAtUnix,
+		value.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
 	filingDigest, filingErr := ClaimFilingCloseReceiptDigestV1(value.AuthorizedClaimFilingCloseReceipt)
 	bundleDigest, bundleErr := CanonicalGuarantorEvidenceSetDigestV1(value.CoverageClosureEvidenceSet)
 	if filingErr != nil || bundleErr != nil {
@@ -757,6 +772,12 @@ func VerifyExposureReleaseReceiptV1(value AuthorizedExposureReleaseReceiptV1, of
 		authorityResolver, fenceResolver, paymentVerifier, now); err != nil {
 		return err
 	}
+	// released_at_unix is compared with the claim set's release guard and
+	// creation time, and bounds the coverage resolution.
+	if err := bindReceiptTimeToStageAdmissionV1("exposure release", value.Body.ReleasedAtUnix,
+		value.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
 	if err := bindExposureReleaseToOfferV1(value, offer, bound); err != nil {
 		return err
 	}
@@ -844,6 +865,10 @@ func VerifyCoverageResolutionV1(value AuthorizedCoverageResolutionV1, offer Auth
 		return err
 	}
 	terminal := value.AuthorizedExposureReleaseReceipt.AuthorizedTerminalClaimSetEvidence.Body
+	if err := bindReceiptTimeToStageAdmissionV1("coverage resolution", body.ResolvedAtUnix,
+		value.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
 	if err := bindCoverageResolutionToReleaseV1(body, value.AuthorizedExposureReleaseReceipt.Body, terminal, bound); err != nil {
 		return err
 	}
@@ -896,9 +921,7 @@ func verifyPortableStage(stage PortableStageActionAdmissionEvidenceV1, bound *Gu
 		stage.ActionResolution.StableActionID != stableID || stage.ActionResolution.ExactRequestDigest != exactRequestDigest {
 		return errors.New("portable Guarantor stage evidence is invalid")
 	}
-	admittedAt := time.Unix(int64(stage.Body.AdmittedAtUnix), 0).UTC()
-	if admittedAt.After(now.UTC().Add(5*time.Minute)) || agentcommerce.VerifyAuthorizedActionAtAuthorityTime(stage.AuthorizedAction,
-		fields, canonical, stage.WriterFence, fenceResolver, admittedAt, now) != nil {
+	if fenceResolver == nil || verifyStageActionAtAdmissionV1(stage, fields, canonical, fenceResolver, now) != nil {
 		return errors.New("portable Guarantor stage action does not verify")
 	}
 	if stage.ActionAdmissionAuthorization.AuthoritySubject != stage.AuthorizedAction.AuthorityID ||
