@@ -1837,7 +1837,9 @@ Before admitting a claim revision, decision, challenge, evidence response,
 dispute, timeout fallback, state transition, or payout materialization, the
 same CAS computes the target profile state. After charging the proposed record,
 the unused decision and transition slots must be at least that target state's
-two required reserves, and checked addition must prove:
+two required reserves. For every admission of that list whose target state has
+an entry in the table above and starts a window of its own, checked addition
+must also prove:
 
 ```text
 admitted_at_unix
@@ -1845,6 +1847,19 @@ admitted_at_unix
   <= terminal_resolution_deadline_unix
   <= coverage_agreement.expires_at
 ```
+
+Two admissions of the list are outside this time inequality in V1, and neither
+the admitting authority nor a portable verifier applies it to them: an evidence
+response (the `nonterminal_response_admission` transition) and the
+`challenge_close` state transition. A response inherits its decision's
+`resolution_due_at_unix` and starts no window, so the table's ex-ante row for
+the state it enters would refuse a response to a decision that was itself
+admitted at its latest permitted time; and the table has no entry for the
+final state a close produces. Section 17.4 ("The section 10.1 closure
+inequality and transitions") gives both derivations, shows that a
+`challenge_admission` satisfies the inequality without a separate check, and
+states what bounds a late close instead. The slot reserves of this section
+apply to those two admissions as to every other.
 
 This time inequality governs normal-case admission. The exact
 `late_recovery_terminal_fallback` branch is exempt only from the ordinary
@@ -3066,6 +3081,14 @@ receive this full bounded interval to resolve ingress and admission. Every
 accepted claim-admission receipt must have `admitted_at_unix` no later than the
 checked sum of cutoff plus grace; an action that has not linearized by that
 instant may later resolve only as a terminal rejection for admission purposes.
+These rules are enforced where their operands are held. Terms validation, and
+with it the terms digest, requires a positive grace, so terms without one have
+no digest. Every verifier that resolves the offer's service profile (firm-offer
+verification and the intrinsic verification of Firm Offer Agreement evidence)
+holds the grace to the selected claim profile's
+`maximum_claim_ingress_resolution_grace_seconds`, and every firm-offer verifier
+holds it to the request's maximum (the table below). The admission bound is a
+rule of every claim-admission verifier (section 17.2).
 
 Filing close normally linearizes after the zero-pending ingress cut and no later
 than that checked grace endpoint. If any timely ingress is still unknown,
@@ -3521,6 +3544,24 @@ claim_ingress_resolution_grace_seconds)`, but only from that timely ingress and
 within the same frozen ingress cut. A claim first sequenced after the filing
 cutoff is invalid, while a timely ingress is not invalid merely because ingress
 resolution or claim admission uses the accepted grace interval.
+
+These bounds are rules of the portable verifiers, not only of the admitting
+authority. A verifier of activation evidence requires
+
+```text
+accepted_at_unix <= activated_at_unix <= coverage_starts_at_unix
+```
+
+where `accepted_at_unix` is that of the acceptance receipt the activation
+embeds. The acceptance is itself admitted while the coverage Agreement is
+valid, so `agreement.valid_from <= activated_at_unix` follows, and an
+activation is never admitted before the commitment it consumes exists. The
+upper bound is the activation cutoff: activation evidence whose
+`activated_at_unix` is later than `coverage_starts_at_unix` is refused whenever
+it is verified, and that coverage can only be resolved as not activated
+(section 15.3). A verifier of a claim-submission ingress receipt and of a claim
+admission, complete or as a compact proof, enforces the claim bounds as
+sections 17.1 and 17.2 state them.
 
 ## 13. Generic Agreement mapping
 
@@ -4734,19 +4775,26 @@ requirement above is judged at that time, never at the verifier's present:
   until its expiry and not at it;
 - the acceptance receipt is verified as the historical fact it is, its
   request at `accepted_at_unix`;
+- `activated_at_unix` is no earlier than that `accepted_at_unix` and no later
+  than the activation cutoff, `coverage_starts_at_unix` (section 12.2);
 - the `coverage_activation` action, its Writer Fence and the Action Authority
   key are judged at the stage `admitted_at_unix`, which is
   `activated_at_unix`;
 - collateral lock, collateral-control and operational-independence evidence
   is current at `activated_at_unix`: its maximum age and its own expiry are
-  measured from that time.
+  measured from that time. A lock finalized exactly
+  `maximum_evidence_age_seconds` before the activation is current and one
+  finalized a second earlier is not; control evidence is current until its
+  `expires_at_unix` and not at it.
 
 Activation evidence therefore verifies however long after the underlying
-Agreement's authorization, the Writer Fence or the coverage Agreement has
-expired, which is when a claim admission, a filing close and a terminal claim
-set that stand on it are verified. An activation admitted when the underlying
-Agreement was no longer authorized, or when its action or Writer Fence had
-expired, is refused whenever it is verified.
+Agreement's authorization, the Writer Fence, the coverage Agreement or its
+collateral prerequisites have expired, which is when a claim admission, a
+filing close and a terminal claim set that stand on it are verified. An
+activation admitted when the underlying Agreement was no longer authorized,
+when its action or Writer Fence had expired, before its acceptance, after the
+coverage start, or on collateral prerequisites that were not current at that
+time, is refused whenever it is verified.
 
 `fee_resolution_evidence_set` and `collateral_non_activation_evidence_set`
 are optional, but a set that is carried is a valid canonical evidence set
@@ -5671,6 +5719,15 @@ than the filing cutoff blocks the ingress cut and therefore filing close. Local
 queue absence, Messenger acknowledgement, timeout, or writer loss cannot reject
 or omit it.
 
+Initial ingress closes at the filing cutoff, and every verifier of an ingress
+receipt enforces it: the receipt of an initial claim (`claim_revision = 1`)
+has `received_at_unix <= claim_filing_ends_at_unix`, whatever the claim's own
+`expires_at_unix`. A receipt that states a later time is refused on its own,
+inside the claim admission that embeds it and inside that admission's compact
+proof. The ingress receipt of a supplemental revision is not held to the
+cutoff: an admitted claim uses its revision-ingress log during the review
+window.
+
 The complete canonical `ClaimSubmissionAuthorityInstanceEffectV1` is the
 ID-free `canonical_effect_body` supplied to the released recoverable authority-
 instance allocator. It embeds that exact ingress receipt, not another claim
@@ -5928,6 +5985,28 @@ admission first attempts to linearize after the grace endpoint, it resolves as
 a terminal rejection with no claim-log or coverage mutation. Late recovery may
 return an already stored receipt whose `admitted_at_unix` was within the bound,
 but cannot mint a backdated receipt.
+
+Every portable verifier of a claim admission enforces these times, on the
+complete receipt and on its `ClaimAdmissionReceiptProofV1`, which carries the
+receipt body and the complete ingress receipt, before any signature is
+checked; a proof that breaks one cannot be built:
+
+```text
+ingress.received_at_unix <= admitted_at_unix              # every admission
+admitted_at_unix <= claim.expires_at_unix                 # initial claim
+admitted_at_unix <= checked_add(claim_filing_ends_at_unix,
+                                claim_ingress_resolution_grace_seconds)
+                                                          # initial claim
+```
+
+An admission consumes its ingress receipt, so it is never admitted before
+that receipt was received; with `created_at_unix <= received_at_unix` of
+section 17.1 this gives `created_at_unix <= admitted_at_unix`. Which admission
+is initial is read from the revision of the claim the ingress receipt carries.
+If the checked sum overflows, no initial claim is admitted under those terms.
+A revision admission is held to the first line only: it may be admitted after
+the filing cutoff and after the grace, during the review window, and V1 does
+not hold it to its claim's `expires_at_unix`.
 
 For an initial claim, checked time ordering is exactly
 `coverage_starts_at_unix <= occurred_at_unix <= created_at_unix <=
@@ -7887,16 +7966,48 @@ forbidden for `lock`, `encumber`, `release`, `reorg`, and
 claim set through its distinct prerequisite role. Request and evidence presence
 and bytes must match exactly.
 
-A verifier of `release` collateral evidence holds it to two rules of its own.
-The action's `prerequisite_evidence_set` names exactly one item of media type
-`application/vnd.tos.service.agent-guarantor-terminal-claim-set.v1+cbor`,
-which as a Guarantor object is content addressed; a release that names none,
-or more than one, is invalid. The collateral verifier holds no firm offer to
-verify that set against, so it checks that the release commits one; the
-Adapter that admits the release, and any holder of the set, verifies the set
-itself. And the release respects the earliest-release guard of section 12.2:
-its stage action is admitted, and its `finalized_at_unix` lies, no earlier
-than `collateral_terms.release_not_before_unix`.
+A verifier of `release` collateral evidence that holds only the evidence and
+the coverage terms holds it to these rules. The action's
+`prerequisite_evidence_set` has purpose `collateral-release` and the action's
+`coverage_agreement_body_digest` as context, and names exactly one item of
+media type
+`application/vnd.tos.service.agent-guarantor-terminal-claim-set.v1+cbor`; a
+release that names none, or more than one, is invalid. As a Guarantor object
+the item is content addressed, and its descriptor names that media type and,
+as `content_digest`, the item's own `evidence_envelope_digest`, so the digest
+the release commits is the digest the set is retrieved by. And the release
+respects the earliest-release guard of section 12.2: its stage action is
+admitted, and its `finalized_at_unix` lies, no earlier than
+`collateral_terms.release_not_before_unix`. That verifier holds no firm offer
+and no set, so it establishes that the release commits one terminal claim
+set, not that the set is the coverage's or that it verifies.
+
+A verifier that also holds the terminal claim set and the firm offer (the
+Adapter that admits the release, and any third party the set was disclosed
+to) verifies the release in full. The evidence is a `release`; it verifies as
+collateral evidence under the offer's terms; the set verifies as the offer's
+terminal claim set (section 19.6), which ties it to the offer's coverage
+Agreement and coverage obligation; the envelope digest the release commits is
+that set's; the release's `coverage_agreement_body_digest` is the offer's; and
+the release's stage action is admitted no earlier than the set's
+`release_not_before_unix` and no earlier than its `created_at_unix`.
+Collateral is therefore not released against a claim cut of another coverage,
+one that does not verify, or one that did not exist yet. A terminal claim set
+of a collateralized coverage already has `release_not_before_unix` no earlier
+than the collateral guard (section 12.2).
+
+Every verifier of collateral evidence, of whatever kind, holds it to the
+Agreement's collateral. The `transition_binding` the action carries is, byte
+for byte, one of `collateral_terms.transition_bindings[]`: a binding is well
+formed on its own, so without this rule evidence could be made and authorized
+under a binding that names another Adapter, evidence profile or authorization
+subjects than the Agreement froze. The same rule holds an Adapter request and
+the transition derived from it wherever either is computed. And the action's
+`obligation_id` is the terms' `collateral_obligation_id`. The coverage terms
+carry no Agreement digest, so which coverage Agreement the evidence names is
+held by the verifier that has one: activation verification compares it with
+the activation's Agreement (section 15.3), and the release verifier above
+with the firm offer's.
 
 Exhaustion is not another transition kind: it is a `payout` whose verified
 resulting state is `depleted`. The action binding, body Adapter and evidence
@@ -8845,6 +8956,16 @@ cancellation request at `admitted_at_unix`, a decision at its admission's
 `admitted_at_unix`, and for activation the rules of section 15.3. The clock
 allowance of object authorizations (`validation_time_unix`), of a service
 profile's `created_at_unix` and of proof seals is the same allowance.
+
+This places one duty on every Action Authority resolver. Because a stage
+admission is judged at its own `admitted_at_unix`, a resolver must treat a
+compromise revocation as retroactive: a key revoked because it was compromised
+is refused at every admission time it is asked about, including times before
+the revocation was recorded. The portable verifier cannot tell an old honest
+receipt from a freshly minted backdated one, so a resolver that kept honouring
+the key for earlier times would let its holder mint receipts dated before the
+revocation. An ordinary rotation or expiry is not retroactive: the replaced
+key stays valid for the admissions made while it was current.
 
 For `unsecured-signed` and `collateral-attested`, the release receipt is
 produced by the same rollback-resistant Provider exposure authority that
