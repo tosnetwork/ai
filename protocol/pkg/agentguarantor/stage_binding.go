@@ -264,6 +264,12 @@ func FindStageActionAuthorityV1(binding GuarantorStageActionAuthorityBindingV1, 
 	return GuarantorStageActionAuthorityV1{}, errors.New("Guarantor stage is not bound")
 }
 
+// stageAdmissionClockAllowanceV1 is how far past the verifier's present an
+// admission time may lie: the verifier's clock may run that much behind the
+// admitting authority's. The stage admission evidence and every receipt time
+// anchored to it use this one allowance.
+const stageAdmissionClockAllowanceV1 = 5 * time.Minute
+
 // VerifyPortableStageActionAdmissionEvidenceV1 reproduces the complete side-
 // effect admission decision from Agreement-bound authority metadata.  It is
 // intentionally independent of any provider journal or transport database.
@@ -306,7 +312,7 @@ func VerifyPortableStageActionAdmissionEvidenceV1(evidence PortableStageActionAd
 		return errors.New("Guarantor portable stage admission body is invalid")
 	}
 	admittedAt := time.Unix(int64(body.AdmittedAtUnix), 0).UTC()
-	if admittedAt.After(now.UTC().Add(5*time.Minute)) || authorityResolver == nil || fenceResolver == nil {
+	if admittedAt.After(now.UTC().Add(stageAdmissionClockAllowanceV1)) || authorityResolver == nil || fenceResolver == nil {
 		return errors.New("Guarantor portable stage admission time or resolver is invalid")
 	}
 	if err := agentcommerce.VerifyAuthorizedActionAtAuthorityTime(evidence.AuthorizedAction, semanticFields,

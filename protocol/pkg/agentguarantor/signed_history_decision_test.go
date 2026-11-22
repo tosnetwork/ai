@@ -2,6 +2,7 @@ package agentguarantor
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -45,10 +46,14 @@ func (history *signedHistory) initialClaimsCut(cutoff uint64) ClaimIngressAdmiss
 			t.Fatal(err)
 		}
 		resolution := admission.StageActionAdmissionEvidence.ActionResolution
-		entries = append(entries, ClaimIngressResolutionEntryV1{ClaimIngressSequence: ingress.Body.ClaimIngressSequence,
+		entry := ClaimIngressResolutionEntryV1{ClaimIngressSequence: ingress.Body.ClaimIngressSequence,
 			ReceivedAtUnix: ingress.Body.ReceivedAtUnix, IngressActionResolution: ingress.StageActionAdmissionEvidence.ActionResolution,
 			ClaimIngressReceiptDigest: ingressDigest, ResolutionKind: "claim_admitted",
-			ClaimAdmissionActionResolution: &resolution, ClaimAdmissionReceiptDigest: admissionDigest})
+			ClaimAdmissionActionResolution: &resolution, ClaimAdmissionReceiptDigest: admissionDigest}
+		if history.vary.filingCutEntry != nil {
+			history.vary.filingCutEntry(&entry)
+		}
+		entries = append(entries, entry)
 		root = ingress.Body.AdmittedClaimIngressLogRoot
 	}
 	cut := ClaimIngressAdmissionCutProofV1{SchemaVersion: 1, CoverageAgreementBodyDigest: history.agreement,
@@ -132,13 +137,17 @@ func (history *signedHistory) filingClose(closedAt uint64) AuthorizedClaimFiling
 	claimLogID := "claim-log:" + history.agreement[len("sha256:"):]
 	filingRevision := history.activation.Body.ActivatedClaimFilingStateRevision
 	admitted := uint64(len(history.initialReceipts))
+	frozenRoot := history.claimLogRoot
+	if history.vary.frozenRoot != "" {
+		frozenRoot = history.vary.frozenRoot
+	}
 	request := ClaimFilingCloseActionBodyV1{SchemaVersion: 1, CoverageAgreementBodyDigest: history.agreement,
 		CoverageObligationID: history.obligation, ClaimAdmissionLogID: claimLogID, ClaimIngressAdmissionCutProof: cut,
 		FilingCloseReason: "normal", FilingCutoffUnix: cutoff, ExpectedCoverageState: "active",
 		ExpectedCoverageEndCommitmentDigest: endDigest, CoverageEndReason: "normal_expiry", ActivationEvidenceDigest: activationDigest,
 		ExpectedCoverageRevision: history.coverageRevision, TargetCoverageRevision: history.coverageRevision + 1,
 		ExpectedClaimFilingStateRevision: filingRevision, TargetClaimFilingState: "frozen",
-		ExpectedClaimAdmissionHighWater: admitted, ExpectedClaimAdmissionLogRoot: history.claimLogRoot,
+		ExpectedClaimAdmissionHighWater: admitted, ExpectedClaimAdmissionLogRoot: frozenRoot,
 		TransitionEvidenceProjection: projection}
 	canonical, err := Canonical(request)
 	if err != nil {
@@ -165,7 +174,7 @@ func (history *signedHistory) filingClose(closedAt uint64) AuthorizedClaimFiling
 		CoverageStateDomainDigest: terms.CoverageStateDomainDigest, CoverageEndCommitmentDigest: endDigest,
 		ClaimAdmissionLogID: claimLogID, ClaimIngressAdmissionCutProofDigest: cutDigest,
 		FrozenClaimIngressHighWater: cut.AdmissionHighWater, FrozenClaimIngressLogRoot: cut.AdmissionLogRoot,
-		FrozenClaimAdmissionHighWater: admitted, FrozenClaimAdmissionLogRoot: history.claimLogRoot,
+		FrozenClaimAdmissionHighWater: admitted, FrozenClaimAdmissionLogRoot: frozenRoot,
 		FilingCloseReason: "normal", FilingCutoffUnix: cutoff, PriorCoverageState: "active", CoverageEndReason: "normal_expiry",
 		IncidentEligibilityEndsAtUnix: terms.CoverageEndsAtUnix, CoverageEndEvidenceDigest: endCommitment.CoverageEndEvidenceDigest,
 		ActivationEvidenceDigest: activationDigest, PriorCoverageRevision: history.coverageRevision,
@@ -228,7 +237,8 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 	switch state.status {
 	case "admitted":
 		sourceState, decisionPath = "initial_reviewing", "initial_terminal_fallback"
-		cutoff = claimAdmission.Body.AdmittedAtUnix + terms.ReviewDeadlineSeconds
+		// The review cutoff runs from the claim's initial admission.
+		cutoff = history.initialReceipts[claimID].Body.AdmittedAtUnix + terms.ReviewDeadlineSeconds
 	case "reviewing":
 		sourceState = "reviewing_after_challenge"
 		cutoff = state.transition.Body.SuccessorDecisionDueAtUnix
@@ -306,6 +316,9 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 		EvidenceSetDigest: evidenceDigest, PolicyApplicationDigest: policyDigest, ReasonDigest: reasonDigest,
 		ChallengeWindowSeconds: terms.ChallengeWindowSeconds, DecidedAtUnix: at, ExpiresAtUnix: expiresAt},
 		DecisionEvidenceSet: evidence, PolicyApplication: policy, DecisionReason: reason}
+	if history.vary.decision != nil {
+		history.vary.decision(&decision.Body)
+	}
 	decisionDigest, err := ClaimDecisionDigestV1(decision)
 	if err != nil {
 		t.Fatal(err)
@@ -319,6 +332,9 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 	if !state.epochFrozen {
 		cut = history.revisionCut(claimID, at)
 		expectedState = "open"
+	}
+	if history.vary.cut != nil {
+		history.vary.cut(&cut)
 	}
 	fallbackDigest, err := DeterministicClaimTerminalFallbackDigestV1(fallback)
 	if err != nil {
@@ -334,6 +350,9 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 		SourceClaimStateRevision: state.stateRevision, SourceClaimState: sourceState,
 		ExpectedChallengeRoundsUsed: state.challengeRounds, ExpectedNonterminalRoundsUsed: state.nonterminalRounds,
 		TriggerCutoffUnix: cutoff, DecisionSequence: sequence}
+	if history.vary.epoch != nil {
+		history.vary.epoch(&variant.ClaimRevisionEpochExpectation)
+	}
 	if state.decision != nil {
 		if variant.CurrentDecisionAdmissionReceiptDigest, err = ClaimDecisionAdmissionReceiptDigestV1(*state.decision); err != nil {
 			t.Fatal(err)
@@ -401,6 +420,14 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 	token := DecisionApplicationTokenV1{SchemaVersion: 1, TokenID: tokenID, CoverageAgreementBodyDigest: history.agreement,
 		CoverageObligationID: history.obligation, ClaimID: claimID, AuthorizedClaimDecisionDigest: decisionDigest,
 		DecisionSequence: sequence, DecisionRevision: 1, ReservedApprovedAmount: zero, TokenRevision: 1, State: "pending"}
+	// The zero-value denial reserves nothing and releases what the replaced
+	// pending token reserved.
+	replacedReserve := uint64(0)
+	if state.token != nil {
+		if replacedReserve, err = strconv.ParseUint(state.token.ReservedApprovedAmount.AmountAtomic, 10, 64); err != nil {
+			t.Fatal(err)
+		}
+	}
 	body := ClaimDecisionAdmissionReceiptBodyV1{SchemaVersion: 1, AuthorityID: action.AuthorityID,
 		CoverageAgreementBodyDigest: history.agreement, CoverageObligationID: history.obligation, ClaimID: claimID,
 		AuthorizedClaimDecisionDigest: decisionDigest, AdmissionMode: "deterministic_fallback", FallbackTriggerCutoffUnix: cutoff,
@@ -415,8 +442,9 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 		ChallengeRoundsUsedAfter: state.challengeRounds, NonterminalRoundsUsedBefore: state.nonterminalRounds,
 		NonterminalRoundsUsedAfter: state.nonterminalRounds, ChallengeStartsAtUnix: at, ChallengeEndsAtUnix: at + terms.ChallengeWindowSeconds,
 		ResultingApplicationToken:             &token,
-		AggregatePendingDecisionReserveBefore: zero, AggregatePendingDecisionReserveAfter: zero,
-		AuthorizedActionDigest: actionDigest, StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
+		AggregatePendingDecisionReserveBefore: history.amount(history.pendingReserve),
+		AggregatePendingDecisionReserveAfter:  history.amount(history.pendingReserve - replacedReserve),
+		AuthorizedActionDigest:                actionDigest, StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
 		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, AdmittedAtUnix: at,
 		AuthorityAdmissionEligibilityProofSetDigest:  eligibilityDigest,
 		PredecessorDecisionAdmissionReceiptDigest:    variant.CurrentDecisionAdmissionReceiptDigest,
@@ -427,10 +455,15 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 		body.LateFilingCloseReceiptDigest = marker
 	}
 	if state.token != nil {
-		if body.PriorApplicationTokenDigest, err = DecisionApplicationTokenDigestV1(*state.token); err != nil {
-			t.Fatal(err)
+		// A prior token that cannot be digested leaves the digest absent; a
+		// test presents such a receipt to show it is refused.
+		if digest, digestErr := DecisionApplicationTokenDigestV1(*state.token); digestErr == nil {
+			body.PriorApplicationTokenDigest = digest
 		}
 		body.PriorApplicationTokenTerminalState = "replaced"
+	}
+	if history.vary.admission != nil {
+		history.vary.admission(&body)
 	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-claim-decision-admission-receipt-body.v1", body)
 	if err != nil {
@@ -447,6 +480,7 @@ func (history *signedHistory) fallback(claimID string, filing *AuthorizedClaimFi
 			terms.DecisionAdmissionProfile, "claim-decision-admission-receipt", bodyDigest,
 			"tos.service.agent-guarantor-claim-decision-admission-signature.v1", at)}}
 	history.coverageRevision++
+	history.pendingReserve -= replacedReserve
 	state.status, state.stateRevision, state.decisionSequence = "denied", state.stateRevision+1, sequence
 	if !state.epochFrozen {
 		state.epochFrozen, state.epochRevision, state.frozenCut = true, cut.FrozenEpochStateRevision, cut
@@ -474,7 +508,11 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 	t, terms := history.t, history.terms
 	state := history.claims[claimID]
 	purpose, resultingState := "claim-challenge-admission", "reviewing"
-	challengeRoundsAfter, successorDue := state.challengeRounds+1, at+terms.SuccessorDecisionWindowSeconds
+	// The stage action is admitted at at; the receipt body states the same
+	// time unless a test varies it, and the successor cutoff follows the
+	// stated time.
+	stated, signedAt := history.receiptTime(at)
+	challengeRoundsAfter, successorDue := state.challengeRounds+1, stated+terms.SuccessorDecisionWindowSeconds
 	switch kind {
 	case "challenge_admission":
 	case "challenge_close":
@@ -488,7 +526,11 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof := history.decisionProof(decision, at)
+	sealedAt := at
+	if history.vary.proofSealedAt != 0 {
+		sealedAt = history.vary.proofSealedAt
+	}
+	proof := history.decisionProof(decision, sealedAt)
 	wire, err := Canonical(decision)
 	if err != nil {
 		t.Fatal(err)
@@ -519,6 +561,9 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 		TargetNonterminalRoundsUsed: state.nonterminalRounds, SuccessorDecisionDueAtUnix: successorDue,
 		AuthorizedClaimDecisionAdmissionReceiptDigest: decisionDigest, TransitionEvidenceProjection: projection,
 		TransitionEvidenceSet: evidence}
+	if history.vary.transitionRequest != nil {
+		history.vary.transitionRequest(&requestBody)
+	}
 	request, err := Canonical(requestBody)
 	if err != nil {
 		t.Fatal(err)
@@ -537,20 +582,24 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 	}
 	eligibility := history.eligibility(actionDigest, decisionDigest, terms.DecisionAdmissionAuthoritySubjects,
 		"claim-state-transition-receipt", projectionDigest, terms.DecisionAdmissionProfile.ProfileDigest,
-		terms.DecisionAdmissionProfile, bound.AdmissionStateDomainDigest, state.stateRevision+1, at)
+		terms.DecisionAdmissionProfile, bound.AdmissionStateDomainDigest, state.stateRevision+1, stated)
 	eligibilityDigest, err := AuthorityAdmissionEligibilityProofSetDigestV1(eligibility)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := ClaimStateTransitionReceiptBodyV1{SchemaVersion: 1, AuthorityID: action.AuthorityID,
-		CoverageAgreementBodyDigest: history.agreement, CoverageObligationID: history.obligation, ClaimID: claimID,
+		CoverageAgreementBodyDigest: requestBody.CoverageAgreementBodyDigest,
+		CoverageObligationID:        requestBody.CoverageObligationID, ClaimID: requestBody.ClaimID,
 		TransitionKind: kind, TransitionEvidenceProjectionDigest: projectionDigest, AuthorizedActionDigest: actionDigest,
 		StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest, WriterGeneration: action.WriterGeneration,
 		WriterFenceDigest: action.WriterFenceDigest, PriorClaimState: state.status, ResultingClaimState: resultingState,
 		PriorClaimStateRevision: state.stateRevision, ResultingClaimStateRevision: state.stateRevision + 1,
 		ChallengeRoundsUsedBefore: state.challengeRounds, ChallengeRoundsUsedAfter: challengeRoundsAfter,
 		NonterminalRoundsUsedBefore: state.nonterminalRounds, NonterminalRoundsUsedAfter: state.nonterminalRounds,
-		SuccessorDecisionDueAtUnix: successorDue, TransitionedAtUnix: at, AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
+		SuccessorDecisionDueAtUnix: successorDue, TransitionedAtUnix: stated, AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
+	if history.vary.transitionBody != nil {
+		history.vary.transitionBody(&body)
+	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-claim-state-transition-receipt-body.v1", body)
 	if err != nil {
 		t.Fatal(err)
@@ -562,7 +611,7 @@ func (history *signedHistory) transition(claimID, kind string, at uint64) Author
 		TransitionEvidenceProjection: projection, TransitionEvidenceSet: evidence, AuthorityAdmissionEligibilityProofSet: eligibility,
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signedHistoryGuarantor,
 			terms.DecisionAdmissionProfile, "claim-state-transition-receipt", bodyDigest,
-			"tos.service.agent-guarantor-claim-state-transition-signature.v1", at)}}
+			"tos.service.agent-guarantor-claim-state-transition-signature.v1", signedAt)}}
 	state.status, state.stateRevision, state.challengeRounds = resultingState, state.stateRevision+1, challengeRoundsAfter
 	state.transition = &receipt
 	if kind == "challenge_admission" && decision.AuthorizedClaimDecision.Body.DecisionPath != "late_recovery_terminal_fallback" {

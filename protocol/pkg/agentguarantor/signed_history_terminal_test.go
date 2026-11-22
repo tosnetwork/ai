@@ -67,18 +67,13 @@ func (history *signedHistory) terminalBundle(claimID string, application Authori
 		t.Fatalf("signed history bundles only a claim that ended denied, not one in %s", state.status)
 	}
 	admissions := history.admissions[claimID]
-	initial, final := admissions[0], admissions[len(admissions)-1]
-	initialProof := history.claimAdmissionProof(initial, at)
+	initialProof := history.claimAdmissionProof(admissions[0], at)
 	revisionProofs := make([]ClaimAdmissionReceiptProofV1, 0, len(admissions)-1)
 	for _, revision := range admissions[1:] {
 		revisionProofs = append(revisionProofs, history.claimAdmissionProof(revision, at))
 	}
 	decision, transition := state.decision.AuthorizedClaimDecision, *state.transition
 	payouts := application.MaterializedPayoutObligationSet
-	claimDigest, err := ClaimEnvelopeDigest(final.AuthorizedClaimIngressReceipt.AuthorizedClaim)
-	if err != nil {
-		t.Fatal(err)
-	}
 	decisionDigest, err := ClaimDecisionDigestV1(decision)
 	if err != nil {
 		t.Fatal(err)
@@ -105,44 +100,64 @@ func (history *signedHistory) terminalBundle(claimID string, application Authori
 		TerminalSettlementEvidenceSet: CanonicalGuarantorEvidenceSetV1{SchemaVersion: 1, Purpose: "terminal-payout",
 			ContextDigest: decisionDigest, Items: []CanonicalGuarantorEvidenceItemV1{carriedEvidenceItem(
 				GuarantorNoPayoutMarkerContentTypeV1, markerDigest, markerBytes, terms.SelectedPayoutAdapterProfile.ProfileDigest)}}}
-	terminalPayoutDigest, err := TerminalPayoutEvidenceSetDigestV1(terminalPayouts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	initialDigest, err := ClaimAdmissionReceiptDigestV1(initial)
-	if err != nil {
-		t.Fatal(err)
-	}
-	finalDigest, err := ClaimAdmissionReceiptDigestV1(final)
-	if err != nil {
-		t.Fatal(err)
-	}
-	applicationDigest, err := ClaimDecisionApplicationReceiptDigestV1(application)
-	if err != nil {
-		t.Fatal(err)
-	}
-	transitionDigest, err := ClaimStateTransitionReceiptDigestV1(transition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref := ClaimTerminalResolutionRefV1{ClaimAdmissionSequence: initial.Body.ClaimAdmissionSequence, ClaimID: claimID,
-		InitialClaimAdmissionReceiptDigest: initialDigest, FinalClaimRevision: final.Body.AdmittedClaimRevision,
-		FinalClaimRevisionAdmissionReceiptDigest: finalDigest,
-		ClaimRevisionAdmissionHighWater:          final.Body.ClaimRevisionAdmissionSequence,
-		ClaimRevisionAdmissionLogRoot:            final.Body.AdmittedClaimRevisionLogRoot,
-		ClaimRevisionIngressHighWater:            final.AuthorizedClaimIngressReceipt.Body.ClaimIngressSequence,
-		ClaimRevisionIngressLogRoot:              final.AuthorizedClaimIngressReceipt.Body.AdmittedClaimIngressLogRoot,
-		TerminalAuthorizedClaimEnvelopeDigest:    claimDigest, TerminalDecisionDigest: decisionDigest,
-		TerminalDecisionAdmissionReceiptDigest: transition.DecisionAdmissionProof.ReceiptEnvelopeDigest,
-		DecisionApplicationReceiptDigest:       applicationDigest, TerminalClaimState: ClaimStatus(state.status),
-		ClaimStateRevision: state.stateRevision, TerminalClaimStateTransitionReceiptDigest: transitionDigest,
-		MaterializedPayoutObligationSetDigest: payoutDigest, TerminalPayoutEvidenceSetDigest: terminalPayoutDigest}
-	return ClaimTerminalResolutionBundleV1{ResolutionRef: ref, InitialClaimAdmissionReceiptProof: initialProof,
+	bundle := ClaimTerminalResolutionBundleV1{InitialClaimAdmissionReceiptProof: initialProof,
 		RevisionAdmissionReceiptProofs: revisionProofs, TerminalAuthorizedDecision: decision,
 		DecisionAdmissionReceiptProofs:  []ClaimDecisionAdmissionReceiptProofV1{transition.DecisionAdmissionProof},
 		DecisionApplicationReceiptProof: history.applicationProof(application, at),
 		ClaimStateTransitionReceipts:    []AuthorizedClaimStateTransitionReceiptV1{transition},
 		MaterializedPayoutObligationSet: payouts, TerminalPayoutEvidenceSet: terminalPayouts}
+	bundle.ResolutionRef = history.terminalRef(bundle)
+	return bundle
+}
+
+// terminalRef derives a bundle's resolution reference from the objects it
+// carries, as the closure sink does. A test that rearranges the signed pieces
+// of a bundle derives the reference again, so the rearranged bundle is refused
+// for the pieces and not for a stale reference.
+func (history *signedHistory) terminalRef(bundle ClaimTerminalResolutionBundleV1) ClaimTerminalResolutionRefV1 {
+	t := history.t
+	initial, final := bundle.InitialClaimAdmissionReceiptProof, bundle.InitialClaimAdmissionReceiptProof
+	if count := len(bundle.RevisionAdmissionReceiptProofs); count > 0 {
+		final = bundle.RevisionAdmissionReceiptProofs[count-1]
+	}
+	claimDigest, err := ClaimEnvelopeDigest(final.AuthorizedClaimIngressReceipt.AuthorizedClaim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisionDigest, err := ClaimDecisionDigestV1(bundle.TerminalAuthorizedDecision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payoutDigest, err := Digest(PayoutSetDomain, bundle.MaterializedPayoutObligationSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminalPayoutDigest, err := TerminalPayoutEvidenceSetDigestV1(bundle.TerminalPayoutEvidenceSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.DecisionAdmissionReceiptProofs) == 0 || len(bundle.ClaimStateTransitionReceipts) == 0 {
+		t.Fatal("a terminal bundle carries a decision admission proof and a transition")
+	}
+	closing := bundle.ClaimStateTransitionReceipts[len(bundle.ClaimStateTransitionReceipts)-1]
+	transitionDigest, err := ClaimStateTransitionReceiptDigestV1(closing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ClaimTerminalResolutionRefV1{ClaimAdmissionSequence: initial.ReceiptBody.ClaimAdmissionSequence,
+		ClaimID:                            initial.ReceiptBody.ClaimID,
+		InitialClaimAdmissionReceiptDigest: initial.ReceiptEnvelopeDigest, FinalClaimRevision: final.ReceiptBody.AdmittedClaimRevision,
+		FinalClaimRevisionAdmissionReceiptDigest: final.ReceiptEnvelopeDigest,
+		ClaimRevisionAdmissionHighWater:          final.ReceiptBody.ClaimRevisionAdmissionSequence,
+		ClaimRevisionAdmissionLogRoot:            final.ReceiptBody.AdmittedClaimRevisionLogRoot,
+		ClaimRevisionIngressHighWater:            final.AuthorizedClaimIngressReceipt.Body.ClaimIngressSequence,
+		ClaimRevisionIngressLogRoot:              final.AuthorizedClaimIngressReceipt.Body.AdmittedClaimIngressLogRoot,
+		TerminalAuthorizedClaimEnvelopeDigest:    claimDigest, TerminalDecisionDigest: decisionDigest,
+		TerminalDecisionAdmissionReceiptDigest: bundle.DecisionAdmissionReceiptProofs[len(bundle.DecisionAdmissionReceiptProofs)-1].ReceiptEnvelopeDigest,
+		DecisionApplicationReceiptDigest:       bundle.DecisionApplicationReceiptProof.ReceiptEnvelopeDigest,
+		TerminalClaimState:                     ClaimStatus("final_" + string(bundle.TerminalAuthorizedDecision.Body.Result)),
+		ClaimStateRevision:                     closing.Body.ResultingClaimStateRevision, TerminalClaimStateTransitionReceiptDigest: transitionDigest,
+		MaterializedPayoutObligationSetDigest: payoutDigest, TerminalPayoutEvidenceSetDigest: terminalPayoutDigest}
 }
 
 // terminalSet closes the coverage at over bundles, the terminal bundles of
@@ -151,6 +166,13 @@ func (history *signedHistory) terminalBundle(claimID string, application Authori
 func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseReceiptV1,
 	bundles []ClaimTerminalResolutionBundleV1, at uint64) AuthorizedTerminalClaimSetEvidenceV1 {
 	t, terms := history.t, history.terms
+	if replaced := history.vary.closureAgreement; replaced != "" {
+		// Everything the set itself states names the replaced Agreement; the
+		// filing close and the bundles it carries stay the history's.
+		own := history.agreement
+		history.agreement = replaced
+		defer func() { history.agreement = own }()
+	}
 	filingDigest, err := ClaimFilingCloseReceiptDigestV1(filing)
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +221,9 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		ClaimAdmissionLogRoot: filing.Body.FrozenClaimAdmissionLogRoot, ClaimResolutionSetDigest: refSetDigest,
 		CumulativeApprovedAmount: zero, CumulativePaidAmount: zero, CumulativeDefaultedAmount: zero,
 		OutstandingApprovedAmount: zero, ReleaseNotBeforeUnix: at}
+	if history.vary.closureContext != nil {
+		history.vary.closureContext(&closure)
+	}
 	closureDigest, err := CoverageClosureEvidenceContextDigestV1(closure)
 	if err != nil {
 		t.Fatal(err)
@@ -251,21 +276,26 @@ func (history *signedHistory) terminalSet(filing AuthorizedClaimFilingCloseRecei
 		CoverageObligationID: history.obligation, ClaimAdmissionProfileDigest: policyDigest,
 		ClaimAdmissionAuthoritySubjects: append([]string(nil), terms.ClaimAdmissionAuthoritySubjects...),
 		ClaimAdmissionLogID:             filing.Body.ClaimAdmissionLogID, ClaimFilingCloseReceiptDigest: filingDigest,
-		CoverageEndCommitmentDigest: filing.Body.CoverageEndCommitmentDigest, FilingCloseReason: filing.Body.FilingCloseReason,
-		CoverageEndReason: filing.Body.CoverageEndReason, IncidentEligibilityEndsAtUnix: filing.Body.IncidentEligibilityEndsAtUnix,
-		CoverageEndEvidenceDigest: filing.Body.CoverageEndEvidenceDigest, ActivationEvidenceDigest: filing.Body.ActivationEvidenceDigest,
-		CoverageClosureReason: closureReason, ResolutionTargetTerminalState: targetState,
+		CoverageEndCommitmentDigest: filing.Body.CoverageEndCommitmentDigest, FilingCloseReason: closure.FilingCloseReason,
+		CoverageEndReason: closure.CoverageEndReason, IncidentEligibilityEndsAtUnix: closure.IncidentEligibilityEndsAtUnix,
+		CoverageEndEvidenceDigest:         closure.CoverageEndEvidenceDigest,
+		CoverageCancellationReceiptDigest: closure.CoverageCancellationReceiptDigest,
+		ActivationEvidenceDigest:          filing.Body.ActivationEvidenceDigest,
+		CoverageClosureReason:             closureReason, ResolutionTargetTerminalState: targetState,
 		CoverageClosureContextDigest: closureDigest, CoverageClosureEvidenceSetDigest: evidenceDigest,
-		TransitionEvidenceProjectionDigest: projectionDigest, FilingCloseCoverageRevision: history.coverageRevision,
+		TransitionEvidenceProjectionDigest: projectionDigest, FilingCloseCoverageRevision: filing.Body.ClosedCoverageRevision,
 		PriorCoverageRevision: history.coverageRevision, ReleasePendingCoverageRevision: history.coverageRevision + 1,
 		AdmissionHighWater: high, ClaimAdmissionLogRoot: filing.Body.FrozenClaimAdmissionLogRoot, ClaimResolutions: refs,
 		CumulativeApprovedAmount: zero, CumulativePaidAmount: zero, CumulativeDefaultedAmount: zero,
 		OutstandingApprovedAmount: zero, ClaimSetRevision: 1, FilingClosedAtUnix: filing.Body.ClosedAtUnix,
-		AllClaimsTerminalAtUnix: at, ReleaseNotBeforeUnix: at, AuthorizedActionDigest: actionDigest,
+		AllClaimsTerminalAtUnix: at, ReleaseNotBeforeUnix: closure.ReleaseNotBeforeUnix, AuthorizedActionDigest: actionDigest,
 		StableActionID: action.StableActionID, ExactRequestDigest: action.ExactRequestDigest,
 		WriterGeneration: action.WriterGeneration, WriterFenceDigest: action.WriterFenceDigest, CreatedAtUnix: at,
 		RequiredExtensions: append([]ProfileRefV1(nil), terms.RequiredExtensions...),
 		OptionalExtensions: append([]ProfileRefV1(nil), terms.OptionalExtensions...)}
+	if history.vary.closureBody != nil {
+		history.vary.closureBody(&body)
+	}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-terminal-claim-set-body.v1", body)
 	if err != nil {
 		t.Fatal(err)

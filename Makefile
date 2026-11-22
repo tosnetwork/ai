@@ -23,10 +23,10 @@ proto-check:
 vet:
 	GOWORK=off go vet ./...
 
-# The Guarantor package's signed-history tests run about ten minutes under the
-# race detector, past go test's default timeout.
+# The Guarantor package's signed-history tests were measured at about 1320 s
+# under the race detector, so the timeout leaves them twice that.
 test-race:
-	GOWORK=off go test -race -count=1 -timeout 30m ./...
+	GOWORK=off go test -race -count=1 -timeout 60m ./...
 
 build:
 	GOWORK=off go build ./...

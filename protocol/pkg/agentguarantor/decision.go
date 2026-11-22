@@ -36,8 +36,14 @@ func ClaimIngressAdmissionCutProofDigestV1(value ClaimIngressAdmissionCutProofV1
 func ValidateClaimIngressAdmissionCutProofV1(value ClaimIngressAdmissionCutProofV1) error {
 	if value.SchemaVersion != 1 || !validDigest(value.CoverageAgreementBodyDigest) ||
 		!validToken(value.CoverageObligationID, 128) || !validDigest(value.ClaimIngressLogID) || value.IngressCutoffUnix == 0 ||
-		!validDigest(value.AdmissionLogRoot) || value.AdmissionHighWater != uint64(len(value.Entries)) ||
-		value.AdmittedClaimCount+value.RejectedIngressOrClaimCount+value.PendingOrAmbiguousCount != value.AdmissionHighWater {
+		!validDigest(value.AdmissionLogRoot) || value.AdmissionHighWater != uint64(len(value.Entries)) {
+		return errors.New("claim ingress admission cut header is invalid")
+	}
+	// The three counters partition the entries, so none exceeds the high-water
+	// and their sum is taken without wrapping.
+	resolved, resolvedFits := checkedAdd(value.AdmittedClaimCount, value.RejectedIngressOrClaimCount)
+	counted, countedFits := checkedAdd(resolved, value.PendingOrAmbiguousCount)
+	if !resolvedFits || !countedFits || counted != value.AdmissionHighWater {
 		return errors.New("claim ingress admission cut header is invalid")
 	}
 	switch value.CutKind {
@@ -47,7 +53,7 @@ func ValidateClaimIngressAdmissionCutProofV1(value ClaimIngressAdmissionCutProof
 		}
 	case "claim_revisions":
 		if !validDigest(value.ClaimID) || value.RevisionEpoch == 0 || value.PriorEpochStateRevision == 0 ||
-			value.FrozenEpochStateRevision != value.PriorEpochStateRevision+1 {
+			!isNextRevisionV1(value.FrozenEpochStateRevision, value.PriorEpochStateRevision) {
 			return errors.New("claim revision ingress cut has invalid epoch")
 		}
 	default:
@@ -255,12 +261,19 @@ func isLateRecoverySuccessorV1(proof ClaimDecisionAdmissionReceiptProofV1) bool 
 func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmissionReceiptV1, terms CoverageTermsV1,
 	agreementVerifier agentcommerce.AgreementEvidenceVerifier, authorityResolver AuthorityKeyResolver,
 	fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
-	if receipt.Body.AdmissionMode == "deterministic_fallback" {
+	fallbackMode := receipt.Body.AdmissionMode == "deterministic_fallback"
+	if !fallbackMode && (receipt.Body.AdmissionMode != "authorized_decision" || agreementVerifier == nil) {
+		return errors.New("claim decision admission mode is unsupported or incomplete")
+	}
+	// Both admission modes anchor the body's admission time here, before any
+	// window, cutoff or deadline is computed from it.
+	if err := bindReceiptTimeToStageAdmissionV1("claim decision admission", receipt.Body.AdmittedAtUnix,
+		receipt.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
+	if fallbackMode {
 		return verifyDeterministicFallbackAdmissionReceiptV1(receipt, terms, agreementVerifier,
 			authorityResolver, fenceResolver, now)
-	}
-	if receipt.Body.AdmissionMode != "authorized_decision" || agreementVerifier == nil {
-		return errors.New("claim decision admission mode is unsupported or incomplete")
 	}
 	// A fallback trigger cutoff, a current decision proof and a fallback
 	// decision path exist only for deterministic fallback admission; an
@@ -302,11 +315,17 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		authorityResolver, fenceResolver, now); err != nil {
 		return fmt.Errorf("claim decision admission has an invalid claim predecessor: %w", err)
 	}
-	if err := ValidateClaimDecision(receipt.AuthorizedClaimDecision, claim, terms, authorityResolver,
-		terms.DecisionAuthoritySubjects, now); err != nil {
+	decisionBody := receipt.AuthorizedClaimDecision.Body
+	if err := validateDecisionAdmissionTimeV1(receipt.Body, decisionBody); err != nil {
 		return err
 	}
-	decisionBody := receipt.AuthorizedClaimDecision.Body
+	// The decision and its authority quorum are judged at the admission time
+	// the receipt binds, not at the verifier's present: its expiry limits
+	// admission only, so a decision admitted in time verifies long after it.
+	if err := ValidateClaimDecision(receipt.AuthorizedClaimDecision, claim, terms, authorityResolver,
+		terms.DecisionAuthoritySubjects, time.Unix(int64(receipt.Body.AdmittedAtUnix), 0).UTC()); err != nil {
+		return err
+	}
 	if decisionBody.DecisionSequence == 1 {
 		if receipt.PredecessorClaimStateTransitionReceipt != nil || variant.PredecessorDecisionAdmissionReceiptDigest != "" ||
 			variant.PredecessorClaimStateTransitionReceiptDigest != "" || receipt.PriorPendingApplicationToken != nil ||
@@ -326,24 +345,30 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 			authorityResolver, fenceResolver, now); err != nil {
 			return fmt.Errorf("successor decision transition predecessor is invalid: %w", err)
 		}
-		transitionDigest, _ := ClaimStateTransitionReceiptDigestV1(*predecessor)
+		transitionDigest, transitionErr := ClaimStateTransitionReceiptDigestV1(*predecessor)
 		priorProof := predecessor.DecisionAdmissionProof
-		priorDecisionDigest, _ := ClaimDecisionDigestV1(priorProof.AuthorizedClaimDecision)
-		if variant.PredecessorDecisionAdmissionReceiptDigest != priorProof.ReceiptEnvelopeDigest ||
+		priorDecisionDigest, priorDecisionErr := ClaimDecisionDigestV1(priorProof.AuthorizedClaimDecision)
+		if transitionErr != nil || priorDecisionErr != nil ||
+			variant.PredecessorDecisionAdmissionReceiptDigest != priorProof.ReceiptEnvelopeDigest ||
 			variant.PredecessorClaimStateTransitionReceiptDigest != transitionDigest ||
 			decisionBody.PredecessorAuthorizedClaimDecisionDigest != priorDecisionDigest ||
-			decisionBody.DecisionSequence != priorProof.ReceiptBody.DecisionSequence+1 {
+			!isNextRevisionV1(decisionBody.DecisionSequence, priorProof.ReceiptBody.DecisionSequence) {
 			return errors.New("successor decision lineage digest or sequence is substituted")
 		}
 		priorToken := priorProof.ReceiptBody.ResultingApplicationToken
 		if predecessor.Body.TransitionKind == "challenge_admission" {
+			// One exercised challenge round is one challenge and one successor,
+			// and that successor is a challengeable candidate.
+			if decisionBody.Result == DecisionEvidenceRequired || decisionBody.Result == DecisionDisputed {
+				return errors.New("challenge successor claim decision produces another nonterminal result")
+			}
 			if priorToken == nil || receipt.PriorPendingApplicationToken == nil ||
 				!equalCanonical(*priorToken, *receipt.PriorPendingApplicationToken) || priorToken.State != "pending" ||
 				receipt.Body.PriorApplicationTokenTerminalState != "replaced" {
 				return errors.New("challenged successor does not replace the exact pending application token")
 			}
-			priorTokenDigest, _ := DecisionApplicationTokenDigestV1(*priorToken)
-			if receipt.Body.PriorApplicationTokenDigest != priorTokenDigest {
+			priorTokenDigest, priorTokenErr := DecisionApplicationTokenDigestV1(*priorToken)
+			if priorTokenErr != nil || receipt.Body.PriorApplicationTokenDigest != priorTokenDigest {
 				return errors.New("successor prior application token digest differs")
 			}
 		} else if predecessor.Body.TransitionKind == "nonterminal_response_admission" {
@@ -354,6 +379,19 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		} else {
 			return errors.New("successor decision predecessor transition kind is invalid")
 		}
+	}
+	if err := validateDecisionAdmissionOutcomeV1(receipt.Body, decisionBody, terms); err != nil {
+		return err
+	}
+	// The review cutoff runs from the claim's initial admission, which a
+	// revision admission carries as a compact proof verified with it above.
+	initialAdmission, err := initialClaimAdmissionBodyV1(receipt.AuthorizedClaimAdmissionReceipt)
+	if err != nil {
+		return err
+	}
+	if err := bindAuthorizedDecisionAdmissionToPredecessorV1(receipt.Body, receipt.AuthorizedClaimAdmissionReceipt.Body,
+		initialAdmission, receipt.PredecessorClaimStateTransitionReceipt, terms); err != nil {
+		return err
 	}
 	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(receipt.ClaimRevisionIngressCutProof)
 	if err != nil {
@@ -366,6 +404,21 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		receipt.ClaimRevisionIngressCutProof.CutKind != "claim_revisions" || receipt.ClaimRevisionIngressCutProof.ClaimID != receipt.Body.ClaimID ||
 		receipt.ClaimRevisionIngressCutProof.PendingOrAmbiguousCount != 0 {
 		return errors.New("claim decision admission revision cut differs")
+	}
+	// Among authorized decisions only the successor of a challenged
+	// late-recovery candidate finds revision ingress still frozen and reuses
+	// the candidate's epoch and cut; every other one freezes the open epoch.
+	var frozenHead *ClaimDecisionAdmissionReceiptBodyV1
+	if wantLateMarker != "" {
+		candidate := receipt.PredecessorClaimStateTransitionReceipt.DecisionAdmissionProof.ReceiptBody
+		if err := bindLateRecoverySuccessorToCandidateV1(candidate, claimReceiptDigest); err != nil {
+			return err
+		}
+		frozenHead = &candidate
+	}
+	if err := bindDecisionRevisionEpochV1("claim decision admission", receipt.Body, epoch,
+		receipt.ClaimRevisionIngressCutProof, claim.Body.ClaimRevision, frozenHead); err != nil {
+		return err
 	}
 	headDigest, identityDigest, err := AuthorizedDecisionAdmissionSourceIdentityV1(variant, receipt.AuthorizedClaimDecision)
 	if err != nil {
@@ -398,14 +451,14 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		body.PredecessorDecisionAdmissionReceiptDigest != variant.PredecessorDecisionAdmissionReceiptDigest ||
 		body.PredecessorClaimStateTransitionReceiptDigest != variant.PredecessorClaimStateTransitionReceiptDigest ||
 		body.DecisionRevision != 1 || body.DecisionPath != receipt.AuthorizedClaimDecision.Body.DecisionPath ||
-		body.AdmittedClaimState != targetState || body.AdmittedClaimStateRevision != body.PriorClaimStateRevision+1 ||
-		body.AdmittedCoverageRevision != body.PriorCoverageRevision+1 || body.PriorCoverageEndCommitmentDigest != endDigest ||
+		body.AdmittedClaimState != targetState || !isNextRevisionV1(body.AdmittedClaimStateRevision, body.PriorClaimStateRevision) ||
+		!isNextRevisionV1(body.AdmittedCoverageRevision, body.PriorCoverageRevision) || body.PriorCoverageEndCommitmentDigest != endDigest ||
 		body.ResultingCoverageEndCommitmentDigest != endDigest || body.AuthorizedActionDigest != actionDigest ||
 		body.StableActionID != receipt.StageActionAdmissionEvidence.AuthorizedAction.StableActionID ||
 		body.ExactRequestDigest != receipt.StageActionAdmissionEvidence.AuthorizedAction.ExactRequestDigest ||
 		body.WriterGeneration != receipt.StageActionAdmissionEvidence.AuthorizedAction.WriterGeneration ||
 		body.WriterFenceDigest != receipt.StageActionAdmissionEvidence.AuthorizedAction.WriterFenceDigest ||
-		body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest || body.AdmittedAtUnix == 0 ||
+		body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest ||
 		variant.ExpectedClaimStateRevision != body.PriorClaimStateRevision ||
 		variant.ExpectedChallengeRoundsUsed != body.ChallengeRoundsUsedBefore ||
 		variant.ExpectedNonterminalRoundsUsed != body.NonterminalRoundsUsedBefore {
@@ -494,6 +547,11 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 	if err := VerifyClaimDecisionAdmissionReceiptProofV1(decisionProof, terms, authorityResolver, now); err != nil {
 		return fmt.Errorf("claim transition has an invalid decision predecessor: %w", err)
 	}
+	// Every window below is compared with the body's transition time.
+	if err := bindReceiptTimeToStageAdmissionV1("claim transition", receipt.Body.TransitionedAtUnix,
+		receipt.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
 	decisionAdmission := decisionProof.ReceiptBody
 	var request ClaimStateTransitionActionBodyV1
 	if err := guarantorCodec.Unmarshal(receipt.StageActionAdmissionEvidence.CanonicalRequest, &request); err != nil ||
@@ -505,6 +563,9 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 	decisionAdmissionDigest := decisionProof.ReceiptEnvelopeDigest
 	if request.AuthorizedClaimDecisionAdmissionReceiptDigest != decisionAdmissionDigest {
 		return errors.New("claim transition action references a substituted decision admission")
+	}
+	if err := bindTransitionToDecisionAdmissionV1(request, decisionAdmission); err != nil {
+		return err
 	}
 	projectionDigest, err := TransitionEvidenceProjectionDigestV1(receipt.TransitionEvidenceProjection)
 	if err != nil {
@@ -521,6 +582,11 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 	wantNonterminalAfter := decisionAdmission.NonterminalRoundsUsedAfter
 	wantSuccessorDue := uint64(0)
 	transitionedAt := receipt.Body.TransitionedAtUnix
+	// Every window a transition acts in opens at its decision's admission, so
+	// no transition precedes it.
+	if transitionedAt < decisionAdmission.AdmittedAtUnix {
+		return errors.New("claim transition precedes the admission of its decision")
+	}
 	switch request.TransitionKind {
 	case "challenge_admission":
 		wantPurpose = "claim-challenge-admission"
@@ -529,8 +595,13 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 			decisionAdmission.ChallengeRoundsUsedAfter >= terms.ClaimClosureCapacity.MaximumChallengeRoundsPerClaim {
 			return errors.New("claim challenge admission is outside its closed window or budget")
 		}
+		// The budget check above leaves the count below the Agreement's maximum.
 		wantChallengeAfter++
-		wantSuccessorDue, _ = checkedAdd(transitionedAt, terms.SuccessorDecisionWindowSeconds)
+		successorDue, fits := checkedAdd(transitionedAt, terms.SuccessorDecisionWindowSeconds)
+		if !fits {
+			return errors.New("claim challenge admission successor decision cutoff overflows")
+		}
+		wantSuccessorDue = successorDue
 	case "nonterminal_response_admission":
 		wantPurpose = "claim-nonterminal-response-admission"
 		if (priorState != "evidence_required" && priorState != "disputed") ||
@@ -538,6 +609,7 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 			decisionAdmission.NonterminalRoundsUsedAfter >= terms.ClaimClosureCapacity.MaximumNonterminalRoundsPerClaim {
 			return errors.New("claim nonterminal response is outside its closed window or budget")
 		}
+		// The budget check above leaves the count below the Agreement's maximum.
 		wantNonterminalAfter++
 		wantSuccessorDue = decisionAdmission.ResolutionDueAtUnix
 	case "challenge_close":
@@ -589,11 +661,10 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 		body.WriterGeneration != action.WriterGeneration || body.WriterFenceDigest != action.WriterFenceDigest ||
 		body.PriorClaimState != priorState || body.ResultingClaimState != resultingState ||
 		body.PriorClaimStateRevision != request.ExpectedClaimStateRevision ||
-		body.ResultingClaimStateRevision != request.ExpectedClaimStateRevision+1 ||
+		!isNextRevisionV1(body.ResultingClaimStateRevision, request.ExpectedClaimStateRevision) ||
 		body.ChallengeRoundsUsedBefore != request.ExpectedChallengeRoundsUsed || body.ChallengeRoundsUsedAfter != wantChallengeAfter ||
 		body.NonterminalRoundsUsedBefore != request.ExpectedNonterminalRoundsUsed || body.NonterminalRoundsUsedAfter != wantNonterminalAfter ||
-		body.SuccessorDecisionDueAtUnix != wantSuccessorDue || body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest ||
-		body.TransitionedAtUnix == 0 {
+		body.SuccessorDecisionDueAtUnix != wantSuccessorDue || body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest {
 		return errors.New("claim transition receipt binding is invalid")
 	}
 	if err := validateEligibilityProofSetAgainstV1(receipt.AuthorityAdmissionEligibilityProofSet, actionDigest,
@@ -647,6 +718,13 @@ func VerifyClaimDecisionApplicationReceiptV1(receipt AuthorizedClaimDecisionAppl
 	if transition.Body.TransitionKind != "challenge_close" {
 		return errors.New("decision application does not select one terminal decision head")
 	}
+	if err := bindReceiptTimeToStageAdmissionV1("decision application", receipt.Body.AppliedAtUnix,
+		receipt.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
+	if err := bindApplicationTimeToClosingTransitionV1(receipt.Body.AppliedAtUnix, transition.Body); err != nil {
+		return err
+	}
 	var request ClaimDecisionApplicationActionBodyV1
 	decision := admission.AuthorizedClaimDecision
 	decisionDigest, decisionErr := ClaimDecisionDigestV1(decision)
@@ -678,7 +756,7 @@ func VerifyClaimDecisionApplicationReceiptV1(receipt AuthorizedClaimDecisionAppl
 	}
 	expectedTarget := transition.Body.ResultingClaimState
 	if request.ExpectedClaimStateRevision != transition.Body.ResultingClaimStateRevision || request.TargetClaimState != expectedTarget ||
-		request.TargetCoverageRevision != request.ExpectedCurrentCoverageRevision+1 ||
+		!isNextRevisionV1(request.TargetCoverageRevision, request.ExpectedCurrentCoverageRevision) ||
 		request.ExpectedApplicationTokenRevision != receipt.DecisionApplicationToken.TokenRevision {
 		return errors.New("decision application state CAS is invalid")
 	}
@@ -716,14 +794,14 @@ func VerifyClaimDecisionApplicationReceiptV1(receipt AuthorizedClaimDecisionAppl
 		body.TerminalClaimStateTransitionReceiptDigest != transitionDigest ||
 		body.DecisionApplicationTokenID != receipt.DecisionApplicationToken.TokenID ||
 		body.DecisionApplicationTokenDigest != tokenDigest || body.PriorApplicationTokenRevision != receipt.DecisionApplicationToken.TokenRevision ||
-		body.ResultingApplicationTokenRevision != body.PriorApplicationTokenRevision+1 || body.ResultingApplicationTokenState != "consumed" ||
+		!isNextRevisionV1(body.ResultingApplicationTokenRevision, body.PriorApplicationTokenRevision) || body.ResultingApplicationTokenState != "consumed" ||
 		body.MaterializedPayoutObligationSetDigest != payoutDigest || body.AuthorizedActionDigest != actionDigest ||
 		body.StableActionID != action.StableActionID || body.ExactRequestDigest != action.ExactRequestDigest ||
 		body.WriterGeneration != action.WriterGeneration || body.WriterFenceDigest != action.WriterFenceDigest ||
-		body.AppliedCoverageRevision != body.PriorCoverageRevision+1 || body.PriorCoverageEndCommitmentDigest != endDigest ||
+		!isNextRevisionV1(body.AppliedCoverageRevision, body.PriorCoverageRevision) || body.PriorCoverageEndCommitmentDigest != endDigest ||
 		body.ResultingCoverageEndCommitmentDigest != endDigest ||
 		body.PriorClaimStateRevision != transition.Body.ResultingClaimStateRevision ||
-		body.AppliedClaimStateRevision != body.PriorClaimStateRevision || body.AppliedAtUnix == 0 {
+		body.AppliedClaimStateRevision != body.PriorClaimStateRevision {
 		return errors.New("decision application receipt binding is invalid")
 	}
 	pendingBefore, okPendingBefore := new(big.Int).SetString(body.AggregatePendingDecisionReserveBefore.AmountAtomic, 10)
@@ -739,6 +817,8 @@ func VerifyClaimDecisionApplicationReceiptV1(receipt AuthorizedClaimDecisionAppl
 	if okCumulativeBefore && okApproved {
 		wantCumulativeAfter.Add(cumulativeBefore, approved)
 	}
+	wantNextPayoutSequence, sequenceFits := checkedAdd(request.ExpectedNextPayoutSequence,
+		uint64(len(receipt.MaterializedPayoutObligationSet.MaterializedLines)))
 	if !okPendingBefore || !okPendingAfter || !okCumulativeBefore || !okCumulativeAfter || !okApproved || !okMaximum ||
 		pendingBefore.Sign() < 0 || wantPendingAfter.Sign() < 0 || pendingAfter.Cmp(wantPendingAfter) != 0 ||
 		cumulativeAfter.Cmp(wantCumulativeAfter) != 0 || cumulativeAfter.Cmp(maximum) > 0 ||
@@ -746,8 +826,8 @@ func VerifyClaimDecisionApplicationReceiptV1(receipt AuthorizedClaimDecisionAppl
 		request.TargetAggregatePendingDecisionReserve != body.AggregatePendingDecisionReserveAfter ||
 		body.CumulativeApprovedBefore.Asset != terms.CoverageAsset || body.CumulativeApprovedAfter.Asset != terms.CoverageAsset ||
 		body.AggregatePendingDecisionReserveBefore.Asset != terms.CoverageAsset || body.AggregatePendingDecisionReserveAfter.Asset != terms.CoverageAsset ||
-		body.PriorNextPayoutSequence != request.ExpectedNextPayoutSequence ||
-		body.ResultingNextPayoutSequence != request.ExpectedNextPayoutSequence+uint64(len(receipt.MaterializedPayoutObligationSet.MaterializedLines)) {
+		body.PriorNextPayoutSequence != request.ExpectedNextPayoutSequence || !sequenceFits ||
+		body.ResultingNextPayoutSequence != wantNextPayoutSequence {
 		return errors.New("decision application aggregate capacity or payout sequence is invalid")
 	}
 	if receipt.StageActionAdmissionEvidence.ActionResolution.SinkReference != payoutDigest ||

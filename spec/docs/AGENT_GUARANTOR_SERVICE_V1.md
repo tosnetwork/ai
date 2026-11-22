@@ -5869,6 +5869,20 @@ deleting a Carrier cannot restore a consumed slot. No admitted initial claim or
 revision may make the section 19.6 envelope exceed the Agreement-bound byte
 ceiling.
 
+The per-claim revision count is also a rule of every portable verifier, not
+only of the admitting authority. `maximum_claim_revisions_per_claim` counts the
+initial claim, so a claim revision number is at least 1 and at most that
+maximum. A verifier refuses a claim ingress receipt whose claim carries a
+higher `claim_revision`, a claim admission receipt whose
+`admitted_claim_revision` is higher, and a `ClaimAdmissionReceiptProofV1` whose
+body's `admitted_claim_revision` is higher, each before any signature is
+checked. A compact proof whose body's `admitted_claim_revision` differs from
+the `claim_revision` of the claim it carries is refused as well: the terminal
+claim set takes the final revision from the body and the decided revision from
+the claim. Every bound the closure capacity reserves per claim is computed
+from the maximum, so a revision past it has no reserved room in the section
+19.6 envelope.
+
 The coverage-level admission log counts distinct claims, not revisions. For an
 `initial` admission, claim revision is 1, the prior revision is zero, revision
 predecessors are absent, and the authority atomically allocates the next never-
@@ -6974,6 +6988,150 @@ the checked sum of transition admission time and
 `successor_decision_window_seconds`; for a nonterminal response it is the
 inherited `resolution_due_at_unix`.
 
+**What a portable verifier checks of a decision admission.** The rules above
+are rules of the receipt, so a third party holding only the evidence enforces
+them. One check applies to the receipt body on the authorized path, on the
+fallback path and inside a `ClaimDecisionAdmissionReceiptProofV1`, because
+transitions, the decision application and the terminal bundle read the claim
+state, the windows and the round counts from the sealed body alone:
+
+- `admitted_claim_state` is the target state of the decision's result.
+- For `approved`, `partially_approved`, and `denied`:
+  `challenge_starts_at_unix = admitted_at_unix`,
+  `challenge_ends_at_unix = checked_add(admitted_at_unix,
+  challenge_window_seconds)`, and both resolution fields are absent. For
+  `evidence_required` and `disputed`: `resolution_starts_at_unix =
+  admitted_at_unix`, `resolution_due_at_unix = checked_add(admitted_at_unix,
+  resolution_window_seconds)`, and both challenge fields are absent. The
+  decision body's window lengths equal the Agreement's. An overflow is a
+  refusal.
+- `challenge_rounds_used_after = challenge_rounds_used_before`. The
+  nonterminal count is unchanged, except that a deterministic fallback may
+  raise it by exactly one (the fallback rule above decides when). Neither
+  count after admission exceeds its Agreement maximum.
+- `evidence_required` and `disputed` are admitted only while a nonterminal
+  round remains: `nonterminal_rounds_used_after <
+  maximum_nonterminal_rounds_per_claim`. With a maximum of zero no nonterminal
+  result is admissible, as decision sequence 1 or later.
+- A body that records a replaced application token
+  (`prior_application_token_digest` or
+  `prior_application_token_terminal_state` present) admits a challengeable
+  candidate, never `evidence_required` or `disputed`. A token is replaced only
+  by the successor of a challenged candidate, so this is the proof-visible
+  form of the rule that a challenge successor cannot produce another
+  nonterminal result. The full authorized receipt, which carries the
+  predecessor transition, refuses a nonterminal result after a
+  `challenge_admission` directly.
+- Off the late-recovery path (no `late_filing_close_receipt_digest`), the
+  admitted state's complete remaining closure fits the ordinary deadline:
+  `checked_add(admitted_at_unix, entry.maximum_remaining_closure_seconds) <=
+  terminal_resolution_deadline_unix`, where `entry` is the continuation budget
+  entry of the admitted state and its remaining rounds:
+  `challengeable_candidate` with `r = maximum_challenge_rounds_per_claim -
+  challenge_rounds_used_after` for `approved`, `partially_approved` and
+  `denied`; `evidence_required` or `disputed` with that `r` and `n =
+  maximum_nonterminal_rounds_per_claim - nonterminal_rounds_used_after`
+  otherwise. This holds for an authorized decision and for an ordinary
+  fallback alike. Payout materialization caps every payout line at the same
+  deadline, so a decision admitted later could never be applied. A missing
+  entry or an overflow is a refusal.
+- `admitted_at_unix` is a protocol timestamp: positive and at most
+  `2^63 - 1`. For `authorized_decision`,
+  `decided_at_unix <= admitted_at_unix <= expires_at_unix`, both ends
+  inclusive. For `deterministic_fallback`, `decided_at_unix =
+  admitted_at_unix`, and `expires_at_unix`, its latest admission time, is not
+  before it.
+- The decision and its authority quorum are judged at `admitted_at_unix`,
+  never at the verifier's own clock and, in a compact proof, not at
+  `decided_at_unix` either. `expires_at_unix` limits admission only: a
+  decision admitted in time remains valid evidence however long after its
+  expiry it is verified. The verifier's own clock does not bound the
+  decision's validity.
+- A `late_recovery_terminal_fallback` body names its late filing close:
+  `late_filing_close_receipt_digest` is a digest, in a compact proof as in the
+  full receipt. Its successor is recognized by that digest alone.
+
+The full receipt of either admission mode anchors its admission time:
+`admitted_at_unix` equals the `admitted_at_unix` of the embedded
+`PortableStageActionAdmissionEvidenceV1` body and is not after the verifier's
+present plus the clock allowance the stage admission evidence itself is
+verified with (five minutes). A compact proof's `sealed_at_unix`, which is
+never before `admitted_at_unix`, is held to the same bound. The allowance
+lets a verifier whose clock runs behind the authority's accept a fresh
+receipt; it widens no window, because every window is computed from the
+signed time and never from the verifier's clock. The receipt body is signed by the decision-admission quorum and the
+stage evidence by the Action Authority; both record one admission, so they
+state one time. The same holds for `transitioned_at_unix` of a claim
+state-transition receipt and `applied_at_unix` of a decision application
+receipt. Without this tie a body signed with another time than its action was
+admitted at moves every window, cutoff and deadline computed from it.
+
+An authorized decision admission is in addition held to the head it follows.
+These rules need the claim admission or the predecessor transition, which the
+full receipt carries:
+
+- `admitted_at_unix` is not before the `admitted_at_unix` of the claim
+  admission it decides. An `initial` decision is admitted no later than
+  `claim_review_cutoff = checked_add(initial claim admission
+  admitted_at_unix, review_deadline_seconds)`, the same value that makes the
+  `initial_terminal_fallback` eligible: the decision is admitted at or before
+  it, the fallback at or after it. The cutoff runs from the claim's initial
+  admission whichever revision is decided; a decision on a revision reads it
+  from the compact proof of the initial admission that the revision's
+  admission receipt carries, and a later revision neither resets nor extends
+  it. The initial decision's two round counts before admission are zero. A `successor` is admitted no earlier than its
+  predecessor transition's `transitioned_at_unix` and no later than that
+  transition's `successor_decision_due_at_unix`, and its round counts before
+  admission equal that transition's counts after it.
+
+The revision epoch is bound by one check for both admission modes. Where the
+admission freezes the open epoch, the expectation has
+`expected_epoch_state = open` and `expected_epoch_state_revision` equal to the
+cut's `prior_epoch_state_revision`, and the receipt body's five frozen-epoch
+fields equal the cut's `revision_epoch`, `prior_epoch_state_revision`,
+`frozen_epoch_state_revision`, `admission_high_water` and
+`admission_log_root`. Where the head left revision ingress frozen, the
+admission reuses the head's epoch exactly as the frozen-epoch reuse rule above
+states; among authorized decisions that is only the `successor` of a
+challenged late-recovery candidate, which must also stand on the claim
+admission its candidate decided. In both cases the cut's `revision_epoch`
+equals the expectation's; the cut is the `claim_revisions` cut of this claim on
+this Agreement and obligation, over the claim's own revision ingress log
+(`claim_ingress_log_id` recomputed from Agreement, obligation and claim ID);
+and the cut ends at the decided claim revision: its `admitted_claim_count`
+equals `expected_claim_revision - 1`, one admitted revision ingress per
+revision after the first.
+
+Limit of a compact proof. A `ClaimDecisionAdmissionReceiptProofV1` carries the
+receipt body, the decision and the claim, so every rule of the first list
+above holds inside it. It does not carry the claim admission receipt, the
+predecessor transition, the revision cut or the stage admission evidence. A
+verifier holding only the proof (a transition, a decision application) therefore
+does not check the claim review cutoff, the lower bound at the claim
+admission, the successor's bounds and starting round counts, the frozen-epoch
+bindings, or the tie of `admitted_at_unix` to the stage evidence; for these it
+relies on the decision-admission quorum's signature over the body and on the
+seal. A cutoff field added to the receipt body would not change that: it would
+be a value the same quorum states, as `admitted_at_unix` is. Where the missing
+object travels beside the proof it is used instead: a terminal bundle carries
+the compact proof of the claim admission each decision stands on, and its
+verifier holds every carried authorized decision admission to that admission's
+`admitted_at_unix` and, for decision sequence 1, to the claim review cutoff
+(section 19.6).
+
+Open limit: the cut is held to the decided revision by its length only. A
+verifier accepts any internally valid `claim_revisions` cut of this claim's
+log ID and epoch with `admitted_claim_count = expected_claim_revision - 1`:
+its entries may name other ingress and admission receipt digests than the
+claim's revisions have, and it may stand on other leaves and therefore another
+`admission_log_root` than the claim's revision ingress log reached. Closing
+this needs the cut's root and high-water tied to the
+`admitted_claim_ingress_log_root` and `claim_ingress_sequence` of the ingress
+receipt the carried claim admission embeds, and the last `claim_admitted`
+entry tied to that admission's digest. The tie is to be added when the
+measured decision receipt used by the size tests is recorded again; the
+current one predates the fields it needs.
+
 For an ordinary `initial_terminal_fallback` or `terminal_fallback`, timestamps
 are outputs rather than caller bytes. The authority derives them exactly as
 follows:
@@ -7338,6 +7496,23 @@ state is exactly `reviewing`; a successor or fallback decision is required and
 no payout may be materialized. A delayed decision message starts its full
 challenge or resolution window only at decision admission, while a delayed
 transition request gains no power from its transport timestamp.
+
+Every window a transition acts in opens at its decision's admission. A
+transition of any kind whose `transitioned_at_unix` is before the embedded
+decision admission's `admitted_at_unix` is therefore invalid, and so is a
+`challenge_admission` whose `successor_decision_due_at_unix` sum overflows. The
+embedded decision admission proof is held to every proof-visible rule of the
+admission itself (section 17.4, what a portable verifier checks of a decision
+admission), so a challenge cannot rely on a window that the admission's signed
+body states longer than the Agreement allows, nor a challenge close or an
+application on a decision admitted outside its own `decided_at_unix` to
+`expires_at_unix` bounds. `transitioned_at_unix` and `applied_at_unix` equal
+the admission time of the receipt's own stage admission evidence. A
+transition's request, and with it its receipt body, names the claim ID,
+Agreement and obligation of the decision admission it embeds; a transition
+signed for another claim over this claim's decision is invalid on its own,
+not only inside a bundle. A decision application's `applied_at_unix` is not
+before the `transitioned_at_unix` of the challenge close it carries.
 
 ## 18. Collateral
 
@@ -8520,6 +8695,24 @@ projection's admission-receipt digest, and complete embedded admission envelope
 must all agree. This output-only construction prevents a caller from selecting
 which loss bucket restores capacity.
 
+The embedded exposure-admission receipt is the firm offer's own, byte for
+byte, and is verified as that receipt. Another admission signed by the same
+Guarantor, for example one whose reservation scope carries another
+`default_liability_disposition`, is refused even when the body commits its
+digest, because the disposition is computed from the embedded receipt's scope.
+The release body's Agreement and obligation equal the firm offer's and the
+terminal claim set's, its `guarantor_agent_id` is the offer's, and its
+`authority_id` is the bound `post_acceptance_exposure_release` stage
+authority. `released_at_unix` is not before the terminal claim set's
+`release_not_before_unix` or `created_at_unix`, and
+`remaining_reserved_exposure` is zero in the reservation asset.
+
+A coverage resolution names the Agreement and obligation of the exposure
+release it carries and the bound `coverage_resolution` stage authority as
+`authority_id`; its `prior_coverage_revision` is the terminal claim set's
+`release_pending_coverage_revision`; and `resolved_at_unix` is not before the
+release's `released_at_unix`.
+
 Removing an amount from the reservation bucket does not necessarily return it
 to underwriting capacity. The release authority derives, rather than accepts,
 the exact `ExposureDispositionComputationV1` from the original embedded
@@ -8629,6 +8822,93 @@ decision-admission receipt digest must equal the resolution reference and its
 per-claim decision-log predecessor must be complete. A verifier rejects a
 bundle that splices an authorization, admission, close receipt, decision, or
 materialized payout set from another claim state.
+
+**How the pieces of a terminal claim set are tied.** Every object in the set
+is signed on its own, so a verifier must also refuse a set that combines
+validly signed pieces of different coverages or claim states. Before any
+signature of a bundle is checked, it requires all of the following.
+
+The set against its filing close, the firm offer and the terms:
+
+- The body's Agreement and obligation equal the filing-close receipt's and
+  the firm offer's.
+- `claim_admission_profile_digest` and `claim_admission_authority_subjects`
+  equal the terms' claim admission profile and authority subjects.
+- `filing_close_reason`, `coverage_end_reason`,
+  `incident_eligibility_ends_at_unix`, `coverage_end_evidence_digest`,
+  `coverage_cancellation_receipt_digest`, `non_activation_evidence_digest`
+  and `claim_admission_log_id` equal the filing-close receipt body's, as the
+  end commitment, activation digest, high-water and root already must.
+- `filing_close_coverage_revision` equals the receipt's
+  `closed_coverage_revision`; `prior_coverage_revision` is not below it; and
+  `release_pending_coverage_revision = checked_add(prior_coverage_revision,
+  1)`.
+- `filing_closed_at_unix` equals the receipt's `closed_at_unix`, and
+  `filing_closed_at_unix <= all_claims_terminal_at_unix <= created_at_unix`
+  with `release_not_before_unix >= all_claims_terminal_at_unix`.
+
+Each bundled claim against the filing cut and the frozen log:
+
+- The initial admission's Agreement and obligation equal the body's.
+- Its `receipt_envelope_digest` is the `claim_admission_receipt_digest` of a
+  `claim_admitted` entry of the filing close's ingress cut, and no entry
+  serves two bundles.
+- The initial admissions recompute the coverage-level claim admission log:
+  the log ID is `ClaimAdmissionLogIDV1(Agreement, obligation)`; the first
+  bundle's `prior_claim_admission_log_root` is that log's empty root; every
+  bundle's `admitted_claim_admission_log_root` is the root advanced by its own
+  `InitialClaimAdmissionLeafV1` and is the next bundle's prior root; and the
+  last equals the filing close's `frozen_claim_admission_log_root`.
+
+The decision objects of one bundle against the claim and each other. A bundle
+carries the terminal decision's admission proof last and the challenge close
+of that decision as its last transition:
+
+- Every carried decision admission proof is of the bundle's claim, Agreement
+  and obligation, appears once, and names an
+  `authorized_claim_admission_receipt_digest` that is one of the bundle's
+  claim admissions. A carried proof that follows another has the next
+  `decision_sequence` and names it as
+  `predecessor_decision_admission_receipt_digest`.
+- A proof that carries `late_filing_close_receipt_digest` names the set's own
+  filing-close receipt. A coverage closes filing once.
+- `terminal_authorized_decision` is byte-identical to the decision in the
+  last proof; that proof stands on the final claim revision's admission and
+  carries the final claim.
+- Every carried transition is of the bundle's claim and embeds a decision
+  admission proof byte-identical to a carried one. Producer rule: a decision
+  admission receipt is sealed once, and every transition that acts on it and
+  every bundle that carries it embed that one sealed proof. A second sealing
+  of the same receipt (the same envelope digest under another seal time or
+  seal authorization) is a different proof and is refused in a bundle. The
+  last transition is the `challenge_close` of the last proof. Any other
+  carried transition is the one the next carried proof names as
+  `predecessor_claim_state_transition_receipt_digest`.
+- A carried proof in `authorized_decision` mode is held to the carried claim
+  admission it names: its `admitted_at_unix` is not before that admission's
+  and, when it is decision sequence 1, not after `checked_add(initial claim
+  admission admitted_at_unix, review_deadline_seconds)`, with the bundle's
+  initial admission proof as the source. A lone compact proof cannot
+  show this (section 17.4, limit of a compact proof).
+- The application proof's `claim_decision_admission_receipt_digest` is the
+  last proof's envelope digest, its
+  `terminal_claim_state_transition_receipt_digest` is the last transition's
+  digest, and its token ID is the last proof's `resulting_application_token`.
+- The reference's `terminal_claim_state` and `claim_state_revision`, and the
+  application's `applied_claim_state_revision`, are the closing transition's
+  resulting state and revision. The application's `applied_at_unix` is not
+  before the closing transition and not after `all_claims_terminal_at_unix`.
+
+Open limit: a V1 verifier binds the decision history a bundle carries and
+does not yet refuse a bundle for carrying only the terminal decision's
+admission proof and challenge close. The complete predecessor-linked chain
+required above is not yet produced by the reference provider. The
+`claim_admission_log_id` the filing close states is likewise not yet the
+`ClaimAdmissionLogIDV1` value the claim admissions state; the bundles are held
+to the latter.
+
+A missing digest is never equal to a missing field: a verifier that cannot
+compute the digest of a carried object refuses the envelope.
 
 The evidence profile is selected inside the coverage Agreement. It defines how
 the verifier proves the admission-log root, close transition, authority or

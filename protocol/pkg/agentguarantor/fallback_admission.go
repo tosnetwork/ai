@@ -159,7 +159,16 @@ func bindDeterministicFallbackReferencesV1(receipt AuthorizedClaimDecisionAdmiss
 		receipt.Body.NonterminalRoundsUsedAfter != wantNonterminalAfter {
 		return source, errors.New("claim decision fallback round consumption is invalid")
 	}
-	if err := bindFallbackRevisionEpochV1(receipt, variant, source); err != nil {
+	// A head that left revision ingress frozen is reused exactly; every other
+	// head is frozen by this admission's ordinary open-to-frozen CAS.
+	var frozenHead *ClaimDecisionAdmissionReceiptBodyV1
+	if fallbackReusesFrozenEpochV1(variant.SourceClaimState, source) {
+		frozenHead = &source.currentDecision.ReceiptBody
+	}
+	if err := bindDecisionRevisionEpochV1("claim decision fallback", receipt.Body, variant.ClaimRevisionEpochExpectation,
+		receipt.ClaimRevisionIngressCutProof,
+		receipt.AuthorizedClaimAdmissionReceipt.AuthorizedClaimIngressReceipt.AuthorizedClaim.Body.ClaimRevision,
+		frozenHead); err != nil {
 		return source, err
 	}
 	lateMarker := fallbackLateRecoveryMarkerV1(variant, source)
@@ -308,48 +317,6 @@ func fallbackReusesFrozenEpochV1(sourceState string, source deterministicFallbac
 			source.currentDecision.AuthorizedClaimDecision.Body.DecisionPath == "late_recovery_terminal_fallback"
 	}
 	return false
-}
-
-// bindFallbackRevisionEpochV1 binds the request's revision-epoch expectation
-// and the receipt's cut to the epoch the head left. A head that left ingress
-// frozen is reused exactly: frozen expectation, the current decision's
-// byte-identical cut and unchanged epoch fields. Every other head is frozen by
-// this admission's ordinary open-to-frozen CAS.
-func bindFallbackRevisionEpochV1(receipt AuthorizedClaimDecisionAdmissionReceiptV1,
-	variant DeterministicFallbackAdmissionVariantV1, source deterministicFallbackSourceV1) error {
-	epoch := variant.ClaimRevisionEpochExpectation
-	cut := receipt.ClaimRevisionIngressCutProof
-	body := receipt.Body
-	if epoch.RevisionIngressLogID != cut.ClaimIngressLogID {
-		return errors.New("claim decision fallback names another revision ingress log than its cut")
-	}
-	if !fallbackReusesFrozenEpochV1(variant.SourceClaimState, source) {
-		if epoch.ExpectedEpochState != "open" || cut.PriorEpochStateRevision != epoch.ExpectedEpochStateRevision {
-			return errors.New("claim decision fallback must freeze the open revision epoch its head opened")
-		}
-		// The admission froze this cut, so the receipt records exactly it.
-		if body.FrozenRevisionEpoch != cut.RevisionEpoch ||
-			body.PriorRevisionEpochStateRevision != cut.PriorEpochStateRevision ||
-			body.FrozenRevisionEpochStateRevision != cut.FrozenEpochStateRevision ||
-			body.FrozenClaimRevisionIngressHighWater != cut.AdmissionHighWater ||
-			body.FrozenClaimRevisionIngressLogRoot != cut.AdmissionLogRoot {
-			return errors.New("claim decision fallback's frozen-epoch fields differ from its cut")
-		}
-		return nil
-	}
-	head := source.currentDecision.ReceiptBody
-	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(cut)
-	if err != nil || epoch.ExpectedEpochState != "frozen" || cutDigest != head.ClaimRevisionIngressCutProofDigest ||
-		epoch.RevisionEpoch != head.FrozenRevisionEpoch ||
-		epoch.ExpectedEpochStateRevision != head.FrozenRevisionEpochStateRevision ||
-		body.FrozenRevisionEpoch != head.FrozenRevisionEpoch ||
-		body.PriorRevisionEpochStateRevision != head.PriorRevisionEpochStateRevision ||
-		body.FrozenRevisionEpochStateRevision != head.FrozenRevisionEpochStateRevision ||
-		body.FrozenClaimRevisionIngressHighWater != head.FrozenClaimRevisionIngressHighWater ||
-		body.FrozenClaimRevisionIngressLogRoot != head.FrozenClaimRevisionIngressLogRoot {
-		return errors.New("claim decision fallback must reuse its head's frozen revision epoch and cut")
-	}
-	return nil
 }
 
 // bindLateFilingCloseToClaimAdmissionV1 requires the late filing close and the
@@ -511,6 +478,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	wantSequence := uint64(0)
 	cutoff := uint64(0)
 	var ok bool
+	// A head at the top of the sequence range has no successor decision.
+	sequenceFits := true
 	var predecessorDecisionDigest string
 	var predecessorAdmissionDigest string
 	var predecessorTransitionDigest string
@@ -518,7 +487,13 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 	switch variant.SourceClaimState {
 	case "initial_reviewing":
 		wantPriorState, wantPath, wantSequence = "admitted", "initial_terminal_fallback", 1
-		cutoff, ok = checkedDurationAddV1(claimAdmission.Body.AdmittedAtUnix, terms.ReviewDeadlineSeconds)
+		// The cutoff runs from the claim's initial admission, which a revision
+		// admission carries as a compact proof verified with it above.
+		initialAdmission, initialErr := initialClaimAdmissionBodyV1(claimAdmission)
+		if initialErr != nil {
+			return initialErr
+		}
+		cutoff, ok = claimReviewCutoffV1(initialAdmission, terms)
 	case "disputed", "evidence_required":
 		current := *source.currentDecision
 		if err := VerifyClaimDecisionAdmissionReceiptProofV1(current, terms, authorityResolver, now); err != nil {
@@ -529,8 +504,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			body.AdmittedClaimState != variant.SourceClaimState || body.ResolutionDueAtUnix == 0 {
 			return errors.New("nonterminal fallback decision head is invalid")
 		}
-		wantPriorState, wantSequence, cutoff, ok = variant.SourceClaimState, body.DecisionSequence+1,
-			body.ResolutionDueAtUnix, true
+		wantPriorState, cutoff, ok = variant.SourceClaimState, body.ResolutionDueAtUnix, true
+		wantSequence, sequenceFits = checkedAdd(body.DecisionSequence, 1)
 		predecessorDecisionDigest = body.AuthorizedClaimDecisionDigest
 		predecessorAdmissionDigest = current.ReceiptEnvelopeDigest
 	case "reviewing_after_challenge", "reviewing_after_nonterminal_response":
@@ -551,8 +526,8 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			transition.Body.SuccessorDecisionDueAtUnix == 0 {
 			return errors.New("reviewing fallback transition head is substituted")
 		}
-		wantPriorState, wantSequence, cutoff, ok = "reviewing", current.ReceiptBody.DecisionSequence+1,
-			transition.Body.SuccessorDecisionDueAtUnix, true
+		wantPriorState, cutoff, ok = "reviewing", transition.Body.SuccessorDecisionDueAtUnix, true
+		wantSequence, sequenceFits = checkedAdd(current.ReceiptBody.DecisionSequence, 1)
 		predecessorDecisionDigest = current.ReceiptBody.AuthorizedClaimDecisionDigest
 		if wantKind == "challenge_admission" {
 			priorPendingToken = current.ReceiptBody.ResultingApplicationToken
@@ -569,7 +544,7 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		cutoff = source.lateFilingClose.Body.ClosedAtUnix
 		ok = cutoff > terms.TerminalResolutionDeadlineUnix && cutoff <= terms.LateIngressRecoveryDeadlineUnix
 	}
-	if !ok || decision.Body.DecisionPath != wantPath || variant.DecisionSequence != wantSequence ||
+	if !ok || !sequenceFits || decision.Body.DecisionPath != wantPath || variant.DecisionSequence != wantSequence ||
 		decision.Body.DecisionSequence != wantSequence || decision.Body.PredecessorAuthorizedClaimDecisionDigest != predecessorDecisionDigest ||
 		variant.SourceClaimStateRevision != receipt.Body.PriorClaimStateRevision {
 		return errors.New("claim decision fallback source lineage is invalid")
@@ -585,9 +560,15 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 			return err
 		}
 	}
+	if err := validateDecisionAdmissionTimeV1(receipt.Body, decision.Body); err != nil {
+		return err
+	}
 	if err := ValidateClaimDecision(decision, claim, terms, authorityResolver,
 		terms.ClaimClosureCapacity.TerminalFallback.FallbackAuthoritySubjects,
 		time.Unix(int64(receipt.Body.AdmittedAtUnix), 0).UTC()); err != nil {
+		return err
+	}
+	if err := validateDecisionAdmissionOutcomeV1(receipt.Body, decision.Body, terms); err != nil {
 		return err
 	}
 	epoch := variant.ClaimRevisionEpochExpectation
@@ -618,19 +599,21 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		body.PredecessorDecisionAdmissionReceiptDigest != predecessorAdmissionDigest ||
 		body.PredecessorClaimStateTransitionReceiptDigest != predecessorTransitionDigest ||
 		body.DecisionSequence != wantSequence || body.DecisionRevision != 1 || body.DecisionPath != wantPath ||
-		body.PriorClaimState != wantPriorState || body.AdmittedClaimState != target || body.AdmittedClaimStateRevision != body.PriorClaimStateRevision+1 ||
-		body.AdmittedCoverageRevision != body.PriorCoverageRevision+1 || body.PriorCoverageEndCommitmentDigest != endDigest ||
+		body.PriorClaimState != wantPriorState || body.AdmittedClaimState != target ||
+		!isNextRevisionV1(body.AdmittedClaimStateRevision, body.PriorClaimStateRevision) ||
+		!isNextRevisionV1(body.AdmittedCoverageRevision, body.PriorCoverageRevision) || body.PriorCoverageEndCommitmentDigest != endDigest ||
 		body.ResultingCoverageEndCommitmentDigest != endDigest || body.AuthorizedActionDigest != actionDigest ||
 		body.StableActionID != receipt.StageActionAdmissionEvidence.AuthorizedAction.StableActionID ||
 		body.ExactRequestDigest != receipt.StageActionAdmissionEvidence.AuthorizedAction.ExactRequestDigest ||
 		body.WriterGeneration != receipt.StageActionAdmissionEvidence.AuthorizedAction.WriterGeneration ||
 		body.WriterFenceDigest != receipt.StageActionAdmissionEvidence.AuthorizedAction.WriterFenceDigest ||
-		body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest || body.AdmittedAtUnix != decision.Body.DecidedAtUnix {
+		body.AuthorityAdmissionEligibilityProofSetDigest != proofDigest {
 		return errors.New("claim decision fallback admission receipt binding is invalid")
 	}
 	if priorPendingToken != nil {
-		priorTokenDigest, _ := DecisionApplicationTokenDigestV1(*priorPendingToken)
-		if body.PriorApplicationTokenDigest != priorTokenDigest || body.PriorApplicationTokenTerminalState != "replaced" {
+		priorTokenDigest, priorTokenErr := DecisionApplicationTokenDigestV1(*priorPendingToken)
+		if priorTokenErr != nil || body.PriorApplicationTokenDigest != priorTokenDigest ||
+			body.PriorApplicationTokenTerminalState != "replaced" {
 			return errors.New("claim decision fallback prior token terminalization is invalid")
 		}
 	} else if receipt.PriorPendingApplicationToken != nil || body.PriorApplicationTokenDigest != "" ||
@@ -661,7 +644,10 @@ func verifyDeterministicFallbackAdmissionReceiptV1(receipt AuthorizedClaimDecisi
 		body.DecisionSequence, body.AdmittedAtUnix); err != nil {
 		return err
 	}
-	bodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-claim-decision-admission-receipt-body.v1", body)
+	bodyDigest, err := guarantorCodec.Digest("tos.service.agent-guarantor-claim-decision-admission-receipt-body.v1", body)
+	if err != nil {
+		return err
+	}
 	return verifyReceiptAuthorizationSetV1(receipt.Authorizations, "claim-decision-admission-receipt", bodyDigest,
 		"tos.service.agent-guarantor-claim-decision-admission-signature.v1", terms.DecisionAdmissionProfile,
 		terms.DecisionAdmissionAuthoritySubjects, terms.DecisionAdmissionQuorumRule, authorityResolver, now)

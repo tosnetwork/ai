@@ -86,29 +86,55 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 		seal.ReceiptBodyDigest != bodyDigest || seal.AuthorizedActionDigest != body.AuthorizedActionDigest ||
 		seal.AuthorizedClaimDecisionDigest != decisionDigest || seal.AuthorizedClaimEnvelopeDigest != claimDigest ||
 		seal.CoverageEndCommitmentDigest != endDigest || seal.CoverageTermsDigest != termsDigest ||
-		seal.SealedAtUnix < body.AdmittedAtUnix || uint64(now.UTC().Unix()) < seal.SealedAtUnix ||
+		seal.SealedAtUnix < body.AdmittedAtUnix ||
 		proof.ReceiptDescriptor.ContentDigest != proof.ReceiptEnvelopeDigest ||
 		proof.ReceiptDescriptor.RetrievalPolicyDigest != terms.DecisionAdmissionProfile.ProfileDigest ||
 		body.AuthorizedClaimDecisionDigest != decisionDigest || body.ClaimID != proof.AuthorizedClaim.Body.ClaimID ||
 		body.CoverageAgreementBodyDigest != proof.AuthorizedClaim.Body.CoverageAgreementBodyDigest ||
 		body.CoverageObligationID != proof.AuthorizedClaim.Body.CoverageObligationID ||
-		body.DecisionSequence != proof.AuthorizedClaimDecision.Body.DecisionSequence ||
-		body.AdmittedAtUnix == 0 || uint64(now.UTC().Unix()) < body.AdmittedAtUnix {
+		body.DecisionSequence != proof.AuthorizedClaimDecision.Body.DecisionSequence {
 		return errors.New("claim decision admission compact proof binding is invalid")
+	}
+	// The seal is not before the admission, so holding the seal time to the
+	// verifier's present, with the stage admission clock allowance, holds the
+	// admission time to it as well.
+	if !notAfterVerifierPresentV1(seal.SealedAtUnix, now) {
+		return errors.New("claim decision admission compact proof is sealed after the verifier's present")
 	}
 	if isFallbackDecisionPathV1(proof.AuthorizedClaimDecision.Body.DecisionPath) !=
 		(body.AdmissionMode == "deterministic_fallback") {
 		return errors.New("claim decision admission compact proof mixes its admission mode and decision path")
+	}
+	// The candidate of the late-recovery path names its late filing close. Its
+	// successor is recognized by that digest alone, so a candidate proof
+	// without it would let the successor pass for an ordinary one.
+	if proof.AuthorizedClaimDecision.Body.DecisionPath == "late_recovery_terminal_fallback" &&
+		!validDigest(body.LateFilingCloseReceiptDigest) {
+		return errors.New("late-recovery candidate compact proof names no late filing close")
+	}
+	// The proof carries the decision and the admission time, so the decision's
+	// own bounds on that time hold here as in the full receipt. What the proof
+	// does not carry (the claim admission, the predecessor transition and the
+	// revision cut) is bound only by the full receipt or by a bundle that
+	// carries those objects beside the proof.
+	if err := validateDecisionAdmissionTimeV1(body, proof.AuthorizedClaimDecision.Body); err != nil {
+		return err
 	}
 	claimValidationTime := time.Unix(int64(proof.AuthorizedClaim.Body.CreatedAtUnix), 0).UTC()
 	if err := VerifyClaim(proof.AuthorizedClaim, terms, body.CoverageAgreementBodyDigest,
 		body.CoverageObligationID, authorityResolver, claimValidationTime); err != nil {
 		return err
 	}
-	decisionValidationTime := time.Unix(int64(proof.AuthorizedClaimDecision.Body.DecidedAtUnix), 0).UTC()
+	// As in the full receipt, the decision is judged at its admission time.
+	decisionValidationTime := time.Unix(int64(body.AdmittedAtUnix), 0).UTC()
 	if err := ValidateClaimDecision(proof.AuthorizedClaimDecision, proof.AuthorizedClaim, terms,
 		authorityResolver, decisionAuthoritySubjectsForPathV1(terms, proof.AuthorizedClaimDecision.Body.DecisionPath),
 		decisionValidationTime); err != nil {
+		return err
+	}
+	// A transition, an application and a terminal bundle read the claim state,
+	// the windows and the round counts from this body alone.
+	if err := validateDecisionAdmissionOutcomeV1(body, proof.AuthorizedClaimDecision.Body, terms); err != nil {
 		return err
 	}
 	if err := verifyReceiptAuthorizationSetV1(proof.ReceiptAuthorizations, "claim-decision-admission-receipt", bodyDigest,
@@ -134,7 +160,10 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 			return errors.New("claim decision admission compact proof differs from its immutable complete receipt")
 		}
 	}
-	sealDigest, _ := guarantorCodec.Digest(ClaimDecisionAdmissionReceiptSealDomainV1, seal)
+	sealDigest, err := guarantorCodec.Digest(ClaimDecisionAdmissionReceiptSealDomainV1, seal)
+	if err != nil {
+		return err
+	}
 	if proof.SealAuthorization.AuthoritySubject != bound.ActionAuthorityID ||
 		proof.SealAuthorization.ValidationTimeUnix != seal.SealedAtUnix {
 		return errors.New("claim decision admission receipt seal authority is substituted")
