@@ -13,11 +13,19 @@
 #   ACTOR_CODE_HASH    tvm-cell-sha256:<hex> pinned Service Actor release
 # Optional: E2E_SKIP_REFUND=1 skips the hour-long timeout refund (quick
 # iterations only; the evidence records it and an evidence run keeps it),
-# E2E_CPUS (default 8).
+# E2E_CPUS (default 8), E2E_HARNESS_DIR (default: this directory's harness).
+#
+# E2E_HARNESS_DIR lets a sibling harness reuse this container, its mounts,
+# the thermal guard and the secret scan: that directory is mounted at
+# /e2e-mounts/harness and its run.py is what the container runs, while this
+# directory's harness stays mounted at /e2e-mounts/base-harness for it to
+# import. Unset, the run is exactly this harness's own.
 set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/../../.." && pwd)
 : "${E2E_WORKDIR:?}" "${TOS_SOURCE:?}" "${TOS_BUILD:?}" "${TOS_VENV:?}" "${REGISTRY_CODE_BOC:?}" "${ACTOR_CODE_HASH:?}"
+harness=$(CDPATH= cd -- "${E2E_HARNESS_DIR:-$here/harness}" && pwd)
+[ -f "$harness/run.py" ] || { echo "the harness directory has no run.py" >&2; exit 2; }
 # The interpreter directory as the venv names it (it may be a link), and
 # what it resolves to on the host.
 python_home=$(awk -F' = ' '$1 == "home" {print $2}' "$TOS_VENV/pyvenv.cfg")
@@ -45,7 +53,8 @@ docker run --detach --name "$name" --network "$network" --cpus "${E2E_CPUS:-8}" 
   --security-opt no-new-privileges \
   --mount "type=bind,src=$E2E_WORKDIR,dst=/e2e/work" \
   --mount "type=bind,src=$E2E_WORKDIR/bin,dst=/e2e-mounts/bin,readonly" \
-  --mount "type=bind,src=$here/harness,dst=/e2e-mounts/harness,readonly" \
+  --mount "type=bind,src=$harness,dst=/e2e-mounts/harness,readonly" \
+  --mount "type=bind,src=$here/harness,dst=/e2e-mounts/base-harness,readonly" \
   --mount "type=bind,src=$repo/protocol/scripts,dst=/e2e-mounts/scripts,readonly" \
   --mount "type=bind,src=$TOS_SOURCE,dst=/e2e-mounts/tos-source,readonly" \
   --mount "type=bind,src=$TOS_BUILD,dst=/e2e-mounts/tos-build,readonly" \
