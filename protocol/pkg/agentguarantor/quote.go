@@ -593,6 +593,16 @@ func VerifyFirmOffer(offer AuthorizedFirmCoverageOfferV1, request AuthorizedCove
 	if validateFirmOfferShape(offer) != nil || agentcommerce.ValidateAgreementBody(agreement) != nil || publicationResolver == nil {
 		return errors.New("firm Guarantor offer or Agreement is invalid")
 	}
+	// The offer is verified against the quote request it embeds; a caller's
+	// request must be that exact envelope.
+	requestDigest, requestErr := QuoteRequestDigest(request)
+	embeddedRequestDigest, embeddedErr := QuoteRequestDigest(offer.AuthorizedQuoteRequest)
+	if requestErr != nil || embeddedErr != nil || embeddedRequestDigest != requestDigest {
+		return errors.New("firm Guarantor offer embeds another quote request")
+	}
+	if err := validateFirmOfferAgreementBindingV1(offer, agreement); err != nil {
+		return err
+	}
 	profile, err := ResolveServiceProfileArtifactV1(offer.ServiceProfileArtifact, publicationResolver, now)
 	if err != nil {
 		return err
@@ -603,30 +613,9 @@ func VerifyFirmOffer(offer AuthorizedFirmCoverageOfferV1, request AuthorizedCove
 	if err := VerifyQuoteRequest(request, profile, resolver, underlyingResolver, agreementVerifier, now); err != nil {
 		return err
 	}
-	if err := validateCoverageDeadlineAnchorV1(offer.CoverageTerms, agreement.ExpiresAtUnix); err != nil {
-		return err
-	}
-	if err := validateTermsWithinRequestedDeadlinesV1(offer.CoverageTerms, request.RequestedTerms); err != nil {
-		return err
-	}
-	agreementDigest, _ := agentcommerce.AgreementBodyDigest(agreement)
-	requestDigest, _ := QuoteRequestDigest(request)
-	termsDigest, _ := CoverageTermsDigest(offer.CoverageTerms)
-	profileDigest, _ := ServiceProfileDigest(profile)
 	body := offer.Body
-	embeddedRequestDigest, _ := QuoteRequestDigest(offer.AuthorizedQuoteRequest)
-	if body.CoverageAgreementBodyDigest != agreementDigest || body.QuoteRequestDigest != requestDigest ||
-		embeddedRequestDigest != requestDigest ||
-		body.CoverageTermsDigest != termsDigest || body.ServiceProfileDigest != request.Body.ServiceProfileDigest ||
-		body.ServiceProfileDigest != profileDigest || body.ServiceIntentDigest != offer.ServiceProfileArtifact.SelectedServiceIntentOperationDigest ||
-		body.GuarantorAgentID != request.Body.GuarantorAgentID || body.CoveredPartyAgentID != request.Body.CoveredPartyAgentID ||
-		body.BeneficiaryAgentID != request.Body.BeneficiaryAgentID || body.CoverageID != offer.CoverageTerms.CoverageID ||
-		body.CoverageVersion != offer.CoverageTerms.CoverageVersion || body.UnderlyingAgreementBodyDigest != request.Body.UnderlyingAgreementBodyDigest ||
-		!equalStrings(body.CoveredObligationIDs, request.Body.CoveredObligationIDs) || body.CoverageObligationID == "" ||
-		!equalStrings(body.PremiumObligationIDs, offer.CoverageTerms.PremiumObligationIDs) ||
-		body.CollateralObligationID != offer.CoverageTerms.CollateralObligationID ||
-		body.ValidFromUnix > uint64(now.UTC().Unix()) || uint64(now.UTC().Unix()) >= body.AcceptByUnix {
-		return errors.New("firm Guarantor offer binding is invalid")
+	if body.ValidFromUnix > uint64(now.UTC().Unix()) || uint64(now.UTC().Unix()) >= body.AcceptByUnix {
+		return errors.New("firm Guarantor offer is outside its acceptance window")
 	}
 	obligations := make(map[string]agentcommerce.AgreementObligation, len(agreement.Obligations))
 	for _, obligation := range agreement.Obligations {
@@ -665,23 +654,6 @@ func VerifyFirmOffer(offer AuthorizedFirmCoverageOfferV1, request AuthorizedCove
 	}
 	if err := VerifyExposureAdmissionReceiptV1(offer.ExposureAdmissionReceipt, resolver, now); err != nil {
 		return err
-	}
-	receiptDigest, _ := ExposureAdmissionReceiptDigestV1(offer.ExposureAdmissionReceipt)
-	descriptor := offer.ExposureAdmissionReceipt.Descriptor
-	if receiptDigest != body.ExposureAdmissionReceiptDigest || descriptor.CoverageAgreementBodyDigest != agreementDigest ||
-		descriptor.CoverageTermsDigest != termsDigest || descriptor.QuoteRequestDigest != requestDigest ||
-		descriptor.ServiceProfileDigest != body.ServiceProfileDigest || descriptor.ReservedExposure != offer.ExposureAdmissionReceipt.Body.ReservedExposure ||
-		offer.ExposureAdmissionReceipt.Body.ReservationID != body.ReservationID ||
-		descriptor.GuarantorAgentID != body.GuarantorAgentID || descriptor.CoverageID != offer.CoverageTerms.CoverageID ||
-		descriptor.CoverageVersion != offer.CoverageTerms.CoverageVersion ||
-		descriptor.ReservationScope.GuarantorAgentID != body.GuarantorAgentID ||
-		descriptor.ReservationScope.CoverageAgreementBodyDigest != agreementDigest ||
-		descriptor.ReservationScope.CoverageObligationID != body.CoverageObligationID ||
-		descriptor.ReservationScope.CoverageAsset != offer.CoverageTerms.CoverageAsset ||
-		descriptor.ReservationScope.SelectedAssuranceLevel != offer.CoverageTerms.SelectedAssuranceLevel ||
-		descriptor.ReservationScope.MaximumAggregatePayout != offer.CoverageTerms.MaximumAggregatePayout ||
-		descriptor.ReservedExposure != offer.CoverageTerms.MaximumAggregatePayout {
-		return errors.New("firm Guarantor offer exposure receipt is not bound to the offer")
 	}
 	bodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-firm-offer-body.v1", body)
 	return ValidateAuthorizationSet(offer.Authorizations, "firm-coverage-offer", bodyDigest,

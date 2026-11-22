@@ -3,6 +3,7 @@ package agentguarantor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
@@ -47,6 +48,13 @@ func VerifyCoverageAcceptanceRequestV1(request AuthorizedCoverageAcceptanceReque
 		uint64(now.UTC().Unix()) > request.Body.ExpiresAtUnix || request.Body.CreatedAtUnix < offer.Body.ValidFromUnix ||
 		request.Body.CreatedAtUnix > offer.Body.AcceptByUnix || request.Body.ExpiresAtUnix > offer.Body.ExpiresAtUnix {
 		return errors.New("Guarantor acceptance request is outside the firm offer")
+	}
+	// Acceptance, and every later object that stands on it, is verified
+	// against the caller's copy of the firm offer. The offer's own binding
+	// rules are enforced here rather than left to the Agreement evidence
+	// verifier the caller supplies.
+	if err := validateFirmOfferAgreementBindingV1(offer, request.CoverageAgreementBody); err != nil {
+		return err
 	}
 	agreement := agentcommerce.AgentAgreement{Body: request.CoverageAgreementBody,
 		AuthorizationEvidence: append([]agentcommerce.AgreementAuthorizationEvidence(nil), request.AuthorizationEvidenceSet.Evidence...)}
@@ -100,9 +108,12 @@ func VerifyCoverageAcceptanceReceiptV1(receipt AuthorizedCoverageAcceptanceRecei
 	offer AuthorizedFirmCoverageOfferV1, agreementVerifier agentcommerce.AgreementEvidenceVerifier,
 	authorityResolver AuthorityKeyResolver, fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
 	acceptedAt := time.Unix(int64(receipt.Body.AcceptedAtUnix), 0).UTC()
-	if err := validateAcceptanceReceiptShape(receipt); err != nil || acceptedAt.After(now.UTC().Add(5*time.Minute)) ||
-		VerifyCoverageAcceptanceRequestV1(receipt.AuthorizedAcceptanceRequest, offer, agreementVerifier, authorityResolver, acceptedAt) != nil {
+	if err := validateAcceptanceReceiptShape(receipt); err != nil || acceptedAt.After(now.UTC().Add(5*time.Minute)) {
 		return errors.New("Guarantor acceptance receipt is invalid")
+	}
+	if err := VerifyCoverageAcceptanceRequestV1(receipt.AuthorizedAcceptanceRequest, offer, agreementVerifier, authorityResolver,
+		acceptedAt); err != nil {
+		return fmt.Errorf("Guarantor acceptance receipt is invalid: %w", err)
 	}
 	if err := enforceCanonicalSize(receipt, offer.CoverageTerms.ClaimClosureCapacity.MaximumAcceptanceReceiptEnvelopeBytes,
 		"coverage acceptance receipt"); err != nil {
