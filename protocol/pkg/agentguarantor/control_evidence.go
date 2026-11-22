@@ -131,7 +131,10 @@ func VerifyOperationalIndependenceEvidenceV1(value AuthorizedGuarantorOperationa
 	if !ok || controlVerifier == nil {
 		return errors.New("operational-independence control-resolution Adapter is unavailable")
 	}
-	termsDigest, _ := OperationalIndependenceTermsDigestV1(*terms)
+	termsDigest, termsErr := OperationalIndependenceTermsDigestV1(*terms)
+	if termsErr != nil {
+		return errors.New("operational-independence terms are invalid")
+	}
 	stageDigest, stageErr := StageActionAuthorityBindingDigestV1(coverageTerms.StageActionAuthorityBinding)
 	body := value.Body
 	if stageErr != nil || body.SchemaVersion != 1 || body.CoverageAgreementBodyDigest != agreementDigest ||

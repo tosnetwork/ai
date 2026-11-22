@@ -396,6 +396,51 @@ func TestSignedHistoryNonActivationEligibilityProofsBindTheNonActivation(t *test
 			signedHistoryTime(release.Body.ReleasedAtUnix)), refusal)
 }
 
+// TestSignedHistoryNonActivationDispositionEvidenceIsValidAndCommitted: an
+// optional fee-resolution or collateral disposition evidence set that
+// non-activation evidence carries is valid and committed by the signed body.
+// Evidence signed by the Guarantor over an action that embeds a set failing
+// validation, with no digest for it in the body, is refused by the verifier
+// and has no envelope digest; it is not treated as carrying no set.
+func TestSignedHistoryNonActivationDispositionEvidenceIsValidAndCommitted(t *testing.T) {
+	history := offerPhaseHistory(t)
+	signed := history.quoteToOffer(true, nil)
+	verifier := signedOfferAgreementVerifier{signed}
+	acceptance := history.acceptanceReceipt(signed)
+	valid := CanonicalGuarantorEvidenceSetV1{SchemaVersion: 1, Purpose: "coverage-non-activation-fee",
+		ContextDigest: signed.offer.Body.CoverageAgreementBodyDigest,
+		Items: []CanonicalGuarantorEvidenceItemV1{{ContentType: "text/plain", EvidenceProfileDigest: testDigest("1"),
+			EvidenceEnvelopeDigest: testDigest("2"), Representation: "inline", CanonicalEnvelopeBytes: []byte("fee refunded")}}}
+	validDigest, err := CanonicalGuarantorEvidenceSetDigestV1(valid)
+	if err != nil {
+		t.Fatalf("the valid disposition evidence set is invalid: %v", err)
+	}
+	const refusal = "Guarantor non-activation evidence carries an invalid or uncommitted disposition evidence set"
+	invalid := CanonicalGuarantorEvidenceSetV1{}
+	cases := []struct {
+		name    string
+		carried nonActivationDisposition
+		refusal string
+	}{
+		{"no disposition evidence", nonActivationDisposition{}, ""},
+		{"a valid fee set committed by the body", nonActivationDisposition{fee: &valid, feeDigest: validDigest}, ""},
+		{"a valid collateral set committed by the body", nonActivationDisposition{collateral: &valid, collateralDigest: validDigest}, ""},
+		{"an invalid fee set with no digest in the body", nonActivationDisposition{fee: &invalid}, refusal},
+		{"an invalid collateral set with no digest in the body", nonActivationDisposition{collateral: &invalid}, refusal},
+		{"a valid fee set the body does not commit", nonActivationDisposition{fee: &valid}, refusal},
+		{"a valid collateral set the body commits under another digest",
+			nonActivationDisposition{collateral: &valid, collateralDigest: testDigest("f")}, refusal},
+	}
+	for _, test := range cases {
+		evidence := history.nonActivationCarrying(signed, acceptance, nil, test.carried)
+		expectEligibility(t, test.name, "the non-activation verifier", VerifyCoverageNonActivationEvidenceV1(evidence,
+			signed.offer, verifier, signed.resolver, history.fenceResolver, signedHistoryTime(evidence.Body.ResolvedAtUnix)),
+			test.refusal)
+		_, digestErr := CoverageNonActivationEvidenceDigestV1(evidence)
+		expectEligibility(t, test.name, "the non-activation envelope digest", digestErr, test.refusal)
+	}
+}
+
 // offerActivation is the Guarantor-signed activation evidence of the accepted
 // coverage, activated one second after the acceptance: the underlying
 // Agreement with its authorization evidence, the acceptance receipt, the

@@ -375,6 +375,21 @@ func validateCoverageNonActivationEvidenceShapeV1(evidence AuthorizedCoverageNon
 	acceptanceDigest, acceptanceErr := CoverageAcceptanceReceiptDigestV1(evidence.AuthorizedAcceptanceReceipt)
 	projectionDigest, projectionErr := TransitionEvidenceProjectionDigestV1(evidence.TransitionEvidenceProjection)
 	proofDigest, proofErr := AuthorityAdmissionEligibilityProofSetDigestV1(evidence.AuthorityAdmissionEligibilityProofSet)
+	// An optional evidence set that is carried must be valid and committed by
+	// the body. Its digest is empty only when the set is absent, so a set
+	// that fails validation cannot pass as an absent one.
+	feeDigest, collateralDigest := "", ""
+	var feeErr, collateralErr error
+	if evidence.FeeResolutionEvidenceSet != nil {
+		feeDigest, feeErr = CanonicalGuarantorEvidenceSetDigestV1(*evidence.FeeResolutionEvidenceSet)
+	}
+	if evidence.CollateralNonActivationEvidenceSet != nil {
+		collateralDigest, collateralErr = CanonicalGuarantorEvidenceSetDigestV1(*evidence.CollateralNonActivationEvidenceSet)
+	}
+	if feeErr != nil || collateralErr != nil || body.FeeResolutionEvidenceSetDigest != feeDigest ||
+		body.CollateralNonActivationEvidenceSetDigest != collateralDigest {
+		return errors.New("Guarantor non-activation evidence carries an invalid or uncommitted disposition evidence set")
+	}
 	if cutErr != nil || reasonErr != nil || acceptanceErr != nil || projectionErr != nil || proofErr != nil ||
 		body.SchemaVersion != 1 || !validID(body.AuthorityID) || !validDigest(body.CoverageAgreementBodyDigest) ||
 		!validToken(body.CoverageObligationID, 128) || !validDigest(body.CoverageStateDomainDigest) ||
@@ -428,19 +443,13 @@ func VerifyCoverageNonActivationEvidenceV1(evidence AuthorizedCoverageNonActivat
 	cutDigest, _ := ActivationAdmissionCutProofDigestV1(evidence.ActivationAdmissionCutProof)
 	reasonDigest, _ := CoverageNonActivationReasonEvidenceDigestV1(evidence.NonActivationReasonEvidence)
 	projectionDigest, _ := TransitionEvidenceProjectionDigestV1(evidence.TransitionEvidenceProjection)
-	feeDigest, collateralDigest := "", ""
-	if evidence.FeeResolutionEvidenceSet != nil {
-		feeDigest, _ = CanonicalGuarantorEvidenceSetDigestV1(*evidence.FeeResolutionEvidenceSet)
-	}
-	if evidence.CollateralNonActivationEvidenceSet != nil {
-		collateralDigest, _ = CanonicalGuarantorEvidenceSetDigestV1(*evidence.CollateralNonActivationEvidenceSet)
-	}
+	// The two optional disposition evidence sets were held to the body's
+	// digests by the shape validation above.
 	if body.AuthorityID != bound.ActionAuthorityID || body.CoverageAgreementBodyDigest != offer.Body.CoverageAgreementBodyDigest ||
 		body.CoverageObligationID != offer.Body.CoverageObligationID || body.CoverageStateDomainDigest != offer.CoverageTerms.CoverageStateDomainDigest ||
 		body.AuthorizedFirmOfferEnvelopeDigest != offerDigest || body.AcceptanceReceiptDigest != acceptanceDigest ||
 		body.ExposureReceiptDigest != exposureDigest || body.ActivationAdmissionCutProofDigest != cutDigest ||
-		body.NonActivationReasonEvidenceDigest != reasonDigest || body.TransitionEvidenceProjectionDigest != projectionDigest ||
-		body.FeeResolutionEvidenceSetDigest != feeDigest || body.CollateralNonActivationEvidenceSetDigest != collateralDigest {
+		body.NonActivationReasonEvidenceDigest != reasonDigest || body.TransitionEvidenceProjectionDigest != projectionDigest {
 		return errors.New("Guarantor non-activation lineage or prerequisite disposition is substituted")
 	}
 	if body.Reason == "activation_window_expired" && body.ActivationCutoffUnix != offer.CoverageTerms.CoverageStartsAtUnix ||

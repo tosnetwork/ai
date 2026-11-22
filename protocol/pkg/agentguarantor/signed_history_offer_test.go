@@ -17,9 +17,12 @@ import (
 // VerifyFirmOffer runs in this package's own tests.
 //
 // It stands beside the claim history rather than under it: the claim history
-// still rests on its stand-in activation. An acceptance request is built on
-// the firm offer (signed_history_offer_binding_test.go); no acceptance receipt
-// or activation is. The offer's issuance action is not built either: the
+// still rests on its stand-in activation. An acceptance request, an
+// acceptance receipt, non-activation evidence and activation evidence are
+// built on the firm offer (signed_history_offer_binding_test.go,
+// signed_history_nonactivation_release_test.go,
+// signed_history_offer_followups_test.go) and verified by the unreplaced
+// verifiers. The offer's issuance action is not built: the
 // offer and reservation identities and the exposure receipt's action digests
 // are well-formed values. A verifier cannot recompute them from the offer,
 // and holds the receipt's eligibility proofs to them.

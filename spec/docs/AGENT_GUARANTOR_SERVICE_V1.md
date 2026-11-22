@@ -4630,6 +4630,13 @@ subject that is not one of the three parties, so their freshness at
 `resolved_at_unix` rests on that evidence's own authorization. The proof set
 of activation evidence is not yet held to its admission beyond its digest.
 
+`fee_resolution_evidence_set` and `collateral_non_activation_evidence_set`
+are optional, but a set that is carried is a valid canonical evidence set
+whose recomputed digest equals the body's corresponding digest field, and a
+body digest without its set is invalid. A carried set that fails validation
+is never treated as an absent one; the same holds for a cancellation
+request's `cancellation_evidence_set`.
+
 Both branches mutate the Agreement's exact `coverage_state_domain_digest`.
 Activation requires the action's `target_coverage_end_commitment` to be the
 cycle-free `scheduled` commitment derived from the exact Agreement; the result

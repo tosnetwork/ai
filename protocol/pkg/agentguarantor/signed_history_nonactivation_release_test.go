@@ -148,11 +148,26 @@ func (history *signedHistory) nonActivation(signed signedOffer,
 	return history.nonActivationWith(signed, acceptance, nil)
 }
 
+// nonActivationDisposition is the optional disposition evidence a
+// non-activation carries: the sets themselves, which the signed action
+// embeds, and the digests its signed body commits for them.
+type nonActivationDisposition struct {
+	fee, collateral             *CanonicalGuarantorEvidenceSetV1
+	feeDigest, collateralDigest string
+}
+
 // nonActivationWith is nonActivation whose eligibility proofs change varies
 // before the evidence is signed. By default the proofs re-resolve the
 // Guarantor, the covered party and the beneficiary.
 func (history *signedHistory) nonActivationWith(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
 	change func(*signedOfferEligibility)) AuthorizedCoverageNonActivationEvidenceV1 {
+	return history.nonActivationCarrying(signed, acceptance, change, nonActivationDisposition{})
+}
+
+// nonActivationCarrying is nonActivationWith carrying disposition evidence,
+// signed into the action and the body exactly as given.
+func (history *signedHistory) nonActivationCarrying(signed signedOffer, acceptance AuthorizedCoverageAcceptanceReceiptV1,
+	change func(*signedOfferEligibility), carried nonActivationDisposition) AuthorizedCoverageNonActivationEvidenceV1 {
 	t, offer, terms := history.t, signed.offer, signed.offer.CoverageTerms
 	agreementDigest, obligationID := offer.Body.CoverageAgreementBodyDigest, offer.Body.CoverageObligationID
 	logID, err := ActivationAdmissionDomainIDV1(agreementDigest)
@@ -184,6 +199,7 @@ func (history *signedHistory) nonActivationWith(signed signedOffer, acceptance A
 	resolvedAt := terms.CoverageStartsAtUnix + 1
 	canonical, err := Canonical(CoverageNonActivationActionBodyV1{SchemaVersion: 1, AuthorizedAcceptanceReceipt: acceptance,
 		ActivationAdmissionCutProof: cut, NonActivationReasonEvidence: reason, TransitionEvidenceProjection: projection,
+		FeeResolutionEvidenceSet: carried.fee, CollateralNonActivationEvidenceSet: carried.collateral,
 		ExpectedCoverageRevision: 1, TargetCoverageRevision: 2, TargetCoverageState: "not_activated_confirmed",
 		ExpectedClaimFilingState: "not_open", TargetClaimFilingState: "not_open", ExpectedClaimFilingStateRevision: 1,
 		TargetClaimFilingStateRevision: 1})
@@ -238,6 +254,7 @@ func (history *signedHistory) nonActivationWith(signed signedOffer, acceptance A
 		WriterFenceDigest: stage.AuthorizedAction.WriterFenceDigest, PriorCoverageRevision: 1, ResolvedCoverageRevision: 2,
 		PriorClaimFilingState: "not_open", ResultingClaimFilingState: "not_open", PriorClaimFilingStateRevision: 1,
 		ResultingClaimFilingStateRevision: 1, ResolvedAtUnix: resolvedAt,
+		FeeResolutionEvidenceSetDigest: carried.feeDigest, CollateralNonActivationEvidenceSetDigest: carried.collateralDigest,
 		AuthorityAdmissionEligibilityProofSetDigest: eligibilityDigest}
 	bodyDigest, err := Digest("tos.service.agent-guarantor-non-activation-evidence-body.v1", body)
 	if err != nil {
@@ -245,10 +262,13 @@ func (history *signedHistory) nonActivationWith(signed signedOffer, acceptance A
 	}
 	evidence := AuthorizedCoverageNonActivationEvidenceV1{Body: body, StageActionAdmissionEvidence: stage,
 		AuthorizedAcceptanceReceipt: acceptance, ActivationAdmissionCutProof: cut, NonActivationReasonEvidence: reason,
+		FeeResolutionEvidenceSet: carried.fee, CollateralNonActivationEvidenceSet: carried.collateral,
 		TransitionEvidenceProjection: projection, AuthorityAdmissionEligibilityProofSet: eligibility,
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObject("non-activation-evidence", bodyDigest,
 			"tos.service.agent-guarantor-non-activation-evidence-signature.v1", resolvedAt)}}
-	if _, err := CoverageNonActivationEvidenceDigestV1(evidence); err != nil {
+	// Evidence carrying disposition sets may be malformed on purpose; its
+	// test judges it.
+	if _, err := CoverageNonActivationEvidenceDigestV1(evidence); err != nil && carried == (nonActivationDisposition{}) {
 		t.Fatalf("signed-history non-activation evidence is malformed: %v", err)
 	}
 	return evidence
