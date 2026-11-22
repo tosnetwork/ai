@@ -180,7 +180,20 @@ def setup_provider(tosctl_sha256: str) -> dict:
                    "--executor-socket", str(base.EXECUTOR_SOCKET), "--gateway-card-out", str(base.GATEWAY_CARD)]
     if TEST_PROFILE:
         offer_flags.append("--test-profile-actor")
-    offered = report(provider_cli(*offer_flags, "--yes")) or {}
+    # offer resumes after a stop: a send whose outcome finalized state has
+    # not established yet is never repeated, and a later run continues from
+    # the journal. The harness runs it again, as an operator would, and
+    # records every attempt.
+    attempts = []
+    offered = {}
+    for _ in range(6):
+        result = provider_cli(*offer_flags, "--yes", check=False)
+        offered = report(result) or {}
+        attempts.append({"exit": result.returncode, "last_stderr_line": (result.stderr.strip().splitlines() or [""])[-1]})
+        if result.returncode == 0 and offered.get("confirmed") is True:
+            break
+        time.sleep(20)
+    record("offer completed (runs of the command: %d)" % len(attempts), offered.get("confirmed") is True, attempts)
     offer = json.loads(base.as_account("provider", ["/bin/cat", str(PROVIDER_RAIL / "setup" / "offer.json")]).stdout)
     record("offer published the Capability and wrote the offer file and the gateway key card",
            offered.get("confirmed") is True and bool(offer.get("capability_id")),
