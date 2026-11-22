@@ -135,8 +135,10 @@ func (chain lateChain) verdictOf(t *testing.T, name string, bundle ClaimTerminal
 // coverage. It verifies as built, and is refused when the set is signed for
 // another Agreement than its filing close, verified against an offer for
 // another Agreement, or signed with a body that names another claim admission
-// authority, another admission log, another filing-close revision or time, or
-// a terminal time before the claim's decision was applied.
+// authority, restates any value of the filing close differently (each of the
+// seven restated values has its own case), closes at another revision than
+// the filing close allows, or states times that do not follow the filing
+// close, the claims' terminal time or the application of the claim's decision.
 func TestSignedHistoryTerminalClaimSetFollowsItsFilingCloseAndOffer(t *testing.T) {
 	chain := newLateChain(t, lateChainOptions{})
 	history := chain.history

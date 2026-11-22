@@ -234,8 +234,11 @@ func refusedFor(t *testing.T, name string, err error, want string) {
 // offer's reservation verifies in full. The same signed release is refused
 // when it carries another exposure admission of the same Guarantor (one with
 // another default-liability disposition, from which the disposition would be
-// computed), names another obligation, or is released before the claim set
-// allows.
+// computed), names another obligation, Guarantor or authority, is released
+// before the claim set allows or before the set was created, leaves exposure
+// reserved or states the remainder in another asset, moves the release-state
+// revision by anything but a checked one, or carries the offer's own exposure
+// admission when that admission does not verify.
 func TestSignedHistoryExposureReleaseIsOfTheOffersReservationAndClaimSet(t *testing.T) {
 	claim := newLateDeniedClaim(t, false, nil)
 	history := claim.history
@@ -315,9 +318,10 @@ func TestSignedHistoryExposureReleaseIsOfTheOffersReservationAndClaimSet(t *test
 // TestSignedHistoryCoverageResolutionFollowsItsReleaseAndClaimSet: the
 // coverage resolution over the signed release verifies in full, and with it
 // the whole closure chain down to the claim. The same signed resolution is
-// refused when it names another obligation than its release, resolves another
-// revision than the release-pending one the claim set produced, or is
-// resolved before the release.
+// refused when it names another obligation than its release or another
+// authority than the Agreement's, resolves another revision than the
+// release-pending one the claim set produced, or is resolved before the
+// release.
 func TestSignedHistoryCoverageResolutionFollowsItsReleaseAndClaimSet(t *testing.T) {
 	claim := newLateDeniedClaim(t, true, nil)
 	history := claim.history
