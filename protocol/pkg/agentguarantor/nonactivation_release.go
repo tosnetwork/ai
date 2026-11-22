@@ -62,8 +62,12 @@ func VerifyNonActivationExposureReleaseReceiptV1(value AuthorizedNonActivationEx
 		agreementVerifier, authorityResolver, fenceResolver, now); err != nil {
 		return err
 	}
-	if err := VerifyExposureAdmissionReceiptV1(value.AuthorizedExposureAdmissionReceipt,
-		authorityResolver, now); err != nil || !equalCanonical(value.AuthorizedExposureAdmissionReceipt, offer.ExposureAdmissionReceipt) {
+	// The released reservation is the one the accepted offer carries. Another
+	// receipt, however validly signed, releases nothing of this coverage.
+	if !equalCanonical(value.AuthorizedExposureAdmissionReceipt, offer.ExposureAdmissionReceipt) {
+		return errors.New("non-activation exposure release carries another exposure receipt than the firm offer's")
+	}
+	if err := VerifyExposureAdmissionReceiptV1(value.AuthorizedExposureAdmissionReceipt, authorityResolver, now); err != nil {
 		return err
 	}
 	bound, err := FindStageActionAuthorityV1(offer.CoverageTerms.StageActionAuthorityBinding,

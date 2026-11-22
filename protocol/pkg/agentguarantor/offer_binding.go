@@ -2,6 +2,7 @@ package agentguarantor
 
 import (
 	"errors"
+	"math/big"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
 )
@@ -9,6 +10,151 @@ import (
 // firmOfferIssuanceObjectKindV1 is the authorized object kind of the
 // eligibility proofs frozen when a firm offer's exposure is admitted.
 const firmOfferIssuanceObjectKindV1 = "firm-offer-issuance"
+
+// FirmOfferAdmissionDomainIDV1 is the admission domain in which a firm
+// offer's issuance, and the eligibility proofs frozen with its exposure
+// admission, are sequenced. It is derived from the offer ID alone, so a
+// holder of the offer can recompute it.
+func FirmOfferAdmissionDomainIDV1(offerID string) (string, error) {
+	if !validDigest(offerID) {
+		return "", errors.New("firm-offer admission domain input is invalid")
+	}
+	return guarantorCodec.Digest("tos.service.agent-guarantor-firm-offer-admission-domain.v1", struct {
+		AuthorityInstanceID string `json:"authority_instance_id"`
+	}{offerID})
+}
+
+// closureCapacityBoundV1 is one count or byte ceiling of a claim closure
+// capacity under its wire name.
+type closureCapacityBoundV1 struct {
+	name  string
+	value uint64
+}
+
+// closureCapacityBoundsV1 lists every count and byte ceiling of a claim
+// closure capacity, in the order they are compared.
+func closureCapacityBoundsV1(capacity ClaimClosureCapacityV1) []closureCapacityBoundV1 {
+	return []closureCapacityBoundV1{
+		{"maximum_claim_ingress_actions", capacity.MaximumClaimIngressActions},
+		{"maximum_claims", capacity.MaximumClaims},
+		{"maximum_claim_revisions_per_claim", capacity.MaximumClaimRevisionsPerClaim},
+		{"maximum_decision_admissions_per_claim", capacity.MaximumDecisionAdmissionsPerClaim},
+		{"maximum_claim_state_transitions_per_claim", capacity.MaximumClaimStateTransitionsPerClaim},
+		{"maximum_challenge_rounds_per_claim", capacity.MaximumChallengeRoundsPerClaim},
+		{"maximum_nonterminal_rounds_per_claim", capacity.MaximumNonterminalRoundsPerClaim},
+		{"maximum_payout_lines_per_claim", capacity.MaximumPayoutLinesPerClaim},
+		{"maximum_admitted_claim_envelope_bytes", capacity.MaximumAdmittedClaimEnvelopeBytes},
+		{"maximum_claim_ingress_receipt_envelope_bytes", capacity.MaximumClaimIngressReceiptEnvelopeBytes},
+		{"maximum_claim_ingress_cut_proof_bytes", capacity.MaximumClaimIngressCutProofBytes},
+		{"maximum_acceptance_request_envelope_bytes", capacity.MaximumAcceptanceRequestEnvelopeBytes},
+		{"maximum_acceptance_receipt_envelope_bytes", capacity.MaximumAcceptanceReceiptEnvelopeBytes},
+		{"maximum_activation_evidence_envelope_bytes", capacity.MaximumActivationEvidenceEnvelopeBytes},
+		{"maximum_non_activation_evidence_envelope_bytes", capacity.MaximumNonActivationEvidenceEnvelopeBytes},
+		{"maximum_cancellation_receipt_envelope_bytes", capacity.MaximumCancellationReceiptEnvelopeBytes},
+		{"maximum_claim_filing_close_receipt_envelope_bytes", capacity.MaximumClaimFilingCloseReceiptEnvelopeBytes},
+		{"maximum_exposure_release_request_bytes", capacity.MaximumExposureReleaseRequestBytes},
+		{"maximum_exposure_release_receipt_bytes", capacity.MaximumExposureReleaseReceiptBytes},
+		{"maximum_terminal_claim_set_envelope_bytes", capacity.MaximumTerminalClaimSetEnvelopeBytes},
+		{"maximum_coverage_resolution_request_bytes", capacity.MaximumCoverageResolutionRequestBytes},
+		{"maximum_coverage_resolution_envelope_bytes", capacity.MaximumCoverageResolutionEnvelopeBytes},
+	}
+}
+
+// validateOfferedClosureCapacityV1 holds the offered claim closure capacity
+// to the requested one: no count or byte ceiling above the request's, the
+// requested terminal fallback unchanged, and the same continuation states.
+// Each object's computed worst-case bytes and budget durations are validated
+// against its own maxima and windows elsewhere and are not compared here.
+func validateOfferedClosureCapacityV1(offered, requested ClaimClosureCapacityV1) error {
+	offeredBounds, requestedBounds := closureCapacityBoundsV1(offered), closureCapacityBoundsV1(requested)
+	for index, bound := range offeredBounds {
+		if bound.value > requestedBounds[index].value {
+			return errors.New("Guarantor terms' closure capacity " + bound.name + " exceeds the requested capacity")
+		}
+	}
+	if !equalCanonical(offered.TerminalFallback, requested.TerminalFallback) {
+		return errors.New("Guarantor terms' terminal fallback differs from the requested fallback")
+	}
+	if len(offered.ContinuationBudgetEntries) != len(requested.ContinuationBudgetEntries) {
+		return errors.New("Guarantor terms' continuation states differ from the requested capacity's")
+	}
+	for index, entry := range offered.ContinuationBudgetEntries {
+		if entry.ProfileStateKey != requested.ContinuationBudgetEntries[index].ProfileStateKey {
+			return errors.New("Guarantor terms' continuation states differ from the requested capacity's")
+		}
+	}
+	return nil
+}
+
+// validateOfferScheduleV1 enforces the offer's place in the section 12.2
+// schedule: the request is created no later than the offer becomes valid,
+// the reservation ends no later than the offer, the offer no later than the
+// request, and the request no later than the coverage starts. The order of
+// valid-from, accept-by, grace and reservation end is part of the offer's
+// shape.
+func validateOfferScheduleV1(offer AuthorizedFirmCoverageOfferV1) error {
+	body, request := offer.Body, offer.AuthorizedQuoteRequest.Body
+	if request.CreatedAtUnix > body.ValidFromUnix {
+		return errors.New("firm Guarantor offer is valid before its quote request was created")
+	}
+	if offer.ExposureAdmissionReceipt.Body.ExpiresAtUnix > body.ExpiresAtUnix {
+		return errors.New("firm Guarantor offer expires before its exposure reservation")
+	}
+	if body.ExpiresAtUnix > request.ExpiresAtUnix {
+		return errors.New("firm Guarantor offer expires after its quote request")
+	}
+	if request.ExpiresAtUnix > offer.CoverageTerms.CoverageStartsAtUnix {
+		return errors.New("Guarantor quote request expires after the offered coverage starts")
+	}
+	return nil
+}
+
+// validateCoveragePremiumV1 enforces the premium rule of section 12.1 on the
+// coverage Agreement: every premium obligation the terms name exists, has a
+// fixed amount in the maximum fee's asset, is owed by the covered party to
+// the Guarantor, and together they do not exceed the request's maximum fee.
+func validateCoveragePremiumV1(offer AuthorizedFirmCoverageOfferV1, agreement agentcommerce.AgentAgreementBody) error {
+	request := offer.AuthorizedQuoteRequest.Body
+	maximum, valid := new(big.Int).SetString(request.MaximumFee.AmountAtomic, 10)
+	if !valid || validateAmount(request.MaximumFee, false) != nil {
+		return errors.New("Guarantor quote request's maximum fee is invalid")
+	}
+	obligations := make(map[string]agentcommerce.AgreementObligation, len(agreement.Obligations))
+	for _, obligation := range agreement.Obligations {
+		obligations[obligation.ObligationID] = obligation
+	}
+	total := new(big.Int)
+	for _, obligationID := range offer.CoverageTerms.PremiumObligationIDs {
+		obligation, found := obligations[obligationID]
+		if !found {
+			return errors.New("Guarantor terms name a premium obligation the coverage Agreement lacks")
+		}
+		if obligation.Amount == nil || obligation.Amount.AmountDecimal != "" {
+			return errors.New("coverage premium obligation has no fixed atomic amount")
+		}
+		amount := AtomicAmountV1{Asset: AssetIdentityV1{AssetNamespace: obligation.Amount.AssetNamespace,
+			AssetIdentifier: obligation.Amount.AssetIdentifier, Unit: obligation.Amount.Unit},
+			AmountAtomic: obligation.Amount.AmountAtomic}
+		value, parsed := new(big.Int).SetString(amount.AmountAtomic, 10)
+		if !parsed || validateAmount(amount, false) != nil {
+			return errors.New("coverage premium obligation has no fixed atomic amount")
+		}
+		if !sameAsset(amount.Asset, request.MaximumFee.Asset) {
+			return errors.New("coverage premium obligation is not in the maximum fee's asset")
+		}
+		if obligation.ObligorAgentID != request.CoveredPartyAgentID {
+			return errors.New("coverage premium obligation is not owed by the covered party")
+		}
+		if obligation.BeneficiaryAgentID != request.GuarantorAgentID {
+			return errors.New("coverage premium obligation is not owed to the Guarantor")
+		}
+		total.Add(total, value)
+	}
+	if total.Cmp(maximum) > 0 {
+		return errors.New("total coverage fee exceeds the quote request's maximum fee")
+	}
+	return nil
+}
 
 // firmOfferSelectedServiceProfileV1 returns the service profile a firm offer
 // embeds, the head of its artifact's revision lineage, with the digest
@@ -114,6 +260,15 @@ func validateOfferedTermsAgainstQuoteRequestV1(terms CoverageTermsV1, request Au
 	if terms.ClaimFilingEndsAtUnix != requested.RequestedClaimFilingEndsAtUnix {
 		return errors.New("Guarantor terms' claim filing end differs from the requested claim filing end")
 	}
+	if err := validateOfferedClosureCapacityV1(terms.ClaimClosureCapacity, requested.RequestedClosureCapacity); err != nil {
+		return err
+	}
+	if !equalProfileRefs(terms.RequiredExtensions, requested.RequiredExtensions) {
+		return errors.New("Guarantor terms' required extensions differ from the requested terms")
+	}
+	if !equalProfileRefs(terms.OptionalExtensions, requested.OptionalExtensions) {
+		return errors.New("Guarantor terms' optional extensions differ from the requested terms")
+	}
 	if terms.ReviewDeadlineSeconds > requested.MaximumReviewDeadlineSeconds {
 		return errors.New("Guarantor terms' review deadline exceeds the requester's maximum")
 	}
@@ -195,6 +350,14 @@ func validateOfferExposureReceiptBindingV1(offer AuthorizedFirmCoverageOfferV1, 
 	if proofs.AdmissionTimeUnix != receipt.Body.AdmittedAtUnix {
 		return errors.New("firm Guarantor offer exposure eligibility proofs are not frozen at the receipt's admission time")
 	}
+	admissionDomain, domainErr := FirmOfferAdmissionDomainIDV1(body.OfferID)
+	if domainErr != nil || proofs.AdmissionDomainID != admissionDomain {
+		return errors.New("firm Guarantor offer exposure eligibility proofs are not in the offer's issuance admission domain")
+	}
+	// The admission checkpoint re-resolves every party the quote request
+	// names, once each. The receipt carries no admission sequence, so the
+	// set's sequence is held only to its own entries.
+	required := map[string]struct{}{request.RequesterAgentID: {}, request.CoveredPartyAgentID: {}, request.BeneficiaryAgentID: {}}
 	proven := make(map[string]struct{}, len(proofs.Entries))
 	for _, proof := range proofs.Entries {
 		if proof.InputAuthorizedEnvelopeDigest != requestDigest {
@@ -209,18 +372,19 @@ func validateOfferExposureReceiptBindingV1(offer AuthorizedFirmCoverageOfferV1, 
 		if proof.AuthorityResolverProfile != profile.ExposureAuthorizationProfile {
 			return errors.New("firm Guarantor offer exposure eligibility proof was resolved under another profile than the exposure authorization profile")
 		}
+		if proof.RequiredScopeDigest != profile.AuthorityDomainDigest {
+			return errors.New("firm Guarantor offer exposure eligibility proof requires another scope than the service profile's authority domain")
+		}
+		if _, party := required[proof.AuthoritySubject]; !party {
+			return errors.New("firm Guarantor offer exposure eligibility proofs name a subject outside the quote request's parties")
+		}
+		if _, duplicate := proven[proof.AuthoritySubject]; duplicate {
+			return errors.New("firm Guarantor offer exposure eligibility proofs carry more than one proof for a party")
+		}
 		proven[proof.AuthoritySubject] = struct{}{}
 	}
-	// The admission checkpoint re-resolves every party the quote request
-	// names; a proof for any other subject is not part of that checkpoint.
-	required := map[string]struct{}{request.RequesterAgentID: {}, request.CoveredPartyAgentID: {}, request.BeneficiaryAgentID: {}}
-	for subject := range required {
-		if _, found := proven[subject]; !found {
-			return errors.New("firm Guarantor offer exposure eligibility proofs omit a party of the quote request")
-		}
-	}
 	if len(proven) != len(required) {
-		return errors.New("firm Guarantor offer exposure eligibility proofs name a subject outside the quote request's parties")
+		return errors.New("firm Guarantor offer exposure eligibility proofs omit a party of the quote request")
 	}
 	return nil
 }
@@ -272,6 +436,21 @@ func validateFirmOfferBindingV1(offer AuthorizedFirmCoverageOfferV1) error {
 		body.CollateralObligationID != terms.CollateralObligationID {
 		return errors.New("firm Guarantor offer binding is invalid")
 	}
+	if !equalProfileRefs(body.RequiredExtensions, terms.RequiredExtensions) {
+		return errors.New("firm Guarantor offer's required extensions differ from its terms")
+	}
+	if !equalProfileRefs(body.OptionalExtensions, terms.OptionalExtensions) {
+		return errors.New("firm Guarantor offer's optional extensions differ from its terms")
+	}
+	if body.AcceptanceProcessingGraceSeconds != terms.AcceptanceProcessingGraceSeconds {
+		return errors.New("firm Guarantor offer's acceptance processing grace differs from its terms")
+	}
+	if body.AcceptanceProcessingGraceSeconds > profile.AdmissionLimits.MaximumAcceptanceProcessingGraceSeconds {
+		return errors.New("firm Guarantor offer's acceptance processing grace exceeds the service profile's maximum")
+	}
+	if err := validateOfferScheduleV1(offer); err != nil {
+		return err
+	}
 	if !validateAuthorizationProfileV1(offer.Authorizations, profile.ExposureAuthorizationProfile) {
 		return errors.New("firm Guarantor offer is not authorized under the service profile's exposure authorization profile")
 	}
@@ -280,7 +459,8 @@ func validateFirmOfferBindingV1(offer AuthorizedFirmCoverageOfferV1) error {
 
 // validateFirmOfferAgreementBindingV1 is validateFirmOfferBindingV1 together
 // with the rules that need the coverage Agreement body: the offer commits
-// that exact body, and the terms' final deadline is its hard-effect deadline.
+// that exact body, its premium obligations stay within the request's maximum
+// fee, and the terms' final deadline is its hard-effect deadline.
 func validateFirmOfferAgreementBindingV1(offer AuthorizedFirmCoverageOfferV1, agreement agentcommerce.AgentAgreementBody) error {
 	if err := validateFirmOfferBindingV1(offer); err != nil {
 		return err
@@ -288,6 +468,9 @@ func validateFirmOfferAgreementBindingV1(offer AuthorizedFirmCoverageOfferV1, ag
 	agreementDigest, err := agentcommerce.AgreementBodyDigest(agreement)
 	if err != nil || offer.Body.CoverageAgreementBodyDigest != agreementDigest {
 		return errors.New("firm Guarantor offer commits another coverage Agreement body")
+	}
+	if err := validateCoveragePremiumV1(offer, agreement); err != nil {
+		return err
 	}
 	return validateCoverageDeadlineAnchorV1(offer.CoverageTerms, agreement.ExpiresAtUnix)
 }
