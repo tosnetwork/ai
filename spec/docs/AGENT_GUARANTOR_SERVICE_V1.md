@@ -3087,6 +3087,45 @@ digests. A revision is a full replacement for future authority; it never
 rewrites an event, fee, claim, decision, or payment already governed by a prior
 version.
 
+The terms a firm offer carries answer exactly one quote request, the one the
+offer embeds. They are `coverage_version = 1` with no
+`predecessor_terms_digest`, and their `coverage_id` is the derivation above
+over their own `guarantor_agent_id` and the digest of that embedded request.
+Every verifier of a firm offer, of Firm Offer Agreement evidence, and of an
+acceptance request compares the terms with the embedded request field by
+field. A Guarantor that cannot offer a requested value declines; it never
+substitutes one. The rules for the following fields are exactly these; a
+field not listed here is governed by its own paragraph of this section:
+
+| Coverage terms field | Rule against the embedded quote request |
+| --- | --- |
+| `quote_request_digest` | equals the recomputed envelope digest of the embedded `AuthorizedCoverageQuoteRequestV1` |
+| `service_profile_digest` | equals the request body's `service_profile_digest` |
+| `underlying_agreement_body_digest` | equals the request body's |
+| `guarantor_agent_id`, `covered_party_agent_id`, `beneficiary_agent_id` | each equals the request body's |
+| `permitted_claimant_subjects[]` | equals the request body's `claimant_subjects[]`, element for element |
+| `covered_obligation_ids[]` | equals the request body's, element for element |
+| `coverage_version`, `predecessor_terms_digest`, `coverage_id` | `1`, absent, and the derivation above |
+| `coverage_category`, `benefit_kind`, `coverage_asset` | each equals the requested terms' |
+| `selected_assurance_level`, `selected_claim_profile_digest`, `selected_collateral_profile_digest`, `selected_payout_adapter_profile` | each equals the requested terms' (an absent collateral digest equals only an absent one) |
+| `claim_trigger_profile`, `claim_evidence_profile` | each equals the requested terms' |
+| `decision_profile` | equals the request body's `selected_decision_profile` |
+| `maximum_aggregate_payout` | equals `requested_aggregate_payout` |
+| `maximum_per_claim` | equals `requested_per_claim` |
+| `coverage_starts_at_unix`, `coverage_ends_at_unix`, `claim_filing_ends_at_unix` | equal `requested_coverage_starts_at_unix`, `requested_coverage_ends_at_unix`, `requested_claim_filing_ends_at_unix` |
+| `review_deadline_seconds`, `challenge_window_seconds`, `nonterminal_resolution_window_seconds`, `successor_decision_window_seconds`, `payout_deadline_seconds`, `adapter_recovery_window_seconds` | each no greater than the request's corresponding `maximum_*_seconds` |
+| `terminal_resolution_deadline_unix`, `late_recovery_terminal_deadline_unix`, `late_ingress_recovery_window_seconds` | each no greater than the request's corresponding maximum (section 12.2) |
+
+The requested amounts and the requested coverage period are exact: they are
+what the requester asked to have covered, not ceilings, so an offer for a
+smaller amount or a shorter period is a different offer that needs a new
+request. Only the per-claim timing windows and the final deadlines are
+maxima that an offer may tighten. The quote request's own
+`service_profile_digest` equals the digest of the service profile the offer
+embeds, and its `service_intent_digest` equals the embedded artifact's
+selected lineage-head operation digest (section 14.3), so the request, the
+terms and the offer body all name one publication.
+
 `fixed_benefit` pays the accepted amount when the trigger predicate is
 satisfied. `indemnity` also applies the accepted loss-measurement, deductible,
 coinsurance, other-coverage, recovery, layer, and aggregate rules. Implementers
@@ -3227,10 +3266,17 @@ derivation the terms carry: with a late-recovery contingency,
 equals `late_ingress_recovery_deadline_unix` minus a positive
 `late_ingress_recovery_window_seconds`, and setting one late deadline without
 the other is refused; without one, all three late fields are zero. The
-`hard_effect_deadline` anchor needs the Agreement, so firm-offer verification
-enforces it: `late_recovery_terminal_deadline_unix` (with the contingency) or
-`terminal_resolution_deadline_unix` (without it) equals `hard_effect_deadline`;
-it also holds `terminal_resolution_deadline_unix` to
+`hard_effect_deadline` anchor needs the Agreement body, so it is enforced
+wherever a firm offer is verified together with that body: firm-offer
+verification and acceptance-request verification, and through the latter
+every acceptance receipt, activation, non-activation and later object that
+embeds an acceptance. Firm Offer Agreement evidence carries only the body's
+digest, so its intrinsic verification cannot apply the anchor; it applies the
+request maxima below. The anchor is:
+`late_recovery_terminal_deadline_unix` (with the contingency) or
+`terminal_resolution_deadline_unix` (without it) equals `hard_effect_deadline`.
+The same verifiers, and the intrinsic one, also hold
+`terminal_resolution_deadline_unix` to
 `maximum_terminal_resolution_deadline_unix` and, with the contingency,
 `late_recovery_terminal_deadline_unix` to
 `maximum_late_recovery_terminal_deadline_unix` and the window to
@@ -3664,6 +3710,33 @@ revision, and reservation horizon against the firm offer. The receipt's
 descriptor bytes or an immutable content-addressed descriptor is not
 verifiable and cannot support a firm offer.
 
+A verifier holding only the firm offer also checks the receipt against the
+service profile the offer embeds and the quote request it admitted:
+
+- `authority_id` equals the profile's `exposure_authority_id`, and
+  `guarantor_agent_id` equals the offer's;
+- every authorization of the receipt is made under the profile's exact
+  `exposure_authorization_profile` (URI, version and digest);
+- `admitted_at_unix` equals the offer's `valid_from_unix`: the reservation and
+  the offer are results of the one issuance operation, and an offer is not
+  valid before or after its own admission instant;
+- the embedded proof set's `admitted_action_digest` equals the receipt's
+  `authorized_action_digest` and its `admission_time_unix` equals
+  `admitted_at_unix`;
+- every proof entry has `input_authorized_envelope_digest` equal to the
+  quote-request envelope digest, `authorized_object_kind` equal to
+  `firm-offer-issuance`, `authorized_body_digest` equal to the receipt's
+  `exact_request_digest`, and `authority_resolver_profile` equal to the
+  profile's `exposure_authorization_profile`;
+- the set of `authority_subject` values over all entries is exactly the set of
+  the request's `requester_agent_id`, `covered_party_agent_id` and
+  `beneficiary_agent_id`; a missing party or any other subject fails closed.
+
+The receipt does not carry the issuance action or its request body, so
+`authorized_action_digest`, `stable_action_id` and `exact_request_digest` are
+not recomputable from a firm offer alone; the rules above tie the frozen
+proofs to the values the Guarantor signed.
+
 The owner/provider authority validates the current Writer Fence, policy,
 mandate, asset bucket, counterparty, correlated exposure, outstanding offers,
 active coverage, claims, and ambiguous actions in one linearized transaction.
@@ -3758,7 +3831,11 @@ The verifier recomputes the complete embedded
 equal `exposure_receipt_digest`, verifies its profile-qualified authorization,
 and rejects a receipt whose descriptor, authority, expiry, reservation, or
 Agreement binding differs from the offer. A digest-only receipt is not a valid
-firm offer.
+firm offer. The firm offer is authorized by the same purpose-limited Provider
+authority that admitted the exposure: every authorization of the offer is made
+under the embedded service profile's exact `exposure_authorization_profile`,
+and one made under any other profile fails closed even when its signature
+verifies.
 
 The embedded `GuarantorServiceProfileArtifactV1` is mandatory. Its signed
 lineage head's operation digest equals `service_intent_digest`; its selected
@@ -3775,6 +3852,10 @@ The envelope also embeds the exact `AuthorizedCoverageQuoteRequestV1` named by
 the body. A verifier recomputes its complete envelope digest, requester
 authorization, requested terms, maxima, selected profiles, parties, underlying
 Agreement, and service-Intent/profile references before checking the offer.
+The request's `service_profile_digest` equals the embedded artifact's selected
+profile digest and its `service_intent_digest` equals the artifact's selected
+lineage-head operation digest, exactly as the offer body's do; the final terms
+are compared with the request under section 12.1.
 The issuance action's quote request and the output copy are byte-identical. A
 digest-only request or Provider-private request record is not portable firm-
 offer evidence.
@@ -4056,6 +4137,20 @@ for acceptance and all wrappers that embed the acceptance request.
 `submission_authorization_profile` is frozen in the body and must be permitted
 by the Agreement for `accepting_subject`; it cannot be selected by inspecting
 which proof happened to arrive.
+
+The acceptance-request verifier itself applies every firm-offer rule that
+needs no resolver and no clock, against the offer and the embedded Agreement
+body: the section 12.1 comparison of the terms with the embedded quote
+request, the section 12.2 deadline maxima and `hard_effect_deadline` anchor,
+the section 14.2 exposure-receipt rules, and the section 14.3 offer-body and
+authorization-profile rules. It does not leave them to the Agreement evidence
+verifier a caller supplies, so a party that verifies an acceptance receipt,
+activation evidence or any later object by its embedded acceptance alone
+enforces them. The signatures of the offer, the quote request and the
+exposure receipt, the service-profile publication and the underlying
+Agreement still require the corresponding resolvers and are verified by
+firm-offer verification and by the intrinsic verification of the Firm Offer
+Agreement evidence.
 
 The authority admits acceptance only when:
 
