@@ -49,17 +49,18 @@ func collateralizedHistoryTerms(t *testing.T, history *signedHistory) CoverageTe
 }
 
 // collateralReleasePrerequisite is the evidence item by which a release names
-// the authorized terminal claim set it is made against.
-func collateralReleasePrerequisite(terms CoverageTermsV1) CanonicalGuarantorEvidenceItemV1 {
-	return carriedEvidenceItem(terminalClaimSetContentTypeV1, testDigest("2"), []byte("terminal claim set"),
+// the authorized terminal claim set of digest it is made against.
+func collateralReleasePrerequisite(terms CoverageTermsV1, digest string) CanonicalGuarantorEvidenceItemV1 {
+	return carriedEvidenceItem(terminalClaimSetContentTypeV1, digest, []byte("terminal claim set"),
 		terms.ClaimAdmissionProfile.ProfileDigest)
 }
 
 // collateralRelease is the custodian-signed evidence of the release of the
-// whole collateral position of terms, made against prerequisite: the release
-// action admitted at admittedAt under the collateral transition authority,
-// and its Adapter evidence finalized at finalizedAt.
-func (history *signedHistory) collateralRelease(terms CoverageTermsV1, prerequisite CanonicalGuarantorEvidenceItemV1,
+// whole collateral position of terms, made against the prerequisite items,
+// given in canonical order: the release action admitted at admittedAt under
+// the collateral transition authority, and its Adapter evidence finalized at
+// finalizedAt.
+func (history *signedHistory) collateralRelease(terms CoverageTermsV1, prerequisite []CanonicalGuarantorEvidenceItemV1,
 	admittedAt, finalizedAt uint64) AuthorizedCollateralEvidenceV1 {
 	t, collateral := history.t, *terms.CollateralTerms
 	binding := collateral.TransitionBindings[len(collateral.TransitionBindings)-1]
@@ -82,10 +83,10 @@ func (history *signedHistory) collateralRelease(terms CoverageTermsV1, prerequis
 		t.Fatal(err)
 	}
 	prerequisites := CanonicalGuarantorEvidenceSetV1{SchemaVersion: 1, Purpose: "collateral-release", ContextDigest: history.agreement,
-		Items: []CanonicalGuarantorEvidenceItemV1{prerequisite}}
+		Items: prerequisite}
 	prerequisiteDigest, err := CanonicalGuarantorEvidenceSetDigestV1(prerequisites)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("signed-history collateral release prerequisites are no canonical evidence set: %v", err)
 	}
 	request := CollateralAdapterRequestV1{SchemaVersion: 1, AdapterProfile: profile.AdapterProfile,
 		AdapterRequestProfile: profile.AdapterRequestProfile, CoverageAgreementBodyDigest: history.agreement,
@@ -181,11 +182,13 @@ func (history *signedHistory) collateralRelease(terms CoverageTermsV1, prerequis
 // TestSignedHistoryCollateralReleaseRespectsTheReleaseGuard: a collateral
 // release transition is admitted, and its Adapter evidence finalized, no
 // earlier than the collateral terms' release_not_before_unix, and it names an
-// authorized terminal claim set as its prerequisite. The complete
-// custodian-signed release admitted and finalized exactly at the guard is
-// accepted by the collateral evidence verifier; the same release admitted a
-// second before the guard, finalized a second before it, or made against a
-// prerequisite that is no terminal claim set, is refused.
+// authorized terminal claim set as its prerequisite, and only one. The
+// complete custodian-signed release admitted and finalized exactly at the
+// guard is accepted by the collateral evidence verifier; the same release
+// admitted a second before the guard, finalized a second before it, made
+// against a prerequisite that is no terminal claim set, or made against two
+// terminal claim sets, which are a canonical evidence set like any other, is
+// refused.
 func TestSignedHistoryCollateralReleaseRespectsTheReleaseGuard(t *testing.T) {
 	history := newSignedHistory(t)
 	terms := collateralizedHistoryTerms(t, history)
@@ -198,24 +201,30 @@ func TestSignedHistoryCollateralReleaseRespectsTheReleaseGuard(t *testing.T) {
 	if guard >= history.fence.Body.ExpiresAtUnix {
 		t.Fatalf("the release guard %d is not inside the history's Writer Fence, which expires at %d", guard, history.fence.Body.ExpiresAtUnix)
 	}
-	claimSet := collateralReleasePrerequisite(terms)
+	claimSet := collateralReleasePrerequisite(terms, testDigest("2"))
+	secondClaimSet := collateralReleasePrerequisite(terms, testDigest("3"))
 	other := claimSet
 	other.ContentType = ClaimFilingCloseReceiptMediaTypeV1
 	descriptor := *claimSet.ImmutableDescriptor
 	descriptor.ContentType = ClaimFilingCloseReceiptMediaTypeV1
 	other.ImmutableDescriptor = &descriptor
+	one := []CanonicalGuarantorEvidenceItemV1{claimSet}
 	for _, test := range []struct {
 		name                  string
-		prerequisite          CanonicalGuarantorEvidenceItemV1
+		prerequisite          []CanonicalGuarantorEvidenceItemV1
 		admittedAt, finalized uint64
 		want                  string
 	}{
-		{"a release admitted and finalized at the release guard", claimSet, guard, guard, ""},
-		{"a release admitted a second before the release guard", claimSet, guard - 1, guard,
+		{"a release admitted and finalized at the release guard", one, guard, guard, ""},
+		{"a release admitted a second before the release guard", one, guard - 1, guard,
 			"Guarantor collateral release is admitted before the Agreement's release guard"},
-		{"a release finalized a second before the release guard", claimSet, guard, guard - 1,
+		{"a release finalized a second before the release guard", one, guard, guard - 1,
 			"Guarantor collateral release is finalized before the Agreement's release guard"},
-		{"a release whose prerequisite is a filing close and no terminal claim set", other, guard, guard,
+		{"a release whose prerequisite is a filing close and no terminal claim set",
+			[]CanonicalGuarantorEvidenceItemV1{other}, guard, guard,
+			"Guarantor collateral release does not name exactly one authorized terminal claim set as its prerequisite"},
+		{"a release that names two terminal claim sets",
+			[]CanonicalGuarantorEvidenceItemV1{claimSet, secondClaimSet}, guard, guard,
 			"Guarantor collateral release does not name exactly one authorized terminal claim set as its prerequisite"},
 	} {
 		evidence := history.collateralRelease(terms, test.prerequisite, test.admittedAt, test.finalized)
