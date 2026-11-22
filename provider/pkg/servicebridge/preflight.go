@@ -459,14 +459,14 @@ func (p *preflight) checkPause() {
 	if err != nil {
 		p.report.AdmissionPaused = true
 		p.addf("admission.pause", CheckFail, "%v; the node treats it as paused: remove it with "+
-			"`openfox earning service resume` or fix its mode to 0600", err)
+			"`%s` or fix its mode to 0600", err, serviceCommand("resume"))
 		return
 	}
 	if pause != nil {
 		p.report.AdmissionPaused = true
 		p.addf("admission.pause", CheckWarn, "new admissions are paused since %s; admitted work still completes; "+
-			"run `openfox earning service resume` to admit again",
-			time.Unix(pause.PausedUnix, 0).UTC().Format(time.RFC3339))
+			"run `%s` to admit again",
+			time.Unix(pause.PausedUnix, 0).UTC().Format(time.RFC3339), serviceCommand("resume"))
 		return
 	}
 	p.addf("admission.pause", CheckPass, "new admissions are open")
@@ -651,7 +651,7 @@ func (p *preflight) checkManifest() {
 	raw, err := os.ReadFile(p.config.Provider.ManifestFile)
 	if err != nil || len(raw) == 0 || len(raw) > 1<<20 {
 		p.addf("manifest.local", CheckFail, "provider.manifest_file cannot be read; build it with "+
-			"`openfox earning service manifest`")
+			"`%s`", serviceCommand("manifest"))
 		return
 	}
 	manifest, err := nativecore.DecodeCanonicalSoftwareWorkManifestCBOR(raw)
@@ -802,7 +802,7 @@ func (p *preflight) checkChain() {
 		p.skipChain("chain.open")
 		return
 	}
-	scratch, err := os.MkdirTemp("", "openfox-preflight-")
+	scratch, err := os.MkdirTemp("", currentCommandLine().Scratch+"-preflight-")
 	if err != nil {
 		p.addf("chain.open", CheckFail, "create a private scratch directory for checkpoint fences")
 		p.skipChain("chain.open")

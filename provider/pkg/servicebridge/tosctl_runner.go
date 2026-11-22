@@ -121,7 +121,18 @@ func (e *TOSCTLError) Error() string {
 	if e.Reason == TOSCTLFailureUnclassified {
 		return fmt.Sprintf("servicebridge: tosctl %s failed: %s", e.Label, e.Status)
 	}
-	return fmt.Sprintf("servicebridge: tosctl %s failed: %s (%s)", e.Label, e.Status, e.Reason)
+	return fmt.Sprintf("servicebridge: tosctl %s failed: %s (%s)", e.Label, e.Status, e.Reason.text())
+}
+
+// text is the failure class as a message shows it. The class that names
+// the running program names the embedding program; the class constant
+// itself stays the fixed value failures are compared by.
+func (f TOSCTLFailure) text() string {
+	if f == TOSCTLFailureUnsafeDirectory {
+		return "the tosctl configuration is under a directory another user can modify; every ancestor must be " +
+			"owned by the user running " + currentCommandLine().Program + " or by root"
+	}
+	return string(f)
 }
 
 // tosctlFailure returns the failure class of err, if it is a tosctl error.
