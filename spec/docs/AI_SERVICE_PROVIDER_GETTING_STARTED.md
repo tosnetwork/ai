@@ -21,8 +21,8 @@ step below says `openfox earning service <verb>`, `tos-service-provider
 direct sockets and relays only (no `--messenger-socket` and no chat flags,
 and a configuration that has either is refused); it has no `buy` or
 `purchases` (buying is `tos-service-buyer` and the MCP buyer server); and
-`init` names its packet controller `service-packet` unless the flag or an
-existing configuration says otherwise. See
+`init` names its packet controller `service-packet` unless the flag, the
+node's setup journal or an existing configuration says otherwise. See
 [`provider/README.md`](../../provider/README.md). Rewriting this guide around
 that program is a follow-up; no public-network run of it is recorded.
 

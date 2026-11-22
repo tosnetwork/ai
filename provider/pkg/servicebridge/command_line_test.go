@@ -1,6 +1,8 @@
 package servicebridge
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -151,6 +153,47 @@ func TestAProgramNamesItsOwnCommandLine(t *testing.T) {
 	if steps := strings.Join(again.NextSteps, "\n"); !strings.Contains(steps,
 		"buyer: rail-buyer buy --rail-config "+f.init.RailConfigPath+" --offer <file> --source <archive>") {
 		t.Errorf("init next steps lack the buyer step: %s", steps)
+	}
+}
+
+// The remaining messages that name a command do so under a program's own
+// command line too: the hint of an unreadable pause marker, the hint of a
+// configuration that lacks what init records, and both offer next steps.
+func TestTheOtherCommandHintsNameTheProgram(t *testing.T) {
+	useCommandLine(t, CommandLine{Service: "rail-node", Program: "rail-node", Scratch: "rail-node"})
+
+	pf := newPreflightFixture(t)
+	writeFixtureFile(t, filepath.Join(pf.config.StateDir, AdmissionPauseFile), []byte("not a pause marker"), 0o600)
+	_, checks := pf.run(t)
+	checkMessage(t, checks, "admission.pause", "the node treats it as paused: remove it with `rail-node resume`")
+
+	f := newSetupFixture(t)
+	f.mustInit(t)
+	original, err := os.ReadFile(f.init.RailConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err = json.Unmarshal(original, &config); err != nil {
+		t.Fatal(err)
+	}
+	config["agent_id"] = ""
+	stripped, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, f.init.RailConfigPath, stripped, 0o600)
+	if _, err = RunOffer(t.Context(), f.offer, f.env()); err == nil || !strings.HasSuffix(err.Error(),
+		"lacks the Agent, wallet address or chain global configuration `init` records; run `rail-node init` first") {
+		t.Errorf("offer under a configuration without the Agent: %v", err)
+	}
+
+	writeFixtureFile(t, f.init.RailConfigPath, original, 0o600)
+	offered := f.mustOffer(t)
+	if len(offered.NextSteps) != 2 ||
+		offered.NextSteps[0] != "rail-node preflight --rail-config "+f.init.RailConfigPath ||
+		offered.NextSteps[1] != "rail-node serve --rail-config "+f.init.RailConfigPath {
+		t.Errorf("offer next steps: %q", offered.NextSteps)
 	}
 }
 

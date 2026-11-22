@@ -258,6 +258,31 @@ func loadSetupJournal(stateDir string) (*SetupJournal, error) {
 	return journal, nil
 }
 
+// RecordedPacketController is the packet controller an earlier `init` under
+// stateDir recorded in the setup journal, or empty when no journal or no
+// init record exists. The journal is written before the rail configuration,
+// so a run that stopped between the two is found here only. It only reads:
+// no directory or file is created.
+func RecordedPacketController(stateDir string) (string, error) {
+	if !cleanAbsolute(stateDir) {
+		return "", errors.New("servicebridge: state_dir must be absolute and clean")
+	}
+	journal := &SetupJournal{}
+	if err := readJSON(setupJournalPath(stateDir), maxSetupJournal, journal); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("servicebridge: setup journal: %w", err)
+	}
+	if journal.Schema != setupJournalSchema {
+		return "", errors.New("servicebridge: the setup journal has another schema")
+	}
+	if journal.Init == nil {
+		return "", nil
+	}
+	return journal.Init.Identity.PacketController, nil
+}
+
 func saveSetupJournal(stateDir string, journal *SetupJournal, now time.Time) error {
 	journal.Schema, journal.UpdatedUnix = setupJournalSchema, now.Unix()
 	encoded, err := json.MarshalIndent(journal, "", "  ")

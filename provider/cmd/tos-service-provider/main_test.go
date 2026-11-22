@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,6 +205,10 @@ func TestArgumentHandlingOfEveryVerb(t *testing.T) {
 		if code != test.code || !strings.Contains(stdout, test.stdout) || !strings.Contains(stderr, test.stderr) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q", name, code, stdout, stderr)
 		}
+		// Help is plain text, and a refusal prints nothing on stdout.
+		if (code == exitDone && json.Valid([]byte(stdout))) || (code == exitUsage && stdout != "") {
+			t.Errorf("%s: stdout %q", name, stdout)
+		}
 	}
 }
 
@@ -267,15 +273,84 @@ func repeatFlag(name, value string, count int) []string {
 }
 
 func TestInitContinuesWithThePacketControllerTheConfigurationRecords(t *testing.T) {
-	rail, _ := providerDirectory(t, nil)
-	if got := packetController(rail); got != "openfox-packet" {
-		t.Fatalf("an existing configuration's packet controller was not kept: %q", got)
+	rail, state := providerDirectory(t, nil)
+	if got, err := packetController(rail, state); err != nil || got != "openfox-packet" {
+		t.Fatalf("an existing configuration's packet controller was not kept: %q, %v", got, err)
 	}
-	if got := packetController(filepath.Join(t.TempDir(), "absent.json")); got != defaultPacketController {
-		t.Fatalf("a new node's packet controller: %q", got)
+	fresh := filepath.Join(t.TempDir(), "state")
+	if got, err := packetController(filepath.Join(t.TempDir(), "absent.json"), fresh); err != nil ||
+		got != defaultPacketController {
+		t.Fatalf("a new node's packet controller: %q, %v", got, err)
 	}
-	if got := packetController("relative.json"); got != defaultPacketController {
-		t.Fatalf("an unreadable configuration's packet controller: %q", got)
+	if _, err := os.Stat(fresh); !os.IsNotExist(err) {
+		t.Fatalf("looking up the packet controller created the state directory: %v", err)
+	}
+	if got, err := packetController("relative.json", "relative-state"); err != nil || got != defaultPacketController {
+		t.Fatalf("an unreadable configuration's packet controller: %q, %v", got, err)
+	}
+}
+
+// setupJournal is the setup journal an earlier runtime's `init` writes
+// before the rail configuration: its identity names the packet controller.
+const setupJournal = `{
+  "schema": "tos.openfox.rail-setup.v1",
+  "updated_unix": 1900000000,
+  "init": {
+    "identity": {
+      "network_id": "tos:global-id:1",
+      "genesis_root_hash": "` + "1111111111111111111111111111111111111111111111111111111111111111" + `",
+      "genesis_file_hash": "` + "2222222222222222222222222222222222222222222222222222222222222222" + `",
+      "registry_code_hash": "` + "3333333333333333333333333333333333333333333333333333333333333333" + `",
+      "packet_controller": "openfox-packet",
+      "packet_key_id": "` + "4444444444444444444444444444444444444444444444444444444444444444" + `"
+    },
+    "tosctl_sha256": "` + "5555555555555555555555555555555555555555555555555555555555555555" + `",
+    "agent_nonce": "7",
+    "agent": {"state": "pending"}
+  }
+}
+`
+
+// An earlier init that stopped after writing its journal and before its
+// rail configuration is continued with the controller the journal records,
+// not the default; a journal that cannot be read stops init instead of
+// letting it pick a controller.
+func TestInitContinuesWithThePacketControllerTheJournalRecords(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	for _, directory := range []string{state, filepath.Join(state, "setup")} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal := filepath.Join(state, "setup", "journal.json")
+	if err := os.WriteFile(journal, []byte(setupJournal), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	absent := filepath.Join(root, "rail.json")
+	if got, err := packetController(absent, state); err != nil || got != "openfox-packet" {
+		t.Fatalf("the journal's packet controller was not kept: %q, %v", got, err)
+	}
+	// The journal outranks a configuration that names another controller:
+	// it is what init compares the identity against.
+	rail, _ := providerDirectory(t, func(document map[string]any) { document["packet_controller"] = "other" })
+	if got, err := packetController(rail, state); err != nil || got != "openfox-packet" {
+		t.Fatalf("with a configuration naming another controller: %q, %v", got, err)
+	}
+	if err := os.Chmod(journal, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := packetController(absent, state); err == nil {
+		t.Fatalf("an unreadable journal gave the packet controller %q", got)
+	}
+	// Through the command: init stops before it does anything.
+	_, stderr, code := invoke(t, "init", "--rail-config", absent, "--state-dir", state, "--rpc", "http://127.0.0.1:1",
+		"--rpc", "http://127.0.0.1:2", "--rpc", "http://127.0.0.1:3", "--global-config", filepath.Join(root, "g.json"),
+		"--network-label", "1", "--tosctl", filepath.Join(root, "tosctl"), "--tosctl-config",
+		filepath.Join(root, "c.json"), "--wallet", "w", "--registry-code-boc", filepath.Join(root, "r.boc"),
+		"--actor-code-hash", fixtureCodeHash)
+	if code != exitFailed || !strings.Contains(stderr, "setup journal") {
+		t.Fatalf("init with an unreadable journal: exit %d, %q", code, stderr)
 	}
 }
 
@@ -313,9 +388,32 @@ func TestOfferRefusesMalformedArguments(t *testing.T) {
 	// Well-formed arguments reach the configuration, which does not exist:
 	// the hint names this program's own init.
 	stdout, stderr, code := invoke(t, append(append([]string(nil), base...), "--price", "1")...)
-	if code != exitFailed || !strings.Contains(stderr, "run `"+programName+" init` first") {
+	if code != exitFailed || !strings.Contains(stderr, "run `"+programName+" init` first") ||
+		!isReport(stdout, servicebridge.OfferResultSchema) {
 		t.Fatalf("offer without a configuration: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
+	// A price of zero is well formed; the library refuses it, after the
+	// configuration is read: exit 1 with the report, not exit 2.
+	existing, state := providerDirectory(t, nil)
+	stdout, stderr, code = invoke(t, "offer", "--rail-config", existing, "--price", "0", "--storage-fee", "0.2",
+		"--cleanup-bounty", "0.1", "--response-sla", "3600", "--refund-claim-window", "3600", "--executor-socket",
+		filepath.Join(state, "absent.sock"))
+	if code != exitFailed || !strings.Contains(stderr, "price") || !isReport(stdout, servicebridge.OfferResultSchema) {
+		t.Fatalf("offer at price 0: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+// isReport reports whether stdout is exactly one JSON document of schema.
+func isReport(stdout, schema string) bool {
+	var report struct {
+		Schema string `json:"schema"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(stdout))
+	if decoder.Decode(&report) != nil || report.Schema != schema {
+		return false
+	}
+	var trailing any
+	return errors.Is(decoder.Decode(&trailing), io.EOF)
 }
 
 func TestWithdrawTakesExactlyOneOfAmountAndAll(t *testing.T) {
