@@ -289,11 +289,20 @@ func (history *signedHistory) eligibility(actionDigest, inputDigest string, subj
 // Agreement-bound action, terminal at the Action Authority, admitted at.
 func (history *signedHistory) stage(stage, contentType string, request []byte, fields map[string]agentcommerce.SemanticValue,
 	expectedPriorState string, expiresAt, at uint64, sink string, evidenceRefs []string) PortableStageActionAdmissionEvidenceV1 {
-	t := history.t
 	bound, err := FindStageActionAuthorityV1(history.terms.StageActionAuthorityBinding, stage)
 	if err != nil {
-		t.Fatal(err)
+		history.t.Fatal(err)
 	}
+	return history.stageFor(bound, contentType, request, fields, expectedPriorState, expiresAt, at, sink, evidenceRefs)
+}
+
+// stageFor is stage for a given stage authority, which need not be one of the
+// history's terms: an auxiliary authority derived from them, or a stage of
+// another offer's terms.
+func (history *signedHistory) stageFor(bound GuarantorStageActionAuthorityV1, contentType string, request []byte,
+	fields map[string]agentcommerce.SemanticValue, expectedPriorState string, expiresAt, at uint64, sink string,
+	evidenceRefs []string) PortableStageActionAdmissionEvidenceV1 {
+	t, stage := history.t, bound.Stage
 	operation, err := StageOperationBindingForAuthorityV1(bound)
 	if err != nil {
 		t.Fatal(err)
