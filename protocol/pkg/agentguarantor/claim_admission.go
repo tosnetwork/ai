@@ -35,10 +35,32 @@ func validateEligibilityProofSetAgainstV1(set AuthorityAdmissionEligibilityProof
 	return nil
 }
 
+// validateClaimRevisionWithinCapacityV1 holds a claim revision number to the
+// Agreement's maximum_claim_revisions_per_claim, which counts the initial
+// claim. Every bound the closure capacity reserves per claim (ingress actions,
+// bundle bytes, revision proofs) is computed from that maximum, so a revision
+// past it has no reserved room in the terminal claim set.
+func validateClaimRevisionWithinCapacityV1(terms CoverageTermsV1, revision uint64) error {
+	maximum := terms.ClaimClosureCapacity.MaximumClaimRevisionsPerClaim
+	if maximum == 0 {
+		return errors.New("Guarantor terms set no maximum claim revisions per claim")
+	}
+	if revision == 0 {
+		return errors.New("Guarantor claim revision is zero")
+	}
+	if revision > maximum {
+		return errors.New("Guarantor claim revision exceeds the Agreement's maximum claim revisions per claim")
+	}
+	return nil
+}
+
 func VerifyClaimSubmissionIngressReceiptV1(receipt AuthorizedClaimSubmissionIngressReceiptV1, terms CoverageTermsV1,
 	bound GuarantorStageActionAuthorityV1, authorityResolver AuthorityKeyResolver,
 	fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
 	body, claim := receipt.Body, receipt.AuthorizedClaim
+	if err := validateClaimRevisionWithinCapacityV1(terms, claim.Body.ClaimRevision); err != nil {
+		return err
+	}
 	claimDigest, claimErr := ClaimEnvelopeDigest(claim)
 	claimBodyDigest, bodyErr := ClaimBodyDigest(claim.Body)
 	stateDomain, stateErr := ClaimIngressStateDomainDigestV1(body.CoverageAgreementBodyDigest, body.CoverageObligationID)
@@ -175,6 +197,9 @@ func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, te
 	fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
 	body, ingress := receipt.Body, receipt.AuthorizedClaimIngressReceipt
 	if err := validateRevisionInitialAdmissionV1(body); err != nil {
+		return err
+	}
+	if err := validateClaimRevisionWithinCapacityV1(terms, body.AdmittedClaimRevision); err != nil {
 		return err
 	}
 	if err := bindRevisionInitialAdmissionProofV1(body, receipt.InitialClaimAdmissionProof); err != nil {

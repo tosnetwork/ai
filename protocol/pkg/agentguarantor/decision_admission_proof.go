@@ -111,6 +111,11 @@ func VerifyClaimDecisionAdmissionReceiptProofV1(proof ClaimDecisionAdmissionRece
 		decisionValidationTime); err != nil {
 		return err
 	}
+	// A transition, an application and a terminal bundle read the claim state,
+	// the windows and the round counts from this body alone.
+	if err := validateDecisionAdmissionOutcomeV1(body, proof.AuthorizedClaimDecision.Body, terms); err != nil {
+		return err
+	}
 	if err := verifyReceiptAuthorizationSetV1(proof.ReceiptAuthorizations, "claim-decision-admission-receipt", bodyDigest,
 		"tos.service.agent-guarantor-claim-decision-admission-signature.v1", terms.DecisionAdmissionProfile,
 		terms.DecisionAdmissionAuthoritySubjects, terms.DecisionAdmissionQuorumRule, authorityResolver, now); err != nil {

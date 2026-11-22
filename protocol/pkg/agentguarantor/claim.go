@@ -196,7 +196,7 @@ func ValidateClaimDecision(decision AuthorizedClaimDecisionV1, claim AuthorizedC
 		decision.PolicyApplication.EvidenceSetDigest != evidenceDigest ||
 		decision.PolicyApplication.OtherRecoveryDeclarationDigest != claim.Body.OtherRecoveryDeclarationDigest ||
 		decision.DecisionReason.DecisionProfile != expectedProfile || decision.DecisionReason.Result != decision.Body.Result ||
-		uint64(now.UTC().Unix()) >= decision.Body.ExpiresAtUnix {
+		uint64(now.UTC().Unix()) > decision.Body.ExpiresAtUnix {
 		return errors.New("claim decision does not match admitted claim")
 	}
 	triggeredDigest, err := TriggeredObligationSetDigestV1(claim.Body.TriggeredObligationSet)

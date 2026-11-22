@@ -302,11 +302,17 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		authorityResolver, fenceResolver, now); err != nil {
 		return fmt.Errorf("claim decision admission has an invalid claim predecessor: %w", err)
 	}
-	if err := ValidateClaimDecision(receipt.AuthorizedClaimDecision, claim, terms, authorityResolver,
-		terms.DecisionAuthoritySubjects, now); err != nil {
+	decisionBody := receipt.AuthorizedClaimDecision.Body
+	if err := validateAuthorizedDecisionAdmissionTimeV1(receipt.Body, decisionBody); err != nil {
 		return err
 	}
-	decisionBody := receipt.AuthorizedClaimDecision.Body
+	// The decision and its authority quorum are judged at the admission time
+	// the receipt binds, not at the verifier's present: its expiry limits
+	// admission only, so a decision admitted in time verifies long after it.
+	if err := ValidateClaimDecision(receipt.AuthorizedClaimDecision, claim, terms, authorityResolver,
+		terms.DecisionAuthoritySubjects, time.Unix(int64(receipt.Body.AdmittedAtUnix), 0).UTC()); err != nil {
+		return err
+	}
 	if decisionBody.DecisionSequence == 1 {
 		if receipt.PredecessorClaimStateTransitionReceipt != nil || variant.PredecessorDecisionAdmissionReceiptDigest != "" ||
 			variant.PredecessorClaimStateTransitionReceiptDigest != "" || receipt.PriorPendingApplicationToken != nil ||
@@ -326,10 +332,11 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 			authorityResolver, fenceResolver, now); err != nil {
 			return fmt.Errorf("successor decision transition predecessor is invalid: %w", err)
 		}
-		transitionDigest, _ := ClaimStateTransitionReceiptDigestV1(*predecessor)
+		transitionDigest, transitionErr := ClaimStateTransitionReceiptDigestV1(*predecessor)
 		priorProof := predecessor.DecisionAdmissionProof
-		priorDecisionDigest, _ := ClaimDecisionDigestV1(priorProof.AuthorizedClaimDecision)
-		if variant.PredecessorDecisionAdmissionReceiptDigest != priorProof.ReceiptEnvelopeDigest ||
+		priorDecisionDigest, priorDecisionErr := ClaimDecisionDigestV1(priorProof.AuthorizedClaimDecision)
+		if transitionErr != nil || priorDecisionErr != nil ||
+			variant.PredecessorDecisionAdmissionReceiptDigest != priorProof.ReceiptEnvelopeDigest ||
 			variant.PredecessorClaimStateTransitionReceiptDigest != transitionDigest ||
 			decisionBody.PredecessorAuthorizedClaimDecisionDigest != priorDecisionDigest ||
 			decisionBody.DecisionSequence != priorProof.ReceiptBody.DecisionSequence+1 {
@@ -342,8 +349,8 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 				receipt.Body.PriorApplicationTokenTerminalState != "replaced" {
 				return errors.New("challenged successor does not replace the exact pending application token")
 			}
-			priorTokenDigest, _ := DecisionApplicationTokenDigestV1(*priorToken)
-			if receipt.Body.PriorApplicationTokenDigest != priorTokenDigest {
+			priorTokenDigest, priorTokenErr := DecisionApplicationTokenDigestV1(*priorToken)
+			if priorTokenErr != nil || receipt.Body.PriorApplicationTokenDigest != priorTokenDigest {
 				return errors.New("successor prior application token digest differs")
 			}
 		} else if predecessor.Body.TransitionKind == "nonterminal_response_admission" {
@@ -354,6 +361,13 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		} else {
 			return errors.New("successor decision predecessor transition kind is invalid")
 		}
+	}
+	if err := validateDecisionAdmissionOutcomeV1(receipt.Body, decisionBody, terms); err != nil {
+		return err
+	}
+	if err := bindAuthorizedDecisionAdmissionToPredecessorV1(receipt.Body,
+		receipt.AuthorizedClaimAdmissionReceipt.Body, receipt.PredecessorClaimStateTransitionReceipt, terms); err != nil {
+		return err
 	}
 	cutDigest, err := ClaimIngressAdmissionCutProofDigestV1(receipt.ClaimRevisionIngressCutProof)
 	if err != nil {
@@ -366,6 +380,21 @@ func VerifyClaimDecisionAdmissionReceiptV1(receipt AuthorizedClaimDecisionAdmiss
 		receipt.ClaimRevisionIngressCutProof.CutKind != "claim_revisions" || receipt.ClaimRevisionIngressCutProof.ClaimID != receipt.Body.ClaimID ||
 		receipt.ClaimRevisionIngressCutProof.PendingOrAmbiguousCount != 0 {
 		return errors.New("claim decision admission revision cut differs")
+	}
+	// Among authorized decisions only the successor of a challenged
+	// late-recovery candidate finds revision ingress still frozen and reuses
+	// the candidate's epoch and cut; every other one freezes the open epoch.
+	var frozenHead *ClaimDecisionAdmissionReceiptBodyV1
+	if wantLateMarker != "" {
+		candidate := receipt.PredecessorClaimStateTransitionReceipt.DecisionAdmissionProof.ReceiptBody
+		if err := bindLateRecoverySuccessorToCandidateV1(candidate, claimReceiptDigest); err != nil {
+			return err
+		}
+		frozenHead = &candidate
+	}
+	if err := bindDecisionRevisionEpochV1("claim decision admission", receipt.Body, epoch,
+		receipt.ClaimRevisionIngressCutProof, claim.Body.ClaimRevision, frozenHead); err != nil {
+		return err
 	}
 	headDigest, identityDigest, err := AuthorizedDecisionAdmissionSourceIdentityV1(variant, receipt.AuthorizedClaimDecision)
 	if err != nil {
@@ -521,6 +550,11 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 	wantNonterminalAfter := decisionAdmission.NonterminalRoundsUsedAfter
 	wantSuccessorDue := uint64(0)
 	transitionedAt := receipt.Body.TransitionedAtUnix
+	// Every window a transition acts in opens at its decision's admission, so
+	// no transition precedes it.
+	if transitionedAt < decisionAdmission.AdmittedAtUnix {
+		return errors.New("claim transition precedes the admission of its decision")
+	}
 	switch request.TransitionKind {
 	case "challenge_admission":
 		wantPurpose = "claim-challenge-admission"
@@ -530,7 +564,11 @@ func VerifyClaimStateTransitionReceiptV1(receipt AuthorizedClaimStateTransitionR
 			return errors.New("claim challenge admission is outside its closed window or budget")
 		}
 		wantChallengeAfter++
-		wantSuccessorDue, _ = checkedAdd(transitionedAt, terms.SuccessorDecisionWindowSeconds)
+		successorDue, fits := checkedAdd(transitionedAt, terms.SuccessorDecisionWindowSeconds)
+		if !fits {
+			return errors.New("claim challenge admission successor decision cutoff overflows")
+		}
+		wantSuccessorDue = successorDue
 	case "nonterminal_response_admission":
 		wantPurpose = "claim-nonterminal-response-admission"
 		if (priorState != "evidence_required" && priorState != "disputed") ||

@@ -47,8 +47,8 @@ func testCapacity() ClaimClosureCapacityV1 {
 	if err != nil {
 		panic(err)
 	}
-	return ClaimClosureCapacityV1{MaximumClaims: 4, MaximumClaimIngressActions: 8,
-		MaximumClaimRevisionsPerClaim: 2, MaximumDecisionAdmissionsPerClaim: 4,
+	return ClaimClosureCapacityV1{MaximumClaims: 4, MaximumClaimIngressActions: 12,
+		MaximumClaimRevisionsPerClaim: 3, MaximumDecisionAdmissionsPerClaim: 4,
 		MaximumClaimStateTransitionsPerClaim: 8, MaximumChallengeRoundsPerClaim: 1,
 		MaximumNonterminalRoundsPerClaim: 1, MaximumPayoutLinesPerClaim: 2,
 		MaximumAdmittedClaimEnvelopeBytes: 64 << 10, MaximumClaimIngressReceiptEnvelopeBytes: 128 << 10,

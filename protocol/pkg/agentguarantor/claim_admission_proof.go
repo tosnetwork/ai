@@ -111,6 +111,14 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 	}
 	body := proof.ReceiptBody
 	claim := proof.AuthorizedClaimIngressReceipt.AuthorizedClaim
+	if err := validateClaimRevisionWithinCapacityV1(terms, body.AdmittedClaimRevision); err != nil {
+		return err
+	}
+	// A terminal bundle takes the final claim revision from this body and the
+	// decided revision from the carried claim, so the two must agree.
+	if body.AdmittedClaimRevision != claim.Body.ClaimRevision {
+		return errors.New("claim admission compact proof admits another revision than its claim's")
+	}
 	stage := "claim_revision_admission"
 	if body.AdmissionKind == "initial" {
 		stage = "initial_claim_admission"
