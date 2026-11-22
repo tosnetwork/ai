@@ -568,8 +568,11 @@ func (history *signedHistory) quoteToOffer(late bool, change func(*signedOfferIn
 	}
 	// The offered grace is the published maximum of offerServiceProfile.
 	terms.AcceptanceProcessingGraceSeconds = 60
+	// The offered ingress resolution grace is the request's maximum.
+	terms.ClaimIngressResolutionGraceSeconds = 60
 	claimProfile := testClaimProfileFor(t, &terms)
 	requested := testRequestedTerms(t, terms)
+	requested.MaximumClaimIngressResolutionGraceSeconds = terms.ClaimIngressResolutionGraceSeconds
 	requested.MaximumLateRecoveryTerminalDeadlineUnix = terms.LateRecoveryTerminalDeadlineUnix
 	requested.MaximumLateIngressRecoveryWindowSeconds = terms.LateIngressRecoveryWindowSeconds
 	inputs := signedOfferInputs{terms: terms, requested: requested, agreementExpiresAt: signedOfferFinalDeadline(terms),
@@ -724,8 +727,10 @@ func checkSignedOffers(t *testing.T, cases []signedOfferCase) {
 // second apart. The final deadline is the late-recovery terminal deadline
 // with a late contingency and the terminal resolution deadline without one.
 // The hard-effect deadline is the coverage Agreement's expiry for unsecured
-// terms, and for collateralized terms the earlier of that expiry and the
-// collateral lock's end less the reorg window.
+// terms. For collateralized terms it is the collateral lock's end less the
+// reorg window: the lock ends no later than the Agreement expires, accepted
+// when the two coincide and refused when the lock is a second longer, so the
+// lock's end less the reorg window is always the earlier of the two.
 //
 // Collateralized terms whose final deadline is after the lock's end less the
 // reorg window never reach the anchor: valid terms keep the final deadline
@@ -733,11 +738,17 @@ func checkSignedOffers(t *testing.T, cases []signedOfferCase) {
 // than the lock's end. That direction is refused by ValidateCoverageTerms.
 func TestSignedHistoryFirmOfferFinalDeadlineIsTheHardEffectAnchor(t *testing.T) {
 	const reorg = signedOfferReorgWindow
-	lockedLong := func(in *signedOfferInputs) { in.collateralLockUntil = signedOfferFinalDeadline(in.terms) + reorg + 600 }
+	// The collateral lock ends at the final deadline plus the reorg window,
+	// and the Agreement expires with the lock or 40 seconds after it.
+	lockedToAgreement := func(in *signedOfferInputs) {
+		in.collateralLockUntil = signedOfferFinalDeadline(in.terms) + reorg
+		in.agreementExpiresAt = in.collateralLockUntil
+	}
 	lockedToFinal := func(in *signedOfferInputs) {
 		in.collateralLockUntil = signedOfferFinalDeadline(in.terms) + reorg
 		in.agreementExpiresAt += 100
 	}
+	const lockOutlivesAgreement = "Guarantor collateral lock ends after the coverage Agreement expires"
 	var cases []signedOfferCase
 	for _, late := range []bool{true, false} {
 		cases = append(cases,
@@ -746,20 +757,13 @@ func TestSignedHistoryFirmOfferFinalDeadlineIsTheHardEffectAnchor(t *testing.T) 
 				func(in *signedOfferInputs) { in.agreementExpiresAt++ }, signedOfferAnchorRefusal},
 			signedOfferCase{"unsecured, Agreement expiring one second before the final deadline", late,
 				func(in *signedOfferInputs) { in.agreementExpiresAt-- }, signedOfferAnchorRefusal},
-			signedOfferCase{"collateral locked past the Agreement's expiry at the final deadline", late, lockedLong, ""},
-			signedOfferCase{"collateral locked past the Agreement's expiry one second after the final deadline", late,
-				func(in *signedOfferInputs) { lockedLong(in); in.agreementExpiresAt++ }, signedOfferAnchorRefusal},
-			signedOfferCase{"collateral locked past the Agreement's expiry one second before the final deadline", late,
-				func(in *signedOfferInputs) { lockedLong(in); in.agreementExpiresAt-- }, signedOfferAnchorRefusal},
+			signedOfferCase{"collateral locked until the Agreement expires", late, lockedToAgreement, ""},
+			signedOfferCase{"collateral locked one second past the Agreement's expiry", late,
+				func(in *signedOfferInputs) { lockedToAgreement(in); in.agreementExpiresAt-- }, lockOutlivesAgreement},
 			signedOfferCase{"collateral lock less the reorg window at the final deadline, before the Agreement's expiry", late,
 				lockedToFinal, ""},
 			signedOfferCase{"collateral lock less the reorg window one second after the final deadline", late,
-				func(in *signedOfferInputs) { lockedToFinal(in); in.collateralLockUntil++ }, signedOfferAnchorRefusal},
-			signedOfferCase{"collateral lock less the reorg window at the final deadline, Agreement expiring one second before it", late,
-				func(in *signedOfferInputs) {
-					lockedToFinal(in)
-					in.agreementExpiresAt = signedOfferFinalDeadline(in.terms) - 1
-				}, signedOfferAnchorRefusal})
+				func(in *signedOfferInputs) { lockedToFinal(in); in.collateralLockUntil++ }, signedOfferAnchorRefusal})
 	}
 	// With a late contingency the anchored deadline is the late-recovery
 	// terminal deadline, not the terminal resolution deadline before it.

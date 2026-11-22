@@ -121,8 +121,8 @@ func main() {
 		DefaultStringBytes    int                      `json:"default_string_bytes"`
 		Domain                string                   `json:"domain"`
 		Vectors               []guarantor.SizeVectorV1 `json:"vectors"`
-	}{guarantor.GuarantorCodecLimitsV1.CanonicalBytes, guarantor.GuarantorCodecLimitsV1.StringBytes,
-		guarantor.GuarantorCodecLimitsV1.JSONBytes, codec.MaxCanonicalBytes, codec.MaxStringBytes,
+	}{guarantor.GuarantorCodecLimitsV1().CanonicalBytes, guarantor.GuarantorCodecLimitsV1().StringBytes,
+		guarantor.GuarantorCodecLimitsV1().JSONBytes, codec.MaxCanonicalBytes, codec.MaxStringBytes,
 		guarantor.SizeVectorDomainV1, sizeVectors}
 	document := struct {
 		Schema                        string                               `json:"schema"`

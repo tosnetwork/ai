@@ -197,8 +197,52 @@ func checkOfferBinding(t *testing.T, cases []offerBindingCase) {
 	}
 }
 
+// signedOfferCollateralized makes the offered terms collateral-attested: the
+// collateral is locked by the coverage start until the final deadline plus the
+// reorg window, and the coverage Agreement expires when the lock ends.
 func signedOfferCollateralized(in *signedOfferInputs) {
-	in.collateralLockUntil = signedOfferFinalDeadline(in.terms) + signedOfferReorgWindow + 600
+	in.collateralLockUntil = signedOfferFinalDeadline(in.terms) + signedOfferReorgWindow
+	in.agreementExpiresAt = in.collateralLockUntil
+}
+
+// TestSignedHistoryCollateralIsLockedForTheCoverage: collateralized terms
+// lock their collateral no later than the coverage starts and no longer than
+// the coverage Agreement lasts. An offer whose collateral is due at the
+// coverage start and locked until the Agreement expires is accepted by every
+// verifier, and one whose lock ends a second after the Agreement expires is
+// refused by the two verifiers that hold the Agreement body. Terms whose lock
+// is due a second after the coverage starts are invalid terms: they have no
+// digest, so no offer, receipt or proof can be made or verified over them.
+func TestSignedHistoryCollateralIsLockedForTheCoverage(t *testing.T) {
+	var cases []offerBindingCase
+	for _, late := range []bool{true, false} {
+		cases = append(cases,
+			offerBindingCase{name: "collateral due at the coverage start and locked until the Agreement expires", late: late,
+				change: signedOfferCollateralized},
+			offerBindingCase{name: "collateral locked a second past the Agreement's expiry", late: late,
+				change:  func(in *signedOfferInputs) { signedOfferCollateralized(in); in.agreementExpiresAt-- },
+				refusal: "Guarantor collateral lock ends after the coverage Agreement expires", agreementRule: true})
+	}
+	checkOfferBinding(t, cases)
+
+	const lockedLate = "collateral may be locked after the coverage starts"
+	terms := newSignedHistory(t).quoteToOffer(true, signedOfferCollateralized).offer.CoverageTerms
+	if terms.CollateralTerms.LockByUnix != terms.CoverageStartsAtUnix {
+		t.Fatalf("the offered collateral is due at %d, want the coverage start %d", terms.CollateralTerms.LockByUnix, terms.CoverageStartsAtUnix)
+	}
+	if err := ValidateCoverageTerms(terms); err != nil {
+		t.Errorf("terms whose collateral is due at the coverage start are refused: %v", err)
+	}
+	if _, err := CoverageTermsDigest(terms); err != nil {
+		t.Errorf("terms whose collateral is due at the coverage start have no digest: %v", err)
+	}
+	late := terms
+	collateral := *terms.CollateralTerms
+	collateral.LockByUnix++
+	late.CollateralTerms = &collateral
+	refusedFor(t, "terms whose collateral is due a second after the coverage starts", ValidateCoverageTerms(late), lockedLate)
+	_, err := CoverageTermsDigest(late)
+	refusedFor(t, "the digest of terms whose collateral is due a second after the coverage starts", err, lockedLate)
 }
 
 // TestSignedHistoryOfferIsAcceptedByEveryVerifier: the unvaried signed firm
@@ -410,9 +454,10 @@ func signedOfferShortenedWindow(t *testing.T, window func(*RequestedCoverageTerm
 
 // TestSignedHistoryOfferedTermsStayWithinTheRequestedWindows: the offered
 // terms' review deadline, challenge window, nonterminal resolution window,
-// successor decision window, payout deadline and adapter recovery window are
-// accepted exactly at the request's maxima and refused one second over any
-// one of them; so are the terminal and late-recovery deadline maxima.
+// successor decision window, payout deadline, adapter recovery window and
+// claim ingress resolution grace are accepted exactly at the request's maxima
+// and refused one second over any one of them; so are the terminal and
+// late-recovery deadline maxima.
 func TestSignedHistoryOfferedTermsStayWithinTheRequestedWindows(t *testing.T) {
 	requested := func(change func(*RequestedCoverageTermsV1)) func(*signedOfferInputs) {
 		return func(in *signedOfferInputs) { change(&in.requested) }
@@ -449,6 +494,9 @@ func TestSignedHistoryOfferedTermsStayWithinTheRequestedWindows(t *testing.T) {
 				return &requested.MaximumAdapterRecoveryWindowSeconds
 			}),
 			refusal: "Guarantor terms' adapter recovery window exceeds the requester's maximum"},
+		{name: "claim ingress resolution grace one second over the request's maximum", late: true,
+			change:  requested(func(requested *RequestedCoverageTermsV1) { requested.MaximumClaimIngressResolutionGraceSeconds-- }),
+			refusal: "Guarantor terms' claim ingress resolution grace exceeds the requester's maximum"},
 		{name: "terminal resolution deadline one second over the request's maximum", late: true,
 			change:  requested(func(requested *RequestedCoverageTermsV1) { requested.MaximumTerminalResolutionDeadlineUnix-- }),
 			refusal: signedOfferTerminalRefusal},

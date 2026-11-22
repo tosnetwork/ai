@@ -1465,7 +1465,10 @@ func TestCoverageDeadlinesAnchorAtTheHardEffectDeadline(t *testing.T) {
 			short.CollateralTerms = &lock
 			return short
 		}(), collateralized.LateRecoveryTerminalDeadlineUnix + 3600, refused},
-		"Agreement expiry earlier than the collateral lock": {collateralized, collateralized.LateRecoveryTerminalDeadlineUnix, ""},
+		// Section 12.2: "collateral_terms.lock_until_unix <= agreement.expires_at".
+		"Agreement expiring when the collateral lock ends": {collateralized, collateralized.CollateralTerms.LockUntilUnix, ""},
+		"Agreement expiring one second before the collateral lock ends": {collateralized,
+			collateralized.CollateralTerms.LockUntilUnix - 1, "Guarantor collateral lock ends after the coverage Agreement expires"},
 	}
 	for name, test := range cases {
 		err := validateCoverageDeadlineAnchorV1(test.terms, test.expiresAt)

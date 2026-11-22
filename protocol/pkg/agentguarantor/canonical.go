@@ -126,9 +126,11 @@ type AuthorityResolutionScopeV1 struct {
 	SignatureDomain  string
 }
 
-// GuarantorCodecLimitsV1 are the canonical-encoding limits of every Guarantor
-// V1 object. Only this profile uses them; the package-level codec limits of
-// every other profile stay at codec.DefaultLimits.
+// GuarantorCodecLimitsV1 returns the canonical-encoding limits of every
+// Guarantor V1 object. Only this profile uses them; the package-level codec
+// limits of every other profile stay at codec.DefaultLimits. The result is a
+// copy: the limits every Guarantor digest and decoder runs under are fixed
+// and cannot be changed through it.
 //
 //   - CanonicalBytes is the complete-object ceiling, MaxCanonicalObjectBytes.
 //   - StringBytes equals the object ceiling: a nested string (a base64
@@ -137,10 +139,12 @@ type AuthorityResolutionScopeV1 struct {
 //     that a valid history reaches first. The worst-case authorized-decision
 //     receipt carries a 1,165,360-character request string.
 //   - JSONBytes keeps the codec's JSON-to-CBOR ratio of 2.
-var GuarantorCodecLimitsV1 = codec.Limits{CanonicalBytes: MaxCanonicalObjectBytes,
-	JSONBytes: 2 * MaxCanonicalObjectBytes, StringBytes: MaxCanonicalObjectBytes}
+func GuarantorCodecLimitsV1() codec.Limits {
+	return codec.Limits{CanonicalBytes: MaxCanonicalObjectBytes,
+		JSONBytes: 2 * MaxCanonicalObjectBytes, StringBytes: MaxCanonicalObjectBytes}
+}
 
-var guarantorCodec = codec.Bounded{Limits: GuarantorCodecLimitsV1}
+var guarantorCodec = codec.Bounded{Limits: GuarantorCodecLimitsV1()}
 
 // Digest is codec.Digest under the Guarantor limits.
 func Digest(domain string, value interface{}) (string, error) {

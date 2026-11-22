@@ -11506,6 +11506,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "maximum_claim_ingress_resolution_grace_seconds": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "maximum_claims": {
           "minimum": 0,
           "type": "integer"
@@ -11613,6 +11617,7 @@
         "maximum_successor_decision_window_seconds",
         "maximum_payout_deadline_seconds",
         "maximum_adapter_recovery_window_seconds",
+        "maximum_claim_ingress_resolution_grace_seconds",
         "maximum_late_ingress_recovery_window_seconds",
         "maximum_terminal_resolution_deadline_unix",
         "maximum_late_recovery_terminal_deadline_unix",
