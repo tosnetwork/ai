@@ -7714,9 +7714,11 @@ signed for another claim over this claim's decision is invalid on its own,
 not only inside a bundle. A decision application's `applied_at_unix` is not
 before the `transitioned_at_unix` of the challenge close it carries.
 
-The section 10.1 closure inequality and transitions. Section 10.1 names
-challenges, responses and state transitions among the admissions the closure
-inequality governs. A verifier applies it where a decision is admitted, and
+The section 10.1 closure inequality and transitions. Section 10.1 charges
+challenges, responses and state transitions against the slot reserves, and
+holds to the closure inequality only those admissions whose target state has a
+table entry and starts a window of its own. A verifier applies it where a
+decision is admitted, and
 for a `challenge_admission` it then holds without a separate check: the
 candidate was admitted with `admitted_at_unix + challengeable_candidate(r)
 <= deadline`, a challenge is admitted no later than `challenge_ends_at_unix =
