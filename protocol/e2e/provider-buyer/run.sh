@@ -6,10 +6,11 @@
 #
 # Required environment: as protocol/e2e/mcp-buyer/run.sh (E2E_WORKDIR,
 # TOS_SOURCE, TOS_BUILD, TOS_VENV, REGISTRY_CODE_BOC, ACTOR_CODE_HASH).
-# With ACTOR_CODE_HASH the test-only Service Actor build's hash, the offer
-# uses that build's 600 s windows and the refund scenario runs in about
-# twenty minutes; with the release hash it waits out the hour-long windows.
-# E2E_SKIP_REFUND=1 skips the refund scenario (the evidence records it).
+# ACTOR_CODE_HASH must be the release Service Actor build's: tosctl operates
+# only that build (a test-only actor can be deployed and not configured), so
+# the refund scenario waits out the release build's hour-long windows and
+# the whole run takes about 65 minutes. E2E_SKIP_REFUND=1 skips the refund
+# scenario (the evidence records it).
 set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 E2E_HARNESS_DIR="$here/harness" exec "$here/../mcp-buyer/run.sh"

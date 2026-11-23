@@ -18,12 +18,21 @@ Scenarios:
    reached the actor, that the buyer accepted the result and that the
    provider recorded the buyer's ack.
 2. The provider withdraws the credited revenue: a preview (exit 4) first,
-   then `--yes`, until finalized state shows the withdrawal.
+   then `--yes`, until finalized state shows the withdrawal: the actor's
+   withdraw_revenue transaction, its transfer to the provider wallet, and the
+   wallet's balance before and after.
 3. An unanswered call: admission is paused, the buyer pays, nothing is
-   responded, and the buyer agent's refund duties expire the request and
-   claim the refund once the response window is over. With the test-only
-   Service Actor build (600 s windows) this takes about twenty minutes;
-   E2E_SKIP_REFUND=1 skips it.
+   responded, and once the response window is over the request is expired
+   and the buyer agent claims the refund; the chain shows the expire, the
+   claim and the transfer to the buyer wallet. With the release Service
+   Actor build the response window is at least an hour, so the scenario
+   takes about an hour; E2E_SKIP_REFUND=1 skips it. (The test-only build's
+   600 s windows would shorten it, but tosctl operates only the release
+   build: a test-only actor can be deployed and not configured.)
+
+Chain facts the checks rest on (respond counts, the withdrawal, the refund,
+wallet balances) are read from every validator's JSON-RPC and taken only
+when a strict majority of them agree, not from the provider's own status.
 
 Execution is protocol/e2e/mcp-buyer's stand-in executor service: it reads
 the source archive and executes nothing.
@@ -61,7 +70,17 @@ NANO = base.NANO
 TEST_PROFILE_CODE_HASH = "tvm-cell-sha256:79a566f5f4281f7abe59cd1c16a7bc3b2d990e840f42b00d55cb0ae4b0545960"
 TEST_PROFILE = base.ACTOR_CODE_HASH == TEST_PROFILE_CODE_HASH
 WINDOW = 600 if TEST_PROFILE else 3600
+# Service Actor inbound opcodes (protocol/pkg/nativecore/service_actor.go).
+CALL_OPCODE = 0x53564301
 RESPOND_OPCODE = 0x53564302
+EXPIRE_OPCODE = 0x53564303
+CLAIM_REFUND_OPCODE = 0x53564304
+WITHDRAW_OPCODE = 0x53564309
+# What a wallet may lose to fees on one send, beyond the value it attached.
+FEE_ALLOWANCE = NANO // 10
+# The offer's price per call, "--price 0.1" below.
+PRICE = "0.1"
+PRICE_NANO = NANO // 10
 
 # The provider reads the chain through these ports; each forwards to one
 # validator's JSON-RPC port.
@@ -175,7 +194,7 @@ def setup_provider(tosctl_sha256: str) -> dict:
            initialized.get("confirmed") is True and initialized.get("packet_controller") == "service-packet" and
            str(initialized.get("agent_id", "")).startswith("agent_"),
            {"agent_id": initialized.get("agent_id"), "packet_controller": initialized.get("packet_controller")})
-    offer_flags = ["offer", "--rail-config", str(RAIL_CONFIG), "--price", "0.1", "--storage-fee", "0.2",
+    offer_flags = ["offer", "--rail-config", str(RAIL_CONFIG), "--price", PRICE, "--storage-fee", "0.2",
                    "--cleanup-bounty", "0.1", "--response-sla", str(WINDOW), "--refund-claim-window", str(WINDOW),
                    "--executor-socket", str(base.EXECUTOR_SOCKET), "--gateway-card-out", str(base.GATEWAY_CARD)]
     if TEST_PROFILE:
@@ -194,19 +213,22 @@ def setup_provider(tosctl_sha256: str) -> dict:
             break
         if "update-policy failed" in result.stderr and "policy_diagnosis" not in base.evidence:
             # The library keeps tosctl's own message to itself; the same send,
-            # made once by the harness as the provider, records it.
+            # made once by the harness as the provider, records it. That send
+            # is the harness's, not the program's: whatever it returns, the
+            # step fails, so an offer that a later attempt completes on top of
+            # it can never make the run pass.
             preview = offered.get("preview") or {}
             diagnosis = base.tosctl(
                 "provider", "agent", "service", "send", "--operation", "update-policy", "--address",
-                preview.get("actor", ""), "--from", "provider", "--price-per-call", "0.1", "--storage-fee", "0.2",
+                preview.get("actor", ""), "--from", "provider", "--price-per-call", PRICE, "--storage-fee", "0.2",
                 "--cleanup-bounty", "0.1", "--response-sla", str(WINDOW), "--refund-claim-window", str(WINDOW),
                 "--rate-limit-per-day", "0", "--active", "true", "--open-access", "--metadata-hash",
                 preview.get("metadata_hash", ""), "--proof-scheme-hash", preview.get("proof_scheme_hash", ""),
                 "--yes", check=False)
             base.evidence["policy_diagnosis"] = {"exit": diagnosis.returncode,
                                                  "stdout": diagnosis.stdout[-1500:], "stderr": diagnosis.stderr[-1500:]}
-            record("diagnosis: the policy send made directly with tosctl", diagnosis.returncode == 0,
-                   base.evidence["policy_diagnosis"])
+            record("diagnosis (fails the run): offer's policy send failed; the harness made the same send with "
+                   "tosctl", False, base.evidence["policy_diagnosis"])
         time.sleep(20)
     record("offer completed (runs of the command: %d)" % len(attempts), offered.get("confirmed") is True, attempts)
     offer = json.loads(base.as_account("provider", ["/bin/cat", str(PROVIDER_RAIL / "setup" / "offer.json")]).stdout)
@@ -222,27 +244,118 @@ def setup_provider(tosctl_sha256: str) -> dict:
 
 
 # --- Chain facts -----------------------------------------------------------------
+#
+# Every chain fact a check rests on is read from each validator's JSON-RPC
+# directly (not through the provider's proxies) and taken only when a strict
+# majority of the validators return the same value.
 
-def actor_transactions(actor: str) -> list:
-    answer = rpc("getTransactions", address=actor, limit=100, lt="", hash="")
-    return answer.get("result") or []
+def rpc_at(port: int, method: str, **params) -> dict:
+    import urllib.request
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/jsonRPC", data=body,
+                                     headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read())
 
 
-def inbound_opcode(transaction: dict):
-    """The first 32 bits of a transaction's inbound message body, decoded from
-    the transaction BOC the endpoint returns, or None."""
-    from pytosiq_core import Cell, Transaction
+def majority_read(method: str, view, timeout: float = 180, **params):
+    """view(answer) as a strict majority of the validators return it, polled
+    until they agree. Returns {"value": ..., "agreeing": n, "of": m}, or None
+    when no strict majority agreed before the timeout."""
+    def attempt():
+        tally: dict = {}
+        for port in base.RPC_PORTS:
+            try:
+                value = view(rpc_at(port, method, **params))
+            except Exception:  # noqa: BLE001 - a validator that cannot answer does not vote
+                continue
+            entry = tally.setdefault(json.dumps(value, sort_keys=True), [value, 0])
+            entry[1] += 1
+        for value, count in tally.values():
+            if count * 2 > len(base.RPC_PORTS):
+                return {"value": value, "agreeing": count, "of": len(base.RPC_PORTS)}
+        return None
+    return poll(attempt, timeout, 3)
+
+
+def decode_transaction(transaction: dict) -> dict:
+    """The facts of one transaction, decoded from the BOC the endpoint
+    returns: its hash, the inbound opcode, sender and value, whether it was
+    aborted, and its outbound internal transfers. decoded is False when the
+    BOC does not decode."""
+    from pytosiq_core import Cell, InternalMsgInfo, Transaction
+    facts = {"hash": (transaction.get("transaction_id") or {}).get("hash", ""), "decoded": False}
     try:
         decoded = Transaction.deserialize(Cell.one_from_boc(transaction["data"]).begin_parse())
-        return decoded.in_msg.body.begin_parse().load_uint(32)
-    except Exception:  # noqa: BLE001 - no inbound message or an empty body has no opcode
+    except Exception as error:  # noqa: BLE001 - recorded; a check that needs a decode fails on it
+        facts["error"] = repr(error)
+        return facts
+    facts.update({"decoded": True, "lt": decoded.lt, "opcode": None, "source": None, "value": 0,
+                  "aborted": bool(getattr(decoded.description, "aborted", True)), "transfers": []})
+    message = decoded.in_msg
+    if message is not None:
+        if isinstance(message.info, InternalMsgInfo):
+            facts["source"] = message.info.src.to_str(is_user_friendly=False).lower() if message.info.src else None
+            facts["value"] = message.info.value_coins
+        body = message.body.begin_parse()
+        if body.remaining_bits >= 32:
+            facts["opcode"] = body.load_uint(32)
+    for out in decoded.out_msgs:
+        if isinstance(out.info, InternalMsgInfo):
+            facts["transfers"].append({"to": out.info.dest.to_str(is_user_friendly=False).lower(),
+                                       "value": out.info.value_coins})
+    return facts
+
+
+def account_transactions(address: str) -> dict:
+    """An account's latest transactions, decoded, as a strict majority of the
+    validators return them, or None."""
+    return majority_read("getTransactions", lambda answer: [decode_transaction(tx) for tx in answer["result"]],
+                         address=address, limit=100, lt="", hash="")
+
+
+def wallet_balance(address: str):
+    read = majority_read("getAddressInformation", lambda answer: int(answer["result"]["balance"]), address=address)
+    return read["value"] if read else None
+
+
+def with_opcode(transactions: list, opcode: int) -> list:
+    return [tx for tx in transactions if tx.get("opcode") == opcode]
+
+
+def paid_to(transaction: dict, address: str) -> int:
+    return sum(transfer["value"] for transfer in transaction.get("transfers", []) if transfer["to"] == address)
+
+
+def credited_from(wallet: str, sender: str, at_least: int):
+    """The wallet's inbound transfer from sender of at least that value, as a
+    strict majority of the validators return it, polled until it appears."""
+    def found():
+        read = account_transactions(wallet)
+        for tx in (read or {}).get("value", []):
+            if tx.get("decoded") and tx.get("source") == sender and tx.get("value", 0) >= at_least \
+                    and not tx.get("aborted"):
+                return tx
         return None
+    return poll(found, 180, 5)
 
 
-def responds(actor: str) -> list:
-    """Every transaction of the actor whose inbound message is a respond,
-    whether or not the actor accepted it: a second respond would be one."""
-    return [tx for tx in actor_transactions(actor) if inbound_opcode(tx) == RESPOND_OPCODE]
+def respond_count(actor: str) -> dict:
+    """How many transactions of the actor carry a respond, accepted or not (a
+    second respond would be one), from a strict-majority read. The read must
+    also hold the call that paid for the request, decoded: a decoder that
+    decodes nothing would otherwise count zero responds."""
+    read = account_transactions(actor)
+    transactions = (read or {}).get("value") or []
+    return {"read": bool(read), "agreeing": (read or {}).get("agreeing"), "transactions": len(transactions),
+            "decoded": sum(1 for tx in transactions if tx.get("decoded")),
+            "calls": len(with_opcode(transactions, CALL_OPCODE)),
+            "responds": len(with_opcode(transactions, RESPOND_OPCODE)),
+            "respond_hashes": sorted(tx["hash"] for tx in with_opcode(transactions, RESPOND_OPCODE))}
+
+
+def respond_read_sound(count: dict) -> bool:
+    return count["read"] and count["decoded"] == count["transactions"] and count["calls"] >= 1
 
 
 # --- Scenario 1: a paid call, serve killed between execution and respond -------
@@ -306,17 +419,25 @@ def quote_and_prepare(offer: dict, label: str) -> str:
     return purchase.get("request_hash", "")
 
 
-def provider_record(request_hash: str) -> dict:
+def provider_record(request_hash: str, strict: bool = False):
     """The provider's local record of a request, found by the request hash it
-    holds (records are named by their slot)."""
+    holds (records are named by their slot), or {} when none holds it. With
+    strict, None when the records could not all be listed and read, so that
+    "no record" is never concluded from a failed read."""
     records = PROVIDER_RAIL / "provider"
-    names = base.as_account("provider", ["/usr/bin/find", str(records), "-maxdepth", "1", "-name", "*.json"],
-                            check=False).stdout
-    for name in names.split():
+    listed = base.as_account("provider", ["/usr/bin/find", str(records), "-maxdepth", "1", "-name", "*.json"],
+                             check=False)
+    if listed.returncode != 0:
+        return None if strict else {}
+    for name in listed.stdout.split():
         result = base.as_account("provider", ["/bin/cat", name], check=False)
         try:
-            entry = json.loads(result.stdout) if result.returncode == 0 else {}
+            entry = json.loads(result.stdout) if result.returncode == 0 else None
         except json.JSONDecodeError:
+            entry = None
+        if entry is None:
+            if strict:
+                return None
             continue
         if entry.get("request_hash") == request_hash:
             return entry
@@ -334,9 +455,12 @@ def scenario_paid_call(offer: dict, serve: subprocess.Popen) -> subprocess.Popen
     record("paid call: the confirmed purchase is paid with one call",
            not paid.get("is_error", True) and paid_state not in (None, "awaiting_confirmation", "declined"), paid_state)
     try:
-        watcher.wait(timeout=1600)
+        watcher_status = watcher.wait(timeout=1600)
     except subprocess.TimeoutExpired:
-        pass
+        watcher_status = None
+        base.as_account("provider", ["/bin/kill", "-TERM", str(watcher.pid)], check=False)
+    record("paid call: the kill watcher ended on its own", watcher_status is not None,
+           {"watcher_exit": watcher_status})
     lines = (WORK / "logs" / "kill-watcher.log").read_text().strip().splitlines()
     seen = json.loads(lines[-1]) if lines else {}
     try:
@@ -345,13 +469,15 @@ def scenario_paid_call(offer: dict, serve: subprocess.Popen) -> subprocess.Popen
         status = None
     # Popen reports death by a signal as the negative signal number.
     record("paid call: serve was killed by SIGKILL while its record was executed (executed, not responded)",
-           seen.get("killed") is True and status == -signal.SIGKILL,
+           seen.get("killed") is True and status == -signal.SIGKILL and watcher_status == 0,
            {"watcher": seen, "serve_returncode": status})
     entry = provider_record(request_hash)
     actor = entry.get("actor", "")
-    before = responds(actor) if actor else None
-    record("paid call: no respond reached the actor before the restart", before == [],
-           {"actor": actor, "state": entry.get("state"), "responds": len(before or [])})
+    before = respond_count(actor) if actor else None
+    record("paid call: no respond reached the actor before the restart (strict-majority read of the actor's "
+           "transactions, every one decoded, the paying call among them)",
+           before is not None and respond_read_sound(before) and before["responds"] == 0,
+           {"actor": actor, "state": entry.get("state"), "read": before})
     HOLD["seconds"] = 0.0
     serve = start_serve("provider-serve-2.log")
     result = poll(lambda: (lambda r: r if not r["is_error"] else None)(
@@ -361,22 +487,31 @@ def scenario_paid_call(offer: dict, serve: subprocess.Popen) -> subprocess.Popen
     record("paid call: the buyer accepted the result against the finalized response hash",
            bool(result) and bool(files.get("receipt_boc")),
            {"response_hash": (accepted.get("result") or {}).get("response_hash"), "files": sorted(files)})
-    base.mcp("tos_buyer_refund", {"request_hash": request_hash})
+    # The agent's duty round after acceptance sends the ack (refund_now runs
+    # that round now and reports it).
+    round_ = base.mcp("tos_buyer_refund", {"request_hash": request_hash})
+    duty = structured(round_).get("duty") or {}
+    record("paid call: the agent's result round after acceptance (ack sent or due)",
+           not round_.get("is_error", True) and bool((duty.get("result") or {}).get("accepted")), duty.get("result"))
     acked = poll(lambda: provider_record(request_hash).get("state") == "acked", 600, 15)
     record("paid call: the provider recorded the buyer's ack", acked is not None,
            {"state": provider_record(request_hash).get("state")})
-    after = responds(actor) if actor else []
-    hashes = sorted({(tx.get("transaction_id") or {}).get("hash", "") for tx in after})
-    record("paid call: exactly one respond reached the actor after the restart",
-           len(after) == 1, {"responds": len(after), "transactions": hashes})
+    after = respond_count(actor) if actor else None
+    record("paid call: exactly one respond reached the actor after the restart (strict-majority read)",
+           after is not None and respond_read_sound(after) and after["responds"] == 1, after)
     evidence_for("paid_call", {"request_hash": request_hash, "actor": actor, "kill": seen,
-                               "serve_returncode_after_kill": status, "responds": len(after)})
-    return serve
+                               "serve_returncode_after_kill": status, "before_restart": before,
+                               "after_restart": after})
+    if not actor:
+        raise RuntimeError("paid call: the provider's record names no actor")
+    return serve, actor
 
 
 # --- Scenario 2: withdraw the credited revenue -----------------------------------
 
-def scenario_withdraw() -> None:
+def scenario_withdraw(actor: str) -> None:
+    wallet = base.evidence["wallets"]["provider"]
+    balance_before = wallet_balance(wallet)
     before = provider_status().get("actor") or {}
     credited = int(before.get("credited_revenue_nanotos") or 0)
     record("withdraw: status shows credited revenue after the paid call", credited > 0,
@@ -401,18 +536,51 @@ def scenario_withdraw() -> None:
            latest.get("state") == "finalized" and int(latest.get("payout_nanotos") or 0) == credited and left == 0,
            {"state": latest.get("state"), "payout_nanotos": latest.get("payout_nanotos"), "credited_before": credited,
             "credited_after": left})
-    evidence_for("withdraw", {"credited_before_nanotos": credited, "withdrawal": latest})
+    # The program's record says the payout finalized and leaves the wallet
+    # credit unverified; the chain is checked here, independently of it.
+    read = account_transactions(actor)
+    withdrawals = with_opcode((read or {}).get("value") or [], WITHDRAW_OPCODE)
+    accepted = [tx for tx in withdrawals if tx.get("source") == wallet and not tx.get("aborted")]
+    sent_out = paid_to(accepted[0], wallet) if len(accepted) == 1 else 0
+    record("withdraw: on chain, the actor accepted one withdraw_revenue from the provider wallet and sent it at "
+           "least the credited amount (strict-majority read)", len(accepted) == 1 and credited > 0 and
+           sent_out >= credited, {"withdraw_transactions": withdrawals, "sent_to_wallet_nanotos": sent_out})
+    credit = credited_from(wallet, actor, credited) if credited > 0 else None
+    attached = int(withdrawal.get("attached_nanotos") or latest.get("attached_nanotos") or 0)
+    # The wallet paid the attached value and its own fee and received what the
+    # actor sent (the payout plus the change of the attached value). Read
+    # after the credit is final; polled briefly for a lagging majority.
+
+    def within(value):
+        return value is not None and balance_before is not None and \
+            sent_out - attached - FEE_ALLOWANCE <= value - balance_before <= sent_out
+    balance_after = poll(lambda: (lambda value: value if within(value) else None)(wallet_balance(wallet)), 60, 5) \
+        if credit is not None else None
+    if balance_after is None:
+        balance_after = wallet_balance(wallet)
+    delta = balance_after - balance_before if balance_after is not None and balance_before is not None else None
+    record("withdraw: on chain, the provider wallet received the transfer and its balance moved by it, less "
+           "the attached value and fees", credit is not None and within(balance_after),
+           {"credit_transaction": (credit or {}).get("hash"), "credit_nanotos": (credit or {}).get("value"),
+            "balance_before": balance_before, "balance_after": balance_after, "delta_nanotos": delta,
+            "attached_nanotos": attached, "fee_allowance_nanotos": FEE_ALLOWANCE})
+    evidence_for("withdraw", {"credited_before_nanotos": credited, "withdrawal": latest,
+                              "on_chain": {"withdraw_transactions": withdrawals, "sent_to_wallet_nanotos": sent_out,
+                                           "wallet_balance_before": balance_before,
+                                           "wallet_balance_after": balance_after, "delta_nanotos": delta}})
 
 
 # --- Scenario 3: an unanswered call is refunded -----------------------------------
 
-def scenario_refund(offer: dict) -> None:
+def scenario_refund(offer: dict, actor: str) -> None:
+    buyer_wallet = base.evidence["wallets"]["custody"]
     paused = report(provider_cli("pause", "--rail-config", str(RAIL_CONFIG), "--reason", "refund scenario")) or {}
     record("refund: pause stops new admissions", paused.get("paused") is True, paused)
     request_hash = quote_and_prepare(offer, "unanswered call")
     paid = base.confirm_payment(request_hash)
     record("refund: the unanswered call is paid", not paid.get("is_error", True), structured(paid).get("purchase", {}).get("state"))
     started = time.monotonic()
+    balance_paid = wallet_balance(buyer_wallet)
 
     def refunded():
         duty = structured(base.mcp("tos_buyer_refund", {"request_hash": request_hash})).get("duty") or {}
@@ -421,14 +589,36 @@ def scenario_refund(offer: dict) -> None:
     seen: list = []
     duty = poll(refunded, WINDOW * 3 + 900, 30)
     compact = [entry for index, entry in enumerate(seen) if index == 0 or entry != seen[index - 1]]
-    record("refund: the buyer's duties expired the request and claimed the refund", bool(duty),
-           {"seconds": int(time.monotonic() - started), "statuses": compact[-12:]})
-    entry = provider_record(request_hash)
-    record("refund: the paused provider admitted nothing for the unanswered call",
-           entry.get("state") in (None, "") or entry == {}, {"provider_record_state": entry.get("state")})
+    sent_operations = sorted({entry["operation"] for entry in seen if entry.get("sent") and entry.get("operation")})
+    record("refund: the buyer agent's duty status reads refunded once the response window is over", bool(duty),
+           {"seconds": int(time.monotonic() - started), "statuses": compact[-12:],
+            "operations_sent_through_refund_calls": sent_operations})
+    # On chain: the request was expired (permissionless; the call above names
+    # who sent it) and the buyer's claim_refund paid the price to the buyer
+    # wallet, which holds the transfer.
+    read = account_transactions(actor)
+    transactions = (read or {}).get("value") or []
+    expires = [tx for tx in with_opcode(transactions, EXPIRE_OPCODE) if not tx.get("aborted")]
+    claims = [tx for tx in with_opcode(transactions, CLAIM_REFUND_OPCODE)
+              if tx.get("source") == buyer_wallet and not tx.get("aborted")]
+    price = PRICE_NANO
+    refunded_out = paid_to(claims[0], buyer_wallet) if len(claims) == 1 else 0
+    credit = credited_from(buyer_wallet, actor, price) if refunded_out >= price else None
+    balance_refunded = wallet_balance(buyer_wallet)
+    record("refund: on chain, the request was expired and one claim_refund from the buyer wallet paid at least "
+           "the price back to it (strict-majority read)", bool(expires) and len(claims) == 1 and
+           refunded_out >= price and credit is not None,
+           {"expire_transactions": [{"hash": tx["hash"], "from": tx.get("source")} for tx in expires],
+            "claim_refund_transactions": [tx["hash"] for tx in claims], "sent_to_buyer_nanotos": refunded_out,
+            "price_nanotos": price, "buyer_credit_transaction": (credit or {}).get("hash"),
+            "buyer_balance_after_payment": balance_paid, "buyer_balance_after_refund": balance_refunded})
+    entry = provider_record(request_hash, strict=True)
+    record("refund: the paused provider admitted nothing for the unanswered call", entry == {},
+           {"provider_record": "unreadable" if entry is None else entry.get("state")})
     resumed = report(provider_cli("resume", "--rail-config", str(RAIL_CONFIG))) or {}
     record("refund: resume admits new requests again", resumed.get("paused") is False, resumed)
-    evidence_for("refund", {"request_hash": request_hash, "statuses": compact, "window_seconds": WINDOW})
+    evidence_for("refund", {"request_hash": request_hash, "statuses": compact, "window_seconds": WINDOW,
+                            "on_chain": {"expires": expires, "claims": claims, "sent_to_buyer_nanotos": refunded_out}})
 
 
 def evidence_for(name: str, value: dict) -> None:
@@ -506,10 +696,10 @@ async def main() -> int:
             serve = start_serve("provider-serve-1.log")
             base.start_gateway(offer["provider_agent_id"])
             base.evidence["buyer"] = base.setup_buyer(base.evidence["wallets"]["custody"], tosctl_sha256)
-            serve = scenario_paid_call(offer, serve)
-            scenario_withdraw()
+            serve, actor = scenario_paid_call(offer, serve)
+            scenario_withdraw(actor)
             if not base.SKIP_REFUND:
-                scenario_refund(offer)
+                scenario_refund(offer, actor)
     except Exception as error:  # noqa: BLE001 - the evidence records the failure
         import traceback
         record("run completed without an exception", False, {"error": repr(error),
@@ -520,6 +710,10 @@ async def main() -> int:
     thermal = WORK / "thermal.jsonl"
     base.evidence["thermal_pauses"] = [json.loads(line) for line in thermal.read_text().splitlines()] \
         if thermal.exists() else []
+    # A pause freezes the whole container; the run's result says how often.
+    base.evidence["thermal_pause_count"] = sum(1 for entry in base.evidence["thermal_pauses"]
+                                               if entry.get("event") == "pause")
+    print(f"thermal pauses: {base.evidence['thermal_pause_count']}")
     base.evidence["finished_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     passed = bool(base.steps) and all(step["pass"] for step in base.steps)
     base.evidence["result"] = "ALL PASS" if passed else "FAIL"
