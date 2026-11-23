@@ -13,6 +13,7 @@ change a purchase.
 | `pkg/provideragent` | The provider agent of the MCP provider adapter ([`MCP_PROVIDER_ADAPTER_V1.md`](../spec/docs/MCP_PROVIDER_ADAPTER_V1.md)): runs the node, serves the agent socket, keeps the action store and the pause-origin record, and applies an action only after a human confirmed it. |
 | `pkg/provideragent/agentapi` | The agent socket's API and client; it links no custody code. |
 | `pkg/providerconfirm` | The adapter's confirmer, on a custody-account terminal. |
+| `pkg/mcpprovider`, `cmd/tos-service-provider-mcp` | The adapter's stdio MCP server, which an MCP client starts in the developer account: the twelve `tos_provider_*` tools, each one agent method over the socket. Its binary links only `agentapi`, `protocol/pkg/agentsocket` and the MCP SDK. |
 
 `provider/` imports `protocol/` and `execution/` only, and nothing imports
 `provider/` (`make boundary-lint`).
@@ -21,7 +22,12 @@ change a purchase.
 
 ```sh
 go build -o tos-service-provider ./provider/cmd/tos-service-provider
+go build -o tos-service-provider-mcp ./provider/cmd/tos-service-provider-mcp
 ```
+
+Operating the node from Claude Code or Codex (two OS accounts, the agent,
+the confirmer and each client's MCP entry) is the
+[MCP provider guide](../spec/docs/MCP_PROVIDER_GUIDE.md).
 
 The program needs, at run time, a pinned `tosctl` with a vault and a funded
 wallet, three to eight chain RPC endpoints, the Native Registry code file,
@@ -228,12 +234,17 @@ buying is `protocol/cmd/tos-service-buyer` and the MCP buyer server.
   a withdrawal and a resume of any pause but the model's own are previewed
   and wait for a human, who confirms them with `tos-service-provider confirm`
   on a custody terminal; the agent re-runs the preview before it sends.
+  The confirmer talks only to a socket its own account owns. The MCP server
+  (`tos-service-provider-mcp`) holds nothing secret and refuses to start as
+  the custody account, with the vault variable set, or where it can open the
+  rail configuration or the agent's state directory.
 
 ## Not here yet
 
-- **The MCP provider server.** `tos-service-provider-mcp`, the stdio server
-  an MCP client starts, and its guide come next; the agent and the
-  confirmer it speaks to are here.
+- **The acceptance of the MCP provider adapter.** The agent, the confirmer
+  and the MCP server are implemented and tested; the local agent-operated
+  run of the specification's section 10.2, with Claude Code and Codex each
+  operating a provider, has not run yet.
 - **A live run on a public network.** No record shows this program serving a
   paid call on a public test network; the recorded paid-work runs used the
   same library inside another program.

@@ -2,11 +2,13 @@
 
 ## Status and scope
 
-**Status:** partly implemented, not accepted. The library prerequisites of
+**Status:** implemented, not yet accepted. The library prerequisites of
 section 13, the provider agent (`tos-service-provider agent`, package
-`provider/pkg/provideragent`) and the confirmer (`tos-service-provider
-confirm`) are implemented; the MCP server `tos-service-provider-mcp` and its
-guide are not yet, and no run of section 10.2 has used it. It is the
+`provider/pkg/provideragent`), the confirmer (`tos-service-provider
+confirm`) and the MCP server `tos-service-provider-mcp` (package
+`provider/pkg/mcpprovider`) are implemented, with the tests of 10.1; the
+user guide is [`MCP_PROVIDER_GUIDE.md`](MCP_PROVIDER_GUIDE.md). No run of
+section 10.2 has used it yet, so the acceptance of section 10 is open. It is the
 selling-side counterpart of
 [`MCP_BUYER_ADAPTER_V1.md`](MCP_BUYER_ADAPTER_V1.md) ("the buyer spec"
 below), and it is written against ai main at merge `57b1a448` and the
@@ -160,10 +162,14 @@ configuration, agent configuration or `tosctl` configuration is readable or
 writable by group or others, or when its configuration names no client uid.
 
 The MCP server refuses to start when its effective uid is the custody
-account, when `VAULT_URL` (or the rail configuration's `vault_url_env`) is
-set in its environment, or when it can open the rail configuration or the
-agent's state directory. Custody and the peer-credential check are Linux
-interfaces, so V1 runs on Linux.
+account (the owner of the socket at `--agent-socket`), when `VAULT_URL` (or
+the rail configuration's `vault_url_env`, named with `--vault-url-env`) is
+set in its environment, or when it can open the rail configuration
+(`--rail-config`) or the agent's state directory (`--agent-state-dir`); a
+path it cannot check because it does not exist is refused too. The
+confirmer, conversely, refuses a socket path that is not a socket owned by
+its own uid. Custody and the peer-credential check are Linux interfaces, so
+V1 runs on Linux.
 
 ### 2.4 `tos-service-provider agent`
 
@@ -559,7 +565,10 @@ checks of 4.7. The MCP server writes them to
 as the buyer's results directory (buyer spec 4.9, "Writing the files"):
 `--export-dir` resolved once, not group or world writable, the file created
 fresh and linked into place, an existing file kept only if it has the same
-bytes. This is how the provider hands the offer to a buyer (buyer spec 4.4,
+bytes. The file is written readable by all, as public data. The server
+checks the bytes against the stated length and SHA-256, the 256 KiB bound
+and the schema, and refuses a capability ID or version that cannot name a
+file (a version is any printable ASCII, so it could hold a path separator). This is how the provider hands the offer to a buyer (buyer spec 4.4,
 owner decision O7 there). The offer file is public by design: it carries the
 manifest and the provider's key card.
 
@@ -785,6 +794,13 @@ safe for these reasons:
 - `offer` and `withdraw` are not run by hand while the agent runs (3.1). A
   hand run in the gap is refused with `ErrSetupBusy` if it overlaps either
   call, and otherwise is caught by the re-read above.
+- the agent's own library calls never meet at the run lock: one preview slot
+  serializes every client preview and an apply's fresh preview together with
+  its send. A client preview waits at most 5 seconds for the slot (and its
+  offer preview is bounded to 20 seconds), then is refused with
+  `MCP_PROVIDER_CONFLICT`; a confirmed action's apply waits for the slot, so
+  a client preview at the same moment can never make its fresh preview fail
+  with `ErrSetupBusy` and expire it.
 
 #### 6.1.1 Apply-time comparison
 
@@ -817,9 +833,14 @@ Every other field (checkpoint, chain time, generated time) is ignored.
 Domain failures are tool results with `isError: true` and
 `structuredContent` `{"error": {"code", "disposition", "message", "state"}}`,
 as buyer spec section 12. `message` is fixed server text, redacted under
-4.3, and never carries untrusted text. A client that does not recognise a
-code treats it as `NEVER`. Only a request the SDK rejects against the input
-schema is a JSON-RPC error (`-32602`).
+4.3, and never carries untrusted text. `state` is the action's state when
+the refusal is about one (for example a cancel of an applied action), and
+empty otherwise; a value the agent attached to the refusal (an action, the
+offer's steps, an undecided withdrawal record, a preflight report) is
+returned beside it under `result`. A client that does not recognise a code
+treats it as `NEVER`. A request the SDK rejects against the input schema
+never reaches the agent; go-sdk v1.7.0 answers it with a tool result that
+has `isError: true`, its validation text and no `structuredContent`.
 
 | Code | Meaning | Disposition |
 |---|---|---|
@@ -837,9 +858,16 @@ schema is a JSON-RPC error (`-32602`).
 | `MCP_PROVIDER_AGENT_UNAVAILABLE` | the agent socket does not answer | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_PROVIDER_AMBIGUOUS` | a confirmed send may have been submitted, or an earlier withdrawal is undecided | `RESOLVE_BEFORE_RETRY` |
 | `MCP_PROVIDER_PERMISSION_DENIED` | the socket peer's account may not call this method | `NEVER` |
-| `MCP_PROVIDER_NOT_CONFIGURED` | the rail configuration has no provider section, or names a buyer, chat or messenger carrier | `NEVER` |
 | `MCP_PROVIDER_RATE_LIMITED` | over a bound of 4.2 | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_PROVIDER_INTERNAL` | anything else | `NEVER` |
+
+There is no "not configured" code. A rail configuration that names a buyer,
+chat or messenger carrier keeps the agent from starting (2.4), so no client
+ever reaches an agent serving one; a rail configuration without a provider
+section is served, and before the offer every method that needs it answers
+`MCP_PROVIDER_NOT_OFFERED`. The MCP server refuses its own bad deployment
+(2.3) by not starting, which the client reports as a server that failed to
+start, not as a tool result.
 
 **Timeouts.** Every agent method answers within 30 seconds except
 `request_confirmation` (its `wait_seconds` plus 5). A chain read past 20
@@ -894,7 +922,13 @@ result, and timestamps. Terminal records are kept for 30 days and then
 removed. On start, an action in `applying` is resolved from the node's own
 records, never re-sent on the strength of its old confirmation: an offer
 reads the setup journal, a withdrawal its withdrawal record, a resume the
-marker.
+marker. Before a withdrawal's send the agent stores, in the action, the
+query IDs of every withdrawal record the node holds; the send's own record
+is then the one of the confirmed amount and actor whose query ID is not
+among them, so no clock (which may step) takes part, and an action without
+the stored IDs never reached its send. An action written without its
+idempotency key (a crash between the two writes) is returned, and its key
+written, when the same key and inputs are previewed again.
 
 ### 8.2 The pause-origin record
 

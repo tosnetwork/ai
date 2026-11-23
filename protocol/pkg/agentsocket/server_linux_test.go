@@ -140,3 +140,29 @@ func TestTheSocketDirectoryIsChecked(t *testing.T) {
 		t.Fatal("a client uid equal to the agent's was accepted")
 	}
 }
+
+func TestSocketOwnerReadsOnlyASocketItself(t *testing.T) {
+	root := socketDir(t)
+	path := filepath.Join(root, "s.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if owner, err := SocketOwner(path); err != nil || owner != uint32(os.Geteuid()) {
+		t.Fatalf("owner %d: %v", owner, err)
+	}
+	link := filepath.Join(root, "link.sock")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(root, "plain")
+	if err := os.WriteFile(plain, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, refused := range []string{link, plain, filepath.Join(root, "none")} {
+		if _, err := SocketOwner(refused); err == nil {
+			t.Errorf("%s was read as a socket", filepath.Base(refused))
+		}
+	}
+}

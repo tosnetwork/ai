@@ -190,8 +190,12 @@ func (a *Agent) OfferPreview(ctx context.Context, role agentsocket.Role, params 
 		return nil, agentapi.Refusal(agentapi.CodeAlreadyOffered, "the node's offer is published; a terms change is "+
 			"out of this adapter", nil)
 	}
-	record, err := a.storeAction(agentapi.KindOffer, params.IdempotencyKey, inputs, func() (any, any, error) {
-		preview, failed, previewErr := a.previewOffer(ctx, inputs)
+	record, err := a.storeAction(ctx, agentapi.KindOffer, params.IdempotencyKey, inputs, func() (any, any, error) {
+		// The preview reads finalized state and the attestor through tosctl,
+		// whose own deadlines are longer than the method's bound.
+		previewCtx, cancel := context.WithTimeout(ctx, chainReadTimeout)
+		defer cancel()
+		preview, failed, previewErr := a.previewOffer(previewCtx, inputs)
 		return preview, failed, previewErr
 	})
 	if err != nil {
@@ -273,7 +277,7 @@ func (a *Agent) WithdrawPreview(ctx context.Context, role agentsocket.Role, para
 	}
 	readCtx, cancel := context.WithTimeout(ctx, chainReadTimeout)
 	defer cancel()
-	record, err := a.storeAction(agentapi.KindWithdraw, params.IdempotencyKey, inputs, func() (any, any, error) {
+	record, err := a.storeAction(ctx, agentapi.KindWithdraw, params.IdempotencyKey, inputs, func() (any, any, error) {
 		preview, failed, previewErr := a.previewWithdraw(readCtx, in)
 		return preview, failed, previewErr
 	})
@@ -287,14 +291,21 @@ func (a *Agent) WithdrawPreview(ctx context.Context, role agentsocket.Role, para
 // same inputs, refuses a key used with other inputs, and otherwise builds
 // the preview and stores a new action awaiting confirmation. On a refusal
 // the returned value is what the refusal is about, if anything.
-func (a *Agent) storeAction(kind, key string, inputs any, build func() (any, any, error)) (actionRecord, error) {
+func (a *Agent) storeAction(ctx context.Context, kind, key string, inputs any,
+	build func() (any, any, error)) (actionRecord, error) {
 	canonicalInputs, err := canonicalJSON(inputs)
 	if err != nil {
 		return actionRecord{}, err
 	}
 	id := actionID(kind, key, canonicalInputs)
-	a.previews.Lock()
-	defer a.previews.Unlock()
+	waitCtx, cancelWait := context.WithTimeout(ctx, previewWait)
+	release, err := a.holdPreviews(waitCtx)
+	cancelWait()
+	if err != nil {
+		return actionRecord{}, agentapi.Refusal(agentapi.CodeConflict, "another preview or a confirmed action is "+
+			"using the state directory; ask again shortly", err)
+	}
+	defer release()
 	var existing keyRecord
 	var found bool
 	a.withLock(func() { existing, found, err = a.store.readKey(kind, key) })
@@ -308,6 +319,25 @@ func (a *Agent) storeAction(kind, key string, inputs any, build func() (any, any
 		var record actionRecord
 		a.withLock(func() { record, err = a.loadLocked(id) })
 		return record, err
+	}
+	// The action is written before its key, so a crash between the two
+	// leaves an action without a key. Its id is derived from the kind, the
+	// key and the inputs, so an action stored under this id is this
+	// request's: the key is written now and the action returned, as for a
+	// retry after a lost answer.
+	var orphan actionRecord
+	var orphanErr error
+	a.withLock(func() {
+		if orphan, orphanErr = a.loadLocked(id); orphanErr == nil {
+			err = a.store.writeKey(kind, key, id)
+		}
+	})
+	var refusal *agentapi.Error
+	switch {
+	case orphanErr == nil:
+		return orphan, err
+	case !errors.As(orphanErr, &refusal) || refusal.Code != agentapi.CodeNotFound:
+		return actionRecord{}, orphanErr
 	}
 	var awaiting int
 	a.withLock(func() { awaiting, err = a.awaitingLocked() })
@@ -835,6 +865,15 @@ func (a *Agent) applyOffer(ctx context.Context, record actionRecord) outcome {
 	if err := json.Unmarshal(record.Preview, &confirmed); err != nil {
 		return outcome{state: agentapi.StateFailed, code: agentapi.CodeInternal, message: "the stored preview does not decode"}
 	}
+	// The slot is held across the fresh preview and the send, so a client
+	// preview at the same moment waits instead of holding the run lock
+	// under either call.
+	release, err := a.holdPreviews(ctx)
+	if err != nil {
+		return outcome{state: agentapi.StateFailed, code: agentapi.CodeInternal,
+			message: "the agent stopped before the offer was sent; nothing was sent"}
+	}
+	defer release()
 	fresh, _, err := a.previewOffer(ctx, inputs)
 	if err != nil || !sameOffer(confirmed, fresh) {
 		return errChanged
@@ -879,11 +918,25 @@ func (a *Agent) applyWithdraw(ctx context.Context, record actionRecord) outcome 
 	if !ok || amount == 0 {
 		return outcome{state: agentapi.StateFailed, code: agentapi.CodeInternal, message: "the stored amount is invalid"}
 	}
+	// The slot is held across the fresh preview and the send (see applyOffer).
+	release, err := a.holdPreviews(ctx)
+	if err != nil {
+		return outcome{state: agentapi.StateFailed, code: agentapi.CodeInternal,
+			message: "the agent stopped before the withdrawal was sent; nothing was sent"}
+	}
+	defer release()
 	readCtx, cancel := context.WithTimeout(ctx, chainReadTimeout)
 	fresh, _, err := a.previewWithdraw(readCtx, servicebridge.WithdrawInput{AmountNano: amount})
 	cancel()
 	if err != nil || !sameWithdraw(confirmed, fresh, amount) {
 		return errChanged
+	}
+	// Recovery after a crash finds this send's own withdrawal record as the
+	// one whose query id is not among the records that exist now, so the
+	// ids are stored durably before the send and no clock takes part.
+	if err := a.recordPriorWithdrawals(record.ActionID); err != nil {
+		return outcome{state: agentapi.StateFailed, code: agentapi.CodeDependencyUnavailable,
+			message: "the withdrawal records could not be read or noted; nothing was sent"}
 	}
 	// The send moves the confirmed exact amount, never "all".
 	result, err := a.lib.Withdraw(ctx, servicebridge.WithdrawInput{AmountNano: amount, Yes: true})
@@ -896,6 +949,32 @@ func (a *Agent) applyWithdraw(ctx context.Context, record actionRecord) outcome 
 	}
 	return outcome{state: agentapi.StateFailed, code: agentapi.CodeNotReady, message: "the withdrawal was not completed",
 		result: result}
+}
+
+// recordPriorWithdrawals stores, in the applying action, the query ids of
+// every withdrawal record the node holds before the send.
+func (a *Agent) recordPriorWithdrawals(id string) error {
+	records, err := a.lib.Withdrawals()
+	if err != nil {
+		return err
+	}
+	prior := make([]uint64, 0, len(records))
+	for _, withdrawal := range records {
+		prior = append(prior, withdrawal.QueryID)
+	}
+	a.withLock(func() {
+		var record actionRecord
+		if record, err = a.store.readAction(id); err != nil {
+			return
+		}
+		if record.State != agentapi.StateApplying {
+			err = errors.New("the action left applying before its send")
+			return
+		}
+		record.PriorWithdrawals, record.PriorRecorded = prior, true
+		err = a.store.writeAction(record, false)
+	})
+	return err
 }
 
 // sameWithdraw is the withdrawal comparison of section 6.1.1.
@@ -1005,13 +1084,25 @@ func (a *Agent) resolve(record actionRecord) outcome {
 			return outcome{state: agentapi.StateAmbiguous, code: agentapi.CodeAmbiguous,
 				message: "the stored preview does not decode; read the withdrawal records"}
 		}
+		// The prior query ids are stored before the send, so without them
+		// the send never started.
+		if !record.PriorRecorded {
+			return outcome{state: agentapi.StateFailed, code: agentapi.CodeNotReady,
+				message: "the agent stopped before the withdrawal was sent; nothing was sent"}
+		}
 		records, err := a.lib.Withdrawals()
 		if err != nil {
 			return outcome{state: agentapi.StateAmbiguous, code: agentapi.CodeAmbiguous,
 				message: "the withdrawal records cannot be read; status shows them once they can"}
 		}
+		prior := make(map[uint64]bool, len(record.PriorWithdrawals))
+		for _, queryID := range record.PriorWithdrawals {
+			prior[queryID] = true
+		}
+		// The send's own record is the one that did not exist before it,
+		// whatever the clocks of the agent and the library said.
 		for _, withdrawal := range records {
-			if withdrawal.StartedUnix < record.ApplyingUnix || withdrawal.AmountNano != confirmed.AmountNanoTOS ||
+			if prior[withdrawal.QueryID] || withdrawal.AmountNano != confirmed.AmountNanoTOS ||
 				withdrawal.Actor != confirmed.Withdraw.Actor {
 				continue
 			}

@@ -75,15 +75,20 @@ func runConfirm(ctx context.Context, set *flag.FlagSet, arguments []string, std 
 	if interval < time.Second || interval > time.Minute {
 		return usagef("--interval must be 1s to 1m")
 	}
+	client, err := agentapi.NewClient(socket, 2*time.Minute)
+	if err != nil {
+		return err
+	}
+	// The decision goes only to the agent of this custody account: a
+	// socket another account owns is refused before anything is sent.
+	if err := providerconfirm.CheckAgentSocket(socket); err != nil {
+		return err
+	}
 	tty, err := buyerconfirm.OpenTerminal(os.Stdin)
 	if err != nil {
 		return err
 	}
 	defer tty.Close()
-	client, err := agentapi.NewClient(socket, 2*time.Minute)
-	if err != nil {
-		return err
-	}
 	session := &providerconfirm.Session{Agent: client, In: bufio.NewReader(tty), Out: tty}
 	if watch {
 		return session.Watch(ctx, interval)

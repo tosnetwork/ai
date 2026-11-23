@@ -70,7 +70,6 @@ const (
 	CodeAgentUnavailable      = "MCP_PROVIDER_AGENT_UNAVAILABLE"
 	CodeAmbiguous             = "MCP_PROVIDER_AMBIGUOUS"
 	CodePermissionDenied      = "MCP_PROVIDER_PERMISSION_DENIED"
-	CodeNotConfigured         = "MCP_PROVIDER_NOT_CONFIGURED"
 	CodeRateLimited           = "MCP_PROVIDER_RATE_LIMITED"
 	CodeInternal              = "MCP_PROVIDER_INTERNAL"
 
