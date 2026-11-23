@@ -271,6 +271,9 @@ func VerifyCoverageActivationEvidenceV1(evidence AuthorizedCoverageActivationEvi
 	if err := VerifyCoverageAcceptanceReceiptV1(acceptance, offer, agreementVerifier, authorityResolver, fenceResolver, now); err != nil {
 		return err
 	}
+	if err := validateActivationTimeBoundsV1(body.ActivatedAtUnix, acceptance.Body.AcceptedAtUnix, offer.CoverageTerms); err != nil {
+		return err
+	}
 	underlying := agentcommerce.AgentAgreement{Body: evidence.UnderlyingAgreementBody,
 		AuthorizationEvidence: evidence.UnderlyingAuthorizationEvidenceSet.Evidence}
 	if err := agentcommerce.ValidateAgreementAuthorization(underlying, agreementVerifier, activatedAt); err != nil {
@@ -338,6 +341,25 @@ func VerifyCoverageActivationEvidenceV1(evidence AuthorizedCoverageActivationEvi
 	bodyDigest, _ := guarantorCodec.Digest("tos.service.agent-guarantor-activation-evidence-body.v1", body)
 	return ValidateAuthorizationSet(evidence.Authorizations, "activation-evidence", bodyDigest,
 		"tos.service.agent-guarantor-activation-evidence-signature.v1", []string{offer.Body.GuarantorAgentID}, authorityResolver, now)
+}
+
+// validateActivationTimeBoundsV1 holds an activation between the acceptance
+// it consumes and the activation cutoff, which is the coverage start:
+// accepted_at_unix <= activated_at_unix <= coverage_starts_at_unix. An
+// activation admitted before its acceptance stands on a commitment that did
+// not exist yet, and one admitted after the cutoff would start coverage
+// retroactively; after the cutoff the coverage can only be resolved as not
+// activated. The acceptance is itself admitted while the coverage Agreement
+// is valid, so the lower bound also keeps the activation at or after the
+// Agreement's valid-from time.
+func validateActivationTimeBoundsV1(activatedAtUnix, acceptedAtUnix uint64, terms CoverageTermsV1) error {
+	if activatedAtUnix < acceptedAtUnix {
+		return errors.New("coverage activation is admitted before the acceptance it stands on")
+	}
+	if activatedAtUnix > terms.CoverageStartsAtUnix {
+		return errors.New("coverage activation is admitted after the activation cutoff, the coverage start")
+	}
+	return nil
 }
 
 func validateActivationEvidenceShape(evidence AuthorizedCoverageActivationEvidenceV1) error {
