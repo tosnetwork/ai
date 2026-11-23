@@ -378,6 +378,9 @@ Deliver on the Service Actor rail:
   confirmed the payments. The buyer's user guide is
   `docs/MCP_BUYER_GUIDE.md`. No Gate D acceptance item is met by this work
   alone.
+- ⬜ MCP provider adapter, so that an MCP client can operate a provider node
+  without OpenFox — specified, not implemented, in
+  `docs/MCP_PROVIDER_ADAPTER_V1.md`.
 
 Delivered earlier:
 
