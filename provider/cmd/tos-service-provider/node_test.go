@@ -72,9 +72,9 @@ func TestAConfigurationOfAnotherCarrierIsRefused(t *testing.T) {
 				"--yes"},
 		} {
 			arguments = append([]string{arguments[0], "--rail-config", rail}, arguments[1:]...)
-			_, stderr, code := invoke(t, arguments...)
-			if code != exitFailed || !strings.Contains(stderr, test.want.Error()) {
-				t.Errorf("%s: %v: exit %d, %q", name, arguments, code, stderr)
+			stdout, stderr, code := invoke(t, arguments...)
+			if code != exitFailed || !strings.Contains(stderr, test.want.Error()) || stdout != "" {
+				t.Errorf("%s: %v: exit %d, stdout %q, stderr %q", name, arguments, code, stdout, stderr)
 			}
 		}
 		// The readiness report says the same in its own form.
@@ -158,8 +158,8 @@ func TestAnExistingProviderDirectoryWorksUnchanged(t *testing.T) {
 	}
 	// A re-run of init continues with the packet controller the directory
 	// was made with.
-	if got := packetController(rail); got != "openfox-packet" {
-		t.Fatalf("init would use packet controller %q", got)
+	if got, err := packetController(rail, state); err != nil || got != "openfox-packet" {
+		t.Fatalf("init would use packet controller %q: %v", got, err)
 	}
 	if after, err := os.ReadFile(rail); err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("the configuration changed: %v", err)

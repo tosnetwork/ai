@@ -291,6 +291,34 @@ func TestInitKilledWhileBuildingRebuildsTheSameAgent(t *testing.T) {
 	}
 }
 
+// An init killed after its journal and before its rail configuration leaves
+// the packet controller in the journal only; RecordedPacketController finds
+// it there, and reads without creating anything.
+func TestTheRecordedPacketControllerComesFromTheJournal(t *testing.T) {
+	f := newSetupFixture(t)
+	if got, err := RecordedPacketController(f.init.StateDir); err != nil || got != "" {
+		t.Fatalf("a state directory without a journal: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.init.StateDir, setupDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("the lookup created the setup directory: %v", err)
+	}
+	f.script("agent native-registry register-agent", fakeKillBefore)
+	f.runKilled(t, "init", f.init)
+	if _, err := os.Stat(f.init.RailConfigPath); !os.IsNotExist(err) {
+		t.Fatalf("the killed init wrote its rail configuration: %v", err)
+	}
+	if got, err := RecordedPacketController(f.init.StateDir); err != nil || got != f.init.PacketController {
+		t.Fatalf("the journal's packet controller: %q, %v", got, err)
+	}
+	if _, err := RecordedPacketController("relative"); err == nil {
+		t.Fatal("a relative state directory was accepted")
+	}
+	writeFixtureFile(t, setupJournalPath(f.init.StateDir), []byte(`{"schema":"another"}`), 0o600)
+	if _, err := RecordedPacketController(f.init.StateDir); err == nil {
+		t.Fatal("a journal of another schema was accepted")
+	}
+}
+
 func TestInitNeverResendsARegistrationWhoseOutcomeIsUnknown(t *testing.T) {
 	t.Run("killed after the message landed", func(t *testing.T) {
 		f := newSetupFixture(t)

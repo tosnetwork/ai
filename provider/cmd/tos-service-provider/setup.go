@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -12,7 +13,8 @@ import (
 )
 
 // defaultPacketController names the vault controller `init` creates when
-// neither the flag nor an existing rail configuration names one.
+// neither the flag, the setup journal nor an existing rail configuration
+// names one.
 const defaultPacketController = "service-packet"
 
 // setupEnv reports previews and progress on standard error; standard output
@@ -70,13 +72,27 @@ func uint32Flag(set *flag.FlagSet, target *uint32, name, usage string) {
 }
 
 // packetController is the packet controller `init` uses when the flag was
-// not given: the one an existing rail configuration records, so that a
-// re-run continues the node it finds, and otherwise the default.
-func packetController(railConfigPath string) string {
-	if existing, err := servicebridge.LoadNodeConfig(railConfigPath); err == nil && existing.PacketController != "" {
-		return existing.PacketController
+// not given, so that a re-run continues the node it finds: the one the setup
+// journal under stateDir records (an earlier init that stopped after its
+// journal and before its rail configuration is found only there), else the
+// one an existing rail configuration records, else the default. A journal
+// that exists but cannot be read is an error rather than a reason to pick
+// another controller. A state directory that is not clean and absolute is
+// left to init, which refuses it with its own message.
+func packetController(railConfigPath, stateDir string) (string, error) {
+	if filepath.IsAbs(stateDir) && filepath.Clean(stateDir) == stateDir {
+		recorded, err := servicebridge.RecordedPacketController(stateDir)
+		if err != nil {
+			return "", err
+		}
+		if recorded != "" {
+			return recorded, nil
+		}
 	}
-	return defaultPacketController
+	if existing, err := servicebridge.LoadNodeConfig(railConfigPath); err == nil && existing.PacketController != "" {
+		return existing.PacketController, nil
+	}
+	return defaultPacketController, nil
 }
 
 func runInit(ctx context.Context, set *flag.FlagSet, arguments []string, std streams) error {
@@ -96,8 +112,9 @@ func runInit(ctx context.Context, set *flag.FlagSet, arguments []string, std str
 		"URL (its value is never printed or stored)")
 	set.StringVar(&in.WalletName, "wallet", "", "tosctl wallet that owns and funds this node")
 	set.StringVar(&in.PacketController, "packet-controller", "", "vault controller that signs Agent Packets and "+
-		"controls the Agent, created if absent (default: the one the rail configuration records, else "+
-		defaultPacketController+")")
+		"controls the Agent, created if absent (default: the one the setup journal under --state-dir records, "+
+		"else the one the rail configuration records, else "+defaultPacketController+"; a setup journal that "+
+		"cannot be read stops init)")
 	set.StringVar(&in.RegistryCodeBOC, "registry-code-boc", "", "Native Registry code BOC file (base64)")
 	set.StringVar(&in.ActorCodeHash, "actor-code-hash", "", "pinned Service Actor release code hash "+
 		"(tvm-cell-sha256:<hex>)")
@@ -127,7 +144,9 @@ func runInit(ctx context.Context, set *flag.FlagSet, arguments []string, std str
 		return err
 	}
 	if in.PacketController == "" {
-		in.PacketController = packetController(in.RailConfigPath)
+		if in.PacketController, err = packetController(in.RailConfigPath, in.StateDir); err != nil {
+			return err
+		}
 	}
 	result, err := servicebridge.RunInit(ctx, in, setupEnv(std))
 	if result == nil {
