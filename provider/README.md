@@ -134,7 +134,33 @@ one. Standard output carries JSON or nothing:
 ### An existing provider directory
 
 The rail configuration file, the state directory, the journals and the
-request records are the library's formats and did not change. A directory
+request records are the library's formats. This release changes three of
+them, and reads every earlier form:
+
+- a request record gains `admitted_unix`, the time the gate admitted it,
+  written once; a record without it is read as before;
+- the admission pause marker is written as schema
+  `tos.openfox.rail-admission-pause.v2` with an `origin` (`operator` or
+  `agent`) and a random `stamp`; a v1 marker is read as an operator pause.
+  Every pause, re-stamp and removal runs under `<state_dir>/admission-pause.lock`;
+- `serve` holds `<state_dir>/serve.lock` while it runs, so a second `serve`,
+  or a provider agent, on the same node is refused
+  (`another process already serves the node of this state directory`).
+
+Use one release for every program that touches a node. An earlier
+release's program cannot read a v2 marker (its `pause` fails and its node
+treats the marker as unreadable, so admission stays paused) nor a record with
+`admitted_unix`. This release refuses a marker of a schema it does not know,
+with a message that says to run the program of the same release; admission
+stays paused until the right program resumes it.
+
+`pause` always leaves an operator marker: over an agent's pause it replaces
+the marker with an operator one that keeps the first `paused_unix`, carries
+the new `--reason` (the old one when none is given) and a new stamp, and
+reports `"restamped": true` with the `previous_origin`, so the agent can no
+longer lift it. Over a marker it cannot read it changes nothing and fails.
+`resume` stays unconditional: it removes whatever marker there is. A
+directory
 made by the earlier `earning service init` and `offer` commands is operated
 by this program as it is: name the same `--rail-config`. A re-run of `init`
 without `--packet-controller` keeps the controller the node already has: the

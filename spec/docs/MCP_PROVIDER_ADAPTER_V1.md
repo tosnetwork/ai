@@ -268,7 +268,14 @@ for a request, is bounded by:
   store-and-forward and cost the wallet nothing. The agent lifts that pause
   by itself once the balance is at or above the floor at a later checkpoint,
   and only by the compare-and-remove of 2.6, so a pause anyone else wrote or
-  re-stamped is never lifted.
+  re-stamped is never lifted. A model's `tos_provider_pause` over the
+  floor's own marker leaves the marker unchanged (2.6, "Agent pause") and
+  moves the pause-origin record (8.2) of those bytes from `wallet_floor` to
+  `model`; from then on the floor never lifts it, and it is lifted only by
+  the model's own resume of 4.11, which also requires the floor to be met, or
+  by a confirmed resume. Moving the record keeps the model's later stop from
+  being dropped silently when the balance recovers, without making the
+  model's own pause need a human to lift.
 
 **Residual fee exposure.** The floor is checked once per service interval,
 and work already admitted still responds. Below the floor the wallet can
@@ -295,7 +302,10 @@ indistinguishable. Section 13 therefore changes the library and the program:
 - **Marker origin.** The marker (schema bumped to
   `tos.openfox.rail-admission-pause.v2`) carries `origin`, either `operator`
   or `agent`, and `stamp`, 16 random bytes in hex drawn at each write. A v1
-  marker reads as `origin = operator`.
+  marker reads as `origin = operator`. A v2 marker with any other `origin`,
+  and a marker of a schema the release does not know, reads as unreadable:
+  admission stays paused, and only the operator's `resume` or a confirmed
+  resume lifts it.
 - **Operator pause re-stamps.** `tos-service-provider pause`, and a pause
   the custody uid asks of the agent, always leave an `operator` marker. On a
   marker that is already `operator` it changes nothing, as today. On an
@@ -838,9 +848,19 @@ marker gains `origin` and `stamp` with its v2 schema and a lock file (2.6),
 and `state_dir` gains the serve lock (2.4). These are library state, written
 by the library for every node, with or without the adapter.
 
+**One release.** The program (`tos-service-provider`), the provider agent and
+the MCP server MUST come from one release. A program of the release before
+these changes cannot read a v2 pause marker: its `pause` fails on one (the
+node it serves treats the marker as unreadable, so admission stays paused),
+and it reads a provider record with `admitted_unix` as invalid. Every program
+of this release refuses a marker schema it does not know with a message that
+says so, and reads v1 markers and records without `admitted_unix`.
+
 The adapter itself adds exactly three things, in its own state directory
 (owner-only `0700`, atomic synced replacements, one agent per directory under
-an exclusive lock, which is also the action lock of 6.1):
+an exclusive directory lock). The action lock of 6.1 is a separate lock file
+in that directory, taken only around one action's apply, so that the
+directory lock, held for the agent's whole life, never doubles as it:
 
 ### 8.1 The action store
 
@@ -1002,8 +1022,12 @@ Code and Codex replace OpenFox for using and accepting `ai`. The run MUST:
   validator of the old set is not in the new one and at least one validator
   of the new set was not in the old one. A re-election of the same members,
   which also changes the configuration's hash, does not count. The local
-  network's rotation, which alternates between member sets such as
-  {1, 2, 3, 7} and {1, 2, 3, 4}, meets this. During the switch at least one
+  network's rotation meets this: a network installed with
+  `local/scripts/setup-testnet.sh --rotate` (tos-ops) runs the ten-minute
+  development election profile with candidate node 7 added, and its election
+  driver (`local/scripts/local-pq-elections.py`, the `tos-pq-elections`
+  service) alternates the four-member sets {1, 2, 3, 7} and {1, 2, 3, 4}
+  (tos-ops `local/README.md`, "Staking wallets and continuous elections"). During the switch at least one
   paid request is pending at the provider; that request is responded and
   accepted after the switch, and a further purchase runs entirely after it.
   Both agents keep their strict-majority reads through the switch;

@@ -173,13 +173,20 @@ func runPause(_ context.Context, set *flag.FlagSet, arguments []string, std stre
 	if err != nil {
 		return err
 	}
-	pause, already, err := servicebridge.PauseAdmission(config.StateDir, reason, time.Now())
+	// The operator's pause: over the provider agent's own pause it re-stamps
+	// the marker as the operator's, so the agent can no longer lift it.
+	result, err := servicebridge.PauseAdmissionAs(config.StateDir, servicebridge.PauseOriginOperator, reason, time.Now())
 	if err != nil {
 		return err
 	}
-	return printJSON(std.out, map[string]any{
-		"paused": true, "already_paused": already, "paused_unix": pause.PausedUnix, "reason": pause.Reason,
-	})
+	answer := map[string]any{
+		"paused": true, "already_paused": result.Already, "paused_unix": result.Pause.PausedUnix,
+		"reason": result.Pause.Reason, "origin": result.Pause.Origin, "restamped": result.Restamped,
+	}
+	if result.Already {
+		answer["previous_origin"] = result.PreviousOrigin
+	}
+	return printJSON(std.out, answer)
 }
 
 func runResume(_ context.Context, set *flag.FlagSet, arguments []string, std streams) error {

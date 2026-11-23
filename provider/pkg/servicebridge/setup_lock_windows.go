@@ -9,7 +9,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func acquireRunLock(path string) (*os.File, error) {
+// acquireRunLock takes the exclusive lock of a lock file without waiting.
+// busy is returned when another handle holds it.
+func acquireRunLock(path string, busy error) (*os.File, error) {
 	pathUTF16, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, errors.New("servicebridge: encode the run lock path")
@@ -42,7 +44,7 @@ func acquireRunLock(path string) (*os.File, error) {
 		overlapped,
 	); err != nil {
 		_ = windows.CloseHandle(handle)
-		return nil, ErrSetupBusy
+		return nil, busy
 	}
 	lock := os.NewFile(uintptr(handle), path)
 	if lock == nil {
