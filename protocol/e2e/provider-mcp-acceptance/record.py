@@ -241,12 +241,29 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             {k: ledger.get(k) for k in ("transactions", "history_complete", "balance_before_oldest_nanotos")},
         )
         # The ledger's balance after the withdrawal's payout must equal the
-        # balance the harness read directly once the payout arrived.
+        # balance the harness read directly once the payout arrived. The
+        # actor's withdraw transaction pays the wallet in two messages (the
+        # revenue and the change of the attached value), so the wallet takes
+        # two credits; the ledger's balance after the last of them is what
+        # the direct read saw (the wallet sent nothing after the withdrawal).
         payout_lt = max((t["lt"] for t in after.get("withdraw_transactions", [])), default=None)
         credit_rows = sorted(
             (r for r in ledger.get("rows", []) if payout_lt and r["lt"] > payout_lt), key=lambda r: r["lt"]
         )
-        ledger_after = credit_rows[0]["balance_after_nanotos"] if credit_rows else None
+        ledger_after = credit_rows[-1]["balance_after_nanotos"] if credit_rows else None
+        # And before it: the wallet's own send of withdraw_revenue (its last
+        # transaction before the actor's) starts from the balance the harness
+        # read directly before the step.
+        send_rows = sorted(
+            (r for r in ledger.get("rows", []) if payout_lt and r["lt"] < payout_lt), key=lambda r: r["lt"]
+        )
+        ledger_before = send_rows[-1]["balance_before_nanotos"] if send_rows else None
+        check(
+            f"{label}: the ledger's balance before the wallet's withdraw_revenue send equals the harness's direct "
+            "read before the step",
+            ledger_before is not None and ledger_before == before.get("wallet_balance_nanotos"),
+            {"ledger": ledger_before, "direct_read": before.get("wallet_balance_nanotos")},
+        )
         check(
             f"{label}: the ledger's balance after the withdrawal payout equals the harness's direct read",
             ledger_after is not None and ledger_after == after.get("wallet_balance_nanotos"),
