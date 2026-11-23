@@ -198,6 +198,36 @@ func TestTheDailyCapHoldsATaskUntilAnAdmissionLeavesTheDay(t *testing.T) {
 	}
 }
 
+// The limiter fails closed: when the provider records cannot be read, the
+// count is unknown and the task is held, never admitted. A limiter that
+// would admit anything is configured, so only the read failure can hold.
+func TestARecordReadFailureHoldsTheTask(t *testing.T) {
+	ctx := context.Background()
+	service := startRealExecutor(t, shortSocketDir(t), &fakeRuntime{}, nil)
+	fixture := newGateFixture(t, serviceFixtureStart)
+	state := serviceState(t)
+	node := openServiceNode(t, fixture, state, ownClient(t, service.socket))
+	node.provider.config.Limiter = DailyAdmissionCap{Max: 1_000_000}
+	broken := filepath.Join(state, "provider", strings.Repeat("e", 64)+".json")
+	if err := os.WriteFile(broken, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := node.provider.HandleTask(ctx, fixture.message)
+	if !errors.Is(err, ErrAdmissionLimited) || !errors.Is(err, ErrAdmissionPaused) {
+		t.Fatalf("with an unreadable record: %v", err)
+	}
+	if slotCount(t, state) != 0 || service.backend.runs() != 0 {
+		t.Fatal("a task was admitted while the records could not be read")
+	}
+	// With the record readable again the same task is admitted.
+	if err := os.Remove(broken); err != nil {
+		t.Fatal(err)
+	}
+	if err := node.provider.HandleTask(ctx, fixture.message); err != nil {
+		t.Fatalf("once the records read: %v", err)
+	}
+}
+
 // admitted_unix is written once, at admission, and later updates move only
 // updated_unix.
 func TestTheAdmissionTimeIsWrittenOnceAndNeverMoved(t *testing.T) {

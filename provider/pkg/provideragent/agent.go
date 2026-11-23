@@ -31,6 +31,9 @@ type Options struct {
 	VaultURL string
 	Now      func() time.Time
 	Random   func([]byte) error
+	// Log receives every serving problem the ring keeps, redacted, for the
+	// agent's standard error.
+	Log func(line string)
 }
 
 // Agent is the provider agent.
@@ -40,6 +43,7 @@ type Agent struct {
 	vaultURL string
 	now      func() time.Time
 	random   func([]byte) error
+	log      func(string)
 	store    store
 	// rail is the rail configuration as read at open: the node's identity
 	// and state directory, which no later change of the file moves.
@@ -97,7 +101,7 @@ func Open(options Options) (*Agent, error) {
 		return nil, err
 	}
 	agent := &Agent{config: config, lib: options.Library, vaultURL: options.VaultURL, now: options.Now,
-		random: options.Random, store: store{root: config.StateDir}, rail: rail, changed: make(chan struct{}),
+		random: options.Random, log: options.Log, store: store{root: config.StateDir}, rail: rail, changed: make(chan struct{}),
 		rates: newRates(config.MaxWithdrawPreviewsPerDay), ring: &ring{}, releaseDirectory: release}
 	if agent.now == nil {
 		agent.now = time.Now
@@ -177,7 +181,11 @@ func (a *Agent) Report(stage string, err error) {
 		return
 	}
 	line := time.Now().UTC().Format(time.RFC3339) + " " + stage + ": " + err.Error()
-	a.ring.add(a.redactor().text(strings.Join(strings.Fields(line), " ")))
+	line = a.redactor().text(strings.Join(strings.Fields(line), " "))
+	a.ring.add(line)
+	if a.log != nil {
+		a.log(line)
+	}
 }
 
 // ring keeps the last lines of the serving report in memory.

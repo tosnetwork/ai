@@ -12,6 +12,7 @@ package agentsocket
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -391,11 +392,12 @@ func (s *Server) dispatch(ctx context.Context, role Role, raw []byte) Response {
 	return Response{Schema: s.config.Schema, OK: true, Result: result}
 }
 
-// DecodeParams decodes a method's params strictly: unknown fields,
-// duplicate keys and trailing data are refused.
+// DecodeParams decodes a method's params strictly: they must be one JSON
+// object, and unknown fields, duplicate keys and trailing data are refused.
 func DecodeParams(raw json.RawMessage, value any) error {
-	if len(raw) == 0 {
-		return errors.New("params are missing")
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return errors.New("params must be one JSON object")
 	}
 	return jsonstrict.Decode(raw, value)
 }

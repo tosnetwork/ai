@@ -594,18 +594,33 @@ def scenario_refund(offer: dict, actor: str) -> None:
         read = account_transactions(actor)
         return [tx for tx in with_opcode((read or {}).get("value") or [], CALL_OPCODE)
                 if tx.get("source") == buyer_wallet and not tx.get("aborted")] if read else None
-    calls_before = buyer_calls() or []
+    # The buyer's calls already at the actor, read before the payment. A read
+    # that failed is not "no calls" (None stays distinct from []): taking it
+    # as none would let any earlier call stand for the paying one.
+    read_before = poll(lambda: (lambda calls: (calls,) if calls is not None else None)(buyer_calls()), 120, 5)
+    calls_before = read_before[0] if read_before else None
+    record("refund: the buyer's calls at the actor are read before the payment", calls_before is not None,
+           {"calls_before": None if calls_before is None else len(calls_before)})
     paid = base.confirm_payment(request_hash)
     record("refund: the unanswered call is paid", not paid.get("is_error", True), structured(paid).get("purchase", {}).get("state"))
     started = time.monotonic()
     # The buyer's balance after the call, read once the call itself is
-    # finalized at the actor, so the bound below starts after the payment.
-    new_calls = poll(lambda: (lambda calls: calls if calls is not None and len(calls) > len(calls_before) else None)(
-        buyer_calls()), 300, 5) or []
+    # finalized at the actor and the change it sent the buyer wallet is
+    # received there: the change can land in a later block than the call,
+    # and the bound below counts only what the actor sent after the call.
+    new_calls = (poll(lambda: (lambda calls: calls if calls is not None and len(calls) > len(calls_before) else None)(
+        buyer_calls()), 300, 5) or []) if calls_before is not None else []
     call_lt = max((tx["lt"] for tx in new_calls), default=None)
-    balance_paid = wallet_balance(buyer_wallet)
-    record("refund: the paying call is finalized at the actor before the buyer's balance is read",
-           call_lt is not None and balance_paid is not None, {"call_lt": call_lt, "balance": balance_paid})
+    paying = [tx for tx in new_calls if tx["lt"] == call_lt]
+    change_sent = paid_to(paying[0], buyer_wallet) if paying else 0
+    change = credited_from(buyer_wallet, actor, paying[0]) if change_sent > 0 else None
+    change_received = change_sent == 0 or change is not None
+    balance_paid = wallet_balance(buyer_wallet) if call_lt is not None and change_received else None
+    record("refund: the paying call is finalized at the actor and its change is received by the buyer wallet "
+           "before the buyer's balance is read",
+           call_lt is not None and change_received and balance_paid is not None,
+           {"call_lt": call_lt, "change_sent_nanotos": change_sent, "change_transaction": (change or {}).get("hash"),
+            "balance": balance_paid})
 
     def refunded():
         duty = structured(base.mcp("tos_buyer_refund", {"request_hash": request_hash})).get("duty") or {}
