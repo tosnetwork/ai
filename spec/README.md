@@ -113,6 +113,10 @@ contradict them.
 - [MCP Buyer Guide](docs/MCP_BUYER_GUIDE.md) walks a developer using an MCP
   client through custody setup, configuration, purchase, confirmation, result
   and refunds with the MCP buyer adapter.
+- [MCP Provider Guide](docs/MCP_PROVIDER_GUIDE.md) walks a developer using an
+  MCP client through the custody and developer accounts, the provider agent,
+  the confirmer, each client's MCP entry and a first session with the MCP
+  provider adapter (implemented, not yet accepted).
 - [Gate E Buyer Onboarding](docs/GATE_E_BUYER_ONBOARDING.md) defines canonical
   Quote review, funding, and crash-safe buyer recovery (its stablecoin
   funding path describes the retired escrow rail).

@@ -379,8 +379,12 @@ Deliver on the Service Actor rail:
   `docs/MCP_BUYER_GUIDE.md`. No Gate D acceptance item is met by this work
   alone.
 - ⬜ MCP provider adapter, so that an MCP client can operate a provider node
-  without OpenFox — specified, not implemented, in
-  `docs/MCP_PROVIDER_ADAPTER_V1.md`.
+  without OpenFox — implemented, not yet accepted
+  (`docs/MCP_PROVIDER_ADAPTER_V1.md`): the library prerequisites (ai #131),
+  the provider agent and the confirmer (ai #132), and the MCP server
+  `tos-service-provider-mcp` with its user guide `docs/MCP_PROVIDER_GUIDE.md`.
+  The local agent-operated run of section 10.2, with Claude Code and Codex
+  each operating a provider, is still to come.
 
 Delivered earlier:
 

@@ -335,6 +335,16 @@ func TestTheServerChecksTheInputShapeBeforeSending(t *testing.T) {
 	if calls := m.agent.count(); calls != 0 {
 		t.Fatalf("the agent was called %d times for refused shapes", calls)
 	}
+	// What the schema refuses the SDK answers itself: a tool result with
+	// isError and its validation text, without structured content (spec
+	// section 7); what only the server can see, such as amount and all
+	// together, carries the error envelope.
+	if schemaRefused := m.tool(mcpprovider.ToolStatus, map[string]any{"wallet": "0:x"}); schemaRefused.StructuredContent != nil ||
+		!strings.Contains(toolText(schemaRefused), "validating") {
+		t.Fatalf("a schema refusal: %+v %s", schemaRefused.StructuredContent, toolText(schemaRefused))
+	}
+	m.refused(mcpprovider.ToolWithdrawPreview, map[string]any{"amount_nanotos": "1", "all": true, "idempotency_key": keyA},
+		agentapi.CodeBadInput)
 	// A price of the right shape outside the operator's bounds is the
 	// agent's to refuse.
 	arguments := offerArguments(keyA)
