@@ -9,7 +9,10 @@ change a purchase.
 | Path | Contents |
 |---|---|
 | `pkg/servicebridge` | The rail node library: setup, offer, preflight, relay and direct carriage, execution through the executor service, receipts, status and withdrawal. It also holds the rail's buyer counterpart, which the two-sided node and the tests use. |
-| `cmd/tos-service-provider` | The provider program: a thin command-line wrapper over the library. |
+| `cmd/tos-service-provider` | The provider program: a thin command-line wrapper over the library, with the `agent` and `confirm` verbs of the MCP provider adapter. |
+| `pkg/provideragent` | The provider agent of the MCP provider adapter ([`MCP_PROVIDER_ADAPTER_V1.md`](../spec/docs/MCP_PROVIDER_ADAPTER_V1.md)): runs the node, serves the agent socket, keeps the action store and the pause-origin record, and applies an action only after a human confirmed it. |
+| `pkg/provideragent/agentapi` | The agent socket's API and client; it links no custody code. |
+| `pkg/providerconfirm` | The adapter's confirmer, on a custody-account terminal. |
 
 `provider/` imports `protocol/` and `execution/` only, and nothing imports
 `provider/` (`make boundary-lint`).
@@ -38,13 +41,23 @@ tos-service-provider resume     admit new requests again
 tos-service-provider withdraw   withdraw credited revenue to the owner wallet
 tos-service-provider manifest   build a Capability manifest by hand (no chain effect)
 tos-service-provider metadata   print the metadata hash an actor policy must carry
+tos-service-provider agent      run the node for the MCP provider adapter and serve its agent socket
+tos-service-provider confirm    confirm or decline the adapter's pending actions, on a custody terminal
 ```
+
+`agent --config <file>` reads the owner-private agent configuration (schema
+`tos.service.mcp-provider.agent-config.v1`, section 2.4 of the adapter
+specification) and runs in the custody account; `confirm --agent-socket
+<path> [--watch]` runs there too, on a terminal that account logged in on.
+Before the offer is published the agent serves no node and holds the node's
+serve lock; the model previews the offer and the human confirms it.
 
 `tos-service-provider <command> -h` lists a command's flags. The step-by-step
 walk-through is the
 [provider guide](../spec/docs/AI_SERVICE_PROVIDER_GETTING_STARTED.md); it was
-written around another program's `earning service` commands. Each of the ten
-provider verbs above appears there as `earning service <verb>`, and each flag
+written around another program's `earning service` commands. Each of the
+first ten provider verbs above appears there as `earning service <verb>`
+(`agent` and `confirm` do not), and each flag
 the guide gives one of them exists here with the same name and meaning, with
 these exceptions:
 
@@ -146,6 +159,9 @@ them, and reads every earlier form:
 - `serve` holds `<state_dir>/serve.lock` while it runs, so a second `serve`,
   or a provider agent, on the same node is refused
   (`another process already serves the node of this state directory`).
+  OpenFox's own `earning service serve` is built on its own copy of the
+  library, which takes no serve lock: it is not refused, and it must never
+  run on a node this program or the provider agent serves.
 
 Use one release for every program that touches a node. An earlier
 release's program cannot read a v2 marker (its `pause` fails and its node
@@ -205,16 +221,19 @@ buying is `protocol/cmd/tos-service-buyer` and the MCP buyer server.
   policy. If the rail configuration also has a buyer section, `serve` keeps
   that section's own purchases moving as the library always did, which
   includes sending `expire` and `claim_refund` for them.
-- **An agent operating a provider runs these commands** under the operator's
-  account, with that account's access to the vault. Separating the model
-  from the keys, as the MCP buyer adapter does with its custody account, is
-  not built for the selling side yet (see below).
+- **A model operates a provider through the provider agent,** never with
+  these commands. `tos-service-provider agent` runs in a custody account the
+  model's account cannot read; the model's MCP server reaches it only
+  through the agent socket, whose peer uid decides what it may do. An offer,
+  a withdrawal and a resume of any pause but the model's own are previewed
+  and wait for a human, who confirms them with `tos-service-provider confirm`
+  on a custody terminal; the agent re-runs the preview before it sends.
 
 ## Not here yet
 
-- **An MCP provider adapter.** A later phase adds one with a
-  custody-separated daemon, mirroring the buyer adapter
-  ([`MCP_BUYER_ADAPTER_V1.md`](../spec/docs/MCP_BUYER_ADAPTER_V1.md)).
+- **The MCP provider server.** `tos-service-provider-mcp`, the stdio server
+  an MCP client starts, and its guide come next; the agent and the
+  confirmer it speaks to are here.
 - **A live run on a public network.** No record shows this program serving a
   paid call on a public test network; the recorded paid-work runs used the
   same library inside another program.

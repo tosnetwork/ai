@@ -2,8 +2,12 @@
 
 ## Status and scope
 
-**Status:** specified, not implemented. No code conforms to this document
-yet, and no run has used it. It is the selling-side counterpart of
+**Status:** partly implemented, not accepted. The library prerequisites of
+section 13, the provider agent (`tos-service-provider agent`, package
+`provider/pkg/provideragent`) and the confirmer (`tos-service-provider
+confirm`) are implemented; the MCP server `tos-service-provider-mcp` and its
+guide are not yet, and no run of section 10.2 has used it. It is the
+selling-side counterpart of
 [`MCP_BUYER_ADAPTER_V1.md`](MCP_BUYER_ADAPTER_V1.md) ("the buyer spec"
 below), and it is written against ai main at merge `57b1a448` and the
 provider program `provider/cmd/tos-service-provider` (ai #126).
@@ -187,9 +191,15 @@ custody-owned regular file of mode `0600` or stricter, decoded strictly
   pauses (default 2 TOS);
 - the withdrawal bound `max_withdraw_previews_per_day` (default 8).
 
-It refuses a rail configuration that has no provider section, has a `buyer`
-section, a `chat` section or `messenger_socket`, or whose `state_dir` is not
-an owner-private directory of the custody account.
+It refuses a rail configuration that has a `buyer` section, a `chat` section
+or `messenger_socket`, or whose `state_dir` is not an owner-private directory
+of the custody account. A rail configuration without a provider section is
+accepted: it is a node `init` set up whose offer the agent is to publish
+(3.1, step 4). Until a confirmed offer writes the provider section, the
+agent serves no node but holds the node's serve lock, so `serve` and a second
+agent are refused from its start; once the section exists it releases the
+lock and opens the node in its place (`OpenNode` takes the lock again).
+Methods that need the offer answer `MCP_PROVIDER_NOT_OFFERED` until then.
 
 Running, it:
 
@@ -258,7 +268,10 @@ for a request, is bounded by:
   records whose `admitted_unix` lies in the last 86,400 seconds of host time;
   a record without the field (written before the change) counts as admitted
   at its `updated_unix`, which can only over-count. At the cap a task is held
-  as if paused and admitted once the count falls. The field is new state in
+  as if paused and admitted once the count falls; a buyer's resend of a held
+  task is held the same way, as during a pause. Provider records that cannot
+  be read hold the task too: the count is then unknown, and the limiter fails
+  closed. The field is new state in
   the node's own record, owned by the library, not by the adapter.
 - **Wallet floor:** when the owner wallet's finalized balance falls below
   `min_wallet_nanotos`, the agent writes an agent pause marker (2.6) with the
@@ -321,8 +334,13 @@ indistinguishable. Section 13 therefore changes the library and the program:
   Pause, re-stamp and removal all run under one exclusive lock file in
   `state_dir`, so a re-stamp between the agent's read and its removal makes
   the removal fail with `MCP_PROVIDER_CONFLICT` and leaves the operator's
-  marker in place. The program's own `resume` stays unconditional: it is the
-  operator's command.
+  marker in place. As a second safeguard, independent of the pause-origin
+  record, the agent's direct removals (the model's resume and the floor
+  lift) also decode the expected bytes and refuse any whose `origin` is not
+  `agent`, so a record that somehow held an operator marker's bytes still
+  could not lift it. Only a confirmed resume, which a human decided, may
+  remove an `operator` marker, and only by its confirmed bytes. The
+  program's own `resume` stays unconditional: it is the operator's command.
 
 The agent's pause-origin record (8.2) holds the bytes of each marker it
 wrote and why (`model` or `wallet_floor`); a marker whose bytes differ from
@@ -452,7 +470,8 @@ quorum reads and a `tosctl` controller probe), 10 `pause` and `resume`, and
 10 `offer_preview` and `withdraw_preview` together; and per day at most
 `max_withdraw_previews_per_day` withdrawal previews. Over a bound it refuses
 with `MCP_PROVIDER_RATE_LIMITED` before reading anything. A request refused
-for its input does not count.
+for its input does not count. The bounds apply to the client uid; the
+custody uid is the operator and is not bounded.
 
 ### 4.3 Redaction
 
@@ -652,8 +671,10 @@ Output: one of `awaiting_confirmation` (call again), `declined`, `expired`
 digest, reference, state and timestamps.
 
 `tos_provider_cancel` input: `action_id`. Moves an action still
-`awaiting_confirmation` to the terminal `cancelled`; any later state is
-refused with its current state (`MCP_PROVIDER_CONFLICT`). Cancelling only
+`awaiting_confirmation` to the terminal `cancelled`; a repeat on an action it
+already cancelled answers the same `cancelled` action (7, "Idempotency"), and
+any other later state is refused with its current state
+(`MCP_PROVIDER_CONFLICT`). Cancelling only
 removes authority, so the model may do it without a human. At most 4 actions
 await confirmation at once (`MCP_PROVIDER_OVER_LIMIT` beyond), so a model
 cannot flood the confirmer.

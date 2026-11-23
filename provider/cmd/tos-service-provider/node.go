@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,10 +18,6 @@ import (
 // serviceInterval is how often the serving node runs its duties when no
 // packet prompts it sooner.
 const serviceInterval = 5 * time.Second
-
-// shutdownBudget bounds how long a stopping node waits for its receiver
-// socket to finish the requests in flight.
-const shutdownBudget = 10 * time.Second
 
 // serveStarted is the one line `serve` prints once the node is assembled and
 // its receiver socket is open.
@@ -50,58 +45,24 @@ func runServe(ctx context.Context, set *flag.FlagSet, arguments []string, std st
 	if err != nil {
 		return err
 	}
-	if node.Service == nil {
-		return errors.Join(errors.New("the node has no rail duties to serve"), node.Close())
-	}
-	server, err := servicebridge.OpenAgentPacketUnixServer(node.Config.ReceiverSocket, node.Receiver)
-	if err != nil {
-		return errors.Join(err, node.Close())
-	}
-	served := make(chan error, 1)
-	go func() { served <- server.Serve() }()
-	relayed := make(chan error, 1)
-	relayCtx, stopRelay := context.WithCancel(ctx)
-	defer stopRelay()
-	if node.Relay != nil {
-		// The relay carrier polls the node's relays, keeps redundant
-		// deposits going and rotates the node's encryption keys.
-		go func() { relayed <- node.Relay.Run(relayCtx) }()
-	} else {
-		relayed <- nil
-	}
 	relays := node.Config.RelayURLs
 	if relays == nil {
 		relays = []string{}
 	}
-	started, err := json.Marshal(serveStarted{
-		Serving: true, AgentID: node.Config.AgentID, CapabilityID: node.Config.Provider.CapabilityID,
-		ReceiverSocket: node.Config.ReceiverSocket, RelayURLs: relays,
+	err = node.Serve(ctx, serviceInterval, func() error {
+		started, encodeErr := json.Marshal(serveStarted{
+			Serving: true, AgentID: node.Config.AgentID, CapabilityID: node.Config.Provider.CapabilityID,
+			ReceiverSocket: node.Config.ReceiverSocket, RelayURLs: relays,
+		})
+		if encodeErr == nil {
+			_, encodeErr = fmt.Fprintf(std.out, "%s\n", started)
+		}
+		if encodeErr != nil {
+			return fmt.Errorf("report that the node is serving: %w", encodeErr)
+		}
+		return nil
 	})
-	var runErr error
-	if err == nil {
-		_, err = fmt.Fprintf(std.out, "%s\n", started)
-	}
-	if err != nil {
-		runErr = fmt.Errorf("report that the node is serving: %w", err)
-	} else {
-		runErr = node.Service.Run(ctx, serviceInterval)
-	}
-	stopRelay()
-	if relayErr := <-relayed; relayErr != nil && !errors.Is(relayErr, context.Canceled) {
-		runErr = errors.Join(runErr, relayErr)
-	}
-	shutdown, cancel := context.WithTimeout(context.Background(), shutdownBudget)
-	defer cancel()
-	shutdownErr := server.Shutdown(shutdown)
-	serveErr := <-served
-	if errors.Is(serveErr, http.ErrServerClosed) {
-		serveErr = nil
-	}
-	// A node stopped by its operator ended as asked.
-	if errors.Is(runErr, context.Canceled) {
-		runErr = nil
-	}
-	return errors.Join(serveErr, runErr, shutdownErr, node.Close())
+	return errors.Join(err, node.Close())
 }
 
 func runStatus(ctx context.Context, set *flag.FlagSet, arguments []string, std streams) error {
