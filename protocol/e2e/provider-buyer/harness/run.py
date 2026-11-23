@@ -24,7 +24,9 @@ Scenarios:
 3. An unanswered call: admission is paused, the buyer pays, nothing is
    responded, and once the response window is over the request is expired
    and the buyer agent claims the refund; the chain shows the expire, the
-   claim and the transfer to the buyer wallet. With the release Service
+   claim and the transfer to the buyer wallet, received after the claim, and
+   the buyer wallet's balance moves within the bounds of what it sent the
+   actor and received from it after the paying call. With the release Service
    Actor build the response window is at least an hour, so the scenario
    takes about an hour; E2E_SKIP_REFUND=1 skips it. (The test-only build's
    600 s windows would shorten it, but tosctl operates only the release
@@ -327,14 +329,22 @@ def paid_to(transaction: dict, address: str) -> int:
     return sum(transfer["value"] for transfer in transaction.get("transfers", []) if transfer["to"] == address)
 
 
-def credited_from(wallet: str, sender: str, at_least: int):
-    """The wallet's inbound transfer from sender of at least that value, as a
-    strict majority of the validators return it, polled until it appears."""
+def credited_from(wallet: str, sender: str, origin: dict):
+    """The wallet's transaction that received an outbound transfer of origin,
+    a transaction of the sender, as a strict majority of the validators
+    return it, polled until it appears. It must come from the sender, carry
+    exactly one of the values origin sent to the wallet, and have a logical
+    time after origin's, so an older transfer of the same value can never
+    stand in for it. None when origin sent the wallet nothing."""
+    values = [transfer["value"] for transfer in origin.get("transfers", []) if transfer["to"] == wallet]
+    if not values or not origin.get("decoded"):
+        return None
+
     def found():
         read = account_transactions(wallet)
         for tx in (read or {}).get("value", []):
-            if tx.get("decoded") and tx.get("source") == sender and tx.get("value", 0) >= at_least \
-                    and not tx.get("aborted"):
+            if tx.get("decoded") and tx.get("source") == sender and tx.get("value") in values \
+                    and tx.get("lt", 0) > origin["lt"] and not tx.get("aborted"):
                 return tx
         return None
     return poll(found, 180, 5)
@@ -473,6 +483,8 @@ def scenario_paid_call(offer: dict, serve: subprocess.Popen) -> subprocess.Popen
            {"watcher": seen, "serve_returncode": status})
     entry = provider_record(request_hash)
     actor = entry.get("actor", "")
+    record("paid call: after the kill the provider's record still reads executed (the kill landed before "
+           "the respond was recorded)", entry.get("state") == "executed", {"state": entry.get("state")})
     before = respond_count(actor) if actor else None
     record("paid call: no respond reached the actor before the restart (strict-majority read of the actor's "
            "transactions, every one decoded, the paying call among them)",
@@ -545,7 +557,7 @@ def scenario_withdraw(actor: str) -> None:
     record("withdraw: on chain, the actor accepted one withdraw_revenue from the provider wallet and sent it at "
            "least the credited amount (strict-majority read)", len(accepted) == 1 and credited > 0 and
            sent_out >= credited, {"withdraw_transactions": withdrawals, "sent_to_wallet_nanotos": sent_out})
-    credit = credited_from(wallet, actor, credited) if credited > 0 else None
+    credit = credited_from(wallet, actor, accepted[0]) if credited > 0 and len(accepted) == 1 else None
     attached = int(withdrawal.get("attached_nanotos") or latest.get("attached_nanotos") or 0)
     # The wallet paid the attached value and its own fee and received what the
     # actor sent (the payout plus the change of the attached value). Read
@@ -577,10 +589,23 @@ def scenario_refund(offer: dict, actor: str) -> None:
     paused = report(provider_cli("pause", "--rail-config", str(RAIL_CONFIG), "--reason", "refund scenario")) or {}
     record("refund: pause stops new admissions", paused.get("paused") is True, paused)
     request_hash = quote_and_prepare(offer, "unanswered call")
+
+    def buyer_calls():
+        read = account_transactions(actor)
+        return [tx for tx in with_opcode((read or {}).get("value") or [], CALL_OPCODE)
+                if tx.get("source") == buyer_wallet and not tx.get("aborted")] if read else None
+    calls_before = buyer_calls() or []
     paid = base.confirm_payment(request_hash)
     record("refund: the unanswered call is paid", not paid.get("is_error", True), structured(paid).get("purchase", {}).get("state"))
     started = time.monotonic()
+    # The buyer's balance after the call, read once the call itself is
+    # finalized at the actor, so the bound below starts after the payment.
+    new_calls = poll(lambda: (lambda calls: calls if calls is not None and len(calls) > len(calls_before) else None)(
+        buyer_calls()), 300, 5) or []
+    call_lt = max((tx["lt"] for tx in new_calls), default=None)
     balance_paid = wallet_balance(buyer_wallet)
+    record("refund: the paying call is finalized at the actor before the buyer's balance is read",
+           call_lt is not None and balance_paid is not None, {"call_lt": call_lt, "balance": balance_paid})
 
     def refunded():
         duty = structured(base.mcp("tos_buyer_refund", {"request_hash": request_hash})).get("duty") or {}
@@ -603,18 +628,40 @@ def scenario_refund(offer: dict, actor: str) -> None:
               if tx.get("source") == buyer_wallet and not tx.get("aborted")]
     price = PRICE_NANO
     refunded_out = paid_to(claims[0], buyer_wallet) if len(claims) == 1 else 0
-    credit = credited_from(buyer_wallet, actor, price) if refunded_out >= price else None
-    balance_refunded = wallet_balance(buyer_wallet)
+    credit = credited_from(buyer_wallet, actor, claims[0]) if refunded_out >= price else None
     record("refund: on chain, the request was expired and one claim_refund from the buyer wallet paid at least "
-           "the price back to it (strict-majority read)", bool(expires) and len(claims) == 1 and
-           refunded_out >= price and credit is not None,
+           "the price back to it, received by the buyer wallet after the claim (strict-majority read)",
+           bool(expires) and len(claims) == 1 and refunded_out >= price and credit is not None,
            {"expire_transactions": [{"hash": tx["hash"], "from": tx.get("source")} for tx in expires],
             "claim_refund_transactions": [tx["hash"] for tx in claims], "sent_to_buyer_nanotos": refunded_out,
-            "price_nanotos": price, "buyer_credit_transaction": (credit or {}).get("hash"),
-            "buyer_balance_after_payment": balance_paid, "buyer_balance_after_refund": balance_refunded})
+            "price_nanotos": price, "buyer_credit_transaction": (credit or {}).get("hash")})
+    # Bound the buyer's balance by what moved between it and the actor after
+    # the paying call: it gained at most what the actor sent it less the
+    # values it attached, and lost at most one fee allowance per send on top.
+    window = [tx for tx in transactions if call_lt is not None and tx.get("lt", 0) > call_lt]
+    sends = [tx for tx in window if tx.get("source") == buyer_wallet]
+    received = sum(paid_to(tx, buyer_wallet) for tx in window)
+    attached = sum(tx.get("value", 0) for tx in sends)
+    high = received - attached
+    low = high - FEE_ALLOWANCE * len(sends)
+
+    def bounded(value):
+        return value is not None and balance_paid is not None and low <= value - balance_paid <= high
+    balance_refunded = poll(lambda: (lambda value: value if bounded(value) else None)(wallet_balance(buyer_wallet)),
+                            60, 5) if credit is not None else None
+    if balance_refunded is None:
+        balance_refunded = wallet_balance(buyer_wallet)
+    delta = balance_refunded - balance_paid if balance_refunded is not None and balance_paid is not None else None
+    record("refund: on chain, the buyer wallet's balance moved by the refund and change the actor sent it, less "
+           "the values it attached and at most one fee allowance per send (strict-majority read)",
+           credit is not None and bounded(balance_refunded) and delta is not None and delta > 0,
+           {"buyer_balance_after_payment": balance_paid, "buyer_balance_after_refund": balance_refunded,
+            "delta_nanotos": delta, "received_from_actor_nanotos": received, "attached_nanotos": attached,
+            "sends_to_actor": len(sends), "bounds_nanotos": [low, high], "fee_allowance_nanotos": FEE_ALLOWANCE})
     entry = provider_record(request_hash, strict=True)
     record("refund: the paused provider admitted nothing for the unanswered call", entry == {},
-           {"provider_record": "unreadable" if entry is None else entry.get("state")})
+           {"provider_record": "unreadable: the records could not all be listed and read" if entry is None else
+            "none: no provider record holds the request hash" if entry == {} else entry.get("state")})
     resumed = report(provider_cli("resume", "--rail-config", str(RAIL_CONFIG))) or {}
     record("refund: resume admits new requests again", resumed.get("paused") is False, resumed)
     evidence_for("refund", {"request_hash": request_hash, "statuses": compact, "window_seconds": WINDOW,
