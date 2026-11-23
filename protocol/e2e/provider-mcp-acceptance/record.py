@@ -104,7 +104,9 @@ def build(state: dict, run: Path, facts: dict) -> dict:
                 for s in sessions
             ],
             "provider_objects": {
-                **(a.get("offer") or {}),
+                # The offer file's path names the developer's home; its
+                # SHA-256 stays.
+                **{k: v for k, v in (a.get("offer") or {}).items() if k != "offer_file"},
                 "provider_init": a.get("provider_init"),
                 "wallet": a["wallets"].get(f"provider-{x}"),
             },
@@ -343,7 +345,16 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             "every endpoint is a local validator of this host",
             "one developer account ran both clients (the coordinator's decision), not two",
             "the paid request pending across the switch was held by stopping the provider agent, not by load",
-        ],
+        ]
+        + (
+            [
+                "the developer account is the operator account and has sudo (owner ruling: the clients already "
+                "logged in there were used); the clients had no shell, file or other built-in tool, only the one "
+                "MCP server of their role, so the model could not use it"
+            ]
+            if facts.get("developer_is_operator")
+            else []
+        ),
     }
     document["record_sha256"] = sha256_text(json.dumps(document, sort_keys=True, separators=(",", ":")))
     return document

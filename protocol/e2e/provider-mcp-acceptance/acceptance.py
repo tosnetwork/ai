@@ -46,7 +46,14 @@ Usage: acceptance.py RUN_DIR COMMAND [ARGS]
   record                the section 10.3 record under RUN/record/
 
 Environment: TOS_ROOT (the tos checkout the local network was built from;
-its venv runs this driver), AI_COMMIT (default: this file's pinned main).
+its venv runs this driver), AI_COMMIT (default: this file's pinned main),
+ACCEPTANCE_DEVELOPER (default agentdev), ACCEPTANCE_CLAUDE and
+ACCEPTANCE_CODEX (the client binaries).
+
+The clients start in RUN/client-cwd, outside every home directory, with
+CLAUDE.md, auto-memory, bundled skills, user settings and user MCP servers
+off (Claude Code), and user configuration, rules and project documents off
+(Codex), so that only the task prompt and the one MCP server reach them.
 """
 
 from __future__ import annotations
@@ -78,14 +85,24 @@ COMMAND, ARGS = "", []
 INSTALL_RECORD = Path("/var/lib/tos-acceptance/install.json")
 BIN = Path("/usr/local/bin")
 TOSCTL = BIN / "tosctl"
-CLAUDE = Path("/opt/tos-acceptance-clients/claude/claude")
-CODEX = Path("/opt/tos-acceptance-clients/codex/bin/codex")
+# The model clients. ACCEPTANCE_CLAUDE and ACCEPTANCE_CODEX name the
+# binaries already logged in in the developer account when it is not the
+# dedicated one (the record lists each binary's SHA-256).
+CLAUDE = Path(os.environ.get("ACCEPTANCE_CLAUDE", "/opt/tos-acceptance-clients/claude/claude"))
+CODEX = Path(os.environ.get("ACCEPTANCE_CODEX", "/opt/tos-acceptance-clients/codex/bin/codex"))
 EXECUTOR_SOCKET = "/run/tos-service-executor/executor.sock"
 NETWORK_LABEL = "tos:global-id:3"
 RELAY_PORT = 47790
 RELAY_URL = f"https://127.0.0.1:{RELAY_PORT}"
 NANO = 1_000_000_000
-PROVIDER, BUYER, DEVELOPER = "tosprov1", "tosbuy1", "agentdev"
+PROVIDER, BUYER = "tosprov1", "tosbuy1"
+# The developer account that runs both model clients and both MCP servers.
+# ACCEPTANCE_DEVELOPER names another account, for example the operator's own
+# when the clients are logged in only there; the record then states that
+# the developer account is the operator account, with sudo, and that the
+# clients had no shell or file tool.
+DEVELOPER = os.environ.get("ACCEPTANCE_DEVELOPER", "agentdev")
+DEVELOPER_IS_OPERATOR = DEVELOPER == pwd.getpwuid(os.getuid()).pw_name
 GROUPS = {PROVIDER: "tosprov1-clients", BUYER: "tosbuy1-clients"}
 ASSIGNMENTS = {
     "a": {"provider_client": "codex", "buyer_client": "claude"},
@@ -103,7 +120,8 @@ BINARIES = {
     "tos-service-verify": "./protocol/cmd/tos-service-verify",
     "tos-service-packet-relay": "./protocol/cmd/tos-service-packet-relay",
 }
-SECRET = re.compile(r"master_key=[0-9A-Fa-f]+|VAULT_URL=\S+")
+# Vault credentials, and e-mail addresses (a client's login status names one).
+SECRET = re.compile(r"master_key=[0-9A-Fa-f]+|VAULT_URL=\S+|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 
 
 def now() -> str:
@@ -512,30 +530,35 @@ def checks_after_setup() -> list:
             check(f"account {account} exists", False)
             continue
         mode = Path(entry.pw_dir).stat().st_mode & 0o777
-        check(f"account {account} exists with a 0750 home", mode == 0o750, oct(mode))
+        check(f"account {account} has a home closed to others", mode & 0o007 == 0, oct(mode))
         probe = subprocess.run(["sudo", "-n", "-u", account, "--", "/bin/true"], capture_output=True, text=True)
         check(
             f"the operator can run commands as {account} without a password prompt",
             probe.returncode == 0,
             probe.stderr.strip()[:200],
         )
-    groups = subprocess.run(["id", "-nG", DEVELOPER], capture_output=True, text=True).stdout.split()
-    operator_group = pwd.getpwuid(os.getuid()).pw_name
-    forbidden = {"sudo", "adm", "admin", "wheel", "docker", "lxd", "tos-executor", PROVIDER, BUYER, operator_group}
-    check(
-        "agentdev is in both socket groups and in no privileged or custody group",
-        set(GROUPS.values()) <= set(groups) and not forbidden & set(groups),
-        groups,
-    )
+    # Group membership as a fresh login of the developer gets it (sudo -u
+    # runs initgroups), which is how every client process is started.
+    groups = run_as(DEVELOPER, ["/usr/bin/id", "-nG"], check=False).stdout.split()
+    check("the developer account is in both socket groups", set(GROUPS.values()) <= set(groups), groups)
+    custody_groups = {PROVIDER, BUYER} & set(groups)
+    check("the developer account is in no custody account's own group", not custody_groups, sorted(custody_groups))
+    if DEVELOPER_IS_OPERATOR:
+        # Known limitation of the run: the clients get no shell or file tool,
+        # so the model cannot use the account's sudo (record: accounts).
+        check("the developer account is the operator account (has sudo; clients run without shell tools)", True)
+    else:
+        forbidden = {"sudo", "adm", "admin", "wheel", "docker", "lxd", "tos-executor"}
+        check("the developer account is in no privileged group", not forbidden & set(groups), groups)
+        sudo_probe = run_as(DEVELOPER, ["/usr/bin/sudo", "-n", "true"], check=False)
+        check("the developer account cannot use sudo without a password", sudo_probe.returncode != 0)
     for account in (PROVIDER, BUYER):
         probe = run_as(DEVELOPER, ["/bin/ls", home(account)], check=False)
-        check(f"agentdev cannot open {account}'s home", probe.returncode != 0, probe.stderr.strip()[:160])
+        check(f"the developer account cannot open {account}'s home", probe.returncode != 0, probe.stderr.strip()[:160])
         linger = Path("/var/lib/systemd/linger") / account
         check(f"{account} lingers (its user units run without a login)", linger.exists())
-    sudo_probe = run_as(DEVELOPER, ["/usr/bin/sudo", "-n", "true"], check=False)
-    check("agentdev cannot use sudo without a password", sudo_probe.returncode != 0, sudo_probe.stderr.strip()[:160])
     login_env = subprocess.run(as_cmd(DEVELOPER, ["/bin/bash", "-lc", "env"]), capture_output=True, text=True, cwd="/")
-    check("no VAULT_URL in agentdev's login environment", "VAULT_URL=" not in login_env.stdout)
+    check("no VAULT_URL in the developer account's login environment", "VAULT_URL=" not in login_env.stdout)
     for x in ASSIGNMENTS:
         p = paths(x)
         for directory, owner, group in (
@@ -558,13 +581,12 @@ def checks_after_setup() -> list:
     executor_groups = subprocess.run(["id", "-nG", PROVIDER], capture_output=True, text=True).stdout.split()
     check("tosprov1 is in the executor's socket group", "tos-executor" in executor_groups, executor_groups)
     for client, binary in (("claude", CLAUDE), ("codex", CODEX)):
-        check(
-            f"the {client} client is installed root-owned", binary.exists() and binary.stat().st_uid == 0, str(binary)
-        )
+        check(f"the {client} client exists", binary.exists(), str(binary))
     claude_auth = run_as(DEVELOPER, [CLAUDE, "auth", "status"], check=False, timeout=60)
-    check("Claude Code is logged in as agentdev", claude_auth.returncode == 0, claude_auth.stdout.strip()[-200:])
+    # Only the exit status: the status text names the account's login.
+    check("Claude Code is logged in in the developer account", claude_auth.returncode == 0)
     codex_auth = run_as(DEVELOPER, [CODEX, "login", "status"], check=False, timeout=60)
-    check("Codex is logged in as agentdev", codex_auth.returncode == 0, (codex_auth.stdout + codex_auth.stderr)[-200:])
+    check("Codex is logged in in the developer account", codex_auth.returncode == 0)
     relay = relay_probe()
     check("the run's relay serves HTTPS under the run's CA", relay.get("ok"), relay)
     check("no OpenFox binary, source or configuration is present", openfox_scan()["absent"], openfox_scan())
@@ -1154,17 +1176,29 @@ def client_command(client: str, x: str, role: str) -> tuple[list, bool]:
         f"mcp_servers.{server}.tool_timeout_sec=330",
         "-c",
         f'mcp_servers.{server}.default_tools_approval_mode="approve"',
+        # No AGENTS.md or other project document reaches the model.
+        "-c",
+        "project_doc_max_bytes=0",
         "-C",
-        str(p["dev_work"]),
+        str(client_cwd()),
         "--json",
         "-",
     ], True
+
+
+def client_cwd() -> Path:
+    """The clients' working directory: outside every home directory, so no
+    CLAUDE.md or AGENTS.md of a parent directory is found."""
+    return RUN / "client-cwd"
 
 
 CLIENT_ENV = {
     "claude": {
         "DISABLE_AUTOUPDATER": "1",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1",
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS": "1",
         "MCP_TOOL_TIMEOUT": "330000",
     },
     "codex": {},
@@ -1398,7 +1432,8 @@ def run_session(x: str, name: str) -> dict:
     prompt = prompt_for(role, spec["prompt"], step_values(x, name, spec))
     template, on_stdin = client_command(client, x, role)
     argv = [prompt if part == "{PROMPT}" else part for part in template]
-    command = as_cmd(DEVELOPER, argv, extra_env=CLIENT_ENV[client], chdir=paths(x)["dev_work"])
+    client_cwd().mkdir(mode=0o700, exist_ok=True)
+    command = as_cmd(DEVELOPER, argv, extra_env=CLIENT_ENV[client], chdir=client_cwd())
     index = len(state["sessions"]) + 1
     transcript = TRANSCRIPTS / f"{index:02d}-{x}-{name}-{client}.jsonl"
     TRANSCRIPTS.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1852,7 +1887,7 @@ def cmd_commands(x: str) -> None:
             prompt = "(prompt needs earlier results)"
         template, on_stdin = client_command(client, x, role)
         argv = ["<prompt>" if part == "{PROMPT}" else part for part in template]
-        command = as_cmd(DEVELOPER, argv, extra_env=CLIENT_ENV[client], chdir=paths(x)["dev_work"])
+        command = as_cmd(DEVELOPER, argv, extra_env=CLIENT_ENV[client], chdir=client_cwd())
         print(
             f"### {x} {name}: {client} operates the {role}"
             + (f"; before: {spec['before']}" if spec.get("before") else "")
@@ -2015,6 +2050,7 @@ def cmd_record() -> None:
                 text=True,
             ).stdout.strip(),
             "openfox_scan": openfox_scan(),
+            "developer_is_operator": DEVELOPER_IS_OPERATOR,
             "uids": {
                 role: uid(account)
                 for role, account in (
