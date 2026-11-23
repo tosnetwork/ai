@@ -271,7 +271,7 @@ func (a *Agent) confirmableResume(ctx context.Context, role agentsocket.Role, ke
 	if origin != nil && bytes.Equal(origin.Marker, marker) {
 		preview.RecordedAs = origin.Why
 	}
-	action, err := a.storeAction(agentapi.KindResume, key, inputs, func() (any, any, error) {
+	action, err := a.storeAction(ctx, agentapi.KindResume, key, inputs, func() (any, any, error) {
 		preview.Preflight = a.lib.Preflight(preflightCtx)
 		return preview, nil, nil
 	})

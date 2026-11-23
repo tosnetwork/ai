@@ -56,12 +56,18 @@ type actionRecord struct {
 	PresentedUnix     int64           `json:"presented_unix,omitempty"`
 	CodeFailures      int             `json:"code_failures,omitempty"`
 	ApplyingUnix      int64           `json:"applying_unix,omitempty"`
-	Result            json.RawMessage `json:"result,omitempty"`
-	FailureCode       string          `json:"failure_code,omitempty"`
-	FailureMessage    string          `json:"failure_message,omitempty"`
-	CreatedUnix       int64           `json:"created_unix"`
-	UpdatedUnix       int64           `json:"updated_unix"`
-	ExpiresUnix       int64           `json:"expires_at_unix"`
+	// PriorWithdrawals are the query ids of the node's withdrawal records
+	// just before a confirmed withdrawal is sent, and PriorRecorded says they
+	// were stored; both are written durably before the send, so recovery
+	// finds the send's own record by its query id (section 8.1).
+	PriorWithdrawals []uint64        `json:"prior_withdrawals,omitempty"`
+	PriorRecorded    bool            `json:"prior_withdrawals_recorded,omitempty"`
+	Result           json.RawMessage `json:"result,omitempty"`
+	FailureCode      string          `json:"failure_code,omitempty"`
+	FailureMessage   string          `json:"failure_message,omitempty"`
+	CreatedUnix      int64           `json:"created_unix"`
+	UpdatedUnix      int64           `json:"updated_unix"`
+	ExpiresUnix      int64           `json:"expires_at_unix"`
 }
 
 func terminal(state string) bool {

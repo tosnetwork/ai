@@ -54,9 +54,13 @@ type Agent struct {
 	// change so waiters wake.
 	mutex   sync.Mutex
 	changed chan struct{}
-	// previews serializes previews, so two calls with one key never both
-	// run the library and store two actions.
-	previews sync.Mutex
+	// previewSlot serializes the agent's library offer and withdraw calls:
+	// every client preview, and an apply's fresh preview together with its
+	// send. Two calls with one key therefore never both run the library and
+	// store two actions, and since each library call takes the state
+	// directory's run lock without waiting, the agent's own calls never make
+	// each other fail with ErrSetupBusy. Its capacity is one.
+	previewSlot chan struct{}
 	// pauses serializes the agent's pause, resume and floor decisions.
 	pauses sync.Mutex
 	rates  *rates
@@ -102,7 +106,8 @@ func Open(options Options) (*Agent, error) {
 	}
 	agent := &Agent{config: config, lib: options.Library, vaultURL: options.VaultURL, now: options.Now,
 		random: options.Random, log: options.Log, store: store{root: config.StateDir}, rail: rail, changed: make(chan struct{}),
-		rates: newRates(config.MaxWithdrawPreviewsPerDay), ring: &ring{}, releaseDirectory: release}
+		previewSlot: make(chan struct{}, 1), rates: newRates(config.MaxWithdrawPreviewsPerDay), ring: &ring{},
+		releaseDirectory: release}
 	if agent.now == nil {
 		agent.now = time.Now
 	}
@@ -131,6 +136,21 @@ func (a *Agent) Close() {
 	if a.releaseDirectory != nil {
 		a.releaseDirectory()
 		a.releaseDirectory = nil
+	}
+}
+
+// previewWait bounds how long a client preview waits for the preview slot,
+// so that, with the 20-second bound on the preview itself, the method still
+// answers within 30 seconds.
+const previewWait = 5 * time.Second
+
+// holdPreviews takes the preview slot, waiting at most until ctx ends.
+func (a *Agent) holdPreviews(ctx context.Context) (func(), error) {
+	select {
+	case a.previewSlot <- struct{}{}:
+		return func() { <-a.previewSlot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 

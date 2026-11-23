@@ -3,7 +3,10 @@ package provideragent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -123,6 +126,8 @@ func TestAWithdrawalWhoseStateMovedExpiresAndSendsNothing(t *testing.T) {
 	for name, move := range map[string]func(*fakeLibrary){
 		"credit fell below the amount": func(f *fakeLibrary) { f.credited = 1_000_000_000 },
 		"the actor changed":            func(f *fakeLibrary) { f.withdrawActor = testOther },
+		"the destination changed":      func(f *fakeLibrary) { f.withdrawDestination = testOther },
+		"the attached value changed":   func(f *fakeLibrary) { f.withdrawAttached = "100000001" },
 		"nothing credited":             func(f *fakeLibrary) { f.credited = 0 },
 		// The comparison does not rely on the library's own refusal.
 		"less credit reported than the amount": func(f *fakeLibrary) { f.reportCredited = "1999999999" },
@@ -159,6 +164,115 @@ func TestAnOfferWhosePreviewChangedExpiresAndSendsNothing(t *testing.T) {
 				t.Fatalf("%+v, sends %d", applied, bed.lib.offerSends)
 			}
 		})
+	}
+}
+
+// Every field of the offer preview takes part in the apply-time comparison,
+// not only the owner wallet and the actor: each one changed alone between
+// the confirmation and the apply expires the action. Terms and version are
+// the stored inputs themselves, which the library echoes.
+func TestEveryOfferPreviewFieldIsCompared(t *testing.T) {
+	kind := reflect.TypeFor[servicebridge.OfferPreview]()
+	compared := 0
+	for index := range kind.NumField() {
+		field := kind.Field(index)
+		if field.Name == "Terms" || field.Name == "Version" {
+			continue
+		}
+		compared++
+		t.Run(field.Name, func(t *testing.T) {
+			bed := newTestbed(t)
+			preview := bed.offerPreview(validOffer(keyA))
+			bed.lib.set(func(f *fakeLibrary) {
+				copied := *f.offerPreview
+				value := reflect.ValueOf(&copied).Elem().Field(index)
+				switch value.Kind() {
+				case reflect.String:
+					value.SetString(value.String() + "-changed")
+				case reflect.Slice:
+					value.Set(reflect.Append(value, reflect.ValueOf("changed")))
+				default:
+					t.Fatalf("no change for a %s field", value.Kind())
+				}
+				f.offerPreview = &copied
+			})
+			applied := bed.confirm(preview.ActionID)
+			if applied.State != agentapi.StateExpired || bed.lib.offerSends != 0 {
+				t.Fatalf("%+v, sends %d", applied, bed.lib.offerSends)
+			}
+		})
+	}
+	if compared < 18 {
+		t.Fatalf("only %d preview fields were changed", compared)
+	}
+}
+
+// A client preview that runs while a confirmed action is applied waits for
+// the apply instead of making its fresh preview fail with ErrSetupBusy, so
+// the confirmed action is applied, not expired.
+func TestAConfirmedActionIsAppliedWhileAClientPreviewRuns(t *testing.T) {
+	bed := newTestbed(t)
+	bed.offered()
+	first := bed.withdrawPreview(agentapi.WithdrawPreviewParams{AmountNanoTOS: "1000000000", IdempotencyKey: keyA})
+	presentation := bed.present(first.ActionID)
+	entered, leave := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	bed.lib.set(func(f *fakeLibrary) {
+		f.duringSetup = func() {
+			once.Do(func() {
+				close(entered)
+				<-leave
+			})
+		}
+	})
+	previewed := make(chan error, 1)
+	go func() {
+		_, err := bed.agent.WithdrawPreview(context.Background(), agentsocket.RoleClient,
+			agentapi.WithdrawPreviewParams{AmountNanoTOS: "500000000", IdempotencyKey: keyB})
+		previewed <- err
+	}()
+	<-entered
+	decided := make(chan agentapi.ActionView, 1)
+	go func() {
+		view, err := bed.agent.Decide(context.Background(), agentapi.DecideParams{ActionID: first.ActionID,
+			Decision: agentapi.DecisionConfirm, Code: presentation.Code})
+		if err != nil {
+			t.Errorf("decide: %v", err)
+			decided <- agentapi.ActionView{}
+			return
+		}
+		decided <- view.(agentapi.ActionView)
+	}()
+	// The apply is now waiting for the client preview, which holds the run
+	// lock inside the library.
+	time.Sleep(200 * time.Millisecond)
+	close(leave)
+	if err := <-previewed; err != nil {
+		t.Fatalf("the client preview: %v", err)
+	}
+	applied := <-decided
+	if applied.State != agentapi.StateApplied || bed.lib.withdrawSends != 1 {
+		t.Fatalf("the confirmed action: %+v, sends %d", applied, bed.lib.withdrawSends)
+	}
+}
+
+// An action stored without its idempotency key (a crash between the two
+// writes) is returned to a retry with the same key and inputs, and its key
+// is written then.
+func TestAnActionStoredWithoutItsKeyIsReturnedToARetry(t *testing.T) {
+	bed := newTestbed(t)
+	bed.offered()
+	params := agentapi.WithdrawPreviewParams{AmountNanoTOS: "1000000000", IdempotencyKey: keyA}
+	first := bed.withdrawPreview(params)
+	if err := os.Remove(bed.agent.store.keyPath(agentapi.KindWithdraw, keyA)); err != nil {
+		t.Fatal(err)
+	}
+	again := bed.withdrawPreview(params)
+	if again.ActionID != first.ActionID {
+		t.Fatalf("the retry got %s, not %s", again.ActionID, first.ActionID)
+	}
+	if _, found, err := bed.agent.store.readKey(agentapi.KindWithdraw, keyA); err != nil || !found {
+		t.Fatalf("the key was not written again: %v", err)
 	}
 }
 

@@ -47,6 +47,15 @@ type fakeLibrary struct {
 	// it checks: a library whose preview and check disagree.
 	withdrawActor  string
 	reportCredited string
+	// withdrawDestination and withdrawAttached, when set, replace the
+	// destination and attached value a withdrawal preview names.
+	withdrawDestination string
+	withdrawAttached    string
+	// setupHeld stands for the state directory's run lock, which the
+	// library's offer and withdraw calls take without waiting; duringSetup,
+	// when set, runs while a call holds it.
+	setupHeld   bool
+	duringSetup func()
 	// beforeSend runs when a send is asked for, before anything is recorded;
 	// withdrawSend runs after the record is written. Either may block.
 	beforeSend    func()
@@ -103,7 +112,33 @@ func (f *fakeLibrary) Preflight(context.Context) *servicebridge.PreflightReport 
 	return report
 }
 
+// takeSetup takes the run lock as the library does: a second call while it
+// is held fails with ErrSetupBusy at once.
+func (f *fakeLibrary) takeSetup() (func(), error) {
+	f.mutex.Lock()
+	if f.setupHeld {
+		f.mutex.Unlock()
+		return nil, servicebridge.ErrSetupBusy
+	}
+	f.setupHeld = true
+	during := f.duringSetup
+	f.mutex.Unlock()
+	if during != nil {
+		during()
+	}
+	return func() {
+		f.mutex.Lock()
+		defer f.mutex.Unlock()
+		f.setupHeld = false
+	}, nil
+}
+
 func (f *fakeLibrary) Offer(_ context.Context, in servicebridge.OfferInput) (*servicebridge.OfferResult, error) {
+	release, err := f.takeSetup()
+	if err != nil {
+		return &servicebridge.OfferResult{}, err
+	}
+	defer release()
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	if f.offerErr != nil {
@@ -127,6 +162,11 @@ func (f *fakeLibrary) Offer(_ context.Context, in servicebridge.OfferInput) (*se
 }
 
 func (f *fakeLibrary) Withdraw(_ context.Context, in servicebridge.WithdrawInput) (*servicebridge.WithdrawResult, error) {
+	release, err := f.takeSetup()
+	if err != nil {
+		return &servicebridge.WithdrawResult{}, err
+	}
+	defer release()
 	if in.Yes && f.beforeSend != nil {
 		f.beforeSend()
 	}
@@ -156,8 +196,15 @@ func (f *fakeLibrary) Withdraw(_ context.Context, in servicebridge.WithdrawInput
 	if f.reportCredited != "" {
 		credited = f.reportCredited
 	}
-	result.Preview = &servicebridge.WithdrawPreview{Actor: actor, Destination: testWallet,
-		CreditedNano: credited, AmountNano: fmt.Sprint(amount), AttachedNano: "100000000",
+	destination, attached := testWallet, "100000000"
+	if f.withdrawDestination != "" {
+		destination = f.withdrawDestination
+	}
+	if f.withdrawAttached != "" {
+		attached = f.withdrawAttached
+	}
+	result.Preview = &servicebridge.WithdrawPreview{Actor: actor, Destination: destination,
+		CreditedNano: credited, AmountNano: fmt.Sprint(amount), AttachedNano: attached,
 		RemainingNano: fmt.Sprint(f.credited - amount), Checkpoint: 9}
 	if !in.Yes {
 		f.mutex.Unlock()

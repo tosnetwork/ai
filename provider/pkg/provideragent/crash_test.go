@@ -26,6 +26,10 @@ const (
 	stagePresented = "presented"
 	stageBeforeLog = "before-record"
 	stageAfterSend = "after-send"
+	// stageAfterSendClockAhead is stageAfterSend with the agent's clock an
+	// hour ahead of the library's: as after a backward step of the host
+	// clock between the confirmation and the send's record.
+	stageAfterSendClockAhead = "after-send-clock-ahead"
 )
 
 func TestMain(m *testing.M) {
@@ -65,14 +69,18 @@ func crashChild(root, stage string) error {
 	switch stage {
 	case stageBeforeLog:
 		lib.beforeSend = block
-	case stageAfterSend:
+	case stageAfterSend, stageAfterSendClockAhead:
 		lib.withdrawSend = block
 	}
 	config := testConfig(root)
 	if err := config.check(); err != nil {
 		return err
 	}
-	agent, err := Open(Options{Config: config, Library: lib})
+	now := time.Now
+	if stage == stageAfterSendClockAhead {
+		now = func() time.Time { return time.Now().Add(time.Hour) }
+	}
+	agent, err := Open(Options{Config: config, Library: lib, Now: now})
 	if err != nil {
 		return err
 	}
@@ -195,6 +203,79 @@ func TestAnAgentKilledBeforeTheSendWasRecordedSendsNothing(t *testing.T) {
 	}
 	if records, err := lib.Withdrawals(); err != nil || len(records) != 0 {
 		t.Fatalf("records: %+v %v", records, err)
+	}
+}
+
+// The send's record is found by its query id, not by comparing the record's
+// start time with the agent's clock: a record started "before" the action
+// entered applying, by a clock that stepped back, is still the send's own.
+func TestAWithdrawalSentAcrossABackwardClockStepIsResolvedFromItsRecord(t *testing.T) {
+	root, lib := crashBed(t)
+	runAndKill(t, root, stageAfterSendClockAhead)
+	agent := reopen(t, root, lib)
+	action := onlyAction(t, agent)
+	if action.State != agentapi.StateAmbiguous || lib.withdrawSends != 0 {
+		t.Fatalf("after the restart: %+v, sends %d", action, lib.withdrawSends)
+	}
+}
+
+// A withdrawal record that existed before the send, of the same amount and
+// actor and stamped later than the action by a clock that stepped forward,
+// is never taken for the send's own: a crash before the send resolves as
+// nothing sent.
+func TestAnEarlierWithdrawalRecordIsNeverTakenForTheSend(t *testing.T) {
+	root, lib := crashBed(t)
+	earlier := servicebridge.WithdrawalRecord{QueryID: 99, Actor: testActor, Destination: testWallet,
+		AmountNano: "1000000000", State: servicebridge.WithdrawalFinalized, StartedUnix: time.Now().Add(time.Hour).Unix()}
+	lib.saveRecord(earlier)
+	runAndKill(t, root, stageBeforeLog)
+	agent := reopen(t, root, lib)
+	action := onlyAction(t, agent)
+	if action.State != agentapi.StateFailed || lib.withdrawSends != 0 {
+		t.Fatalf("after the restart: %+v, sends %d", action, lib.withdrawSends)
+	}
+}
+
+// A resume left applying is resolved from the marker: applied only when the
+// marker is gone, failed while it is still in place.
+func TestAnApplyingResumeIsResolvedFromTheMarker(t *testing.T) {
+	for name, removed := range map[string]bool{"marker in place": false, "marker removed": true} {
+		t.Run(name, func(t *testing.T) {
+			bed := newTestbed(t)
+			bed.operatorPause()
+			view, err := bed.resume(keyA)
+			if err != nil || view.Action == nil {
+				t.Fatalf("resume: %+v %v", view, err)
+			}
+			bed.agent.withLock(func() {
+				var record actionRecord
+				if record, err = bed.agent.store.readAction(view.Action.ActionID); err == nil {
+					record.State, record.ApplyingUnix = agentapi.StateApplying, bed.clock.Now().Unix()
+					err = bed.agent.store.writeAction(record, false)
+				}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bed.agent.Close()
+			if removed {
+				if _, err := servicebridge.ResumeAdmission(bed.lib.config.StateDir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bed.open()
+			resolved := bed.action(view.Action.ActionID)
+			want := agentapi.StateFailed
+			if removed {
+				want = agentapi.StateApplied
+			}
+			if resolved.State != want {
+				t.Fatalf("resolved %+v, want %s", resolved, want)
+			}
+			if _, err := readMarkerBytes(bed.lib.config.StateDir); removed == (err == nil) {
+				t.Fatalf("the marker after recovery: %v", err)
+			}
+		})
 	}
 }
 
