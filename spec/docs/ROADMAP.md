@@ -378,17 +378,17 @@ Deliver on the Service Actor rail:
   confirmed the payments. The buyer's user guide is
   `docs/MCP_BUYER_GUIDE.md`. No Gate D acceptance item is met by this work
   alone.
-- ⬜ MCP provider adapter, so that an MCP client can operate a provider node
-  without OpenFox — implemented, acceptance open
+- ✅ MCP provider adapter, so that an MCP client can operate a provider node
+  without OpenFox — implemented and accepted locally
   (`docs/MCP_PROVIDER_ADAPTER_V1.md`): the library prerequisites (ai #131),
   the provider agent and the confirmer (ai #132), and the MCP server
   `tos-service-provider-mcp` with its user guide `docs/MCP_PROVIDER_GUIDE.md`.
-  The local agent-operated run of section 10.2 ran once on 2026-11-23
-  (`deployments/local-agent-operated-provider-run-20261123.json`): Claude
-  Code and Codex each operated a provider and each bought, with one
-  deviation, one developer account (the operator's own) for both clients
-  (owner ruling). Section 10 acceptance stays open until a run with two
-  developer accounts, or until the owner waives that requirement.
+  Accepted locally on 2026-11-23
+  (`deployments/local-agent-operated-provider-run-20261123.json`) with one
+  developer account under the owner's waiver in section 12 of the adapter
+  spec; not Gate D evidence. In that run of section 10.2 Claude Code and
+  Codex each operated a provider and each bought, and the core team
+  operated every role.
 
 Delivered earlier:
 

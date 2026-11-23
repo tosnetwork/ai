@@ -2,12 +2,10 @@
 
 ## Status and scope
 
-**Status:** implemented; run once under section 10.2 on 2026-11-23
+**Status:** implemented; accepted locally on 2026-11-23
 (`deployments/local-agent-operated-provider-run-20261123.json`) with one
-deviation: one developer account, the operator's own, ran both clients
-(owner ruling). Section 10 acceptance stays open until a run with two
-developer accounts, or until the owner waives that requirement in section
-12. The library prerequisites of
+developer account under the owner's waiver in section 12; not Gate D
+evidence. The library prerequisites of
 section 13, the provider agent (`tos-service-provider agent`, package
 `provider/pkg/provideragent`), the confirmer (`tos-service-provider
 confirm`) and the MCP server `tos-service-provider-mcp` (package
@@ -1196,6 +1194,19 @@ Owner rulings:
   `ai` (10.2).
 - An LLM as the worker is out of scope; it needs a new commerce profile
   behind the expansion gate.
+- **2026-11-23, waiver of the two developer accounts of 10.2.** The owner
+  waives the requirement of 10.2 that the run use two developer accounts,
+  and accepts the run recorded in
+  `deployments/local-agent-operated-provider-run-20261123.json` (verdict
+  `LOCAL_AGENT_OPERATED_RUN_PASSED`, 41 checks). That run used one
+  developer account, the operator's own, which has sudo; each client was
+  given only its role's MCP server. Why: the separation a second developer
+  account buys is between the two clients, not custody. Custody separation
+  was complete in the run: separate custody OS accounts for the provider
+  and the buyer, agent sockets that admit callers by their peer
+  credentials (2.3), and no key or vault credential in the developer
+  account. What remains true: the core team operated every role, and the
+  run is not Gate D evidence (`qualifies_as_gate_d: false`).
 
 Decided for V1 on 2026-11-23, in the review of this specification (ai #130);
 the owner may reopen any of them:
