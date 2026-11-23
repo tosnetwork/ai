@@ -191,32 +191,61 @@ func signedOfferAgreementAmount(amount AtomicAmountV1) *agentcommerce.AgreementA
 		AssetIdentifier: amount.Asset.AssetIdentifier, AmountAtomic: amount.AmountAtomic, Unit: amount.Asset.Unit}
 }
 
+// signedOfferCollateralRoles are the prerequisite evidence roles of the
+// transition kinds the signed history's collateral supports.
+var signedOfferCollateralRoles = map[string][]string{"lock": {"collateral-deposit"}, "payout": {"terminal-decision"},
+	"release": {"terminal-claim-set"}}
+
+// collateralBindingOf is the terms' transition binding of kind.
+func collateralBindingOf(t *testing.T, terms CollateralTermsV1, kind string) CollateralTransitionBindingV1 {
+	t.Helper()
+	for _, binding := range terms.TransitionBindings {
+		if binding.TransitionProfile.TransitionKind == kind {
+			return binding
+		}
+	}
+	t.Fatalf("the collateral terms bind no %s transition", kind)
+	return CollateralTransitionBindingV1{}
+}
+
 // offerCollateral is a collateral-attested profile compatible with the claim
 // profile the terms select, and collateral terms under it that cover the
 // maximum aggregate payout, locked until lockUntil and releasable from the
-// terms' final deadline plus the reorg window.
+// terms' final deadline plus the reorg window. The profile supports, and the
+// terms bind under the custodian's authorization, the lock, payout and release
+// transitions, with the states and semantic bindings the released table fixes
+// for each kind.
 func (history *signedHistory) offerCollateral(terms CoverageTermsV1, lockUntil uint64) (CollateralProfileV1, CollateralTermsV1) {
 	t := history.t
 	authority := CollateralAuthorizationBindingV1{AuthorizationProfile: testRef("1", "custody-authority"),
 		AuthorizationSubjects: []string{"agent:custodian"}, AuthorizationQuorumRule: "all"}
-	transition := CollateralTransitionProfileV1{TransitionKind: "payout", SuccessorDerivationProfile: testRef("2", "successor"),
-		AdapterProfile: testRef("3", "custody-adapter"), AdapterRequestContentType: "application/vnd.tos.collateral-request.v1+cbor",
-		AdapterRequestProfile: testRef("4", "request"), MaximumAdapterRequestBytes: 4096,
-		AdapterEvidenceContentType: "application/vnd.tos.collateral-evidence.v1+cbor", AdapterEvidenceProfile: testRef("5", "evidence"),
-		AuthorizationSubjectSource: "custodian", CustodianAuthorizationBinding: &authority,
-		PermittedPriorStates: []string{"encumbered", "partially_consumed"}, PermittedResultingStates: []string{"depleted", "partially_consumed"},
-		PrerequisiteEvidenceRoles: []string{"terminal-decision"}, AuthorizedClaimDecisionBinding: "required",
-		PayoutDestinationBinding: "agreement_fixed"}
-	transitionDigest, err := CollateralTransitionProfileDigestV1(transition)
-	if err != nil {
-		t.Fatal(err)
+	adapter := testRef("3", "custody-adapter")
+	var transitions []CollateralTransitionProfileV1
+	var bindings []CollateralTransitionBindingV1
+	for _, kind := range []string{"lock", "payout", "release"} {
+		rule := collateralTransitionRulesV1[kind]
+		transition := CollateralTransitionProfileV1{TransitionKind: kind, SuccessorDerivationProfile: testRef("2", "successor"),
+			AdapterProfile: adapter, AdapterRequestContentType: "application/vnd.tos.collateral-request.v1+cbor",
+			AdapterRequestProfile: testRef("4", "request"), MaximumAdapterRequestBytes: 4096,
+			AdapterEvidenceContentType: "application/vnd.tos.collateral-evidence.v1+cbor", AdapterEvidenceProfile: testRef("5", "evidence"),
+			AuthorizationSubjectSource: "custodian", CustodianAuthorizationBinding: &authority,
+			PermittedPriorStates: rule.prior, PermittedResultingStates: rule.result,
+			PrerequisiteEvidenceRoles: signedOfferCollateralRoles[kind], AuthorizedClaimDecisionBinding: rule.decision,
+			PayoutDestinationBinding: rule.destination}
+		transitionDigest, err := CollateralTransitionProfileDigestV1(transition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		transitions = append(transitions, transition)
+		bindings = append(bindings, CollateralTransitionBindingV1{TransitionProfileDigest: transitionDigest,
+			TransitionProfile: transition, AuthorizationBinding: authority})
 	}
-	disclosure := CollateralControlDisclosureV1{SchemaVersion: 1, CustodyAdapterProfile: transition.AdapterProfile,
+	disclosure := CollateralControlDisclosureV1{SchemaVersion: 1, CustodyAdapterProfile: adapter,
 		AdapterOperatorSubjects: []string{"agent:custodian"}, CustodianControllerRootSubjects: []string{"root:custodian"},
 		DeclaredGuarantorControlRelationship: "control_undetermined"}
 	profile := CollateralProfileV1{ProfileID: "collateral-profile:test", ProfileVersion: 1,
-		AssuranceLevel: AssuranceCollateralAttested, Asset: terms.CoverageAsset, CustodyAdapterProfile: transition.AdapterProfile,
-		CollateralControlDisclosure: disclosure, TransitionProfiles: []CollateralTransitionProfileV1{transition},
+		AssuranceLevel: AssuranceCollateralAttested, Asset: terms.CoverageAsset, CustodyAdapterProfile: adapter,
+		CollateralControlDisclosure: disclosure, TransitionProfiles: transitions,
 		CompatibleClaimProfileDigests: []string{terms.SelectedClaimProfileDigest}, ExclusiveAllocationRequired: true,
 		MinimumCollateralizationPPM: 1_000_000, MaximumEvidenceAgeSeconds: 60}
 	profileDigest, err := Digest("tos.service.agent-guarantor-collateral-profile.v1", profile)
@@ -225,10 +254,9 @@ func (history *signedHistory) offerCollateral(terms CoverageTermsV1, lockUntil u
 	}
 	return profile, CollateralTermsV1{PositionID: "position:one", SelectedCollateralProfileDigest: profileDigest,
 		AssuranceLevel: AssuranceCollateralAttested, Asset: terms.CoverageAsset, Amount: terms.MaximumAggregatePayout,
-		CollateralPrincipalSubject: "agent:principal", CustodyAdapterProfile: transition.AdapterProfile,
+		CollateralPrincipalSubject: "agent:principal", CustodyAdapterProfile: adapter,
 		CollateralControlDisclosure: disclosure, PositionIdentityProfile: testRef("7", "position"),
-		TransitionBindings: []CollateralTransitionBindingV1{{TransitionProfileDigest: transitionDigest, TransitionProfile: transition,
-			AuthorizationBinding: authority}}, ContractOrAccountDigest: testDigest("8"),
+		TransitionBindings: bindings, ContractOrAccountDigest: testDigest("8"),
 		ExclusiveAllocationRequired: true, LockByUnix: terms.CoverageStartsAtUnix, LockUntilUnix: lockUntil,
 		ReleaseNotBeforeUnix: signedOfferFinalDeadline(terms) + signedOfferReorgWindow, ReorgWindowSeconds: signedOfferReorgWindow,
 		FinalityProfile: testRef("9", "finality"), MaximumEvidenceAgeSeconds: 60}

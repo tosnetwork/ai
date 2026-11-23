@@ -2,6 +2,7 @@ package agentguarantor
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentcommerce"
@@ -148,6 +149,12 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 		proof.SealAuthorization.ValidationTimeUnix != seal.SealedAtUnix {
 		return errors.New("claim admission compact proof binding is invalid")
 	}
+	// The proof carries the admission time and the complete ingress receipt, so
+	// it is held to the admission time bounds exactly as the complete receipt
+	// is, before any signature and therefore also when a proof is built.
+	if err := validateClaimAdmissionTimesV1(body.AdmittedAtUnix, proof.AuthorizedClaimIngressReceipt, terms); err != nil {
+		return err
+	}
 	// The seal time is held to the verifier's present with the allowance every
 	// other proof and receipt time is given, so a verifier whose clock runs
 	// slightly behind accepts a revision's initial admission proof as it
@@ -169,7 +176,7 @@ func ValidateClaimAdmissionReceiptProofV1(proof ClaimAdmissionReceiptProofV1, te
 	}
 	if err := VerifyClaimSubmissionIngressReceiptV1(proof.AuthorizedClaimIngressReceipt, terms,
 		mustStageActionAuthorityV1(terms, "claim_submission_ingress"), resolver, fenceResolver, ingressValidationTime); err != nil {
-		return errors.New("claim admission proof has an invalid ingress receipt")
+		return fmt.Errorf("claim admission proof has an invalid ingress receipt: %w", err)
 	}
 	if err := ValidateAuthorizationQuorumSet(proof.ReceiptAuthorizations, "claim-admission-receipt", bodyDigest,
 		"tos.service.agent-guarantor-claim-admission-receipt-signature.v1", terms.ClaimAdmissionAuthoritySubjects,

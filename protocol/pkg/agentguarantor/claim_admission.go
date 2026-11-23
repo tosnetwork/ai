@@ -54,11 +54,64 @@ func validateClaimRevisionWithinCapacityV1(terms CoverageTermsV1, revision uint6
 	return nil
 }
 
+// validateClaimIngressTimeV1 closes initial claim ingress at the Agreement's
+// filing cutoff: the ingress receipt of an initial claim (revision 1) states a
+// received_at_unix no later than claim_filing_ends_at_unix. A claim first
+// sequenced after the cutoff is not a claim on the coverage, whatever its own
+// expiry says. A supplemental revision of an already admitted claim uses its
+// own ingress log during the review window and is not held to the cutoff.
+func validateClaimIngressTimeV1(claimRevision, receivedAtUnix uint64, terms CoverageTermsV1) error {
+	if claimRevision == 1 && receivedAtUnix > terms.ClaimFilingEndsAtUnix {
+		return errors.New("Guarantor initial claim ingress is received after the claim filing cutoff")
+	}
+	return nil
+}
+
+// validateClaimAdmissionTimesV1 holds the time a claim admission states to
+// the ingress receipt it consumes and, for an initial claim, to the claim and
+// the Agreement's schedule:
+//
+//	received_at_unix <= admitted_at_unix                  (every admission)
+//	admitted_at_unix <= claim.expires_at_unix             (initial)
+//	admitted_at_unix <= claim_filing_ends_at_unix
+//	                    + claim_ingress_resolution_grace_seconds   (initial)
+//
+// An ingress receipt is received no earlier than its claim was created, so the
+// first line also keeps the admission at or after the claim's creation. The
+// last line is independent of the ingress cutoff: a timely ingress does not
+// authorize an admission after the grace. Which admission is initial is read
+// from the revision of the claim the ingress receipt carries, not from the
+// kind the admission states.
+func validateClaimAdmissionTimesV1(admittedAtUnix uint64, ingress AuthorizedClaimSubmissionIngressReceiptV1,
+	terms CoverageTermsV1) error {
+	if admittedAtUnix < ingress.Body.ReceivedAtUnix {
+		return errors.New("Guarantor claim admission is admitted before the ingress receipt it consumes was received")
+	}
+	claim := ingress.AuthorizedClaim.Body
+	if claim.ClaimRevision != 1 {
+		return nil
+	}
+	if admittedAtUnix > claim.ExpiresAtUnix {
+		return errors.New("Guarantor initial claim admission is admitted after its claim expires")
+	}
+	latest, fits := checkedDurationAddV1(terms.ClaimFilingEndsAtUnix, terms.ClaimIngressResolutionGraceSeconds)
+	if !fits {
+		return errors.New("Guarantor terms' claim filing cutoff plus its ingress resolution grace overflows")
+	}
+	if admittedAtUnix > latest {
+		return errors.New("Guarantor initial claim admission is admitted after the claim filing cutoff plus the ingress resolution grace")
+	}
+	return nil
+}
+
 func VerifyClaimSubmissionIngressReceiptV1(receipt AuthorizedClaimSubmissionIngressReceiptV1, terms CoverageTermsV1,
 	bound GuarantorStageActionAuthorityV1, authorityResolver AuthorityKeyResolver,
 	fenceResolver agentcommerce.FenceAuthorityResolver, now time.Time) error {
 	body, claim := receipt.Body, receipt.AuthorizedClaim
 	if err := validateClaimRevisionWithinCapacityV1(terms, claim.Body.ClaimRevision); err != nil {
+		return err
+	}
+	if err := validateClaimIngressTimeV1(claim.Body.ClaimRevision, body.ReceivedAtUnix, terms); err != nil {
 		return err
 	}
 	// received_at_unix is the time the ingress action was admitted at. It is a
@@ -216,6 +269,9 @@ func VerifyClaimAdmissionReceiptV1(receipt AuthorizedClaimAdmissionReceiptV1, te
 	// and the closure fit all start from admitted_at_unix.
 	if err := bindReceiptTimeToStageAdmissionV1("claim admission", body.AdmittedAtUnix,
 		receipt.StageActionAdmissionEvidence, now); err != nil {
+		return err
+	}
+	if err := validateClaimAdmissionTimesV1(body.AdmittedAtUnix, ingress, terms); err != nil {
 		return err
 	}
 	claim := ingress.AuthorizedClaim

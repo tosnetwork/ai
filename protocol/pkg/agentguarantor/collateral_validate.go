@@ -3,6 +3,7 @@ package agentguarantor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -133,6 +134,22 @@ func CollateralTransitionBindingDigestV1(value CollateralTransitionBindingV1) (s
 	return guarantorCodec.Digest("tos.service.agent-guarantor-collateral-transition-binding.v1", value)
 }
 
+// validateCollateralTransitionBindingOfTermsV1 requires a transition binding
+// a request or an action presents to be, byte for byte, one of the bindings
+// the collateral terms carry. A binding is well formed on its own (its profile
+// digest and its custodian authorization are consistent with each other), so
+// without this a transition could be made, and its evidence authorized, under
+// a binding of the presenter's choosing: another Adapter, another evidence
+// profile or other authorization subjects than the Agreement fixed.
+func validateCollateralTransitionBindingOfTermsV1(binding CollateralTransitionBindingV1, terms CollateralTermsV1) error {
+	for _, agreed := range terms.TransitionBindings {
+		if equalCanonical(agreed, binding) {
+			return nil
+		}
+	}
+	return errors.New("Guarantor collateral transition binding is not one of the Agreement's transition bindings")
+}
+
 func ValidateCollateralTermsV1(value CollateralTermsV1) error {
 	if !validID(value.PositionID) || !validDigest(value.SelectedCollateralProfileDigest) ||
 		(value.AssuranceLevel != AssuranceCollateralAttested && value.AssuranceLevel != AssuranceIndependentlyEnforced) ||
@@ -247,6 +264,9 @@ func ValidateCollateralAdapterRequestV1(value CollateralAdapterRequestV1, bindin
 		validateAmount(value.Amount, true) != nil || value.Amount.Asset != value.Asset ||
 		!validDigest(value.PrerequisiteEvidenceSetDigest) {
 		return errors.New("Guarantor collateral Adapter request is invalid")
+	}
+	if err := validateCollateralTransitionBindingOfTermsV1(binding, terms); err != nil {
+		return err
 	}
 	if !containsString(binding.TransitionProfile.PermittedPriorStates, collateralStateToken(value.ExpectedPositionState.Status)) {
 		return errors.New("Guarantor collateral Adapter request uses an impermissible prior state")
@@ -415,25 +435,100 @@ func validateCollateralReleaseGuardV1(transitionKind string, finalizedAtUnix, ad
 // claim set, as an evidence item names it.
 const terminalClaimSetContentTypeV1 = GuarantorMediaTypePrefixV1 + "terminal-claim-set.v1+cbor"
 
-// validateCollateralReleasePrerequisiteV1 requires the prerequisite evidence
-// set of a release transition to name exactly one authorized terminal claim
-// set: collateral is released only against the coverage's closed claim cut.
-// The set is a Guarantor object, so the item is content addressed. The
-// collateral verifier holds no firm offer to verify that set against; it
-// checks that the release commits one, and the Adapter that admits the
-// release, or a holder of the set, verifies the set itself.
-func validateCollateralReleasePrerequisiteV1(transitionKind string, prerequisites CanonicalGuarantorEvidenceSetV1) error {
-	if transitionKind != "release" {
-		return nil
-	}
-	named := 0
+// collateralReleasePrerequisitePurposeV1 is the purpose of the prerequisite
+// evidence set of a release transition.
+const collateralReleasePrerequisitePurposeV1 = "collateral-release"
+
+// collateralReleaseTerminalClaimSetV1 is the digest of the authorized terminal
+// claim set a release transition is made against, as its action commits it:
+// collateral is released only against the coverage's closed claim cut. The
+// prerequisite evidence set has the release purpose and the action's coverage
+// Agreement as context, and names exactly one terminal claim set, through a
+// descriptor of that media type and of the item's own envelope digest, so the
+// digest the action commits is the digest the set is retrieved by.
+//
+// This is all a holder of the collateral evidence and the terms can check: it
+// has no firm offer and no set. VerifyCollateralReleaseEvidenceV1 verifies the
+// set itself and ties it to the release.
+func collateralReleaseTerminalClaimSetV1(action CollateralTransitionActionBodyV1) (string, error) {
+	prerequisites := action.PrerequisiteEvidenceSet
+	var named []CanonicalGuarantorEvidenceItemV1
 	for _, item := range prerequisites.Items {
 		if item.ContentType == terminalClaimSetContentTypeV1 {
-			named++
+			named = append(named, item)
 		}
 	}
-	if named != 1 {
-		return errors.New("Guarantor collateral release does not name exactly one authorized terminal claim set as its prerequisite")
+	if len(named) != 1 {
+		return "", errors.New("Guarantor collateral release does not name exactly one authorized terminal claim set as its prerequisite")
+	}
+	if prerequisites.Purpose != collateralReleasePrerequisitePurposeV1 {
+		return "", errors.New("Guarantor collateral release prerequisites have another purpose than a collateral release")
+	}
+	if prerequisites.ContextDigest != action.CoverageAgreementBodyDigest {
+		return "", errors.New("Guarantor collateral release prerequisites are of another coverage Agreement than the release")
+	}
+	item := named[0]
+	if item.ImmutableDescriptor == nil || item.ImmutableDescriptor.ContentType != item.ContentType {
+		return "", errors.New("Guarantor collateral release names its terminal claim set through a descriptor of another media type")
+	}
+	if item.ImmutableDescriptor.ContentDigest != item.EvidenceEnvelopeDigest {
+		return "", errors.New("Guarantor collateral release names its terminal claim set through a descriptor of another object")
+	}
+	return item.EvidenceEnvelopeDigest, nil
+}
+
+// VerifyCollateralReleaseEvidenceV1 verifies the release of a coverage's
+// collateral together with the terminal claim set it is made against, for a
+// verifier that holds both and the firm offer: the release verifies as
+// collateral evidence under the offer's terms, the set verifies as the
+// offer's terminal claim set, and the release is of that set. The release
+// commits the set's envelope digest, is of the offer's coverage Agreement, and
+// is admitted no earlier than the set was created and than the set allows its
+// release, so collateral is not released against a claim cut of another
+// coverage, an unverifiable one, or one that does not exist yet.
+func VerifyCollateralReleaseEvidenceV1(release AuthorizedCollateralEvidenceV1, claimSet AuthorizedTerminalClaimSetEvidenceV1,
+	offer AuthorizedFirmCoverageOfferV1, agreementVerifier agentcommerce.AgreementEvidenceVerifier,
+	authorityResolver AuthorityKeyResolver, fenceResolver agentcommerce.FenceAuthorityResolver,
+	paymentVerifier agentcommerce.PaymentEvidenceVerifier, finalityVerifier CollateralAdapterFinalityVerifier, now time.Time) error {
+	if release.CollateralTransitionActionBody.TransitionKind != "release" {
+		return errors.New("Guarantor collateral release evidence is of another transition kind")
+	}
+	if err := VerifyCollateralEvidenceV1(release, offer.CoverageTerms, authorityResolver, fenceResolver, now, finalityVerifier,
+		false); err != nil {
+		return err
+	}
+	if err := VerifyTerminalClaimSetV1(claimSet, offer, agreementVerifier, authorityResolver, fenceResolver, paymentVerifier,
+		now); err != nil {
+		return fmt.Errorf("Guarantor collateral release stands on an invalid terminal claim set: %w", err)
+	}
+	return bindCollateralReleaseToTerminalClaimSetV1(release, claimSet, offer)
+}
+
+// bindCollateralReleaseToTerminalClaimSetV1 ties a verified release to the
+// verified terminal claim set it names and to the offer both were verified
+// against.
+func bindCollateralReleaseToTerminalClaimSetV1(release AuthorizedCollateralEvidenceV1,
+	claimSet AuthorizedTerminalClaimSetEvidenceV1, offer AuthorizedFirmCoverageOfferV1) error {
+	named, err := collateralReleaseTerminalClaimSetV1(release.CollateralTransitionActionBody)
+	if err != nil {
+		return err
+	}
+	setDigest, err := TerminalClaimSetDigestV1(claimSet)
+	if err != nil {
+		return errors.New("Guarantor collateral release's terminal claim set cannot be digested")
+	}
+	if named != setDigest {
+		return errors.New("Guarantor collateral release names another terminal claim set than the one presented")
+	}
+	if release.Body.CoverageAgreementBodyDigest != offer.Body.CoverageAgreementBodyDigest {
+		return errors.New("Guarantor collateral release is of another coverage Agreement than the firm offer's")
+	}
+	admittedAt := release.StageActionAdmissionEvidence.Body.AdmittedAtUnix
+	if admittedAt < claimSet.Body.ReleaseNotBeforeUnix {
+		return errors.New("Guarantor collateral release precedes its terminal claim set's release time")
+	}
+	if admittedAt < claimSet.Body.CreatedAtUnix {
+		return errors.New("Guarantor collateral release precedes the creation of its terminal claim set")
 	}
 	return nil
 }
@@ -445,19 +540,32 @@ func VerifyCollateralEvidenceV1(value AuthorizedCollateralEvidenceV1, coverageTe
 		return errors.New("Guarantor collateral evidence has no accepted collateral terms")
 	}
 	terms := *coverageTerms.CollateralTerms
-	if authorityResolver == nil || fenceResolver == nil || finalityVerifier == nil || ValidateCoverageTerms(coverageTerms) != nil ||
-		ValidateCollateralTransitionActionBodyV1(value.CollateralTransitionActionBody, terms, allowCompositePayout) != nil {
-		return errors.New("Guarantor collateral evidence context is invalid")
-	}
 	action := value.CollateralTransitionActionBody
 	binding := action.TransitionBinding
+	// The evidence is of the Agreement's collateral: its transition is made
+	// under one of the terms' bindings and for the terms' collateral
+	// obligation. The terms carry no Agreement digest, so which coverage
+	// Agreement the evidence names is held by the verifier that has one: the
+	// activation it is a prerequisite of, or the release verifier.
+	if err := validateCollateralTransitionBindingOfTermsV1(binding, terms); err != nil {
+		return err
+	}
+	if action.ObligationID != coverageTerms.CollateralObligationID {
+		return errors.New("Guarantor collateral evidence is of another obligation than the Agreement's collateral obligation")
+	}
+	if authorityResolver == nil || fenceResolver == nil || finalityVerifier == nil || ValidateCoverageTerms(coverageTerms) != nil ||
+		ValidateCollateralTransitionActionBodyV1(action, terms, allowCompositePayout) != nil {
+		return errors.New("Guarantor collateral evidence context is invalid")
+	}
 	body := value.Body
 	if err := validateCollateralReleaseGuardV1(action.TransitionKind, body.FinalizedAtUnix,
 		value.StageActionAdmissionEvidence.Body.AdmittedAtUnix, terms); err != nil {
 		return err
 	}
-	if err := validateCollateralReleasePrerequisiteV1(action.TransitionKind, action.PrerequisiteEvidenceSet); err != nil {
-		return err
+	if action.TransitionKind == "release" {
+		if _, err := collateralReleaseTerminalClaimSetV1(action); err != nil {
+			return err
+		}
 	}
 	if body.FinalizedAtUnix > ^uint64(0)-terms.MaximumEvidenceAgeSeconds ||
 		uint64(now.UTC().Unix()) > body.FinalizedAtUnix+terms.MaximumEvidenceAgeSeconds {

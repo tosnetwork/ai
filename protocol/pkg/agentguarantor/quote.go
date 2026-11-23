@@ -440,6 +440,12 @@ func ValidateCoverageTerms(terms CoverageTermsV1) error {
 	if err := validateLateRecoveryDeadlinesV1(terms); err != nil {
 		return err
 	}
+	// The grace is the interval after the filing cutoff in which an ingress
+	// sequenced by the cutoff can still be admitted; terms without one leave a
+	// timely claim no time to be admitted.
+	if terms.ClaimIngressResolutionGraceSeconds == 0 {
+		return errors.New("Guarantor terms set no claim ingress resolution grace")
+	}
 	switch terms.SelectedAssuranceLevel {
 	case AssuranceUnsecuredSigned:
 		if terms.SelectedCollateralProfileDigest != "" || terms.CollateralObligationID != "" || terms.CollateralTerms != nil {
@@ -510,6 +516,11 @@ func ValidateCoverageTermsAgainstServiceProfile(terms CoverageTermsV1, profile S
 				!claimProfilePermitsLateRecoveryV1(claimProfile, terms) ||
 				terms.LifecycleAuthorizationProfile != profile.LifecycleAuthorizationProfile {
 				return errors.New("Guarantor terms substitute the selected claim authorization profile")
+			}
+			// The profile publishes how long after the filing cutoff its
+			// admission authority may still admit a timely ingress.
+			if terms.ClaimIngressResolutionGraceSeconds > claimProfile.MaximumClaimIngressResolutionGraceSeconds {
+				return errors.New("Guarantor terms' claim ingress resolution grace exceeds the selected claim profile's maximum")
 			}
 			if terms.SelectedAssuranceLevel == AssuranceUnsecuredSigned {
 				return nil
