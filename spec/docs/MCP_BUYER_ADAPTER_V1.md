@@ -1452,8 +1452,11 @@ Domain failures are tool results with `isError: true` whose
 "state"}}`. `disposition` is one of the `PUBLIC_ERRORS_V1.md` dispositions; a
 client or model that does not recognise a code treats it as `NEVER`.
 `message` is fixed server text and never contains an endpoint URL, a path
-outside the workspace and results roots, a key name or untrusted text. Only a
-request the SDK rejects against the input schema is a JSON-RPC error
+outside the workspace and results roots, a key name or untrusted text. A call
+whose arguments break the input schema never reaches the tool: go-sdk v1.7.0
+answers it with a tool result that has `isError: true`, the SDK's validation
+text (`validating "arguments": …`) and no `structuredContent`, so it carries
+no `error` object. Only a call naming an unknown tool is a JSON-RPC error
 (`-32602`).
 
 | Code | Meaning | Disposition |

@@ -164,10 +164,19 @@ writable by group or others, or when its configuration names no client uid.
 The MCP server refuses to start when its effective uid is the custody
 account (the owner of the socket at `--agent-socket`), when `VAULT_URL` (or
 the rail configuration's `vault_url_env`, named with `--vault-url-env`) is
-set in its environment, or when it can open the rail configuration
-(`--rail-config`) or the agent's state directory (`--agent-state-dir`); a
-path it cannot check because it does not exist is refused too. The
-confirmer, conversely, refuses a socket path that is not a socket owned by
+set in its environment, or when it can open the path named by
+`--rail-config` or by `--agent-state-dir`. That check opens only the named
+paths: a path whose open fails for lack of permission passes, and a path
+that does not exist under a directory the developer account can search is
+refused as one that cannot be checked. A wrong path under a directory the
+developer account cannot search (for example a mistyped name under the
+custody account's `0750` home) therefore passes, since its open fails for
+permission like the real one's. The check catches a custody directory or
+file left open to the developer account; it does not prove that the paths
+are the agent's. The real guard is the agent side: the agent's own start-up
+checks above (its state directory, rail configuration, agent configuration
+and `tosctl` configuration private to the custody account) and the OS
+account boundary between the two accounts. The confirmer, conversely, refuses a socket path that is not a socket owned by
 its own uid. Custody and the peer-credential check are Linux interfaces, so
 V1 runs on Linux.
 
