@@ -474,7 +474,7 @@ its validation text and no `error` object.
 | `MCP_PROVIDER_NOTHING_TO_DO` | nothing credited, or more than credited, to withdraw | check `tos_provider_status` |
 | `MCP_PROVIDER_OVER_LIMIT` | 4 actions already await confirmation | decide or cancel one |
 | `MCP_PROVIDER_EXPIRED` | the preview's 10 minutes passed, or the fresh preview at apply time differed | preview again |
-| `MCP_PROVIDER_CONFLICT` | an idempotency key reused with other inputs; an action in another phase; another preview or a confirmed action is using the node's state directory | use a new key; check the action; ask again shortly |
+| `MCP_PROVIDER_CONFLICT` | an idempotency key reused with other inputs; an action in another phase; another preview or a confirmed action is using the node's state directory. A confirmed offer or withdrawal holds that slot for its whole send, which can take minutes (an offer's steps are each awaited in finalized state), while a preview waits at most 5 seconds for it | use a new key; check the action; ask again once the confirmed action reads `applied` (`tos_provider_actions`) |
 | `MCP_PROVIDER_DECLINED` | you declined, or three wrong codes cancelled it | none |
 | `MCP_PROVIDER_DEPENDENCY_UNAVAILABLE` | no RPC quorum, or a finalized read did not finish in 20 seconds; nothing was sent | check endpoints; retry |
 | `MCP_PROVIDER_AGENT_UNAVAILABLE` | the agent socket does not answer | check the agent service and its log |
@@ -490,9 +490,9 @@ A code the client does not know is treated as "do not retry".
 | Program | Message (abridged) | Cause |
 |---|---|---|
 | MCP server | `a vault credential variable is set in the MCP server's environment` | remove `VAULT_URL` (or the `--vault-url-env` variable) from `dev`'s environment and the client's entry |
-| MCP server | `the MCP server can open the provider agent's state directory` | `dev` can open `/home/tosprov1/agent-state`; tighten the home and directory modes |
-| MCP server | `the MCP server can open the rail configuration` | as above, for `rail.json` |
-| MCP server | `... cannot be checked; name the real paths` | `--agent-state-dir` or `--rail-config` names nothing that exists |
+| MCP server | `the MCP server can open the provider agent's state directory` | `dev` can open the path named by `--agent-state-dir`; tighten the home and directory modes |
+| MCP server | `the MCP server can open the rail configuration` | as above, for the path named by `--rail-config` |
+| MCP server | `... cannot be checked; name the real paths` | `--agent-state-dir` or `--rail-config` names a path that does not exist under a directory `dev` can search |
 | MCP server | `the agent socket is not a socket` | start the agent first; check `--agent-socket` |
 | MCP server | `the MCP server runs as the account that owns the agent socket` | the client was started as `tosprov1`; start it as `dev` |
 | MCP server | `the export directory must not be writable by group or others` | `chmod 0700 ~/tos-offers` |
@@ -505,6 +505,14 @@ A code the client does not know is treated as "do not retry".
 | confirmer | `the agent socket is not owned by this account` | run the confirmer as `tosprov1`, with that agent's socket |
 | confirmer | `the confirmer's terminal is not owned by the custody account` | you started it from a `dev` terminal; log in as `tosprov1` on a separate console or from another device |
 | confirmer | `the confirmer reads decisions only from a terminal` | do not pipe input into `confirm` |
+
+The MCP server's two "can open" checks open only the paths you name. A
+mistyped path under `/home/tosprov1`, which `dev` cannot search, fails to
+open for permission just as the real one does, so it passes: the server
+starts with a wrong `--agent-state-dir` or `--rail-config` and nothing
+tells you. Copy the paths from `agent.json`. These checks only catch a
+custody file or directory left open to `dev`; what keeps custody private is
+the agent's own start-up checks (section 6.1) and the separate accounts.
 
 ### 10.3 Other checks
 
