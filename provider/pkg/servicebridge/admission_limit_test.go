@@ -73,6 +73,32 @@ func TestAProviderRecordWithoutTheAdmissionTimeStillReads(t *testing.T) {
 	}
 }
 
+// A record of this release, as stored, reads back with its admission time,
+// and the admission count takes that time rather than the update time.
+func TestAProviderRecordWithTheAdmissionTimeReadsAsStored(t *testing.T) {
+	directory := filepath.Join(privateStateDir(t), "provider")
+	if err := ensurePrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	stored := `{"schema":"tos.openfox.rail-provider-request.v1","state":"acked","buyer_agent_id":"agent_` +
+		strings.Repeat("c3", 32) + `","capability_id":"cap","quote_commitment":"` + strings.Repeat("11", 32) +
+		`","actor":"0:` + strings.Repeat("77", 32) + `","request_id":3,"request_hash":"` + strings.Repeat("22", 32) +
+		`","deliveries":1,"updated_unix":1799990000,"admitted_unix":1799900000}`
+	if err := os.WriteFile(filepath.Join(directory, strings.Repeat("ab", 32)+".json"), []byte(stored), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	records, err := ReadProviderRecords(filepath.Dir(directory))
+	if err != nil || len(records) != 1 || records[0].AdmittedUnix != 1_799_900_000 ||
+		records[0].AdmissionTime() != 1_799_900_000 {
+		t.Fatalf("a record with its admission time: %+v %v", records, err)
+	}
+	// One day after the admission, though less than a day after the update,
+	// the request no longer counts.
+	if got := AdmissionsInLastDay(records, time.Unix(1_799_900_000+int64(AdmissionDay/time.Second), 0)); got != 0 {
+		t.Fatalf("counted %d admissions a day after the admission", got)
+	}
+}
+
 type refusingLimiter struct{ calls int }
 
 func (l *refusingLimiter) AllowAdmission(time.Time, []ProviderRecord) error {
@@ -227,6 +253,20 @@ func TestTheWalletBalanceIsReadAtTheSessionCheckpoint(t *testing.T) {
 	}
 	if _, err := ReadWalletBalance(context.Background(), nil, testWallet); err == nil {
 		t.Fatal("no session returned a balance")
+	}
+	session.err, session.asked = nil, ""
+	if _, err := ReadWalletBalance(context.Background(), session, ""); err == nil || session.asked != "" {
+		t.Fatalf("an empty wallet address was read: %v", err)
+	}
+}
+
+func TestAZeroWalletFloorIsRefused(t *testing.T) {
+	state := privateStateDir(t)
+	if _, err := ApplyWalletFloor(state, WalletBalance{}, 0, nil, time.Unix(1_800_000_000, 0)); err == nil {
+		t.Fatal("a zero floor was applied")
+	}
+	if markerBytes(t, state) != nil {
+		t.Fatal("a refused floor check wrote a marker")
 	}
 }
 

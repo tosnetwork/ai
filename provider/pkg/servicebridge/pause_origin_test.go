@@ -69,6 +69,31 @@ func TestAV1MarkerReadsAsAnOperatorPause(t *testing.T) {
 	}
 }
 
+// A v2 marker exactly as this release writes it reads back field for field,
+// for both origins, and its bytes remove it.
+func TestAV2MarkerAsStoredReadsWithItsOriginAndStamp(t *testing.T) {
+	stamp := strings.Repeat("0f", 16)
+	for _, origin := range []string{PauseOriginOperator, PauseOriginAgent} {
+		state := privateStateDir(t)
+		written := writeMarker(t, state, `{"schema":"tos.openfox.rail-admission-pause.v2","paused_unix":1800000000,`+
+			`"reason":"maintenance","origin":"`+origin+`","stamp":"`+stamp+`"}`)
+		pause, data, err := ReadAdmissionPauseMarker(state)
+		if err != nil || pause == nil || pause.Schema != admissionPauseSchema || pause.Origin != origin ||
+			pause.Stamp != stamp || pause.PausedUnix != 1_800_000_000 || pause.Reason != "maintenance" ||
+			!bytes.Equal(data, written) {
+			t.Fatalf("a stored %s marker: %+v %q %v", origin, pause, data, err)
+		}
+		// What this release writes encodes to the same layout.
+		encoded, err := encodePause(pause)
+		if err != nil || !bytes.Equal(encoded, written) {
+			t.Fatalf("the %s marker re-encodes as %s %v", origin, encoded, err)
+		}
+		if removed, err := ResumeAdmissionIf(state, written); err != nil || !removed {
+			t.Fatalf("a stored %s marker was not removed by its bytes: %v %v", origin, removed, err)
+		}
+	}
+}
+
 func TestEveryWriteIsAV2MarkerWithItsOriginAndAFreshStamp(t *testing.T) {
 	state := privateStateDir(t)
 	stamps := map[string]bool{}

@@ -72,6 +72,9 @@ type AccountSession interface {
 	Account(ctx context.Context, account string) (toschain.FinalizedAccount, error)
 }
 
+// The finalized reader's session is what the floor reads in production.
+var _ AccountSession = (*toschain.ServiceActorSession)(nil)
+
 // WalletBalance is a wallet's finalized balance at a checkpoint.
 type WalletBalance struct {
 	Wallet      string `json:"wallet"`
@@ -85,6 +88,9 @@ type WalletBalance struct {
 func ReadWalletBalance(ctx context.Context, session AccountSession, wallet string) (WalletBalance, error) {
 	if ctx == nil || session == nil {
 		return WalletBalance{}, errors.New("servicebridge: the wallet balance needs a finalized session")
+	}
+	if wallet == "" {
+		return WalletBalance{}, errors.New("servicebridge: the wallet balance needs the owner wallet's address")
 	}
 	account, err := session.Account(ctx, wallet)
 	if err != nil {
@@ -144,6 +150,11 @@ func ApplyWalletFloor(
 	floorMarker []byte,
 	now time.Time,
 ) (WalletFloorOutcome, error) {
+	// A zero floor would never pause, so a floor check configured with one
+	// is a mistake, not a disabled floor.
+	if floorNano == 0 {
+		return WalletFloorOutcome{}, errors.New("servicebridge: the wallet floor must be at least 1 nanoTOS")
+	}
 	outcome := WalletFloorOutcome{Balance: balance, FloorNano: floorNano}
 	if balance.BalanceNano < floorNano {
 		result, err := PauseAdmissionAs(stateDir, PauseOriginAgent, WalletFloorReason, now)
