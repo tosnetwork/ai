@@ -52,7 +52,8 @@ def tosctl_urls() -> list[str]:
     return [f"http://127.0.0.1:{port}" for port in RPC_PORTS.values()]
 
 
-def rpc_at(port: int, method: str, **params) -> dict:
+def rpc_at(port: int, method: str, /, **params) -> dict:
+    # Positional-only: runGetMethod's own parameters include one named "method".
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/jsonRPC", data=body, headers={"Content-Type": "application/json"}
@@ -64,7 +65,7 @@ def rpc_at(port: int, method: str, **params) -> dict:
     return answer["result"]
 
 
-def majority(method: str, view, timeout: float = 120, interval: float = 3, **params):
+def majority(method: str, view, /, timeout: float = 120, interval: float = 3, **params):
     """view(result) as a strict majority of the candidate endpoints return it,
     polled until they agree: {"value", "agreeing", "of", "ports"}, or None."""
     deadline = time.monotonic() + timeout
@@ -319,7 +320,11 @@ def service_data(actor: str):
         if result.get("exit_code") != 0:
             raise ValueError("get_service_data failed")
         stack = result["stack"]
-        return {name: _stack_int(stack[index]) for name, index in SERVICE_DATA.items()}
+        if len(stack) != 25:
+            raise ValueError("get_service_data returned another shape")
+        # The endpoint lists the stack top first: the last return value
+        # comes first, so return value i is stack[24 - i].
+        return {name: _stack_int(stack[24 - index]) for name, index in SERVICE_DATA.items()}
 
     read = majority("runGetMethod", view, address=actor, method="get_service_data", stack=[], seqno=seqno)
     return read and {**read, "seqno": seqno}
