@@ -2049,7 +2049,8 @@ def cmd_step(x: str, name: str, finish_action: str | None = None) -> None:
             f"{session['transcript']}"
         )
     hook(x, name, "after")
-    done.append(name)
+    if name not in done:
+        done.append(name)
     event(f"step {x} {name}", client=session["client"], tool_calls=session["tool_calls"], answer=answer)
 
 
