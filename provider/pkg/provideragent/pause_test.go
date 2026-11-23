@@ -263,6 +263,27 @@ func TestAModelPauseOverTheFloorsPauseIsNotLiftedByTheFloor(t *testing.T) {
 	}
 }
 
+// The second safeguard: a record that somehow holds an operator marker's
+// bytes still never lifts it, by the floor or by the model.
+func TestAnOperatorMarkerIsNeverLiftedEvenWhenTheRecordNamesItsBytes(t *testing.T) {
+	for _, why := range []string{pauseForWalletFloor, pauseForModel} {
+		bed := newTestbed(t)
+		result := bed.operatorPause()
+		if err := bed.agent.store.writeOrigin(pauseOrigin{Marker: result.Marker, Why: why}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := bed.agent.CheckWalletFloor(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if view, err := bed.resume(keyA); err != nil || view.Outcome != agentapi.ResumeConfirmable {
+			t.Fatalf("%s: the model's resume: %+v %v", why, view, err)
+		}
+		if pause, _ := bed.marker(); pause == nil || pause.Origin != servicebridge.PauseOriginOperator {
+			t.Fatalf("%s: the operator's marker was lifted", why)
+		}
+	}
+}
+
 func TestTheOperatorsPauseThroughTheAgentIsAnOperatorPause(t *testing.T) {
 	bed := newTestbed(t)
 	bed.pause(agentsocket.RoleClient, "model")
