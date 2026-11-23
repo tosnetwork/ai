@@ -1199,13 +1199,17 @@ Owner rulings:
   and accepts the run recorded in
   `deployments/local-agent-operated-provider-run-20261123.json` (verdict
   `LOCAL_AGENT_OPERATED_RUN_PASSED`, 41 checks). That run used one
-  developer account, the operator's own, which has sudo; each client was
-  given only its role's MCP server. Why: the separation a second developer
+  developer account, the operator's own, which has sudo and holds keys and
+  configurations from earlier work. Why: the separation a second developer
   account buys is between the two clients, not custody. Custody separation
   was complete in the run: separate custody OS accounts for the provider
-  and the buyer, agent sockets that admit callers by their peer
-  credentials (2.3), and no key or vault credential in the developer
-  account. What remains true: the core team operated every role, and the
+  and the buyer, and agent sockets that admit callers by their peer
+  credentials (2.3); the run's custody keys and vaults existed only in the
+  two custody accounts, none in the developer account. Each client was
+  given only its role's MCP server, with no shell or file tool (Codex still
+  listed its code-mode exec, `apply_patch` and its collaboration tools; no
+  session used them), so the clients could not read the developer
+  account's files. What remains true: the core team operated every role, and the
   run is not Gate D evidence (`qualifies_as_gate_d: false`).
 
 Decided for V1 on 2026-11-23, in the review of this specification (ai #130);
