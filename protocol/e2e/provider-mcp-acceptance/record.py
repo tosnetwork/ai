@@ -183,9 +183,10 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             {"call_utime": r2.get("call_utime")},
         )
         check(
-            f"{label}: R1 and R2 were accepted by the buyer against the finalized response_hash",
-            (answers.get("result-r1") or {}).get("accepted") is True
-            and (answers.get("result-r2") or {}).get("accepted") is True,
+            f"{label}: R1 and R2 were accepted by the buyer against the finalized response_hash "
+            "(read from the tos_buyer_result tool results, not from the model's answer)",
+            all((purchases.get(k, {}).get("result_tool") or {}).get("accepted") is True for k in ("R1", "R2")),
+            {k: purchases.get(k, {}).get("result_tool") for k in ("R1", "R2")},
         )
         check(
             f"{label}: the provider's own records of R1 and R2 read acked (custody read; the model's "
@@ -231,6 +232,25 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             f"{label}: a fee was read for every respond",
             len(fees) >= 2 and all("fee_nanotos" in r for r in fees),
             len(fees),
+        )
+        ledger = (facts["respond_fees"].get(x) or {}).get("ledger") or {}
+        check(
+            f"{label}: the owner wallet's ledger, rebuilt from its finalized transactions (values, forwarding "
+            "fees and total fees), starts at zero from the finalized balance",
+            ledger.get("reconciles") is True,
+            {k: ledger.get(k) for k in ("transactions", "history_complete", "balance_before_oldest_nanotos")},
+        )
+        # The ledger's balance after the withdrawal's payout must equal the
+        # balance the harness read directly once the payout arrived.
+        payout_lt = max((t["lt"] for t in after.get("withdraw_transactions", [])), default=None)
+        credit_rows = sorted(
+            (r for r in ledger.get("rows", []) if payout_lt and r["lt"] > payout_lt), key=lambda r: r["lt"]
+        )
+        ledger_after = credit_rows[0]["balance_after_nanotos"] if credit_rows else None
+        check(
+            f"{label}: the ledger's balance after the withdrawal payout equals the harness's direct read",
+            ledger_after is not None and ledger_after == after.get("wallet_balance_nanotos"),
+            {"ledger": ledger_after, "direct_read": after.get("wallet_balance_nanotos")},
         )
         check(
             f"{label}: each client operated the role this assignment gives it",
@@ -289,6 +309,12 @@ def build(state: dict, run: Path, facts: dict) -> dict:
                 "took_effect": s["took_effect"],
                 "config34_hash_before": s["before"]["config34_cell_hash"],
                 "config34_hash_after": s["after"]["config34_cell_hash"],
+                # The Config34 bytes the strict-majority reads returned; runs
+                # before the driver kept them recorded only the cell hashes,
+                # which a lite-client config proof at the key block checks.
+                "config34_boc_before_base64": s["before"].get("config34_boc_base64"),
+                "config34_boc_after_base64": s["after"].get("config34_boc_base64"),
+                "key_block": (s.get("took_effect") or {}).get("block"),
                 "members_before": s["before"]["members"],
                 "members_after": s["after"]["members"],
                 "left_local_indices": s["left"],
@@ -356,17 +382,19 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             "opened, typing the code only for the action or purchase the model's own tool result named",
             "init of each provider and buyer node was harness-driven in the custody accounts",
             "every endpoint is a local validator of this host",
-            "one developer account ran both clients (the coordinator's decision), not two",
+            "one developer account ran both clients, not two (owner ruling)",
             "the paid request pending across the switch was held by stopping the provider agent, not by load",
             "Codex 0.171 still lists, with its shell and file tools disabled and a read-only sandbox, its code-mode "
-            "exec (the host through which it calls MCP tools), apply_patch and its collaboration tools; the harness "
-            "stops a session that uses anything but the role's MCP server (check above)",
+            "exec (the host through which it calls MCP tools), apply_patch and its collaboration tools; no "
+            "session used them. The tool-use check is not live: after each session exits, the driver reads its "
+            "transcript (unexpected_tools) and cmd_step then stops the assignment on any tool use outside the "
+            "role's MCP server (check above)",
         ]
         + (
             [
                 "the developer account is the operator account and has sudo (owner ruling: the clients already "
-                "logged in there were used); the clients had no shell, file or other built-in tool, only the one "
-                "MCP server of their role, so the model could not use it"
+                "logged in there were used); the clients had no shell or file tool, so the model could not use "
+                "sudo (Codex still listed the tools named in the item above)"
             ]
             if facts.get("developer_is_operator")
             else []
@@ -382,6 +410,10 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             else []
         ),
         "funding": facts.get("funding"),
+        # The harness commit each session ran under ("inferred" for sessions
+        # from before the driver recorded it: the newest commit of the driver
+        # directory made before the session started).
+        "session_harness_commits": facts.get("session_commits"),
         # Steps that took more than one session (a re-run after a driver
         # fix, a continuation after an applying action, a client stopped
         # after a model-capacity stall); every session is listed above.

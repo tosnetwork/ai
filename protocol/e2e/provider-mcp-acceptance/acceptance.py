@@ -78,6 +78,23 @@ sys.path.insert(0, str(HERE))
 import chain  # noqa: E402
 
 AI_COMMIT = os.environ.get("AI_COMMIT", "571e9c50e43cc7a23950fe13932abf4579c9e09d")
+# Bounds of one model session (see run_session).
+SESSION_LIMIT_SECONDS = 2400
+SESSION_IDLE_SECONDS = 600
+
+
+def _harness_commit() -> dict:
+    """The commit this driver runs from, and whether its directory differs."""
+    head = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(
+        ["git", "-C", str(HERE), "status", "--porcelain", "--untracked-files=no", "--", str(HERE)],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return {"commit": head, "driver_tree_clean": not dirty}
+
+
+HARNESS_COMMIT = _harness_commit()
 TOS_ROOT = chain.TOS_ROOT
 # Set by main() from the command line.
 RUN = PRIVATE = PUBLIC = TRANSCRIPTS = Path("/nonexistent")
@@ -1497,8 +1514,28 @@ def run_session(x: str, name: str, finish: dict | None = None) -> dict:
     if on_stdin:
         process.stdin.write(prompt)
     process.stdin.close()
+    # A session is bounded: in total, and in time without any client event
+    # (a client retrying a model at capacity prints nothing for minutes).
+    # The driver stops it (SIGTERM to sudo, which passes it on) and records
+    # why; the step then fails and can be run again with the same keys.
+    watch = {"last": time.monotonic(), "started": time.monotonic(), "stopped": None}
+
+    def watchdog():
+        while process.poll() is None:
+            now_m = time.monotonic()
+            if now_m - watch["started"] > SESSION_LIMIT_SECONDS:
+                watch["stopped"] = f"session exceeded {SESSION_LIMIT_SECONDS} s"
+            elif now_m - watch["last"] > SESSION_IDLE_SECONDS:
+                watch["stopped"] = f"no client event for {SESSION_IDLE_SECONDS} s"
+            if watch["stopped"]:
+                process.terminate()
+                return
+            time.sleep(5)
+
+    threading.Thread(target=watchdog, daemon=True).start()
     with transcript.open("w") as handle:
         for line in process.stdout:
+            watch["last"] = time.monotonic()
             handle.write(redact(line))
             handle.flush()
             try:
@@ -1536,6 +1573,8 @@ def run_session(x: str, name: str, finish: dict | None = None) -> dict:
     unexpected = unexpected_tools(transcript, client, server_name(role))
     session = {
         "unexpected_tool_use": unexpected,
+        "stopped_by_driver": watch["stopped"],
+        "harness_commit": HARNESS_COMMIT,
         "assignment": x,
         "step": name,
         "finish": bool(finish),
@@ -1824,20 +1863,32 @@ def hook(x: str, name: str, which: str) -> None:
         a["pauses"].append({"at": now(), "event": f"after {name}", "marker": pause_marker(x)})
     elif action == "balances_before_withdraw":
         wallet = a["wallets"][f"provider-{x}"]
+        read = chain.transactions(actor_of(x)) or fail("no strict-majority read of the actor's transactions")
         a["withdraw_before"] = {
             "wallet_balance_nanotos": chain.balance(wallet),
             "actor": actor_of(x),
             "actor_balance_nanotos": chain.balance(actor_of(x)),
             "actor_service_data": chain.service_data(actor_of(x)),
+            # Earlier withdrawals, so that only this step's counts after it.
+            "withdrawals": [
+                {"lt": tx["lt"], "hash": tx["hash"]}
+                for tx in chain.inbound(read["value"], chain.WITHDRAW_OPCODE, wallet)
+                if not tx["aborted"]
+            ],
         }
     elif action == "withdrawal_facts":
         wallet = a["wallets"][f"provider-{x}"]
+        earlier = {t["hash"] for t in a["withdraw_before"].get("withdrawals", [])}
 
         def withdrawn():
             read = chain.transactions(actor_of(x))
             if not read:
                 return None
-            found = [tx for tx in chain.inbound(read["value"], chain.WITHDRAW_OPCODE, wallet) if not tx["aborted"]]
+            found = [
+                tx
+                for tx in chain.inbound(read["value"], chain.WITHDRAW_OPCODE, wallet)
+                if not tx["aborted"] and tx["hash"] not in earlier
+            ]
             return (read, found) if found else None
 
         read, withdrawals = poll(withdrawn, 600, 10) or ({"value": []}, [])
@@ -1880,15 +1931,9 @@ def first_block_with_set(low: int, high: int, cell_hash: str) -> dict:
         if answer is None:
             return {"seqno_between": [low, high], "exact": False}
         low, high = (low, middle) if answer else (middle, high)
-    header = chain.majority(
-        "getBlockHeader",
-        lambda r: {"utime": int(r.get("gen_utime") or 0), "root_hash": r["id"]["root_hash"]},
-        timeout=30,
-        workchain=-1,
-        shard=chain.MASTERCHAIN_SHARD,
-        seqno=high,
-    )
-    return {"seqno": high, "exact": True, "header": header and header["value"]}
+    block = chain.block_header(high)
+    header = block and {"utime": block["gen_utime"], "root_hash": block["root_hash"]}
+    return {"seqno": high, "exact": True, "header": header, "block": block}
 
 
 def provider_record_state(x: str, request_hash: str) -> str | None:
@@ -1948,6 +1993,47 @@ def wait_applied(x: str, kind: str) -> None:
     time.sleep(20)
 
 
+RESULT_CHECKED = "the Receipt's cell hash equals the finalized respond's response_hash"
+
+
+def result_from_transcript(transcript: Path, request_hash: str) -> dict:
+    """What a session's tos_buyer_result calls returned for one purchase: it
+    counts as accepted only when a result names the request hash, lists the
+    Receipt check against the finalized response_hash, names a receipt.boc,
+    and carries no error."""
+    out = {"accepted": False, "calls": 0, "response_hash": None}
+    for tool, text in _calls(transcript):
+        if not tool.endswith("tos_buyer_result"):
+            continue
+        out["calls"] += 1
+        plain = text.replace('\\"', '"').replace("\\\\", "\\")
+        if (
+            request_hash in plain
+            and RESULT_CHECKED.replace("'", "") in plain.replace("'", "").replace("\\u0027", "")
+            and "receipt.boc" in plain
+            and "MCP_BUYER_" not in plain
+        ):
+            out["accepted"] = True
+            found = re.search(r"response_hash\W+([0-9a-f]{64})", plain)
+            out["response_hash"] = found.group(1) if found else None
+    return out
+
+
+def check_session(session: dict, name: str) -> None:
+    """After a session exits: a tool use outside the role's MCP server (read
+    from its transcript) stops the assignment; a session the driver stopped
+    fails the step, which can then be run again."""
+    if session["unexpected_tool_use"]:
+        fail(
+            f"step {name}: the {session['client']} client used tools outside its MCP server "
+            f"{session['unexpected_tool_use']}; the assignment stops; see {session['transcript']}"
+        )
+    if session.get("stopped_by_driver"):
+        fail(
+            f"step {name}: the driver stopped the session ({session['stopped_by_driver']}); see {session['transcript']}"
+        )
+
+
 def cmd_step(x: str, name: str, finish_action: str | None = None) -> None:
     """One step. With finish_action, only the continuation of an action an
     earlier session of this step had confirmed and left applying."""
@@ -1971,11 +2057,7 @@ def cmd_step(x: str, name: str, finish_action: str | None = None) -> None:
         hook(x, name, "before")
         session = run_session(x, name)
         answer = session.get("answer") or {}
-    if session["unexpected_tool_use"]:
-        fail(
-            f"step {name}: the {session['client']} client used tools outside its MCP server "
-            f"{session['unexpected_tool_use']}; the assignment stops; see {session['transcript']}"
-        )
+    check_session(session, name)
     # A confirmed action's send can outlast every request_confirmation the
     # session may make (the tool answers at once while the action applies).
     # The driver then waits for the applied effect itself and starts a
@@ -1985,11 +2067,7 @@ def cmd_step(x: str, name: str, finish_action: str | None = None) -> None:
         session = run_session(
             x, name, {"ACTION_ID": answer["action_id"], "ACTION_REFERENCE": answer.get("action_reference", "")}
         )
-        if session["unexpected_tool_use"]:
-            fail(
-                f"step {name}: the {session['client']} client used tools outside its MCP server "
-                f"{session['unexpected_tool_use']}; the assignment stops; see {session['transcript']}"
-            )
+        check_session(session, name)
         answer = {**answer, **(session.get("answer") or {})}
     if spec["prompt"] == "provider-offer" and answer.get("capability_id"):
         offer_file = answer.get("offer_file", "")
@@ -2028,9 +2106,14 @@ def cmd_step(x: str, name: str, finish_action: str | None = None) -> None:
         if session["identifiers"].get("tos_buyer_prepare") != answer["request_hash"]:
             save()
             fail(f"step {name}: the reported request_hash is not the prepared one")
-    if spec["prompt"] == "buyer-result" and answer.get("accepted") is not True:
+    if spec["prompt"] == "buyer-result":
+        # Acceptance is read from the tos_buyer_result tool result itself, not
+        # from the model's final JSON (whose template names "accepted").
+        entry = a["purchases"][spec["label"]]
+        entry["result_tool"] = result_from_transcript(RUN / session["transcript"], entry["request_hash"])
         save()
-        fail(f"step {name}: the buyer agent has not accepted the result yet; run the step again shortly")
+        if not entry["result_tool"]["accepted"]:
+            fail(f"step {name}: the buyer agent has not accepted the result yet; run the step again shortly")
     # tos_buyer_status shows the purchase's own phase; the refund duty's
     # status is what tos_buyer_refund reports.
     if spec["prompt"] == "buyer-status" and answer.get("duty_status") != "refunded":
@@ -2151,6 +2234,18 @@ def cmd_evidence(x: str) -> None:
                 (out / label / name).write_bytes(data)
                 files[name] = hashlib.sha256(data).hexdigest()
         exports[label] = {"request_hash": entry["request_hash"], "files": files}
+    # Exactly the three purchases of the steps; the answered ones (R1, R2)
+    # with their Receipt and artifact, the refunded one (F) with the bundle.
+    expected = {
+        "R1": ("evidence.json", "receipt.boc", "artifact.tar"),
+        "R2": ("evidence.json", "receipt.boc", "artifact.tar"),
+        "F": ("evidence.json",),
+    }
+    if set(exports) != set(expected):
+        fail(f"evidence {x}: purchases {sorted(exports)}, expected {sorted(expected)}")
+    missing = {label: [n for n in names if n not in exports[label]["files"]] for label, names in expected.items()}
+    if any(missing.values()):
+        fail(f"evidence {x}: missing files {missing}")
     state["assignments"][x]["evidence"] = exports
     event(f"evidence {x}", exports=exports)
 
@@ -2219,15 +2314,50 @@ def cmd_verify() -> None:
     event("verified", results=results)
 
 
+def session_commits() -> list:
+    """The harness commit each session ran under: as the session recorded it,
+    or, for a session from before sessions recorded it, the newest branch
+    commit made before the session started (marked inferred)."""
+    log = subprocess.run(
+        ["git", "-C", str(REPO), "log", "--format=%H %cI", "HEAD", "--", str(HERE)], capture_output=True, text=True
+    ).stdout.split("\n")
+    commits = [(datetime.datetime.fromisoformat(t), h) for h, t in (line.split(" ", 1) for line in log if line)]
+    out = []
+    for s in state["sessions"]:
+        if s.get("harness_commit"):
+            out.append({"transcript": s["transcript"], **s["harness_commit"], "inferred": False})
+            continue
+        started = datetime.datetime.fromisoformat(s["started_utc"])
+        before = [h for t, h in commits if t <= started]
+        out.append({"transcript": s["transcript"], "commit": before[0] if before else None, "inferred": True})
+    return out
+
+
 def cmd_record() -> None:
     import record as record_builder
 
     out = RUN / "record"
     out.mkdir(mode=0o755, exist_ok=True)
+    # Read again from the run's own files and the chain, never from the
+    # models' answers: each answered purchase's tos_buyer_result tool result,
+    # and each switch's first block of the new set.
+    for x in ASSIGNMENTS:
+        purchases = state["assignments"][x]["purchases"]
+        for label in ("R1", "R2"):
+            sessions = [s for s in state["sessions"] if s["assignment"] == x and s["step"] == f"result-{label.lower()}"]
+            if label in purchases and sessions:
+                purchases[label]["result_tool"] = result_from_transcript(
+                    RUN / sessions[-1]["transcript"], purchases[label]["request_hash"]
+                )
+    for switch in state["switches"]:
+        seqno = (switch.get("took_effect") or {}).get("seqno")
+        if seqno:
+            switch["took_effect"]["block"] = chain.block_header(seqno)
     document = record_builder.build(
         state,
         RUN,
         {
+            "session_commits": session_commits(),
             "ai_commit": AI_COMMIT,
             "network_label": NETWORK_LABEL,
             "actor_code_hash": ACTOR_CODE_HASH,
