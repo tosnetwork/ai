@@ -14,6 +14,7 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/provider/pkg/servicebridge"
+	"golang.org/x/sys/unix"
 )
 
 // invoke runs one command line through the program's entry point.
@@ -610,6 +611,85 @@ func TestPauseAndResumeDriveTheAdmissionMarker(t *testing.T) {
 	if pause, err := servicebridge.ReadAdmissionPause(state); err != nil || pause != nil {
 		t.Fatalf("a refused pause left a marker: %+v %v", pause, err)
 	}
+}
+
+// The operator's pause over the provider agent's own pause re-stamps it as
+// the operator's, keeping the first pause time, whether or not the agent
+// runs; resume stays unconditional.
+func TestTheOperatorsPauseReStampsAnAgentPause(t *testing.T) {
+	rail, state := providerDirectory(t, nil)
+	first := time.Unix(1_800_000_000, 0)
+	agent, err := servicebridge.PauseAdmissionAs(state, servicebridge.PauseOriginAgent, "mcp: drain", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mustAnswer(t, "pause", "--rail-config", rail)
+	if got["already_paused"] != true || got["restamped"] != true || got["origin"] != "operator" ||
+		got["previous_origin"] != "agent" || got["paused_unix"] != float64(first.Unix()) {
+		t.Fatalf("pause over an agent pause: %v", got)
+	}
+	pause, err := servicebridge.ReadAdmissionPause(state)
+	if err != nil || pause.Origin != servicebridge.PauseOriginOperator || pause.PausedUnix != first.Unix() ||
+		pause.Stamp == agent.Pause.Stamp {
+		t.Fatalf("the marker: %+v %v", pause, err)
+	}
+	if removed, err := servicebridge.ResumeAdmissionIf(state, agent.Marker); removed ||
+		!errors.Is(err, servicebridge.ErrPauseMarkerChanged) {
+		t.Fatalf("the agent's bytes still remove the marker: %v %v", removed, err)
+	}
+	// A second operator pause changes nothing.
+	if again := mustAnswer(t, "pause", "--rail-config", rail); again["restamped"] != false ||
+		again["previous_origin"] != "operator" {
+		t.Fatalf("a second pause: %v", again)
+	}
+	if got := mustAnswer(t, "resume", "--rail-config", rail); got["was_paused"] != true {
+		t.Fatalf("resume: %v", got)
+	}
+}
+
+// A marker the program cannot read is never replaced by its pause.
+func TestThePauseRefusesAMarkerItCannotRead(t *testing.T) {
+	rail, state := providerDirectory(t, nil)
+	marker := filepath.Join(state, servicebridge.AdmissionPauseFile)
+	newer := []byte(`{"schema":"tos.openfox.rail-admission-pause.v3","paused_unix":1800000000}`)
+	if err := os.WriteFile(marker, newer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := invoke(t, "pause", "--rail-config", rail)
+	if code != exitFailed || stdout != "" || !strings.Contains(stderr, "same release") ||
+		!strings.Contains(stderr, "admission stays paused") {
+		t.Fatalf("exit %d: %s%s", code, stdout, stderr)
+	}
+	if data, err := os.ReadFile(marker); err != nil || !bytes.Equal(data, newer) {
+		t.Fatalf("the marker was changed: %s %v", data, err)
+	}
+}
+
+// serve refuses a node another process serves, before it opens anything.
+func TestServeRefusesANodeAlreadyServed(t *testing.T) {
+	rail, state := providerDirectory(t, nil)
+	lock, err := os.OpenFile(filepath.Join(state, servicebridge.ServeLockFile), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := invoke(t, "serve", "--rail-config", rail)
+	if code != exitFailed || stdout != "" || !strings.Contains(stderr, "never served twice") {
+		t.Fatalf("exit %d: %s%s", code, stdout, stderr)
+	}
+}
+
+func mustAnswer(t *testing.T, arguments ...string) map[string]any {
+	t.Helper()
+	stdout, stderr, code := invoke(t, arguments...)
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil || code != exitDone {
+		t.Fatalf("%v: exit %d, %v: %s%s", arguments, code, err, stdout, stderr)
+	}
+	return decoded
 }
 
 func TestStatusReportsTheLocalViewWhateverTheChainDoes(t *testing.T) {

@@ -89,6 +89,22 @@ type ProviderRecord struct {
 	// next delivery forward.
 	ResultRequestUnix int64 `json:"result_request_unix,omitempty"`
 	UpdatedUnix       int64 `json:"updated_unix"`
+	// AdmittedUnix is when the gate admitted the request: set once, when the
+	// record is first built after Gate.Admit, and never changed by a later
+	// update. A record written before the field existed has none; the
+	// admission count takes its updated_unix instead (AdmissionTime).
+	AdmittedUnix int64 `json:"admitted_unix,omitempty"`
+}
+
+// AdmissionTime is when the record's request was admitted: AdmittedUnix, or
+// for a record written before that field existed, UpdatedUnix, which is never
+// earlier than the admission and so can only count an admission as more
+// recent than it was.
+func (r ProviderRecord) AdmissionTime() int64 {
+	if r.AdmittedUnix > 0 {
+		return r.AdmittedUnix
+	}
+	return r.UpdatedUnix
 }
 
 // ErrExecutorNotReady reports a task that was not admitted because the
@@ -149,7 +165,10 @@ type ProviderConfig struct {
 	// StateDir holds the owner's admission pause marker. Empty means the
 	// provider has no pause control; OpenNode always sets it.
 	StateDir string
-	Now      func() time.Time
+	// Limiter, when set, is asked right after the pause check whether one
+	// more request may be admitted now. Nil admits without a limit.
+	Limiter AdmissionLimiter
+	Now     func() time.Time
 }
 
 // preRespondChecker is the part of the gate the delivery loop uses to recheck
@@ -293,6 +312,9 @@ func (p *Provider) HandleTask(ctx context.Context, message Message) error {
 	if pauseErr := p.admissionOpen(); pauseErr != nil {
 		return pauseErr
 	}
+	if limitErr := p.admissionAllowed(); limitErr != nil {
+		return limitErr
+	}
 	if p.config.Service != nil {
 		// Asked before the claim takes its slot. A task refused here is
 		// reported as ErrExecutorNotReady, which the dispatcher holds
@@ -332,7 +354,7 @@ func (p *Provider) HandleTask(ctx context.Context, message Message) error {
 		ResponseDeadline: verified.ResponseDeadline, PackageBase64: base64.StdEncoding.EncodeToString(task.Package),
 		BuyerWallet: claim.BuyerWallet, ExecutionID: hex.EncodeToString(claim.ExecutionID[:]),
 		InputDigest: hex.EncodeToString(claim.InputDigest[:]), CallLT: claim.Call.LT, CallHash: claim.Call.Hash,
-		PriceNanoTOS: verified.Price.String(),
+		PriceNanoTOS: verified.Price.String(), AdmittedUnix: p.config.Now().Unix(),
 	}
 	if cardErr != nil {
 		record.Detail = "the buyer's encryption key card was not taken: " + cardErr.Error()
@@ -514,6 +536,31 @@ func (p *Provider) admissionOpen() error {
 	}
 	if pause != nil {
 		return ErrAdmissionPaused
+	}
+	return nil
+}
+
+// admissionAllowed asks the limiter, with every provider record, whether one
+// more request may be admitted now. The caller holds p.mutex, so no other
+// admission of this provider runs between the count and the admission. A
+// refusal, and a failure to read the records, holds the task as a pause does.
+func (p *Provider) admissionAllowed() error {
+	if p.config.Limiter == nil {
+		return nil
+	}
+	records, err := p.records()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrAdmissionLimited, err)
+	}
+	list := make([]ProviderRecord, 0, len(records))
+	for _, record := range records {
+		list = append(list, record)
+	}
+	if err := p.config.Limiter.AllowAdmission(p.config.Now(), list); err != nil {
+		if errors.Is(err, ErrAdmissionLimited) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrAdmissionLimited, err)
 	}
 	return nil
 }

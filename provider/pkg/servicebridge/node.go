@@ -217,6 +217,9 @@ type NodeOptions struct {
 	Lane   any
 	Report func(stage string, err error)
 	Now    func() time.Time
+	// AdmissionLimiter, when set, bounds the provider's admissions
+	// (ProviderConfig.Limiter); the provider agent sets its daily cap here.
+	AdmissionLimiter AdmissionLimiter
 }
 
 // Node is one assembled rail node.
@@ -376,9 +379,14 @@ func OpenNode(ctx context.Context, config NodeConfig, options NodeOptions) (*Nod
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	node := &Node{Config: config, Manifests: &MemoryManifests{}}
+	// The serve lock comes first: nothing of the node is opened while
+	// another process serves it. Close releases it last.
+	releaseServe, err := lockServe(config.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	node := &Node{Config: config, Manifests: &MemoryManifests{}, closers: []io.Closer{&releaser{release: releaseServe}}}
 	fail := func(err error) (*Node, error) { return nil, errors.Join(err, node.Close()) }
-	var err error
 	node.Network = &nativev1.NetworkDomain{
 		NetworkId: config.Network.NetworkID, GenesisRootHash: config.Network.GenesisRootHash,
 		GenesisFileHash: config.Network.GenesisFileHash,
@@ -678,6 +686,7 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 		History:            railReader{reader: n.Reader},
 		Directory:          filepath.Join(n.Config.StateDir, "provider"),
 		StateDir:           n.Config.StateDir,
+		Limiter:            options.AdmissionLimiter,
 		Now:                options.Now,
 	})
 	return err

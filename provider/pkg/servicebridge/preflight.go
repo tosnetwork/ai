@@ -464,9 +464,9 @@ func (p *preflight) checkPause() {
 	}
 	if pause != nil {
 		p.report.AdmissionPaused = true
-		p.addf("admission.pause", CheckWarn, "new admissions are paused since %s; admitted work still completes; "+
-			"run `%s` to admit again",
-			time.Unix(pause.PausedUnix, 0).UTC().Format(time.RFC3339), serviceCommand("resume"))
+		p.addf("admission.pause", CheckWarn, "new admissions are paused since %s (an %s pause); admitted work still "+
+			"completes; run `%s` to admit again",
+			time.Unix(pause.PausedUnix, 0).UTC().Format(time.RFC3339), pause.Origin, serviceCommand("resume"))
 		return
 	}
 	p.addf("admission.pause", CheckPass, "new admissions are open")

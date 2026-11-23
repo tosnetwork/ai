@@ -129,7 +129,11 @@ type AdmissionStatus struct {
 	Paused     bool   `json:"paused"`
 	PausedUnix int64  `json:"paused_unix,omitempty"`
 	Reason     string `json:"reason,omitempty"`
-	Error      string `json:"error,omitempty"`
+	// Origin is who wrote the marker: operator or agent (a v1 marker reads
+	// as operator). Stamp is the marker's random stamp, empty for v1.
+	Origin string `json:"origin,omitempty"`
+	Stamp  string `json:"stamp,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 const (
@@ -514,7 +518,8 @@ func ReadProviderStatus(
 	if pause, pauseErr := ReadAdmissionPause(config.StateDir); pauseErr != nil {
 		status.Admission = AdmissionStatus{Paused: true, Error: pauseErr.Error()}
 	} else if pause != nil {
-		status.Admission = AdmissionStatus{Paused: true, PausedUnix: pause.PausedUnix, Reason: pause.Reason}
+		status.Admission = AdmissionStatus{Paused: true, PausedUnix: pause.PausedUnix, Reason: pause.Reason,
+			Origin: pause.Origin, Stamp: pause.Stamp}
 	}
 	actor, err := providerActor(config)
 	if err != nil {
