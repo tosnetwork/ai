@@ -1209,8 +1209,8 @@ Owner rulings:
   given only its role's MCP server, with no shell or file tool (Codex still
   listed its code-mode exec, `apply_patch` and its collaboration tools; no
   session used them), so the clients could not read the developer
-  account's files. What remains true: the core team operated every role, and the
-  run is not Gate D evidence (`qualifies_as_gate_d: false`).
+  account's files. What remains true: the core team operated every role,
+  and the run is not Gate D evidence (`qualifies_as_gate_d: false`).
 
 Decided for V1 on 2026-11-23, in the review of this specification (ai #130);
 the owner may reopen any of them:
