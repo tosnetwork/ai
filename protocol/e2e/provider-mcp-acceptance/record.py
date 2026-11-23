@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import statistics
 import subprocess
 from pathlib import Path
@@ -381,6 +382,29 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             else []
         ),
         "funding": facts.get("funding"),
+        # Steps that took more than one session (a re-run after a driver
+        # fix, a continuation after an applying action, a client stopped
+        # after a model-capacity stall); every session is listed above.
+        "steps_with_several_sessions": sorted(
+            {
+                f"{ROLE_ASSIGNMENTS[s['assignment']]}:{s['step']}"
+                for s in state["sessions"]
+                if sum(1 for t in state["sessions"] if (t["assignment"], t["step"]) == (s["assignment"], s["step"])) > 1
+            }
+        ),
     }
+    document = neutral(document, run)
     document["record_sha256"] = sha256_text(json.dumps(document, sort_keys=True, separators=(",", ":")))
     return document
+
+
+def neutral(document: dict, run: Path) -> dict:
+    """The record without host specifics: the run directory as RUN, the
+    loopback address as "loopback", role accounts' homes as ~<role account>.
+    No other account's name or home reaches the record."""
+    text = json.dumps(document)
+    text = text.replace(str(run), "RUN").replace("127.0.0.1", "loopback")
+    text = re.sub(r"/home/(tosprov1|tosbuy1|agentdev)", r"~\1", text)
+    if re.search(r"/home/", text):
+        raise ValueError("the record names a home directory outside the role accounts")
+    return json.loads(text)
