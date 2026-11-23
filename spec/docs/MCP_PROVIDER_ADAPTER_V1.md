@@ -837,9 +837,16 @@ schema is a JSON-RPC error (`-32602`).
 | `MCP_PROVIDER_AGENT_UNAVAILABLE` | the agent socket does not answer | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_PROVIDER_AMBIGUOUS` | a confirmed send may have been submitted, or an earlier withdrawal is undecided | `RESOLVE_BEFORE_RETRY` |
 | `MCP_PROVIDER_PERMISSION_DENIED` | the socket peer's account may not call this method | `NEVER` |
-| `MCP_PROVIDER_NOT_CONFIGURED` | the rail configuration has no provider section, or names a buyer, chat or messenger carrier | `NEVER` |
 | `MCP_PROVIDER_RATE_LIMITED` | over a bound of 4.2 | `SAME_REQUEST_AFTER_BACKOFF` |
 | `MCP_PROVIDER_INTERNAL` | anything else | `NEVER` |
+
+There is no "not configured" code. A rail configuration that names a buyer,
+chat or messenger carrier keeps the agent from starting (2.4), so no client
+ever reaches an agent serving one; a rail configuration without a provider
+section is served, and before the offer every method that needs it answers
+`MCP_PROVIDER_NOT_OFFERED`. The MCP server refuses its own bad deployment
+(2.3) by not starting, which the client reports as a server that failed to
+start, not as a tool result.
 
 **Timeouts.** Every agent method answers within 30 seconds except
 `request_confirmation` (its `wait_seconds` plus 5). A chain read past 20

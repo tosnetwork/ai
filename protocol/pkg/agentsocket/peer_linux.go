@@ -32,6 +32,24 @@ func checkSocketGroup(info os.FileInfo, agentGID uint32) error {
 	return nil
 }
 
+// SocketOwner returns the uid that owns the Unix socket at path. The path is
+// not followed: a link, or anything that is not a socket, is refused. A
+// client checks it before it connects, to know whose agent answers.
+func SocketOwner(path string) (uint32, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return 0, err
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return 0, errors.New("the path is not a Unix socket")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, errors.New("the socket's owner cannot be read")
+	}
+	return stat.Uid, nil
+}
+
 // PeerUID returns the connecting process's uid as the kernel recorded it at
 // connect time (SO_PEERCRED); nothing the peer sends can change it.
 func PeerUID(connection *net.UnixConn) (uint32, error) {
