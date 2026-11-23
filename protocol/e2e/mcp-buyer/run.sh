@@ -13,11 +13,19 @@
 #   ACTOR_CODE_HASH    tvm-cell-sha256:<hex> pinned Service Actor release
 # Optional: E2E_SKIP_REFUND=1 skips the hour-long timeout refund (quick
 # iterations only; the evidence records it and an evidence run keeps it),
-# E2E_CPUS (default 8).
+# E2E_CPUS (default 8), E2E_HARNESS_DIR (default: this directory's harness).
+#
+# E2E_HARNESS_DIR lets a sibling harness reuse this container, its mounts,
+# the thermal guard and the secret scan: that directory is mounted at
+# /e2e-mounts/harness and its run.py is what the container runs, while this
+# directory's harness stays mounted at /e2e-mounts/base-harness for it to
+# import. Unset, the run is exactly this harness's own.
 set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/../../.." && pwd)
 : "${E2E_WORKDIR:?}" "${TOS_SOURCE:?}" "${TOS_BUILD:?}" "${TOS_VENV:?}" "${REGISTRY_CODE_BOC:?}" "${ACTOR_CODE_HASH:?}"
+harness=$(CDPATH= cd -- "${E2E_HARNESS_DIR:-$here/harness}" && pwd)
+[ -f "$harness/run.py" ] || { echo "the harness directory has no run.py" >&2; exit 2; }
 # The interpreter directory as the venv names it (it may be a link), and
 # what it resolves to on the host.
 python_home=$(awk -F' = ' '$1 == "home" {print $2}' "$TOS_VENV/pyvenv.cfg")
@@ -40,12 +48,17 @@ network="$name-net"
 docker network create --internal "$network" >/dev/null
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true; docker network rm "$network" >/dev/null 2>&1 || true' EXIT
 : > "$E2E_WORKDIR/thermal.jsonl"
+# The harness takes the work directory over for the run (root, mode 0700),
+# after which this account cannot open a path inside it. The guard writes
+# through a descriptor opened now, which reaches the file without that path.
+exec 3>>"$E2E_WORKDIR/thermal.jsonl"
 docker run --detach --name "$name" --network "$network" --cpus "${E2E_CPUS:-8}" --pids-limit 4096 \
   --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add CHOWN --cap-add FOWNER \
   --security-opt no-new-privileges \
   --mount "type=bind,src=$E2E_WORKDIR,dst=/e2e/work" \
   --mount "type=bind,src=$E2E_WORKDIR/bin,dst=/e2e-mounts/bin,readonly" \
-  --mount "type=bind,src=$here/harness,dst=/e2e-mounts/harness,readonly" \
+  --mount "type=bind,src=$harness,dst=/e2e-mounts/harness,readonly" \
+  --mount "type=bind,src=$here/harness,dst=/e2e-mounts/base-harness,readonly" \
   --mount "type=bind,src=$repo/protocol/scripts,dst=/e2e-mounts/scripts,readonly" \
   --mount "type=bind,src=$TOS_SOURCE,dst=/e2e-mounts/tos-source,readonly" \
   --mount "type=bind,src=$TOS_BUILD,dst=/e2e-mounts/tos-build,readonly" \
@@ -55,7 +68,7 @@ docker run --detach --name "$name" --network "$network" --cpus "${E2E_CPUS:-8}" 
   --env "ACTOR_CODE_HASH=$ACTOR_CODE_HASH" --env "E2E_SKIP_REFUND=${E2E_SKIP_REFUND:-0}" \
   --env "HOST_UID=$(id -u)" --env "HOST_GID=$(id -g)" \
   --entrypoint /e2e-mounts/venv/bin/python3 "$image" -I /e2e-mounts/harness/run.py >/dev/null
-"$here/container-thermal-guard.sh" "$name" "$E2E_WORKDIR/thermal.jsonl" &
+"$here/container-thermal-guard.sh" "$name" /dev/fd/3 &
 guard=$!
 status=$(docker wait "$name")
 # The harness returns the work directory when it ends; if it was killed
@@ -69,7 +82,14 @@ if [ ! -w "$E2E_WORKDIR" ]; then
     > "$E2E_WORKDIR/recovery.json"
 fi
 docker logs "$name" > "$E2E_WORKDIR/run.log" 2>&1 || true
-wait "$guard" || true
+guard_status=0
+wait "$guard" || guard_status=$?
+exec 3>&-
+pauses=$(grep -c '"event":"pause"' "$E2E_WORKDIR/thermal.jsonl" || true)
+echo "thermal pauses: ${pauses:-0} (log: thermal.jsonl)"
+if [ "$guard_status" != 0 ]; then
+  echo "the thermal guard could not record every pause and resume" >&2
+fi
 # No artifact may hold the run's vault master key or any master_key value.
 leaks=0
 for artifact in "$E2E_WORKDIR"/run.log "$E2E_WORKDIR"/evidence.json "$E2E_WORKDIR"/transcript.jsonl; do
@@ -80,7 +100,7 @@ for artifact in "$E2E_WORKDIR"/run.log "$E2E_WORKDIR"/evidence.json "$E2E_WORKDI
   fi
 done
 tail -n 2 "$E2E_WORKDIR/run.log"
-if [ "$status" = 0 ] && [ "$leaks" = 0 ]; then
+if [ "$status" = 0 ] && [ "$leaks" = 0 ] && [ "$guard_status" = 0 ]; then
   exit 0
 fi
 exit 1
