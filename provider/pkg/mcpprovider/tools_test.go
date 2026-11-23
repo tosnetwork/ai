@@ -3,6 +3,9 @@ package mcpprovider
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -346,10 +349,35 @@ func TestTheExportDirectoryIsResolvedAndPrivate(t *testing.T) {
 }
 
 func TestAnExportedVersionThatCannotNameAFileIsRefused(t *testing.T) {
+	content := []byte(`{"schema":"tos.openfox.rail-offer.v2"}`)
+	sum := sha256.Sum256(content)
+	view := agentapi.ExportView{CapabilityID: "cap_" + strings.Repeat("ab", 32), CapabilityVersion: "1.0.0",
+		SHA256: hex.EncodeToString(sum[:]), Bytes: len(content), OfferBase64: base64.StdEncoding.EncodeToString(content)}
+	if _, err := checkExport(view); err != nil {
+		t.Fatalf("a valid export: %v", err)
+	}
 	for _, version := range []string{"../x", "a/b", ".hidden", "", strings.Repeat("v", 129)} {
-		if _, err := checkExport(agentapi.ExportView{CapabilityID: "cap_" + strings.Repeat("ab", 32),
-			CapabilityVersion: version}); err == nil {
+		refused := view
+		refused.CapabilityVersion = version
+		if _, err := checkExport(refused); err == nil {
 			t.Errorf("version %q was accepted", version)
+		}
+	}
+	for name, spoil := range map[string]func(*agentapi.ExportView){
+		"a capability id with a slash": func(v *agentapi.ExportView) { v.CapabilityID = "cap_/../x" },
+		"another digest":               func(v *agentapi.ExportView) { v.SHA256 = strings.Repeat("0", 64) },
+		"another length":               func(v *agentapi.ExportView) { v.Bytes++ },
+		"another schema": func(v *agentapi.ExportView) {
+			other := []byte(`{"schema":"other"}`)
+			otherSum := sha256.Sum256(other)
+			v.OfferBase64, v.Bytes, v.SHA256 = base64.StdEncoding.EncodeToString(other), len(other),
+				hex.EncodeToString(otherSum[:])
+		},
+	} {
+		refused := view
+		spoil(&refused)
+		if _, err := checkExport(refused); err == nil {
+			t.Errorf("%s was accepted", name)
 		}
 	}
 }
