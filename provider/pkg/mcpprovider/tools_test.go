@@ -2,6 +2,7 @@ package mcpprovider
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"net"
@@ -211,6 +212,39 @@ func TestShapeAppliesTheRulesAgain(t *testing.T) {
 	}
 	if strings.Contains(text, "UEFDS0FHRQ==") || strings.Contains(text, `"detail"`) || len(answer.spans) != 4 {
 		t.Fatalf("shaped: %s, %d spans", text, len(answer.spans))
+	}
+}
+
+// Each result draws its own delimiter id, so text from one result cannot
+// carry the end marker of another.
+func TestEveryResultDrawsAFreshDelimiter(t *testing.T) {
+	answer, err := shape(json.RawMessage(`{"detail":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for range 4 {
+		text, err := answer.text(func(value []byte) error { _, err := rand.Read(value); return err })
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := strings.Index(text, "id=")
+		ids[text[start+3:start+19]] = true
+	}
+	if len(ids) != 4 {
+		t.Fatalf("%d distinct delimiter ids in 4 results", len(ids))
+	}
+	tools, err := NewTools(Config{Agent: silentAgent{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := answer.text(tools.random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := answer.text(tools.random)
+	if err != nil || first == second {
+		t.Fatalf("the server's own randomness repeated a delimiter: %v", err)
 	}
 }
 
