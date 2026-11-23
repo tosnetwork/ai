@@ -552,9 +552,18 @@ func (history *signedHistory) offerActivationProving(signed signedOffer, accepta
 		t.Fatal(err)
 	}
 	activatedAt := acceptance.Body.AcceptedAtUnix + 1
+	if history.vary.activatedAt != 0 {
+		activatedAt = history.vary.activatedAt
+	}
+	prerequisites, prerequisiteDigest := history.vary.activationPrerequisites, ""
+	if prerequisites != nil {
+		if prerequisiteDigest, err = CanonicalGuarantorEvidenceSetDigestV1(*prerequisites); err != nil {
+			t.Fatalf("signed-history activation prerequisites are no canonical evidence set: %v", err)
+		}
+	}
 	canonical, err := Canonical(CoverageActivationActionBodyV1{SchemaVersion: 1, UnderlyingAgreementBody: underlying.Body,
 		UnderlyingAuthorizationEvidenceSet: underlyingSet, AuthorizedAcceptanceReceipt: acceptance,
-		TargetCoverageEndCommitment: commitment, TransitionEvidenceProjection: projection, ExpectedCoverageRevision: 1,
+		PrerequisiteEvidenceSet: prerequisites, TargetCoverageEndCommitment: commitment, TransitionEvidenceProjection: projection, ExpectedCoverageRevision: 1,
 		TargetCoverageRevision: 2, ExpectedClaimFilingState: "not_open", TargetClaimFilingState: "open",
 		ExpectedClaimFilingStateRevision: 1, TargetClaimFilingStateRevision: 2})
 	if err != nil {
@@ -595,7 +604,8 @@ func (history *signedHistory) offerActivationProving(signed signedOffer, accepta
 		UnderlyingAgreementBodyDigest:            terms.UnderlyingAgreementBodyDigest,
 		UnderlyingAuthorizationEvidenceSetDigest: underlyingSetDigest, AuthorizedFirmOfferEnvelopeDigest: offerDigest,
 		AcceptanceReceiptDigest: acceptanceDigest, ExposureReceiptDigest: offer.Body.ExposureAdmissionReceiptDigest,
-		SelectedAssuranceLevel: terms.SelectedAssuranceLevel, SelectedClaimProfileDigest: terms.SelectedClaimProfileDigest,
+		PrerequisiteEvidenceSetDigest: prerequisiteDigest,
+		SelectedAssuranceLevel:        terms.SelectedAssuranceLevel, SelectedClaimProfileDigest: terms.SelectedClaimProfileDigest,
 		TransitionEvidenceProjectionDigest: projectionDigest, AuthorizedActionDigest: actionDigest,
 		StableActionID: stage.AuthorizedAction.StableActionID, ExactRequestDigest: stage.AuthorizedAction.ExactRequestDigest,
 		WriterGeneration: stage.AuthorizedAction.WriterGeneration, WriterFenceDigest: stage.AuthorizedAction.WriterFenceDigest,
@@ -609,7 +619,8 @@ func (history *signedHistory) offerActivationProving(signed signedOffer, accepta
 	}
 	evidence := AuthorizedCoverageActivationEvidenceV1{Body: body, StageActionAdmissionEvidence: stage,
 		UnderlyingAgreementBody: underlying.Body, AuthorizedAcceptanceReceipt: acceptance, CoverageEndCommitment: commitment,
-		UnderlyingAuthorizationEvidenceSet: underlyingSet, TransitionEvidenceProjection: projection,
+		UnderlyingAuthorizationEvidenceSet: underlyingSet, PrerequisiteEvidenceSet: prerequisites,
+		TransitionEvidenceProjection:          projection,
 		AuthorityAdmissionEligibilityProofSet: eligibility,
 		Authorizations: []ProfileQualifiedObjectAuthorizationV1{history.signObjectAs(signer, terms.LifecycleAuthorizationProfile,
 			"activation-evidence", bodyDigest, "tos.service.agent-guarantor-activation-evidence-signature.v1", activatedAt)}}

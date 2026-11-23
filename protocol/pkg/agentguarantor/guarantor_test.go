@@ -144,7 +144,7 @@ func testCoverageTerms(t *testing.T) CoverageTermsV1 {
 		MaximumAggregatePayout: AtomicAmountV1{Asset: asset, AmountAtomic: "1000"},
 		MaximumPerClaim:        AtomicAmountV1{Asset: asset, AmountAtomic: "500"}, MaximumClaims: 4,
 		ClaimClosureCapacity: testCapacity(), CoverageStartsAtUnix: 2_000_000_000,
-		CoverageEndsAtUnix: 2_000_003_600, ClaimFilingEndsAtUnix: 2_000_007_200,
+		CoverageEndsAtUnix: 2_000_003_600, ClaimFilingEndsAtUnix: 2_000_007_200, ClaimIngressResolutionGraceSeconds: 60,
 		ReviewDeadlineSeconds: 600, ChallengeWindowSeconds: 600, NonterminalResolutionWindowSeconds: 600,
 		SuccessorDecisionWindowSeconds: 600, PayoutDeadlineSeconds: 600,
 		AdapterRecoveryWindowSeconds: 600, TerminalResolutionDeadlineUnix: 2_000_020_000,
