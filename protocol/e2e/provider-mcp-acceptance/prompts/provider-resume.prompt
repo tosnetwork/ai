@@ -1,0 +1,6 @@
+1. Call tos_provider_status and report the admission state and what the pause is recorded as.
+2. Call tos_provider_resume with idempotency_key "{IDEM}". Report its outcome. If it resumed directly, go to step 4.
+3. If instead it returned an action awaiting confirmation, report the action reference, then call tos_provider_request_confirmation with that action_id and wait_seconds 45. Repeat it, at most 14 times, while the state is awaiting_confirmation. If it reads applying, stop here: do not call it again, and end your answer with state "applying" and the action_id; a later session reads the outcome.
+4. Call tos_provider_status and report the admission state.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","resume_outcome":"...","action_id":"","action_reference":"","state":"...","admission":"..."}

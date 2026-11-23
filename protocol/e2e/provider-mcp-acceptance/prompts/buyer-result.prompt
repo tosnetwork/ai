@@ -1,0 +1,5 @@
+1. Call tos_buyer_status with request_hash "{REQUEST_HASH}" and report its state.
+2. Call tos_buyer_result with request_hash "{REQUEST_HASH}". If it returns MCP_BUYER_RESULT_NOT_READY, report that and stop.
+3. Report every digest the result lists as checked, the response_hash, and whether the Receipt's cell hash equals the finalized response_hash.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","request_hash":"{REQUEST_HASH}","state":"...","accepted":true,"response_hash":"..."}

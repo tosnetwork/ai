@@ -1,0 +1,3354 @@
+{
+  "schema": "tos.service.local-agent-operated-provider-run-record.v1",
+  "protocol": "tos_service_v1",
+  "status": "completed",
+  "verdict": "LOCAL_AGENT_OPERATED_RUN_PASSED",
+  "operation_mode": "agent-operated",
+  "network_kind": "local",
+  "qualifies_as_gate_d": false,
+  "qualifies_as_public_acceptance": false,
+  "qualification_note": "A local agent-operated run by the core team on the host's own four-validator test network. It is not Gate D evidence and not a public acceptance.",
+  "network": {
+    "network_id": "tos:global-id:3",
+    "genesis_root_hash": "sha256:b19f6311d140718d33313ed1bf8d5adacbcc1532e9602736356d4e3ed2fe40cd",
+    "genesis_file_hash": "sha256:5006013d6f5deeb6f6f005314ab90de9ceaab7bd45a80c6f1ce1cb6dae064032",
+    "global_config_sha256": "sha256:7cf2fd3dcb4eb734cdc2981094093b461b8d3700ee4c5563d40dabdf4d7dc438",
+    "validator_count": 4,
+    "endpoints": "the five validator candidates' loopback JSON-RPC; four form each set"
+  },
+  "validator_set_switch": [
+    {
+      "assignment": "A",
+      "took_effect": {
+        "exact": true,
+        "header": {
+          "root_hash": "K6HJnv3BKGU4c4OS0oevVJTkmv0YbhMt2xaYGPlzLOw=",
+          "utime": 1795433155
+        },
+        "seqno": 91532,
+        "block": {
+          "seqno": 91532,
+          "root_hash": "K6HJnv3BKGU4c4OS0oevVJTkmv0YbhMt2xaYGPlzLOw=",
+          "file_hash": "i16sysOjGUw0zWkjRjUrVNc1tEqCLMejWxtTY5Fsp6E=",
+          "gen_utime": 1795433155,
+          "is_key_block": true,
+          "prev_key_block_seqno": 91382,
+          "agreeing": 5,
+          "of": 5
+        }
+      },
+      "config34_hash_before": "d71ce450f6f87642798bf47ceea31d0be6279ff0f0cbf3115303ff2b01343739",
+      "config34_hash_after": "89c16ce3e8da0787bdc251c7a6263c4707b8f489351991815a6dff96a0969e0c",
+      "config34_boc_before_base64": null,
+      "config34_boc_after_base64": null,
+      "key_block": {
+        "seqno": 91532,
+        "root_hash": "K6HJnv3BKGU4c4OS0oevVJTkmv0YbhMt2xaYGPlzLOw=",
+        "file_hash": "i16sysOjGUw0zWkjRjUrVNc1tEqCLMejWxtTY5Fsp6E=",
+        "gen_utime": 1795433155,
+        "is_key_block": true,
+        "prev_key_block_seqno": 91382,
+        "agreeing": 5,
+        "of": 5
+      },
+      "members_before": [
+        {
+          "consensus_key_id_hex": "83a4b496c996b3cc01e2ebf1e7643973c81cbf6e69688bedc4c344f6f0c94835",
+          "controller_id_hex": "84713d6af88e1ebb0a1e65ff7d64ae777b6d8bdf265e1a2eb0fca6c76c6e48a6",
+          "local_index": 1
+        },
+        {
+          "consensus_key_id_hex": "43e1ac55be774b7dc06f4bef5e331cfe96bf6f8b78b9754b85bf8d425743b5ca",
+          "controller_id_hex": "db96507a0e3071dcbdf2718e3c0c2d3b8f6a5a3da215580f346d256dcf46faf0",
+          "local_index": 3
+        },
+        {
+          "consensus_key_id_hex": "20ffb456d55d352369a86d78a742c5e9a3a28a2bc90e22ad09badba6b5e2f486",
+          "controller_id_hex": "7880db390d8cb0fac8f0df9eb585e02b6f8f36e0b6a225165c922425dfdb7c17",
+          "local_index": 2
+        },
+        {
+          "consensus_key_id_hex": "51be3218037b74305689f6129e4e2340e1704ef1e59342e4215d7d8da75d1df4",
+          "controller_id_hex": "a34fee25766b57cfa4e1beb8ed6ddaf5a38ff879de7a6c6d5ac8d90a28499cc3",
+          "local_index": 4
+        }
+      ],
+      "members_after": [
+        {
+          "consensus_key_id_hex": "83a4b496c996b3cc01e2ebf1e7643973c81cbf6e69688bedc4c344f6f0c94835",
+          "controller_id_hex": "84713d6af88e1ebb0a1e65ff7d64ae777b6d8bdf265e1a2eb0fca6c76c6e48a6",
+          "local_index": 1
+        },
+        {
+          "consensus_key_id_hex": "20ffb456d55d352369a86d78a742c5e9a3a28a2bc90e22ad09badba6b5e2f486",
+          "controller_id_hex": "7880db390d8cb0fac8f0df9eb585e02b6f8f36e0b6a225165c922425dfdb7c17",
+          "local_index": 2
+        },
+        {
+          "consensus_key_id_hex": "43e1ac55be774b7dc06f4bef5e331cfe96bf6f8b78b9754b85bf8d425743b5ca",
+          "controller_id_hex": "db96507a0e3071dcbdf2718e3c0c2d3b8f6a5a3da215580f346d256dcf46faf0",
+          "local_index": 3
+        },
+        {
+          "consensus_key_id_hex": "2b2d4b70df5674eea67e016dc823176cb593869758b490c7002d96ebbb68c6b4",
+          "controller_id_hex": "0fac5a399bb54e88ab1512fef4bf73539f96712829f2a43fcb8028c6f17c9887",
+          "local_index": 7
+        }
+      ],
+      "left_local_indices": [
+        4
+      ],
+      "joined_local_indices": [
+        7
+      ],
+      "requests_pending_across": [
+        {
+          "call": {
+            "hash": "SqU5gB53lzKVcZVpezE2DD9BHVYKGQVBxScP/Ww3yKk=",
+            "lt": 91237000003
+          },
+          "label": "R1"
+        }
+      ],
+      "pending_held_by": "the provider agent stopped by the operator (systemctl --user) from before the paid call until the new set took effect"
+    },
+    {
+      "assignment": "B",
+      "took_effect": {
+        "exact": true,
+        "header": {
+          "root_hash": "rvONyWyQzPLQfbOgb/kLHtQWPVmq4Am5ziWBskYyn3I=",
+          "utime": 1795433755
+        },
+        "seqno": 93036,
+        "block": {
+          "seqno": 93036,
+          "root_hash": "rvONyWyQzPLQfbOgb/kLHtQWPVmq4Am5ziWBskYyn3I=",
+          "file_hash": "VrE0r5xJTuLMBI8riWhLkven2WmvR6t7STKCZS8KRHY=",
+          "gen_utime": 1795433755,
+          "is_key_block": true,
+          "prev_key_block_seqno": 92885,
+          "agreeing": 5,
+          "of": 5
+        }
+      },
+      "config34_hash_before": "89c16ce3e8da0787bdc251c7a6263c4707b8f489351991815a6dff96a0969e0c",
+      "config34_hash_after": "2dba635eacfeb9c71b1f96c23e2b6f4fb367bf8a16226ffdb94cdec5286df11c",
+      "config34_boc_before_base64": null,
+      "config34_boc_after_base64": null,
+      "key_block": {
+        "seqno": 93036,
+        "root_hash": "rvONyWyQzPLQfbOgb/kLHtQWPVmq4Am5ziWBskYyn3I=",
+        "file_hash": "VrE0r5xJTuLMBI8riWhLkven2WmvR6t7STKCZS8KRHY=",
+        "gen_utime": 1795433755,
+        "is_key_block": true,
+        "prev_key_block_seqno": 92885,
+        "agreeing": 5,
+        "of": 5
+      },
+      "members_before": [
+        {
+          "consensus_key_id_hex": "83a4b496c996b3cc01e2ebf1e7643973c81cbf6e69688bedc4c344f6f0c94835",
+          "controller_id_hex": "84713d6af88e1ebb0a1e65ff7d64ae777b6d8bdf265e1a2eb0fca6c76c6e48a6",
+          "local_index": 1
+        },
+        {
+          "consensus_key_id_hex": "20ffb456d55d352369a86d78a742c5e9a3a28a2bc90e22ad09badba6b5e2f486",
+          "controller_id_hex": "7880db390d8cb0fac8f0df9eb585e02b6f8f36e0b6a225165c922425dfdb7c17",
+          "local_index": 2
+        },
+        {
+          "consensus_key_id_hex": "43e1ac55be774b7dc06f4bef5e331cfe96bf6f8b78b9754b85bf8d425743b5ca",
+          "controller_id_hex": "db96507a0e3071dcbdf2718e3c0c2d3b8f6a5a3da215580f346d256dcf46faf0",
+          "local_index": 3
+        },
+        {
+          "consensus_key_id_hex": "2b2d4b70df5674eea67e016dc823176cb593869758b490c7002d96ebbb68c6b4",
+          "controller_id_hex": "0fac5a399bb54e88ab1512fef4bf73539f96712829f2a43fcb8028c6f17c9887",
+          "local_index": 7
+        }
+      ],
+      "members_after": [
+        {
+          "consensus_key_id_hex": "83a4b496c996b3cc01e2ebf1e7643973c81cbf6e69688bedc4c344f6f0c94835",
+          "controller_id_hex": "84713d6af88e1ebb0a1e65ff7d64ae777b6d8bdf265e1a2eb0fca6c76c6e48a6",
+          "local_index": 1
+        },
+        {
+          "consensus_key_id_hex": "43e1ac55be774b7dc06f4bef5e331cfe96bf6f8b78b9754b85bf8d425743b5ca",
+          "controller_id_hex": "db96507a0e3071dcbdf2718e3c0c2d3b8f6a5a3da215580f346d256dcf46faf0",
+          "local_index": 3
+        },
+        {
+          "consensus_key_id_hex": "20ffb456d55d352369a86d78a742c5e9a3a28a2bc90e22ad09badba6b5e2f486",
+          "controller_id_hex": "7880db390d8cb0fac8f0df9eb585e02b6f8f36e0b6a225165c922425dfdb7c17",
+          "local_index": 2
+        },
+        {
+          "consensus_key_id_hex": "51be3218037b74305689f6129e4e2340e1704ef1e59342e4215d7d8da75d1df4",
+          "controller_id_hex": "a34fee25766b57cfa4e1beb8ed6ddaf5a38ff879de7a6c6d5ac8d90a28499cc3",
+          "local_index": 4
+        }
+      ],
+      "left_local_indices": [
+        7
+      ],
+      "joined_local_indices": [
+        4
+      ],
+      "requests_pending_across": [
+        {
+          "call": {
+            "hash": "wYL9DD2tGLgOtaOIU6bEzSEKh+p8HQa2yMeNv6ck6YY=",
+            "lt": 92701000003
+          },
+          "label": "R1"
+        }
+      ],
+      "pending_held_by": "the provider agent stopped by the operator (systemctl --user) from before the paid call until the new set took effect"
+    }
+  ],
+  "releases": {
+    "service_actor_code_hash": "tvm-cell-sha256:0594f9a5743440f9c5f63913ab790c0ea6f4fd5c627d9962d63e09428e42aa0c",
+    "service_actor_release": "production",
+    "native_registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a"
+  },
+  "source_commits": {
+    "ai": "571e9c50e43cc7a23950fe13932abf4579c9e09d",
+    "tos": "6224453b5f72f35968071121600c0a9c06f2106e",
+    "harness": "f6ceb60b32a7db76c06ddd3f21206d3ebba7fd77",
+    "harness_tree_clean": true
+  },
+  "binaries": {
+    "tos-service-buyer": "92a9e9c1647e5e72d09cf8bf20798b78dbb06c9f000f14ef78e7189d61ce2280",
+    "tos-service-buyer-mcp": "a42ff2de3cd3f9cb95776b958ca0dd6420bc5c7d8cbf0a707c15861350707934",
+    "tos-service-packet-relay": "f8e1d1eab18acca7329dc5831feee496cce98211ec8c967f27ef88c53f498e01",
+    "tos-service-provider": "0296ca92eb5bd1deabf9c30705688fa6304a7ea2a90bd0db856423e983c6f069",
+    "tos-service-provider-mcp": "eb62a542df894b0b9f4d5bfda2f7145db7e7301c12ce40f922cabbb6f64f9602",
+    "tos-service-verify": "fcd4c74b5cd8e0195981c8384a293d6e859fed50217781c4613720236e372feb",
+    "tosctl": "eb89c7d8a56a4554218ce97566bfba719bc238248272c05c0258725373030273",
+    "software-work-executord": "8fef5233efefc8d453ba3db65c24810a883d41428e8bc0288cb07550c7e2bad7",
+    "claude": "f390eaa0814e6a1bff74cbb47acb74cb9c89d30ced809fe0af5af00c7bfe8ebb",
+    "codex": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0"
+  },
+  "openfox_absent": true,
+  "openfox_scan": {
+    "absent": true,
+    "file_hits": [],
+    "binaries_linking_openfox": [],
+    "run_path": "/usr/local/bin:/usr/bin:/bin",
+    "developer_home_is_operator_home": true,
+    "openfox_items_in_operator_home": 967,
+    "scanned": [
+      "/usr/local/bin",
+      "/opt/tos-acceptance-clients",
+      "RUN/bin",
+      "RUN/client-cwd",
+      "home of the provider custody",
+      "home of the buyer custody",
+      "home of the developer account"
+    ],
+    "at": "2026-11-23T13:23:41.111576+00:00"
+  },
+  "accounts": [
+    {
+      "role": "provider_custody",
+      "uid": 30033
+    },
+    {
+      "role": "buyer_custody",
+      "uid": 30034
+    },
+    {
+      "role": "developer",
+      "uid": 1000
+    }
+  ],
+  "relay": {
+    "url": "https://loopback:47790",
+    "ca_sha256": "d38b5c144a7a12695fb9d9e7bdaf3e9506cb5515dc45a3ec3e1a4e461848fabf",
+    "binary_sha256": "f8e1d1eab18acca7329dc5831feee496cce98211ec8c967f27ef88c53f498e01",
+    "account": "operator"
+  },
+  "role_assignments": {
+    "A": {
+      "provider_model_client": {
+        "client": "codex",
+        "cli_version": "codex-cli 0.171.0",
+        "binary_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
+        "models": []
+      },
+      "buyer_model_client": {
+        "client": "claude",
+        "cli_version": "2.1.330 (Claude Code)",
+        "binary_sha256": "f390eaa0814e6a1bff74cbb47acb74cb9c89d30ced809fe0af5af00c7bfe8ebb",
+        "models": [
+          "claude-opus-5-5"
+        ]
+      },
+      "sessions": [
+        {
+          "step": "provider-offer",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:17:28.047290+00:00",
+          "finished_utc": "2026-11-23T11:17:42.547849+00:00",
+          "exit": 0,
+          "prompt_sha256": "27c18ab1241b15292ffccd6c02aa2257affc1157fa4d1e8d94ccfb4fce4815cb",
+          "transcript_sha256": "187ad2b1e1a3241f1a1082c36533ffc1d26334cfb0aea49a709349ac186aa173",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_preflight"
+          ]
+        },
+        {
+          "step": "provider-offer",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:18:00.714358+00:00",
+          "finished_utc": "2026-11-23T11:18:16.173894+00:00",
+          "exit": 0,
+          "prompt_sha256": "27c18ab1241b15292ffccd6c02aa2257affc1157fa4d1e8d94ccfb4fce4815cb",
+          "transcript_sha256": "87b89047f13b0f69fb0db8636fa25efa8012abc73603ca41bff5dbd21703d284",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_preflight"
+          ]
+        },
+        {
+          "step": "provider-offer",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:18:36.414579+00:00",
+          "finished_utc": "2026-11-23T11:19:04.634863+00:00",
+          "exit": 0,
+          "prompt_sha256": "9c4d377aa4758499df0f219c1d71b00e77ca6b02c30b100260400d55307bfb11",
+          "transcript_sha256": "74a758be49b31eb53558c0aa9321f8c41c961779ab69448172ba02e054c0a2ee",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_preflight",
+            "tos_provider_offer_preview",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation",
+            "tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "provider-offer",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:21:30.059038+00:00",
+          "finished_utc": "2026-11-23T11:21:47.718323+00:00",
+          "exit": 0,
+          "prompt_sha256": "445ff7222f3c61134d2e322122670aba8079c93eb603ecd4bb0555b73184e3a9",
+          "transcript_sha256": "74f212bb6ab3a247ffd35d3c001ba1409c981f6dbdd7f0bfa27f7ca50d6f66ac",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_preflight",
+            "tos_provider_offer_preview"
+          ]
+        },
+        {
+          "step": "provider-offer",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:22:49.717132+00:00",
+          "finished_utc": "2026-11-23T11:23:12.341510+00:00",
+          "exit": 0,
+          "prompt_sha256": "2f81c001aabc5533b90c68504148b45779b12d8a7f5fdbabb107263890910b13",
+          "transcript_sha256": "a2f8aa5eb4901a99b1bba392b501dab98b2ef798d08aaeba42adeea233167eae",
+          "tool_calls": [
+            "tos_provider_request_confirmation",
+            "tos_provider_status",
+            "tos_provider_export_offer"
+          ]
+        },
+        {
+          "step": "buy-r1-across-switch",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:23:25.988623+00:00",
+          "finished_utc": "2026-11-23T11:23:51.441529+00:00",
+          "exit": 0,
+          "prompt_sha256": "4f610d574cbdbca6b1ecac627cb2d30b31e6f29d68b0b2a0f79559c4c46bfa99",
+          "transcript_sha256": "fc0fd280c534563c74134d70f0b8b44948739c09e7598cca870b9850f1a241cb",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_quote",
+            "mcp__tos-buyer__tos_buyer_prepare",
+            "mcp__tos-buyer__tos_buyer_request_payment",
+            "mcp__tos-buyer__tos_buyer_status"
+          ]
+        },
+        {
+          "step": "result-r1",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:26:35.202619+00:00",
+          "finished_utc": "2026-11-23T11:26:48.195021+00:00",
+          "exit": 0,
+          "prompt_sha256": "5bd5bc4144614219d0ccc1bcad81a45dc4189e9824a4e5c06881e973e215ab46",
+          "transcript_sha256": "dd13ec668f2b146d315e6b14386a7d7ca3099c61addb26042099e553cba13578",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_status",
+            "mcp__tos-buyer__tos_buyer_result"
+          ]
+        },
+        {
+          "step": "result-r1",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:27:28.848334+00:00",
+          "finished_utc": "2026-11-23T11:27:48.560715+00:00",
+          "exit": 0,
+          "prompt_sha256": "5bd5bc4144614219d0ccc1bcad81a45dc4189e9824a4e5c06881e973e215ab46",
+          "transcript_sha256": "9ad21857de901130c631229efd8655c08a99fe562ecb902bc111c54a5f842c92",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_status",
+            "mcp__tos-buyer__tos_buyer_result"
+          ]
+        },
+        {
+          "step": "records-acked",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:27:48.723284+00:00",
+          "finished_utc": "2026-11-23T11:28:02.213316+00:00",
+          "exit": 0,
+          "prompt_sha256": "7bbadde467b75c9bfec7278cab7164ac48feda3f863f6c85cd0b6fd82a42d0e4",
+          "transcript_sha256": "7569a9d8fddc448f486f0ff7f2a642dc4c736045c840dac9d9d808344e427c88",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_records"
+          ]
+        },
+        {
+          "step": "buy-r2",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:28:22.152189+00:00",
+          "finished_utc": "2026-11-23T11:28:51.934421+00:00",
+          "exit": 0,
+          "prompt_sha256": "9895988fbf2f57f9a5dcfb4e37edf0f75b9727d34d798e16545727a6d3615824",
+          "transcript_sha256": "56f44d8046056d7749cc2174089e61f3d40aa19a886796274e2815dd339aa787",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_quote",
+            "mcp__tos-buyer__tos_buyer_prepare",
+            "mcp__tos-buyer__tos_buyer_request_payment",
+            "mcp__tos-buyer__tos_buyer_status"
+          ]
+        },
+        {
+          "step": "result-r2",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:30:07.657690+00:00",
+          "finished_utc": "2026-11-23T11:30:27.624974+00:00",
+          "exit": 0,
+          "prompt_sha256": "787ad2277fda92c16de3ec69f31bd50422f14c4aa1a8c6fd98ae71e19d6cf32b",
+          "transcript_sha256": "3a0990b9770b8d55fe74b1b516bdc3470fcdeea3b1b7624152c4ae1e7b097607",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_status",
+            "mcp__tos-buyer__tos_buyer_result"
+          ]
+        },
+        {
+          "step": "pause-for-refund",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:30:36.615351+00:00",
+          "finished_utc": "2026-11-23T11:30:54.211168+00:00",
+          "exit": 0,
+          "prompt_sha256": "42b15c49255588403722985d18647548f6b94f22d0d511927da2b9d33ae5006b",
+          "transcript_sha256": "c966b0a7c48d2200a21ebda57b5607f63aa6cf5d7d4600f29b5cabe7b343351c",
+          "tool_calls": [
+            "tos_provider_pause",
+            "tos_provider_status",
+            "tos_provider_status"
+          ]
+        },
+        {
+          "step": "buy-f-paused",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:30:54.345782+00:00",
+          "finished_utc": "2026-11-23T11:31:26.614420+00:00",
+          "exit": 0,
+          "prompt_sha256": "9f0e2dd3bb540f552bcce2663d4269e171704354c2245ac7fd53b89cbbc5e91c",
+          "transcript_sha256": "455df239f7a96fc23a4140c575d575220c6604478674ba85eb4e60cdfbc9b03c",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_quote",
+            "mcp__tos-buyer__tos_buyer_prepare",
+            "mcp__tos-buyer__tos_buyer_request_payment",
+            "mcp__tos-buyer__tos_buyer_status"
+          ]
+        },
+        {
+          "step": "status-f-refunded",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:32:41.176721+00:00",
+          "finished_utc": "2026-11-23T12:33:01.209392+00:00",
+          "exit": 0,
+          "prompt_sha256": "95c1f1cd14a2a51c02c2e47528cced725e8edf7e9698fd7de19ca49a9372534a",
+          "transcript_sha256": "4debf73792947ca92446e2dabe7420d6a6eb16d20e505bf332fcb4bcd2f6ab55",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_status",
+            "mcp__tos-buyer__tos_buyer_purchases"
+          ]
+        },
+        {
+          "step": "status-f-refunded",
+          "role": "buyer",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:34:01.993770+00:00",
+          "finished_utc": "2026-11-23T12:34:28.304055+00:00",
+          "exit": 0,
+          "prompt_sha256": "f64e9a6c88c37bdf010784f1bbdc8897195b979cbc50c40b689a878e9730cca6",
+          "transcript_sha256": "79eb5d4ab88287f7b5b86c532df9fd9dbdc5819eae4cf01223eb91564a32ddad",
+          "tool_calls": [
+            "mcp__tos-buyer__tos_buyer_status",
+            "mcp__tos-buyer__tos_buyer_refund",
+            "mcp__tos-buyer__tos_buyer_purchases"
+          ]
+        },
+        {
+          "step": "resume-own",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:35:12.925604+00:00",
+          "finished_utc": "2026-11-23T12:35:33.716509+00:00",
+          "exit": 0,
+          "prompt_sha256": "dbdb25a0203641398b4054bbf8ec5986bb01fab8f57993e64f218add3298c783",
+          "transcript_sha256": "b2db82fab09b4a54d0775acfbb117df2526001057a28b591d8f946495eb91b5c",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_resume",
+            "tos_provider_status"
+          ]
+        },
+        {
+          "step": "resume-operator",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:35:33.976133+00:00",
+          "finished_utc": "2026-11-23T12:48:56.431702+00:00",
+          "exit": -15,
+          "prompt_sha256": "ee9fd20f826aa5ccae443eadf4e9725dcb79ba73e9c19e356832805f49fea851",
+          "transcript_sha256": "e83e57fb43d354644e7acabd5119d2548617ad48d6ac78b005f512f7b3993318",
+          "tool_calls": []
+        },
+        {
+          "step": "resume-operator",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:52:12.812294+00:00",
+          "finished_utc": "2026-11-23T12:52:43.121189+00:00",
+          "exit": 0,
+          "prompt_sha256": "ee9fd20f826aa5ccae443eadf4e9725dcb79ba73e9c19e356832805f49fea851",
+          "transcript_sha256": "02fa4318fd5871a40ce9d799c781566bb370e5d771e5571d767adc17ddf78ce9",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_resume",
+            "tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "resume-operator",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:53:03.143357+00:00",
+          "finished_utc": "2026-11-23T12:53:20.851873+00:00",
+          "exit": 0,
+          "prompt_sha256": "9cd3cccadfa55ee60f980abd2c254aec2946753a2184c5c6fc5af6284f0a8942",
+          "transcript_sha256": "5e03cfe95648dc08dfd12e9b6a17584fd52b02c79aaa5e1aac287a715faf2e37",
+          "tool_calls": [
+            "tos_provider_request_confirmation",
+            "tos_provider_status"
+          ]
+        },
+        {
+          "step": "pause-stacked",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:53:21.047357+00:00",
+          "finished_utc": "2026-11-23T12:53:44.845363+00:00",
+          "exit": 0,
+          "prompt_sha256": "a2867261807765d56130e702adcc751dfa8307f7d899e14a14a42b8b2d367cf5",
+          "transcript_sha256": "16df034d2a22ed26e9ad394049c3762eb06705bf3bae98f028286c7f00b6d763",
+          "tool_calls": [
+            "tos_provider_pause",
+            "tos_provider_status"
+          ]
+        },
+        {
+          "step": "resume-stacked",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:53:45.102389+00:00",
+          "finished_utc": "2026-11-23T12:54:09.877855+00:00",
+          "exit": 0,
+          "prompt_sha256": "b548555298fcdb75e223505b495a07439aee2d7eab455726af0a975d8d2e0ae7",
+          "transcript_sha256": "b54dbb9d3589f16a99801595c72c9b6b23fed019756d09b0d2eef76453745173",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_resume",
+            "tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "resume-stacked",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:54:29.902054+00:00",
+          "finished_utc": "2026-11-23T12:54:47.026842+00:00",
+          "exit": 0,
+          "prompt_sha256": "4df931ba5caf2621554131f9bd259e22dd98dea1fd40bf848b2fee61eac84863",
+          "transcript_sha256": "562d41bf7a6297d004571e6702167bf1c4183f45bf0c167e838e3771ff5aeda1",
+          "tool_calls": [
+            "tos_provider_request_confirmation",
+            "tos_provider_status"
+          ]
+        },
+        {
+          "step": "withdraw",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:54:47.284299+00:00",
+          "finished_utc": "2026-11-23T12:55:26.934362+00:00",
+          "exit": 0,
+          "prompt_sha256": "9fb9076bc2939dfab9bc765828f4ba9e4f2a9a87b3098d924401c70b4289af60",
+          "transcript_sha256": "7d2ccc07449d536f6584ea56b5e670655daf6a29be6db34ce3ac432ae124920b",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_withdraw_preview",
+            "tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "withdraw",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:55:47.096955+00:00",
+          "finished_utc": "2026-11-23T12:56:06.279646+00:00",
+          "exit": 0,
+          "prompt_sha256": "59c7245bf3c7b6cfd0f34cf7696b7106211f9bbdd4806d606b05217d0093a81f",
+          "transcript_sha256": "33074fd0e9e70851482137c120cf1b944c4e12d596dae79a545c3c8c7427641b",
+          "tool_calls": [
+            "tos_provider_request_confirmation",
+            "tos_provider_status"
+          ]
+        },
+        {
+          "step": "records-final",
+          "role": "provider",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:56:06.597313+00:00",
+          "finished_utc": "2026-11-23T12:56:26.862412+00:00",
+          "exit": 0,
+          "prompt_sha256": "0baaf6eae9f734b462138b0e25301579b93b6368451828529ef432d1090424cb",
+          "transcript_sha256": "5a01a9c220d353dd1c85449d5583ae60333bc0e055e2886217f9dbc20e38978d",
+          "tool_calls": [
+            "tos_provider_status",
+            "tos_provider_records",
+            "tos_provider_actions"
+          ]
+        }
+      ],
+      "provider_objects": {
+        "actor": "0:e4834e64fa3d8ac21d1b9b044f31c5f2a570a4b251d4cb7fe746c06f71dfbcd5",
+        "capability_id": "cap_3a761c8d0d1a12da7370ffffdacb2f81d45f17d1fe3f1a466d9704535ac0675e",
+        "capability_version": "1.0.0",
+        "manifest_digest": "sha256:3e1c42539ecaa357df906fb8e168bcd3dfa81944b316dc433f5c9552279e85db",
+        "offer_schema": "tos.openfox.rail-offer.v2",
+        "offer_sha256": "d516eef37476eee6332cdc3d5838b58bd481d5b4beede28858718c8d5c2fb7e3",
+        "provider_agent_id": "agent_45d91641cebaecbe444562016a80f02a3a9e4f40a91714c1ff6f8baccd8c143e",
+        "provider_init": {
+          "agent_address": "0:234f5792b330e2231ac031802e55eec3c377e58312d29302d180144148446300",
+          "agent_id": "agent_45d91641cebaecbe444562016a80f02a3a9e4f40a91714c1ff6f8baccd8c143e",
+          "confirmed": true,
+          "network": {
+            "genesis_file_hash": "sha256:5006013d6f5deeb6f6f005314ab90de9ceaab7bd45a80c6f1ce1cb6dae064032",
+            "genesis_root_hash": "sha256:b19f6311d140718d33313ed1bf8d5adacbcc1532e9602736356d4e3ed2fe40cd",
+            "network_id": "tos:global-id:3"
+          },
+          "next_steps": [
+            "provider: tos-service-provider offer --rail-config ~tosprov1/node-a/rail.json --price <TOS> ..."
+          ],
+          "packet_controller": "service-packet-a",
+          "packet_key_id": "mldsa44:60b3a03a1333e408012725271ff1ef4932c9e580796989b246f894b89732585c",
+          "rail_config": "~tosprov1/node-a/rail.json",
+          "registration_attached_nanotos": "2000000000",
+          "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "schema": "tos.openfox.rail-init.v1",
+          "state_dir": "~tosprov1/node-a/rail",
+          "steps": [
+            {
+              "detail": "tosctl is pinned to SHA-256 eb89c7d8a56a4554218ce97566bfba719bc238248272c05c0258725373030273 (the binary matches the SHA-256 given with --tosctl-sha256)",
+              "id": "tosctl.pin",
+              "status": "done"
+            },
+            {
+              "detail": "network \"tos:global-id:3\" with genesis root sha256:b19f6311d140718d33313ed1bf8d5adacbcc1532e9602736356d4e3ed2fe40cd and file sha256:5006013d6f5deeb6f6f005314ab90de9ceaab7bd45a80c6f1ce1cb6dae064032, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree",
+              "id": "network.domain",
+              "status": "done"
+            },
+            {
+              "detail": "wallet \"provider-a\" is 0:01b5881b999aa16ab0f37a81b9ffe70b095854f2c89284a9b79958cf00a7eba7",
+              "id": "wallet.address",
+              "status": "done"
+            },
+            {
+              "detail": "created controller \"service-packet-a\" in the vault with key id mldsa44:60b3a03a1333e408012725271ff1ef4932c9e580796989b246f894b89732585c",
+              "id": "controller.packet",
+              "status": "done"
+            },
+            {
+              "detail": "the registration of Agent agent_45d91641cebaecbe444562016a80f02a3a9e4f40a91714c1ff6f8baccd8c143e is in finalized state at checkpoint 88897",
+              "id": "agent.register",
+              "status": "done"
+            },
+            {
+              "detail": "this node's https relays are verified against the 1 pinned certificate authorities in ~tosprov1/node-a/rail/relay/relay-ca-d38b5c144a7a12695fb9d9e7bdaf3e9506cb5515dc45a3ec3e1a4e461848fabf.pem (SHA-256 d38b5c144a7a12695fb9d9e7bdaf3e9506cb5515dc45a3ec3e1a4e461848fabf) only, not the system trust store; relays only a peer's card names use the system trust store",
+              "id": "relay.trust",
+              "status": "done"
+            },
+            {
+              "detail": "wrote the rail configuration ~tosprov1/node-a/rail.json (0600); it reads back strictly",
+              "id": "config.write",
+              "status": "done"
+            }
+          ],
+          "tosctl_pin": "given_by_owner",
+          "tosctl_pin_note": "the binary matches the SHA-256 given with --tosctl-sha256",
+          "tosctl_sha256": "eb89c7d8a56a4554218ce97566bfba719bc238248272c05c0258725373030273",
+          "wallet_address": "0:01b5881b999aa16ab0f37a81b9ffe70b095854f2c89284a9b79958cf00a7eba7",
+          "wallet_name": "provider-a"
+        },
+        "wallet": "0:01b5881b999aa16ab0f37a81b9ffe70b095854f2c89284a9b79958cf00a7eba7"
+      },
+      "buyer_objects": {
+        "agent_id": "agent_8761fb40209dbe9949b8380860e891dd6f47ee02c1d0aee5850e744bec05310b",
+        "packet_controller_key_id": "mldsa44:4af27a1c8de7c9470e88806bb5907464a64f8c3a5d4cff7742fed107e1b53fec",
+        "wallet": "0:13179e45d9786df96e95c3ae7b2746133ed15c799d10e5157666768ba2ecc422"
+      },
+      "provider_actions": [
+        {
+          "kind": "offer",
+          "reference": "f68d-4b19-3d71-9b56",
+          "identifier": "f68d4b193d719b567119b2d3286af0a7a7b7a5c0ada058f16b6737e02bb792d9",
+          "typed": "code",
+          "outcome": "Action f68d-4b19-3d71-9b56 is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        },
+        {
+          "kind": "resume",
+          "reference": "020a-6972-3944-c09a",
+          "identifier": "020a69723944c09a523ce971d11885188fa175323e0754d999ba0451745a5293",
+          "typed": "code",
+          "outcome": "Action 020a-6972-3944-c09a is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        },
+        {
+          "kind": "resume",
+          "reference": "9365-fc59-94ab-f711",
+          "identifier": "9365fc5994abf711298b4088cbc5a3c897ee3dcd00af4cd0ed9f3a4fba4f283b",
+          "typed": "code",
+          "outcome": "Action 9365-fc59-94ab-f711 is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        },
+        {
+          "kind": "withdraw",
+          "reference": "93b6-7908-c6f6-c96e",
+          "identifier": "93b67908c6f6c96ee9f844e185d3d67fd2b7b10964831f9fec2c1eb9c9fbcc9b",
+          "typed": "code",
+          "outcome": "Action 93b6-7908-c6f6-c96e is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        }
+      ],
+      "purchases": {
+        "F": {
+          "call_hash": "O2RRftHdfz6D5Q792eQqwrz+jSXyIg2YFpsXrh9SjXg=",
+          "call_lt": 92369000003,
+          "refund_seen": {
+            "claims": [
+              {
+                "hash": "/EeBSSTFo8EMqr+hQAkBQA4umDLaW5ta95dbqExrB3k=",
+                "lt": 101519000003,
+                "paid_to_buyer": 299738092
+              }
+            ],
+            "expires": [
+              {
+                "hash": "ZqYiYTakULCihmoXP5gX0+5iCXNpkDVnldmheIotKGc=",
+                "lt": 101444000003,
+                "paid_to_buyer": 0
+              }
+            ],
+            "responds": []
+          },
+          "request_hash": "744cb82e41b84ff5319acd2ee27bece48c6a4b705c9539636ea3e5d908a1fbb8",
+          "verdict": {
+            "assignment": "a",
+            "checkpoint": {
+              "block_file_hash": "sha256:a46d1b635e40b685e2ee11c20cc5a16346c1dac13c9ce603bfa41ea73bdd883b",
+              "block_root_hash": "sha256:261450c07df40d43c7cf39fcbf5ae7a189eee70fc98f573c0d04ae54ced11e32",
+              "chain_time": 1795438693,
+              "seqno": 105409
+            },
+            "exit": 0,
+            "label": "F",
+            "request_hash": "744cb82e41b84ff5319acd2ee27bece48c6a4b705c9539636ea3e5d908a1fbb8",
+            "verdict": "pass",
+            "verdict_sha256": "70bf7ddcefe14e7d3d14b944821ee461e1385a80170cde37166247ca1e7d373a"
+          }
+        },
+        "R1": {
+          "call_hash": "SqU5gB53lzKVcZVpezE2DD9BHVYKGQVBxScP/Ww3yKk=",
+          "call_lt": 91237000003,
+          "call_utime": 1795433019,
+          "provider_record_before_result_session": "acked",
+          "request_hash": "e06d35f4662e81cbeab4501fff984d258cff6b8c71f8de32f82049383d9520a7",
+          "respond_seen": [
+            {
+              "hash": "gVkyxozx6H9y+lsmpBgCV2ASVSWxoScZCyHzaxgbudQ=",
+              "lt": 91662000003,
+              "utime": 1795433188
+            }
+          ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "31bf5bc427c3c1341f81984ca6aa4f131c403eff6f66b37a274561eee6006da8"
+          },
+          "verdict": {
+            "assignment": "a",
+            "checkpoint": {
+              "block_file_hash": "sha256:699280b14297e8ffd1a4a6582e5320a2695bafecdf54ac5affa8a6741cad682c",
+              "block_root_hash": "sha256:d546c46c4de962175cbb40d338871638627336393d2b66516671e57442e54e19",
+              "chain_time": 1795438694,
+              "seqno": 105410
+            },
+            "exit": 0,
+            "label": "R1",
+            "request_hash": "e06d35f4662e81cbeab4501fff984d258cff6b8c71f8de32f82049383d9520a7",
+            "verdict": "pass",
+            "verdict_sha256": "5fa1a0c7f628b67b792a6177989e15c76096e014d9de9a6d244d12a09dadeaa9"
+          }
+        },
+        "R2": {
+          "call_hash": "qTXaX+r786AATGbQcrEy99KW41zcvn/A/7ckSkl6hMk=",
+          "call_lt": 91989000003,
+          "call_utime": 1795433319,
+          "provider_record_before_result_session": "acked",
+          "request_hash": "512eb04e41cb4a3087870c860e8980a59acafd8f78b7d751d644a21d817f08d5",
+          "respond_seen": [
+            {
+              "hash": "vEGTBNwDtNvVDbsnoa2r+UrbcN0KS1TtqWiIWhaZWHE=",
+              "lt": 92126000003,
+              "utime": 1795433374
+            }
+          ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "e0d7561bb3e1b742095f3d8eda33e5ca675ebfe74fd80d10fcde0f1bd82ce6c8"
+          },
+          "verdict": {
+            "assignment": "a",
+            "checkpoint": {
+              "block_file_hash": "sha256:699280b14297e8ffd1a4a6582e5320a2695bafecdf54ac5affa8a6741cad682c",
+              "block_root_hash": "sha256:d546c46c4de962175cbb40d338871638627336393d2b66516671e57442e54e19",
+              "chain_time": 1795438694,
+              "seqno": 105410
+            },
+            "exit": 0,
+            "label": "R2",
+            "request_hash": "512eb04e41cb4a3087870c860e8980a59acafd8f78b7d751d644a21d817f08d5",
+            "verdict": "pass",
+            "verdict_sha256": "4921c582b915b26b6b2f1bebfdedb7929d7a6d125e7519a5014a877acd310bf6"
+          }
+        }
+      },
+      "pause_events": [
+        {
+          "at": "2026-11-23T12:35:33.719038+00:00",
+          "event": "after resume-own",
+          "marker": null
+        },
+        {
+          "at": "2026-11-23T12:35:33.957733+00:00",
+          "by": "operator",
+          "marker": {
+            "origin": "operator",
+            "paused_unix": 1795437333,
+            "reason": "operator stop before the model's resume",
+            "schema": "tos.openfox.rail-admission-pause.v2",
+            "stamp": "7ce828afebd78dc910c78b39b1c17d43"
+          },
+          "origin_expected": "operator"
+        },
+        {
+          "at": "2026-11-23T12:52:12.795081+00:00",
+          "by": "operator",
+          "marker": {
+            "origin": "operator",
+            "paused_unix": 1795437333,
+            "reason": "operator stop before the model's resume",
+            "schema": "tos.openfox.rail-admission-pause.v2",
+            "stamp": "7ce828afebd78dc910c78b39b1c17d43"
+          },
+          "origin_expected": "operator"
+        },
+        {
+          "at": "2026-11-23T12:53:20.854068+00:00",
+          "event": "after resume-operator",
+          "marker": null
+        },
+        {
+          "at": "2026-11-23T12:53:44.943095+00:00",
+          "by": "operator over model",
+          "first_paused_unix_kept": true,
+          "marker_after": {
+            "origin": "operator",
+            "paused_unix": 1795438415,
+            "reason": "operator stop stacked on the model's pause",
+            "schema": "tos.openfox.rail-admission-pause.v2",
+            "stamp": "6aff706425ad13f3ad34ba94c6baa5c2"
+          },
+          "marker_before": {
+            "origin": "agent",
+            "paused_unix": 1795438415,
+            "reason": "mcp: stacked pause: model first",
+            "schema": "tos.openfox.rail-admission-pause.v2",
+            "stamp": "03193f22a8846d62635b220dfd0ed27e"
+          },
+          "origin_after": "operator",
+          "restamped": true
+        },
+        {
+          "at": "2026-11-23T12:54:47.029002+00:00",
+          "event": "after resume-stacked",
+          "marker": null
+        }
+      ],
+      "operator_commands": [
+        {
+          "action": "stop-agent",
+          "at": "2026-11-23T11:23:25.985879+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "why": "hold the paid request pending at the provider across a validator-set switch"
+        },
+        {
+          "action": "start-agent",
+          "at": "2026-11-23T11:26:06.994327+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "why": "the switch has taken effect; the provider admits the pending request"
+        },
+        {
+          "action": "pause",
+          "at": "2026-11-23T12:35:33.956617+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "reason": "operator stop before the model's resume",
+          "report": {
+            "already_paused": false,
+            "origin": "operator",
+            "paused": true,
+            "paused_unix": 1795437333,
+            "reason": "operator stop before the model's resume",
+            "restamped": false
+          }
+        },
+        {
+          "action": "pause",
+          "at": "2026-11-23T12:52:12.793865+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "reason": "operator stop before the model's resume",
+          "report": {
+            "already_paused": true,
+            "origin": "operator",
+            "paused": true,
+            "paused_unix": 1795437333,
+            "previous_origin": "operator",
+            "reason": "operator stop before the model's resume",
+            "restamped": false
+          }
+        },
+        {
+          "action": "pause",
+          "at": "2026-11-23T12:53:44.921249+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "reason": "operator stop stacked on the model's pause",
+          "report": {
+            "already_paused": true,
+            "origin": "operator",
+            "paused": true,
+            "paused_unix": 1795438415,
+            "previous_origin": "agent",
+            "reason": "operator stop stacked on the model's pause",
+            "restamped": true
+          }
+        }
+      ],
+      "withdrawal": {
+        "before": {
+          "actor": "0:e4834e64fa3d8ac21d1b9b044f31c5f2a570a4b251d4cb7fe746c06f71dfbcd5",
+          "actor_balance_nanotos": 2039186449,
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 104891,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 800000000
+            }
+          },
+          "wallet_balance_nanotos": 14741166316
+        },
+        "after": {
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 105091,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 0
+            }
+          },
+          "agreeing": 5,
+          "of": 5,
+          "wallet_balance_nanotos": 15540705003,
+          "withdraw_transactions": [
+            {
+              "hash": "nOWJt62STP9ePqKbbP0cc+PgTFE2+7DcPUuvp14hslw=",
+              "lt": 105024000003,
+              "sent_to_wallet_nanotos": 999756618
+            }
+          ]
+        },
+        "reader": "harness"
+      },
+      "custody_start": {
+        "agent_start_lines": {
+          "buyer": [],
+          "provider": [
+            "{"
+          ]
+        },
+        "mcp_startup": {
+          "buyer": {
+            "exit": 0,
+            "stderr": ""
+          },
+          "provider": {
+            "exit": 0,
+            "stderr": ""
+          }
+        },
+        "custody_preflight_after_init": {
+          "exit": 3,
+          "failing": [
+            "config.provider",
+            "relay.key"
+          ]
+        }
+      },
+      "cli_fallback_steps": []
+    },
+    "B": {
+      "provider_model_client": {
+        "client": "claude",
+        "cli_version": "2.1.330 (Claude Code)",
+        "binary_sha256": "f390eaa0814e6a1bff74cbb47acb74cb9c89d30ced809fe0af5af00c7bfe8ebb",
+        "models": [
+          "claude-opus-5-5"
+        ]
+      },
+      "buyer_model_client": {
+        "client": "codex",
+        "cli_version": "codex-cli 0.171.0",
+        "binary_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
+        "models": []
+      },
+      "sessions": [
+        {
+          "step": "provider-offer",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:31:36.791854+00:00",
+          "finished_utc": "2026-11-23T11:32:08.727532+00:00",
+          "exit": 0,
+          "prompt_sha256": "248600f46eba762f84f4fafe794d2b70e6bf2896832f800ea99c0a652aaed6be",
+          "transcript_sha256": "78f05a53b4f44067948a1fda2de21f14dd21cfe96bdfc7076bab63d1d5707da3",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_preflight",
+            "mcp__tos-provider__tos_provider_offer_preview",
+            "mcp__tos-provider__tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "provider-offer",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:32:28.825656+00:00",
+          "finished_utc": "2026-11-23T11:32:52.483857+00:00",
+          "exit": 0,
+          "prompt_sha256": "39f9a217edcb5de12091b988c1b3cd71a7cfc0389ac8041dca29b901c9ea9f1e",
+          "transcript_sha256": "8af231bb2639f034f179b1e7ce29caadf52d5dbb4b2778e2fd9b0640f0846a7d",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_request_confirmation",
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_export_offer"
+          ]
+        },
+        {
+          "step": "buy-r1-across-switch",
+          "role": "buyer",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:33:00.459352+00:00",
+          "finished_utc": "2026-11-23T11:33:34.753528+00:00",
+          "exit": 0,
+          "prompt_sha256": "bb9696f935372a27702ab70153aeeb6b96e8ed9e2ca782f6d15d107663f6dd00",
+          "transcript_sha256": "41c7ab7c34f60472ce097645b847c84e4e7a7c68d4161e03531876cafe3b687c",
+          "tool_calls": [
+            "tos_buyer_quote",
+            "tos_buyer_prepare",
+            "tos_buyer_request_payment",
+            "tos_buyer_status"
+          ]
+        },
+        {
+          "step": "result-r1",
+          "role": "buyer",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:37:19.457379+00:00",
+          "finished_utc": "2026-11-23T11:37:51.929676+00:00",
+          "exit": 0,
+          "prompt_sha256": "88158920e41a71b4b9ca574289dd1db29309ce2fde9fd37b76f1d8ec1e3bc10f",
+          "transcript_sha256": "1aee5d38669291ed388d9a1e534cef795c6d63296d1518e2265d28c281a36b58",
+          "tool_calls": [
+            "tos_buyer_status",
+            "tos_buyer_result"
+          ]
+        },
+        {
+          "step": "records-acked",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:37:52.122957+00:00",
+          "finished_utc": "2026-11-23T11:38:03.711502+00:00",
+          "exit": 0,
+          "prompt_sha256": "b8eb941b8fe8187608a8918aa67ac065a4baedc9e5bd96a09d853b637e626ba2",
+          "transcript_sha256": "eac30845343347b449ae026d9c4254c28cc9fbc739d7dda236040a00c1f46944",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_records"
+          ]
+        },
+        {
+          "step": "buy-r2",
+          "role": "buyer",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:38:03.864665+00:00",
+          "finished_utc": "2026-11-23T11:38:34.630430+00:00",
+          "exit": 0,
+          "prompt_sha256": "76c7450a546696d2de0b5614af5899748d9d65d308c0d8c505cccb382bf4bff1",
+          "transcript_sha256": "cc44c67525380befa8011a52aed295867a7b394d935d612e96387be618403e36",
+          "tool_calls": [
+            "tos_buyer_quote",
+            "tos_buyer_prepare",
+            "tos_buyer_request_payment",
+            "tos_buyer_status"
+          ]
+        },
+        {
+          "step": "result-r2",
+          "role": "buyer",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:39:45.313235+00:00",
+          "finished_utc": "2026-11-23T11:40:13.223727+00:00",
+          "exit": 0,
+          "prompt_sha256": "a485e598a0c078ea2be3286ebf426b601b4a9ae3f70062452c2f7a993cb0d663",
+          "transcript_sha256": "083e548bd08fadd23192340ccdeed408d5ff85dcd2b861204f6a57894ba5bb69",
+          "tool_calls": [
+            "tos_buyer_status",
+            "tos_buyer_result"
+          ]
+        },
+        {
+          "step": "pause-for-refund",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T11:40:25.152807+00:00",
+          "finished_utc": "2026-11-23T11:40:38.412767+00:00",
+          "exit": 0,
+          "prompt_sha256": "a365d6fca64aabf9af7f39fb6eefd27ef33febbdc4a879852088ed9f46265889",
+          "transcript_sha256": "82037d4f69fe40418085190f37fc2b01a3a60b776ecfabd4d725b8fd71df445d",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_pause",
+            "mcp__tos-provider__tos_provider_status"
+          ]
+        },
+        {
+          "step": "buy-f-paused",
+          "role": "buyer",
+          "client": "codex",
+          "started_utc": "2026-11-23T11:40:38.548381+00:00",
+          "finished_utc": "2026-11-23T11:41:13.685780+00:00",
+          "exit": 0,
+          "prompt_sha256": "c3fd33d4ee30d0369c1d0f09cee32be53603a0472b6b4ea0ad8b73945efef67c",
+          "transcript_sha256": "390ab2651e9cee3242c640bdb7c260fd3aba973bc1052ca5bb7d017b786f12fa",
+          "tool_calls": [
+            "tos_buyer_quote",
+            "tos_buyer_prepare",
+            "tos_buyer_request_payment",
+            "tos_buyer_status"
+          ]
+        },
+        {
+          "step": "status-f-refunded",
+          "role": "buyer",
+          "client": "codex",
+          "started_utc": "2026-11-23T12:42:24.032856+00:00",
+          "finished_utc": "2026-11-23T12:42:45.825193+00:00",
+          "exit": 0,
+          "prompt_sha256": "022a4a00adcf6e235c236440dcd3cc98999f66781b91eca03b1792be3bede211",
+          "transcript_sha256": "4ba77c3ce6bc03358c85ec4d63aeee3139085eee7e7a78f1e4f78a7f9e2eefc9",
+          "tool_calls": [
+            "tos_buyer_status",
+            "tos_buyer_refund",
+            "tos_buyer_purchases"
+          ]
+        },
+        {
+          "step": "resume-own",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:43:10.571161+00:00",
+          "finished_utc": "2026-11-23T12:43:34.309750+00:00",
+          "exit": 0,
+          "prompt_sha256": "efbd9fe34b9b4957169aad02102514f24e26d99982ea309e99522f1f2fd4f707",
+          "transcript_sha256": "dccc455c496817d400e30556c117145f2a2ba1ac478cdb88d58f1f4077db7923",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_resume",
+            "mcp__tos-provider__tos_provider_status"
+          ]
+        },
+        {
+          "step": "resume-operator",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:43:34.584007+00:00",
+          "finished_utc": "2026-11-23T12:43:58.692641+00:00",
+          "exit": 0,
+          "prompt_sha256": "a13f34d8c44c6e0a15c19f22a6885a083140661a8fb1996191cf018fd6b7d248",
+          "transcript_sha256": "202b61cc4009ceca2dfeecfb694d63e2e6109ebbbd6c0bc6f67f95ec9a6a82ea",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_resume",
+            "mcp__tos-provider__tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "resume-operator",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:44:18.714689+00:00",
+          "finished_utc": "2026-11-23T12:44:39.806605+00:00",
+          "exit": 0,
+          "prompt_sha256": "8acb46cf33e52652b255d9a89c194a0fa8c4d15839787f3fff209b95d1c6aaa4",
+          "transcript_sha256": "0915a72506c6143a8c4c6abb195efdab29bab535d231918f4e30582856ac7e4b",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_request_confirmation",
+            "mcp__tos-provider__tos_provider_status"
+          ]
+        },
+        {
+          "step": "pause-stacked",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:44:40.003449+00:00",
+          "finished_utc": "2026-11-23T12:44:59.142381+00:00",
+          "exit": 0,
+          "prompt_sha256": "9cf1dae2f6f5115c59c9ba4f4ad37dd18e80c3338eeb9c115f1b6a27f6046d42",
+          "transcript_sha256": "7bfb24a744d50dd0c6642897b209cd20bbc295d8e2cc2a9573b466da23650444",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_pause",
+            "mcp__tos-provider__tos_provider_status"
+          ]
+        },
+        {
+          "step": "resume-stacked",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:44:59.395440+00:00",
+          "finished_utc": "2026-11-23T12:45:26.241381+00:00",
+          "exit": 0,
+          "prompt_sha256": "43048b1d3a6f98dcf2ff12fe92ca385495319afb0b8643c63929ad0cb459f035",
+          "transcript_sha256": "f8ce973cbf14db0384822f1e40a7a3857795fe8817aad99c097e5035d22817d3",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_resume",
+            "mcp__tos-provider__tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "resume-stacked",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:45:46.261829+00:00",
+          "finished_utc": "2026-11-23T12:46:05.239583+00:00",
+          "exit": 0,
+          "prompt_sha256": "c6b1cb6c8c9f2ab31b0def86aa763a628c93e310d91c403065291745629c7836",
+          "transcript_sha256": "1eff71ada78559f167f2ad96737b71c4fc7f7893a5fa9d54bdefdbe32ff4e597",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_request_confirmation",
+            "mcp__tos-provider__tos_provider_status"
+          ]
+        },
+        {
+          "step": "withdraw",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:47:10.905142+00:00",
+          "finished_utc": "2026-11-23T12:47:35.883053+00:00",
+          "exit": 0,
+          "prompt_sha256": "8f820a844db074f39b7c769075dcb015895c01e0beb19da732e836a90a4db9bb",
+          "transcript_sha256": "512a55260d4cf7aecd21bb27f49385af476e48ff3b1f41802e8f1cdd3529b99b",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_withdraw_preview",
+            "mcp__tos-provider__tos_provider_request_confirmation"
+          ]
+        },
+        {
+          "step": "withdraw",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:47:56.013688+00:00",
+          "finished_utc": "2026-11-23T12:48:12.915058+00:00",
+          "exit": 0,
+          "prompt_sha256": "005b8b85f82f76c1f3000e695c92e463de9138bd954957d691a82e3db0906b30",
+          "transcript_sha256": "0145443df5739e24168fe2e3e92b8d2dacda08d18fff302ea99ffb9d478c0ec1",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_request_confirmation",
+            "mcp__tos-provider__tos_provider_status"
+          ]
+        },
+        {
+          "step": "records-final",
+          "role": "provider",
+          "client": "claude",
+          "started_utc": "2026-11-23T12:48:13.239904+00:00",
+          "finished_utc": "2026-11-23T12:48:32.133213+00:00",
+          "exit": 0,
+          "prompt_sha256": "cfb2e12bb455ac20394832ff9048094ea99219e73e5cfbb70fb4561721807e83",
+          "transcript_sha256": "6eee3a94a281ff1dbf7aa33762564988bb8a718d3f719f8ec7d766d73b57bb8b",
+          "tool_calls": [
+            "mcp__tos-provider__tos_provider_status",
+            "mcp__tos-provider__tos_provider_records",
+            "mcp__tos-provider__tos_provider_actions"
+          ]
+        }
+      ],
+      "provider_objects": {
+        "actor": "0:c4f9a9ebd16b21d26861421ef25bf212ff3d6bee9e86e63fdd8487e20627621b",
+        "capability_id": "cap_e11b08e313fdd2f327f925a1051b1a7827c53d877864e370063ad6d49b2fac27",
+        "capability_version": "1.0.0",
+        "manifest_digest": "sha256:8a5a9661c0904f23cf0fd6c9003327e45100e4d75762ab6cf290dec5f76d964c",
+        "offer_schema": "tos.openfox.rail-offer.v2",
+        "offer_sha256": "b646d9e4d52c5c1d73831bbd79ebb82e8978f0e62e69ae6b348b7206b427b237",
+        "provider_agent_id": "agent_9f5f5ddfb8753c8449ab6158835636474a4a2213beaf4bffe3d6bf2507b9b6bd",
+        "provider_init": {
+          "agent_address": "0:7a0f9c7f4dbb9fbb953f23d5e3bc98c0f25c70b1bfa288deadb4823eade6c7f2",
+          "agent_id": "agent_9f5f5ddfb8753c8449ab6158835636474a4a2213beaf4bffe3d6bf2507b9b6bd",
+          "confirmed": true,
+          "network": {
+            "genesis_file_hash": "sha256:5006013d6f5deeb6f6f005314ab90de9ceaab7bd45a80c6f1ce1cb6dae064032",
+            "genesis_root_hash": "sha256:b19f6311d140718d33313ed1bf8d5adacbcc1532e9602736356d4e3ed2fe40cd",
+            "network_id": "tos:global-id:3"
+          },
+          "next_steps": [
+            "provider: tos-service-provider offer --rail-config ~tosprov1/node-b/rail.json --price <TOS> ..."
+          ],
+          "packet_controller": "service-packet-b",
+          "packet_key_id": "mldsa44:7a5a81fcd4d305457ac03f079bd85333ac81fd3b28021d2ff5e00826734555fb",
+          "rail_config": "~tosprov1/node-b/rail.json",
+          "registration_attached_nanotos": "2000000000",
+          "registry_code_hash": "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a",
+          "schema": "tos.openfox.rail-init.v1",
+          "state_dir": "~tosprov1/node-b/rail",
+          "steps": [
+            {
+              "detail": "tosctl is pinned to SHA-256 eb89c7d8a56a4554218ce97566bfba719bc238248272c05c0258725373030273 (the binary matches the SHA-256 given with --tosctl-sha256)",
+              "id": "tosctl.pin",
+              "status": "done"
+            },
+            {
+              "detail": "network \"tos:global-id:3\" with genesis root sha256:b19f6311d140718d33313ed1bf8d5adacbcc1532e9602736356d4e3ed2fe40cd and file sha256:5006013d6f5deeb6f6f005314ab90de9ceaab7bd45a80c6f1ce1cb6dae064032, registry code tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a; the registry code file and the RPC endpoints agree",
+              "id": "network.domain",
+              "status": "done"
+            },
+            {
+              "detail": "wallet \"provider-b\" is 0:a27f1a61763ad56e887f2ac40dbcfd0c95e1dd8352c07a0faa6b0857b3f6a126",
+              "id": "wallet.address",
+              "status": "done"
+            },
+            {
+              "detail": "created controller \"service-packet-b\" in the vault with key id mldsa44:7a5a81fcd4d305457ac03f079bd85333ac81fd3b28021d2ff5e00826734555fb",
+              "id": "controller.packet",
+              "status": "done"
+            },
+            {
+              "detail": "the registration of Agent agent_9f5f5ddfb8753c8449ab6158835636474a4a2213beaf4bffe3d6bf2507b9b6bd is in finalized state at checkpoint 88975",
+              "id": "agent.register",
+              "status": "done"
+            },
+            {
+              "detail": "this node's https relays are verified against the 1 pinned certificate authorities in ~tosprov1/node-b/rail/relay/relay-ca-d38b5c144a7a12695fb9d9e7bdaf3e9506cb5515dc45a3ec3e1a4e461848fabf.pem (SHA-256 d38b5c144a7a12695fb9d9e7bdaf3e9506cb5515dc45a3ec3e1a4e461848fabf) only, not the system trust store; relays only a peer's card names use the system trust store",
+              "id": "relay.trust",
+              "status": "done"
+            },
+            {
+              "detail": "wrote the rail configuration ~tosprov1/node-b/rail.json (0600); it reads back strictly",
+              "id": "config.write",
+              "status": "done"
+            }
+          ],
+          "tosctl_pin": "given_by_owner",
+          "tosctl_pin_note": "the binary matches the SHA-256 given with --tosctl-sha256",
+          "tosctl_sha256": "eb89c7d8a56a4554218ce97566bfba719bc238248272c05c0258725373030273",
+          "wallet_address": "0:a27f1a61763ad56e887f2ac40dbcfd0c95e1dd8352c07a0faa6b0857b3f6a126",
+          "wallet_name": "provider-b"
+        },
+        "wallet": "0:a27f1a61763ad56e887f2ac40dbcfd0c95e1dd8352c07a0faa6b0857b3f6a126"
+      },
+      "buyer_objects": {
+        "agent_id": "agent_d6e47503bdc9ab445b92f52df4ca719818039deb1ab4afdc818aa1db5458bde2",
+        "packet_controller_key_id": "mldsa44:8cd3f50a7d5179b84330842d8b19663f2fa85ad964ef422709d990c733bc7b53",
+        "wallet": "0:7e872c859456666d140ac0c4f47c52b6bca72eea641746a4ac151a632d294d51"
+      },
+      "provider_actions": [
+        {
+          "kind": "offer",
+          "reference": "9665-93fe-91cc-3a52",
+          "identifier": "966593fe91cc3a52a063e5fc56711fe3d75afc90eb7e85380aa7cb5de5357c41",
+          "typed": "code",
+          "outcome": "Action 9665-93fe-91cc-3a52 is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        },
+        {
+          "kind": "resume",
+          "reference": "2e4a-feda-bae2-2dce",
+          "identifier": "2e4afedabae22dcef07f60f647f5b8e17822de21006ba2d556f4e4c093d0f068",
+          "typed": "code",
+          "outcome": "Action 2e4a-feda-bae2-2dce is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        },
+        {
+          "kind": "resume",
+          "reference": "07d9-cf01-a5f7-5751",
+          "identifier": "07d9cf01a5f75751035c4fca50aa7d5ca1fa1941009415f83776fc29aa4deef3",
+          "typed": "code",
+          "outcome": "Action 07d9-cf01-a5f7-5751 is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        },
+        {
+          "kind": "withdraw",
+          "reference": "ee77-0d73-eefb-ab5b",
+          "identifier": "ee770d73eefbab5b910444b2a3cb5020238a07102de09bc1b46ca9e8e02c7555",
+          "typed": "code",
+          "outcome": "Action ee77-0d73-eefb-ab5b is now applied.",
+          "confirmed_by": "harness through the real confirmer"
+        }
+      ],
+      "purchases": {
+        "F": {
+          "call_hash": "OO0mhLaDH6VU1Xxd6qdav8wX1SWFHxsnJrXdUjzJwI0=",
+          "call_lt": 93852000003,
+          "refund_seen": {
+            "claims": [
+              {
+                "hash": "PETdQwaIONHOy8KVQD36gJ2AAbYE9Rrc18DNrvWDmpw=",
+                "lt": 103027000003,
+                "paid_to_buyer": 299738092
+              }
+            ],
+            "expires": [
+              {
+                "hash": "MYp6EGSgYzxUENaG3a92ZGoaaerqgnXZ7OnXeZX25qU=",
+                "lt": 102952000003,
+                "paid_to_buyer": 0
+              }
+            ],
+            "responds": []
+          },
+          "request_hash": "7dfa485f4a6a6c4b18dc7a79202a09c79bf83ed2171216e4c6ac4bcf7c7d01ef",
+          "verdict": {
+            "assignment": "b",
+            "checkpoint": {
+              "block_file_hash": "sha256:31961ed3bd0a114668cb4c7f1504aae8a9b0d1600cf3d862c0eafff255a850b2",
+              "block_root_hash": "sha256:d3ef8198a4e086aaaaca09815076cc83060324b8e34f7bd23fc13ca757ee8926",
+              "chain_time": 1795438694,
+              "seqno": 105411
+            },
+            "exit": 0,
+            "label": "F",
+            "request_hash": "7dfa485f4a6a6c4b18dc7a79202a09c79bf83ed2171216e4c6ac4bcf7c7d01ef",
+            "verdict": "pass",
+            "verdict_sha256": "32abb2d64467bccdad8c95630d4b657c97e95cc9c4eba63a01a165484d3a4911"
+          }
+        },
+        "R1": {
+          "call_hash": "wYL9DD2tGLgOtaOIU6bEzSEKh+p8HQa2yMeNv6ck6YY=",
+          "call_lt": 92701000003,
+          "call_utime": 1795433603,
+          "provider_record_before_result_session": "acked",
+          "request_hash": "632919604672c1873c70a74143c01f658e01437a862ab45a05afe085b1376d1a",
+          "respond_seen": [
+            {
+              "hash": "lmYAUAclzCmudAM/jT2hfXA8PPeumSS/0eEF1dnMtPY=",
+              "lt": 93161000003,
+              "utime": 1795433786
+            }
+          ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "7e11804ec793e150d8a270e0c2b7520221350c74e4894c320e368098a7ef8454"
+          },
+          "verdict": {
+            "assignment": "b",
+            "checkpoint": {
+              "block_file_hash": "sha256:31961ed3bd0a114668cb4c7f1504aae8a9b0d1600cf3d862c0eafff255a850b2",
+              "block_root_hash": "sha256:d3ef8198a4e086aaaaca09815076cc83060324b8e34f7bd23fc13ca757ee8926",
+              "chain_time": 1795438694,
+              "seqno": 105411
+            },
+            "exit": 0,
+            "label": "R1",
+            "request_hash": "632919604672c1873c70a74143c01f658e01437a862ab45a05afe085b1376d1a",
+            "verdict": "pass",
+            "verdict_sha256": "8edaa824ab4647c229d3e08e624a05eebf9225980b653bc87d2ab0d8ff151d69"
+          }
+        },
+        "R2": {
+          "call_hash": "KxV0VnWj9Lw4YebqftaHHoj/sE022dXhvfEzgRAIYXU=",
+          "call_lt": 93456000003,
+          "call_utime": 1795433904,
+          "provider_record_before_result_session": "acked",
+          "request_hash": "c03edfe073a98a606327c600232f9ed0274ae7e8f8ce52e7ce44678482747879",
+          "respond_seen": [
+            {
+              "hash": "Hee7FbXwtB0sr8EncP45EIEFJgsq+YmItA+jfOp1atE=",
+              "lt": 93539000003,
+              "utime": 1795433938
+            }
+          ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "e7660138c951a349dfc13191039e1cf99d6e567638eece4a4070c5c51340a5e6"
+          },
+          "verdict": {
+            "assignment": "b",
+            "checkpoint": {
+              "block_file_hash": "sha256:31961ed3bd0a114668cb4c7f1504aae8a9b0d1600cf3d862c0eafff255a850b2",
+              "block_root_hash": "sha256:d3ef8198a4e086aaaaca09815076cc83060324b8e34f7bd23fc13ca757ee8926",
+              "chain_time": 1795438694,
+              "seqno": 105411
+            },
+            "exit": 0,
+            "label": "R2",
+            "request_hash": "c03edfe073a98a606327c600232f9ed0274ae7e8f8ce52e7ce44678482747879",
+            "verdict": "pass",
+            "verdict_sha256": "39b25848504e076131b2f1732e7ed150ff11ec8a32f6342e79152877d8f07150"
+          }
+        }
+      },
+      "pause_events": [
+        {
+          "at": "2026-11-23T12:43:34.312153+00:00",
+          "event": "after resume-own",
+          "marker": null
+        },
+        {
+          "at": "2026-11-23T12:43:34.565894+00:00",
+          "by": "operator",
+          "marker": {
+            "origin": "operator",
+            "paused_unix": 1795437814,
+            "reason": "operator stop before the model's resume",
+            "schema": "tos.openfox.rail-admission-pause.v2",
+            "stamp": "4e582b57fd0cacc53668d0c84bd1fb81"
+          },
+          "origin_expected": "operator"
+        },
+        {
+          "at": "2026-11-23T12:44:39.808711+00:00",
+          "event": "after resume-operator",
+          "marker": null
+        },
+        {
+          "at": "2026-11-23T12:44:59.229793+00:00",
+          "by": "operator over model",
+          "first_paused_unix_kept": true,
+          "marker_after": {
+            "origin": "operator",
+            "paused_unix": 1795437886,
+            "reason": "operator stop stacked on the model's pause",
+            "schema": "tos.openfox.rail-admission-pause.v2",
+            "stamp": "eaf4ab3b1d0a6b78e489352a2b109e48"
+          },
+          "marker_before": {
+            "origin": "agent",
+            "paused_unix": 1795437886,
+            "reason": "mcp: stacked pause: model first",
+            "schema": "tos.openfox.rail-admission-pause.v2",
+            "stamp": "b2c42f4e726c02119b7a03538b52fbde"
+          },
+          "origin_after": "operator",
+          "restamped": true
+        },
+        {
+          "at": "2026-11-23T12:46:05.241727+00:00",
+          "event": "after resume-stacked",
+          "marker": null
+        }
+      ],
+      "operator_commands": [
+        {
+          "action": "stop-agent",
+          "at": "2026-11-23T11:33:00.456391+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "why": "hold the paid request pending at the provider across a validator-set switch"
+        },
+        {
+          "action": "start-agent",
+          "at": "2026-11-23T11:36:05.414028+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "why": "the switch has taken effect; the provider admits the pending request"
+        },
+        {
+          "action": "pause",
+          "at": "2026-11-23T12:43:34.563998+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "reason": "operator stop before the model's resume",
+          "report": {
+            "already_paused": false,
+            "origin": "operator",
+            "paused": true,
+            "paused_unix": 1795437814,
+            "reason": "operator stop before the model's resume",
+            "restamped": false
+          }
+        },
+        {
+          "action": "pause",
+          "at": "2026-11-23T12:44:59.212341+00:00",
+          "command_kind": "permitted custody-side command (section 3.1)",
+          "exit": 0,
+          "reason": "operator stop stacked on the model's pause",
+          "report": {
+            "already_paused": true,
+            "origin": "operator",
+            "paused": true,
+            "paused_unix": 1795437886,
+            "previous_origin": "agent",
+            "reason": "operator stop stacked on the model's pause",
+            "restamped": true
+          }
+        }
+      ],
+      "withdrawal": {
+        "before": {
+          "actor": "0:c4f9a9ebd16b21d26861421ef25bf212ff3d6bee9e86e63fdd8487e20627621b",
+          "actor_balance_nanotos": 2039186480,
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 103749,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 800000000
+            }
+          },
+          "wallet_balance_nanotos": 14741166294
+        },
+        "after": {
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 103904,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 0
+            }
+          },
+          "agreeing": 5,
+          "of": 5,
+          "wallet_balance_nanotos": 15540705023,
+          "withdraw_transactions": [
+            {
+              "hash": "RL07Zb8CZL7OGoz+TfpFaTmDyyuKIHFqF6o3vN0IG8U=",
+              "lt": 103848000003,
+              "sent_to_wallet_nanotos": 999756618
+            }
+          ]
+        },
+        "reader": "harness"
+      },
+      "custody_start": {
+        "agent_start_lines": {
+          "buyer": [],
+          "provider": [
+            "{"
+          ]
+        },
+        "mcp_startup": {
+          "buyer": {
+            "exit": 0,
+            "stderr": ""
+          },
+          "provider": {
+            "exit": 0,
+            "stderr": ""
+          }
+        },
+        "custody_preflight_after_init": {
+          "exit": 3,
+          "failing": [
+            "config.provider",
+            "relay.key"
+          ]
+        }
+      },
+      "cli_fallback_steps": []
+    }
+  },
+  "respond_fees": {
+    "reader": "harness",
+    "per_assignment": {
+      "A": {
+        "read": true,
+        "agreeing": 5,
+        "of": 5,
+        "wallet_balance_nanotos": 15540705003,
+        "ledger": {
+          "transactions": 12,
+          "history_complete": true,
+          "oldest_lt": 88765000001,
+          "balance_before_oldest_nanotos": 0,
+          "reconciles": true,
+          "rows": [
+            {
+              "lt": 105024000006,
+              "balance_before_nanotos": 15340951873,
+              "balance_after_nanotos": 15540705003
+            },
+            {
+              "lt": 105024000005,
+              "balance_before_nanotos": 14540955361,
+              "balance_after_nanotos": 15340951873
+            },
+            {
+              "lt": 105024000001,
+              "balance_before_nanotos": 14741166316,
+              "balance_after_nanotos": 14540955361
+            },
+            {
+              "lt": 92126000001,
+              "balance_before_nanotos": 14754295468,
+              "balance_after_nanotos": 14741166316
+            },
+            {
+              "lt": 91662000001,
+              "balance_before_nanotos": 14767424631,
+              "balance_after_nanotos": 14754295468
+            },
+            {
+              "lt": 90541000001,
+              "balance_before_nanotos": 14777790308,
+              "balance_after_nanotos": 14767424631
+            },
+            {
+              "lt": 90534000001,
+              "balance_before_nanotos": 16781426919,
+              "balance_after_nanotos": 14777790308
+            },
+            {
+              "lt": 90527000001,
+              "balance_before_nanotos": 17989001556,
+              "balance_after_nanotos": 16781426919
+            },
+            {
+              "lt": 88934000001,
+              "balance_before_nanotos": 19999345168,
+              "balance_after_nanotos": 17989001556
+            },
+            {
+              "lt": 88915000003,
+              "balance_before_nanotos": 19989348656,
+              "balance_after_nanotos": 19999345168
+            },
+            {
+              "lt": 88915000001,
+              "balance_before_nanotos": 20000000000,
+              "balance_after_nanotos": 19989348656
+            },
+            {
+              "lt": 88765000001,
+              "balance_before_nanotos": 0,
+              "balance_after_nanotos": 20000000000
+            }
+          ]
+        },
+        "responds": [
+          {
+            "wallet_transaction": {
+              "lt": 91662000001,
+              "hash": "3qe9haVggHhEo89ZgnFUKDKQAzoRya4mMJXhf2gulFM=",
+              "utime": 1795433188
+            },
+            "actor_transaction": {
+              "lt": 91662000003,
+              "hash": "gVkyxozx6H9y+lsmpBgCV2ASVSWxoScZCyHzaxgbudQ=",
+              "aborted": false
+            },
+            "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106576,
+            "returned_nanotos": 0,
+            "return_credit_transaction": null,
+            "fee_nanotos": 13129163,
+            "balance_before_nanotos": 14767424631,
+            "balance_after_nanotos": 14754295468
+          },
+          {
+            "wallet_transaction": {
+              "lt": 92126000001,
+              "hash": "+OhovwaEy8wRmj6unQ7Vp/kM7XIBQCxct+9mSKnbaf0=",
+              "utime": 1795433374
+            },
+            "actor_transaction": {
+              "lt": 92126000003,
+              "hash": "vEGTBNwDtNvVDbsnoa2r+UrbcN0KS1TtqWiIWhaZWHE=",
+              "aborted": false
+            },
+            "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106565,
+            "returned_nanotos": 0,
+            "return_credit_transaction": null,
+            "fee_nanotos": 13129152,
+            "balance_before_nanotos": 14754295468,
+            "balance_after_nanotos": 14741166316
+          }
+        ]
+      },
+      "B": {
+        "read": true,
+        "agreeing": 5,
+        "of": 5,
+        "wallet_balance_nanotos": 15540705023,
+        "ledger": {
+          "transactions": 12,
+          "history_complete": true,
+          "oldest_lt": 88771000001,
+          "balance_before_oldest_nanotos": 0,
+          "reconciles": true,
+          "rows": [
+            {
+              "lt": 103848000006,
+              "balance_before_nanotos": 15340951893,
+              "balance_after_nanotos": 15540705023
+            },
+            {
+              "lt": 103848000005,
+              "balance_before_nanotos": 14540955381,
+              "balance_after_nanotos": 15340951893
+            },
+            {
+              "lt": 103848000001,
+              "balance_before_nanotos": 14741166294,
+              "balance_after_nanotos": 14540955381
+            },
+            {
+              "lt": 93539000001,
+              "balance_before_nanotos": 14754295445,
+              "balance_after_nanotos": 14741166294
+            },
+            {
+              "lt": 93161000001,
+              "balance_before_nanotos": 14767424600,
+              "balance_after_nanotos": 14754295445
+            },
+            {
+              "lt": 92505000001,
+              "balance_before_nanotos": 14777790277,
+              "balance_after_nanotos": 14767424600
+            },
+            {
+              "lt": 92499000001,
+              "balance_before_nanotos": 16781426888,
+              "balance_after_nanotos": 14777790277
+            },
+            {
+              "lt": 92492000001,
+              "balance_before_nanotos": 17989001556,
+              "balance_after_nanotos": 16781426888
+            },
+            {
+              "lt": 89012000001,
+              "balance_before_nanotos": 19999345168,
+              "balance_after_nanotos": 17989001556
+            },
+            {
+              "lt": 88994000003,
+              "balance_before_nanotos": 19989348656,
+              "balance_after_nanotos": 19999345168
+            },
+            {
+              "lt": 88994000001,
+              "balance_before_nanotos": 20000000000,
+              "balance_after_nanotos": 19989348656
+            },
+            {
+              "lt": 88771000001,
+              "balance_before_nanotos": 0,
+              "balance_after_nanotos": 20000000000
+            }
+          ]
+        },
+        "responds": [
+          {
+            "wallet_transaction": {
+              "lt": 93161000001,
+              "hash": "t9Go7ZgWGc4kBfgASF0VhvQm8EbZpN3BdZLdyJZQEAI=",
+              "utime": 1795433786
+            },
+            "actor_transaction": {
+              "lt": 93161000003,
+              "hash": "lmYAUAclzCmudAM/jT2hfXA8PPeumSS/0eEF1dnMtPY=",
+              "aborted": false
+            },
+            "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106568,
+            "returned_nanotos": 0,
+            "return_credit_transaction": null,
+            "fee_nanotos": 13129155,
+            "balance_before_nanotos": 14767424600,
+            "balance_after_nanotos": 14754295445
+          },
+          {
+            "wallet_transaction": {
+              "lt": 93539000001,
+              "hash": "680rwlKGVP1VoPGKUONtiJdEzMUsXpQEuCDIEW/a530=",
+              "utime": 1795433938
+            },
+            "actor_transaction": {
+              "lt": 93539000003,
+              "hash": "Hee7FbXwtB0sr8EncP45EIEFJgsq+YmItA+jfOp1atE=",
+              "aborted": false
+            },
+            "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106564,
+            "returned_nanotos": 0,
+            "return_credit_transaction": null,
+            "fee_nanotos": 13129151,
+            "balance_before_nanotos": 14754295445,
+            "balance_after_nanotos": 14741166294
+          }
+        ]
+      }
+    },
+    "summary": {
+      "count": 4,
+      "highest_nanotos": 13129163,
+      "mean_nanotos": 13129155
+    }
+  },
+  "confirmations": [
+    {
+      "assignment": "a",
+      "program": "provider",
+      "kind": "offer",
+      "reference": "f68d-4b19-3d71-9b56",
+      "typed": "code",
+      "outcome": "Action f68d-4b19-3d71-9b56 is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "2955e3ea1d3954809beb45e49e7e97d53d88b82ea7c490feedc06c4955c50bf9",
+      "at": "2026-11-23T11:19:04.624764+00:00"
+    },
+    {
+      "assignment": "a",
+      "program": "buyer",
+      "kind": "",
+      "reference": "e06d-35f4-662e-81cb",
+      "typed": "code",
+      "outcome": "Purchase e06d-35f4-662e-81cb is now submitted.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30034
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-buyer confirm --watch",
+      "screen_sha256": "bee9077d6f82f25f0cddeff3b1f99c8aa25b24cd9aa80a21d45def687539bb34",
+      "at": "2026-11-23T11:23:41.639655+00:00"
+    },
+    {
+      "assignment": "a",
+      "program": "buyer",
+      "kind": "",
+      "reference": "512e-b04e-41cb-4a30",
+      "typed": "code",
+      "outcome": "Purchase 512e-b04e-41cb-4a30 is now submitted.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30034
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-buyer confirm --watch",
+      "screen_sha256": "e45a4f68365193a52dcbf637b1c64479828a5c3a6c8244b442b84050310cff94",
+      "at": "2026-11-23T11:28:41.372954+00:00"
+    },
+    {
+      "assignment": "a",
+      "program": "buyer",
+      "kind": "",
+      "reference": "744c-b82e-41b8-4ff5",
+      "typed": "code",
+      "outcome": "Purchase 744c-b82e-41b8-4ff5 is now submitted.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30034
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-buyer confirm --watch",
+      "screen_sha256": "76f617d3d499cc8a4767695861e3fb87ba637f0d5c0ab808b4dba4213717392d",
+      "at": "2026-11-23T11:31:13.305465+00:00"
+    },
+    {
+      "assignment": "a",
+      "program": "provider",
+      "kind": "resume",
+      "reference": "020a-6972-3944-c09a",
+      "typed": "code",
+      "outcome": "Action 020a-6972-3944-c09a is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "ec7f7c362b630874136f983ce2f493a37f3858fae0f96c177dab3f0f4199a0c4",
+      "at": "2026-11-23T12:52:35.629336+00:00"
+    },
+    {
+      "assignment": "a",
+      "program": "provider",
+      "kind": "resume",
+      "reference": "9365-fc59-94ab-f711",
+      "typed": "code",
+      "outcome": "Action 9365-fc59-94ab-f711 is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "eadd88159d0297a96db4183dee8f8ac6c0d8fbf6b82cf93539903f1161b41988",
+      "at": "2026-11-23T12:54:05.178548+00:00"
+    },
+    {
+      "assignment": "a",
+      "program": "provider",
+      "kind": "withdraw",
+      "reference": "93b6-7908-c6f6-c96e",
+      "typed": "code",
+      "outcome": "Action 93b6-7908-c6f6-c96e is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "1a65f305dfbf599e1f3fd41fb99446117c60200dd4a1adaf6b3fd67e20199d51",
+      "at": "2026-11-23T12:55:19.882983+00:00"
+    },
+    {
+      "assignment": "b",
+      "program": "provider",
+      "kind": "offer",
+      "reference": "9665-93fe-91cc-3a52",
+      "typed": "code",
+      "outcome": "Action 9665-93fe-91cc-3a52 is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "f921f6e70b20be48d1f16ae8726c6b333bb60d1bf92cf21a9b032e2c5e272dbc",
+      "at": "2026-11-23T11:32:07.726404+00:00"
+    },
+    {
+      "assignment": "b",
+      "program": "buyer",
+      "kind": "",
+      "reference": "6329-1960-4672-c187",
+      "typed": "code",
+      "outcome": "Purchase 6329-1960-4672-c187 is now submitted.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30034
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-buyer confirm --watch",
+      "screen_sha256": "97715bb10fd8a17cb86a57d3513cd6c9e7217f53104cf4b0db92170e22d61113",
+      "at": "2026-11-23T11:33:25.728346+00:00"
+    },
+    {
+      "assignment": "b",
+      "program": "buyer",
+      "kind": "",
+      "reference": "c03e-dfe0-73a9-8a60",
+      "typed": "code",
+      "outcome": "Purchase c03e-dfe0-73a9-8a60 is now submitted.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30034
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-buyer confirm --watch",
+      "screen_sha256": "fbe98793157892b9927c0940680c2f30934d380d4d5f8bab8ec54248ff688fed",
+      "at": "2026-11-23T11:38:27.035182+00:00"
+    },
+    {
+      "assignment": "b",
+      "program": "buyer",
+      "kind": "",
+      "reference": "7dfa-485f-4a6a-6c4b",
+      "typed": "code",
+      "outcome": "Purchase 7dfa-485f-4a6a-6c4b is now submitted.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30034
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-buyer confirm --watch",
+      "screen_sha256": "53d125f9b83d4a4f4a71c50b8ba1eb732d5e9b06a050b3ef8341e4821bf6941e",
+      "at": "2026-11-23T11:41:04.942350+00:00"
+    },
+    {
+      "assignment": "b",
+      "program": "provider",
+      "kind": "resume",
+      "reference": "2e4a-feda-bae2-2dce",
+      "typed": "code",
+      "outcome": "Action 2e4a-feda-bae2-2dce is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "9be0080fa59a43e6b648d81295aaac0364918308c2620e9ce8149c93ec1a5a32",
+      "at": "2026-11-23T12:43:49.457216+00:00"
+    },
+    {
+      "assignment": "b",
+      "program": "provider",
+      "kind": "resume",
+      "reference": "07d9-cf01-a5f7-5751",
+      "typed": "code",
+      "outcome": "Action 07d9-cf01-a5f7-5751 is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "8967d63beb1dadd954c25252f030faf4328dd1c842d97663b8b220e20a84621a",
+      "at": "2026-11-23T12:45:17.809747+00:00"
+    },
+    {
+      "assignment": "b",
+      "program": "provider",
+      "kind": "withdraw",
+      "reference": "ee77-0d73-eefb-ab5b",
+      "typed": "code",
+      "outcome": "Action ee77-0d73-eefb-ab5b is now applied.",
+      "terminal": {
+        "controlling_terminal_of_own_session": true,
+        "kind": "pseudo-terminal opened by the custody account",
+        "slave_mode": "0o620",
+        "slave_owner_uid": 30033
+      },
+      "driven_by": "harness",
+      "confirmer": "tos-service-provider confirm --watch",
+      "screen_sha256": "51e8523fa16e71df26e4913f0ab11b5383d55295164815779809025f07dff736",
+      "at": "2026-11-23T12:47:31.002542+00:00"
+    }
+  ],
+  "verifier_output": {
+    "at": "2026-11-23T12:58:15.254870+00:00",
+    "binary_sha256": "484665a48d9f84588fe3bbd746bc9b9b7f8d6cc386e0ade20e83e47df1450215",
+    "built_from": "fresh clone of https://github.com/tosnetwork/ai",
+    "endpoints": [
+      "http://loopback:8011/jsonRPC",
+      "http://loopback:8012/jsonRPC",
+      "http://loopback:8013/jsonRPC",
+      "http://loopback:8014/jsonRPC",
+      "http://loopback:8017/jsonRPC"
+    ],
+    "quorum": "every endpoint given (default)",
+    "results": [
+      {
+        "assignment": "a",
+        "checkpoint": {
+          "block_file_hash": "sha256:a46d1b635e40b685e2ee11c20cc5a16346c1dac13c9ce603bfa41ea73bdd883b",
+          "block_root_hash": "sha256:261450c07df40d43c7cf39fcbf5ae7a189eee70fc98f573c0d04ae54ced11e32",
+          "chain_time": 1795438693,
+          "seqno": 105409
+        },
+        "exit": 0,
+        "label": "F",
+        "request_hash": "744cb82e41b84ff5319acd2ee27bece48c6a4b705c9539636ea3e5d908a1fbb8",
+        "verdict": "pass",
+        "verdict_sha256": "70bf7ddcefe14e7d3d14b944821ee461e1385a80170cde37166247ca1e7d373a"
+      },
+      {
+        "assignment": "a",
+        "checkpoint": {
+          "block_file_hash": "sha256:699280b14297e8ffd1a4a6582e5320a2695bafecdf54ac5affa8a6741cad682c",
+          "block_root_hash": "sha256:d546c46c4de962175cbb40d338871638627336393d2b66516671e57442e54e19",
+          "chain_time": 1795438694,
+          "seqno": 105410
+        },
+        "exit": 0,
+        "label": "R1",
+        "request_hash": "e06d35f4662e81cbeab4501fff984d258cff6b8c71f8de32f82049383d9520a7",
+        "verdict": "pass",
+        "verdict_sha256": "5fa1a0c7f628b67b792a6177989e15c76096e014d9de9a6d244d12a09dadeaa9"
+      },
+      {
+        "assignment": "a",
+        "checkpoint": {
+          "block_file_hash": "sha256:699280b14297e8ffd1a4a6582e5320a2695bafecdf54ac5affa8a6741cad682c",
+          "block_root_hash": "sha256:d546c46c4de962175cbb40d338871638627336393d2b66516671e57442e54e19",
+          "chain_time": 1795438694,
+          "seqno": 105410
+        },
+        "exit": 0,
+        "label": "R2",
+        "request_hash": "512eb04e41cb4a3087870c860e8980a59acafd8f78b7d751d644a21d817f08d5",
+        "verdict": "pass",
+        "verdict_sha256": "4921c582b915b26b6b2f1bebfdedb7929d7a6d125e7519a5014a877acd310bf6"
+      },
+      {
+        "assignment": "b",
+        "checkpoint": {
+          "block_file_hash": "sha256:31961ed3bd0a114668cb4c7f1504aae8a9b0d1600cf3d862c0eafff255a850b2",
+          "block_root_hash": "sha256:d3ef8198a4e086aaaaca09815076cc83060324b8e34f7bd23fc13ca757ee8926",
+          "chain_time": 1795438694,
+          "seqno": 105411
+        },
+        "exit": 0,
+        "label": "F",
+        "request_hash": "7dfa485f4a6a6c4b18dc7a79202a09c79bf83ed2171216e4c6ac4bcf7c7d01ef",
+        "verdict": "pass",
+        "verdict_sha256": "32abb2d64467bccdad8c95630d4b657c97e95cc9c4eba63a01a165484d3a4911"
+      },
+      {
+        "assignment": "b",
+        "checkpoint": {
+          "block_file_hash": "sha256:31961ed3bd0a114668cb4c7f1504aae8a9b0d1600cf3d862c0eafff255a850b2",
+          "block_root_hash": "sha256:d3ef8198a4e086aaaaca09815076cc83060324b8e34f7bd23fc13ca757ee8926",
+          "chain_time": 1795438694,
+          "seqno": 105411
+        },
+        "exit": 0,
+        "label": "R1",
+        "request_hash": "632919604672c1873c70a74143c01f658e01437a862ab45a05afe085b1376d1a",
+        "verdict": "pass",
+        "verdict_sha256": "8edaa824ab4647c229d3e08e624a05eebf9225980b653bc87d2ab0d8ff151d69"
+      },
+      {
+        "assignment": "b",
+        "checkpoint": {
+          "block_file_hash": "sha256:31961ed3bd0a114668cb4c7f1504aae8a9b0d1600cf3d862c0eafff255a850b2",
+          "block_root_hash": "sha256:d3ef8198a4e086aaaaca09815076cc83060324b8e34f7bd23fc13ca757ee8926",
+          "chain_time": 1795438694,
+          "seqno": 105411
+        },
+        "exit": 0,
+        "label": "R2",
+        "request_hash": "c03edfe073a98a606327c600232f9ed0274ae7e8f8ce52e7ce44678482747879",
+        "verdict": "pass",
+        "verdict_sha256": "39b25848504e076131b2f1732e7ed150ff11ec8a32f6342e79152877d8f07150"
+      }
+    ],
+    "tool_commit": "571e9c50e43cc7a23950fe13932abf4579c9e09d"
+  },
+  "provider_facts_reader": "harness",
+  "provider_facts_reads": "every provider-side fact (respond and withdrawal transactions, credited revenue, respond fees, wallet balances) was read by the harness from the validators' JSON-RPC and taken only at a strict majority of the five candidate endpoints",
+  "checks": [
+    {
+      "name": "A: every step ran through the model's tool calls",
+      "result": "pass",
+      "detail": {
+        "done": [
+          "provider-offer",
+          "buy-r1-across-switch",
+          "result-r1",
+          "records-acked",
+          "buy-r2",
+          "result-r2",
+          "pause-for-refund",
+          "buy-f-paused",
+          "status-f-refunded",
+          "resume-own",
+          "resume-operator",
+          "pause-stacked",
+          "resume-stacked",
+          "withdraw",
+          "records-final"
+        ]
+      }
+    },
+    {
+      "name": "A: no CLI-fallback step",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "A: the offer was previewed, confirmed and applied",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "A: every confirmation the steps needed was typed by the harness into the real confirmer",
+      "result": "pass",
+      "detail": [
+        {
+          "kind": "offer",
+          "outcome": "Action f68d-4b19-3d71-9b56 is now applied."
+        },
+        {
+          "kind": "",
+          "outcome": "Purchase e06d-35f4-662e-81cb is now submitted."
+        },
+        {
+          "kind": "",
+          "outcome": "Purchase 512e-b04e-41cb-4a30 is now submitted."
+        },
+        {
+          "kind": "",
+          "outcome": "Purchase 744c-b82e-41b8-4ff5 is now submitted."
+        },
+        {
+          "kind": "resume",
+          "outcome": "Action 020a-6972-3944-c09a is now applied."
+        },
+        {
+          "kind": "resume",
+          "outcome": "Action 9365-fc59-94ab-f711 is now applied."
+        },
+        {
+          "kind": "withdraw",
+          "outcome": "Action 93b6-7908-c6f6-c96e is now applied."
+        }
+      ]
+    },
+    {
+      "name": "A: the validator-set switch changed membership (at least one left, one joined)",
+      "result": "pass",
+      "detail": {
+        "left": [
+          4
+        ],
+        "joined": [
+          7
+        ]
+      }
+    },
+    {
+      "name": "A: R1 was paid before the switch and responded after it",
+      "result": "pass",
+      "detail": {
+        "call_utime": 1795433019,
+        "switch_utime": 1795433155,
+        "respond": [
+          {
+            "hash": "gVkyxozx6H9y+lsmpBgCV2ASVSWxoScZCyHzaxgbudQ=",
+            "lt": 91662000003,
+            "utime": 1795433188
+          }
+        ]
+      }
+    },
+    {
+      "name": "A: R2 ran entirely after the switch",
+      "result": "pass",
+      "detail": {
+        "call_utime": 1795433319
+      }
+    },
+    {
+      "name": "A: R1 and R2 were accepted by the buyer against the finalized response_hash (read from the tos_buyer_result tool results, not from the model's answer)",
+      "result": "pass",
+      "detail": {
+        "R1": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "31bf5bc427c3c1341f81984ca6aa4f131c403eff6f66b37a274561eee6006da8"
+        },
+        "R2": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "e0d7561bb3e1b742095f3d8eda33e5ca675ebfe74fd80d10fcde0f1bd82ce6c8"
+        }
+      }
+    },
+    {
+      "name": "A: the provider's own records of R1 and R2 read acked (custody read; the model's tos_provider_records result shows the same record state)",
+      "result": "pass",
+      "detail": {
+        "R1": "acked",
+        "R2": "acked"
+      }
+    },
+    {
+      "name": "A: the paused call F was not answered and ended refunded (expire and claim_refund on chain)",
+      "result": "pass",
+      "detail": {
+        "claims": [
+          {
+            "hash": "/EeBSSTFo8EMqr+hQAkBQA4umDLaW5ta95dbqExrB3k=",
+            "lt": 101519000003,
+            "paid_to_buyer": 299738092
+          }
+        ],
+        "expires": [
+          {
+            "hash": "ZqYiYTakULCihmoXP5gX0+5iCXNpkDVnldmheIotKGc=",
+            "lt": 101444000003,
+            "paid_to_buyer": 0
+          }
+        ],
+        "responds": []
+      }
+    },
+    {
+      "name": "A: the stacked operator pause re-stamped the model's marker as operator and kept paused_unix",
+      "result": "pass",
+      "detail": {
+        "at": "2026-11-23T12:53:44.943095+00:00",
+        "by": "operator over model",
+        "first_paused_unix_kept": true,
+        "marker_after": {
+          "origin": "operator",
+          "paused_unix": 1795438415,
+          "reason": "operator stop stacked on the model's pause",
+          "schema": "tos.openfox.rail-admission-pause.v2",
+          "stamp": "6aff706425ad13f3ad34ba94c6baa5c2"
+        },
+        "marker_before": {
+          "origin": "agent",
+          "paused_unix": 1795438415,
+          "reason": "mcp: stacked pause: model first",
+          "schema": "tos.openfox.rail-admission-pause.v2",
+          "stamp": "03193f22a8846d62635b220dfd0ed27e"
+        },
+        "origin_after": "operator",
+        "restamped": true
+      }
+    },
+    {
+      "name": "A: the model's resume of the operator pause and of the stacked pause each became a confirmable action",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "A: the model resumed its own pause directly, with no confirmable action",
+      "result": "pass",
+      "detail": {
+        "action_id": "",
+        "action_reference": "",
+        "admission": "open",
+        "label": "a-resume-own",
+        "resume_outcome": "resumed",
+        "state": "resumed"
+      }
+    },
+    {
+      "name": "A: the withdrawal reached the owner wallet (harness reads: actor transaction, wallet balance)",
+      "result": "pass",
+      "detail": {
+        "before": {
+          "actor": "0:e4834e64fa3d8ac21d1b9b044f31c5f2a570a4b251d4cb7fe746c06f71dfbcd5",
+          "actor_balance_nanotos": 2039186449,
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 104891,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 800000000
+            }
+          },
+          "wallet_balance_nanotos": 14741166316
+        },
+        "after": {
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 105091,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 0
+            }
+          },
+          "agreeing": 5,
+          "of": 5,
+          "wallet_balance_nanotos": 15540705003,
+          "withdraw_transactions": [
+            {
+              "hash": "nOWJt62STP9ePqKbbP0cc+PgTFE2+7DcPUuvp14hslw=",
+              "lt": 105024000003,
+              "sent_to_wallet_nanotos": 999756618
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "A: a fee was read for every respond",
+      "result": "pass",
+      "detail": 2
+    },
+    {
+      "name": "A: the owner wallet's ledger, rebuilt from its finalized transactions (values, forwarding fees and total fees), starts at zero from the finalized balance",
+      "result": "pass",
+      "detail": {
+        "transactions": 12,
+        "history_complete": true,
+        "balance_before_oldest_nanotos": 0
+      }
+    },
+    {
+      "name": "A: the ledger's balance before the wallet's withdraw_revenue send equals the harness's direct read before the step",
+      "result": "pass",
+      "detail": {
+        "ledger": 14741166316,
+        "direct_read": 14741166316
+      }
+    },
+    {
+      "name": "A: the ledger's balance after the withdrawal payout equals the harness's direct read",
+      "result": "pass",
+      "detail": {
+        "ledger": 15540705003,
+        "direct_read": 15540705003
+      }
+    },
+    {
+      "name": "A: each client operated the role this assignment gives it",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "B: every step ran through the model's tool calls",
+      "result": "pass",
+      "detail": {
+        "done": [
+          "provider-offer",
+          "buy-r1-across-switch",
+          "result-r1",
+          "records-acked",
+          "buy-r2",
+          "result-r2",
+          "pause-for-refund",
+          "buy-f-paused",
+          "status-f-refunded",
+          "resume-own",
+          "resume-operator",
+          "pause-stacked",
+          "resume-stacked",
+          "withdraw",
+          "records-final"
+        ]
+      }
+    },
+    {
+      "name": "B: no CLI-fallback step",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "B: the offer was previewed, confirmed and applied",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "B: every confirmation the steps needed was typed by the harness into the real confirmer",
+      "result": "pass",
+      "detail": [
+        {
+          "kind": "offer",
+          "outcome": "Action 9665-93fe-91cc-3a52 is now applied."
+        },
+        {
+          "kind": "",
+          "outcome": "Purchase 6329-1960-4672-c187 is now submitted."
+        },
+        {
+          "kind": "",
+          "outcome": "Purchase c03e-dfe0-73a9-8a60 is now submitted."
+        },
+        {
+          "kind": "",
+          "outcome": "Purchase 7dfa-485f-4a6a-6c4b is now submitted."
+        },
+        {
+          "kind": "resume",
+          "outcome": "Action 2e4a-feda-bae2-2dce is now applied."
+        },
+        {
+          "kind": "resume",
+          "outcome": "Action 07d9-cf01-a5f7-5751 is now applied."
+        },
+        {
+          "kind": "withdraw",
+          "outcome": "Action ee77-0d73-eefb-ab5b is now applied."
+        }
+      ]
+    },
+    {
+      "name": "B: the validator-set switch changed membership (at least one left, one joined)",
+      "result": "pass",
+      "detail": {
+        "left": [
+          7
+        ],
+        "joined": [
+          4
+        ]
+      }
+    },
+    {
+      "name": "B: R1 was paid before the switch and responded after it",
+      "result": "pass",
+      "detail": {
+        "call_utime": 1795433603,
+        "switch_utime": 1795433755,
+        "respond": [
+          {
+            "hash": "lmYAUAclzCmudAM/jT2hfXA8PPeumSS/0eEF1dnMtPY=",
+            "lt": 93161000003,
+            "utime": 1795433786
+          }
+        ]
+      }
+    },
+    {
+      "name": "B: R2 ran entirely after the switch",
+      "result": "pass",
+      "detail": {
+        "call_utime": 1795433904
+      }
+    },
+    {
+      "name": "B: R1 and R2 were accepted by the buyer against the finalized response_hash (read from the tos_buyer_result tool results, not from the model's answer)",
+      "result": "pass",
+      "detail": {
+        "R1": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "7e11804ec793e150d8a270e0c2b7520221350c74e4894c320e368098a7ef8454"
+        },
+        "R2": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "e7660138c951a349dfc13191039e1cf99d6e567638eece4a4070c5c51340a5e6"
+        }
+      }
+    },
+    {
+      "name": "B: the provider's own records of R1 and R2 read acked (custody read; the model's tos_provider_records result shows the same record state)",
+      "result": "pass",
+      "detail": {
+        "R1": "acked",
+        "R2": "acked"
+      }
+    },
+    {
+      "name": "B: the paused call F was not answered and ended refunded (expire and claim_refund on chain)",
+      "result": "pass",
+      "detail": {
+        "claims": [
+          {
+            "hash": "PETdQwaIONHOy8KVQD36gJ2AAbYE9Rrc18DNrvWDmpw=",
+            "lt": 103027000003,
+            "paid_to_buyer": 299738092
+          }
+        ],
+        "expires": [
+          {
+            "hash": "MYp6EGSgYzxUENaG3a92ZGoaaerqgnXZ7OnXeZX25qU=",
+            "lt": 102952000003,
+            "paid_to_buyer": 0
+          }
+        ],
+        "responds": []
+      }
+    },
+    {
+      "name": "B: the stacked operator pause re-stamped the model's marker as operator and kept paused_unix",
+      "result": "pass",
+      "detail": {
+        "at": "2026-11-23T12:44:59.229793+00:00",
+        "by": "operator over model",
+        "first_paused_unix_kept": true,
+        "marker_after": {
+          "origin": "operator",
+          "paused_unix": 1795437886,
+          "reason": "operator stop stacked on the model's pause",
+          "schema": "tos.openfox.rail-admission-pause.v2",
+          "stamp": "eaf4ab3b1d0a6b78e489352a2b109e48"
+        },
+        "marker_before": {
+          "origin": "agent",
+          "paused_unix": 1795437886,
+          "reason": "mcp: stacked pause: model first",
+          "schema": "tos.openfox.rail-admission-pause.v2",
+          "stamp": "b2c42f4e726c02119b7a03538b52fbde"
+        },
+        "origin_after": "operator",
+        "restamped": true
+      }
+    },
+    {
+      "name": "B: the model's resume of the operator pause and of the stacked pause each became a confirmable action",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "B: the model resumed its own pause directly, with no confirmable action",
+      "result": "pass",
+      "detail": {
+        "action_id": "",
+        "action_reference": "",
+        "admission": "not_paused",
+        "label": "b-resume-own",
+        "resume_outcome": "resumed",
+        "state": "resumed"
+      }
+    },
+    {
+      "name": "B: the withdrawal reached the owner wallet (harness reads: actor transaction, wallet balance)",
+      "result": "pass",
+      "detail": {
+        "before": {
+          "actor": "0:c4f9a9ebd16b21d26861421ef25bf212ff3d6bee9e86e63fdd8487e20627621b",
+          "actor_balance_nanotos": 2039186480,
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 103749,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 800000000
+            }
+          },
+          "wallet_balance_nanotos": 14741166294
+        },
+        "after": {
+          "actor_service_data": {
+            "agreeing": 5,
+            "of": 5,
+            "ports": [
+              8011,
+              8012,
+              8013,
+              8014,
+              8017
+            ],
+            "seqno": 103904,
+            "value": {
+              "active": 1,
+              "live_count": 0,
+              "locked_storage_fees": 0,
+              "next_request_id": 3,
+              "pending_count": 0,
+              "pending_liability": 0,
+              "price_per_call": 100000000,
+              "refundable_liability": 0,
+              "storage_fee": 200000000,
+              "withdrawable_revenue": 0
+            }
+          },
+          "agreeing": 5,
+          "of": 5,
+          "wallet_balance_nanotos": 15540705023,
+          "withdraw_transactions": [
+            {
+              "hash": "RL07Zb8CZL7OGoz+TfpFaTmDyyuKIHFqF6o3vN0IG8U=",
+              "lt": 103848000003,
+              "sent_to_wallet_nanotos": 999756618
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "B: a fee was read for every respond",
+      "result": "pass",
+      "detail": 2
+    },
+    {
+      "name": "B: the owner wallet's ledger, rebuilt from its finalized transactions (values, forwarding fees and total fees), starts at zero from the finalized balance",
+      "result": "pass",
+      "detail": {
+        "transactions": 12,
+        "history_complete": true,
+        "balance_before_oldest_nanotos": 0
+      }
+    },
+    {
+      "name": "B: the ledger's balance before the wallet's withdraw_revenue send equals the harness's direct read before the step",
+      "result": "pass",
+      "detail": {
+        "ledger": 14741166294,
+        "direct_read": 14741166294
+      }
+    },
+    {
+      "name": "B: the ledger's balance after the withdrawal payout equals the harness's direct read",
+      "result": "pass",
+      "detail": {
+        "ledger": 15540705023,
+        "direct_read": 15540705023
+      }
+    },
+    {
+      "name": "B: each client operated the role this assignment gives it",
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "name": "tos-service-verify, built from a fresh clone, passes every purchase",
+      "result": "pass",
+      "detail": [
+        {
+          "assignment": "a",
+          "label": "F",
+          "exit": 0,
+          "verdict": "pass"
+        },
+        {
+          "assignment": "a",
+          "label": "R1",
+          "exit": 0,
+          "verdict": "pass"
+        },
+        {
+          "assignment": "a",
+          "label": "R2",
+          "exit": 0,
+          "verdict": "pass"
+        },
+        {
+          "assignment": "b",
+          "label": "F",
+          "exit": 0,
+          "verdict": "pass"
+        },
+        {
+          "assignment": "b",
+          "label": "R1",
+          "exit": 0,
+          "verdict": "pass"
+        },
+        {
+          "assignment": "b",
+          "label": "R2",
+          "exit": 0,
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "name": "no OpenFox binary, source or configuration is present",
+      "result": "pass",
+      "detail": {
+        "absent": true,
+        "file_hits": [],
+        "binaries_linking_openfox": [],
+        "run_path": "/usr/local/bin:/usr/bin:/bin",
+        "developer_home_is_operator_home": true,
+        "openfox_items_in_operator_home": 967,
+        "scanned": [
+          "/usr/local/bin",
+          "/opt/tos-acceptance-clients",
+          "RUN/bin",
+          "RUN/client-cwd",
+          "home of the provider custody",
+          "home of the buyer custody",
+          "home of the developer account"
+        ],
+        "at": "2026-11-23T13:23:41.111576+00:00"
+      }
+    },
+    {
+      "name": "no model session used any tool outside its role's MCP server",
+      "result": "pass",
+      "detail": []
+    }
+  ],
+  "known_limitations": [
+    "the core team operated every role: the owner, the coordinator and the two model clients",
+    "the confirmers were harness-driven: the real confirmers on pseudo-terminals the custody accounts opened, typing the code only for the action or purchase the model's own tool result named",
+    "init of each provider and buyer node was harness-driven in the custody accounts",
+    "every endpoint is a local validator of this host",
+    "one developer account ran both clients, not two (owner ruling)",
+    "the paid request pending across the switch was held by stopping the provider agent, not by load",
+    "Codex 0.171 still lists, with its shell and file tools disabled and a read-only sandbox, its code-mode exec (the host through which it calls MCP tools), apply_patch and its collaboration tools; no session used them. The tool-use check is not live: after each session exits, the driver reads its transcript (unexpected_tools) and cmd_step then stops the assignment on any tool use outside the role's MCP server (check above)",
+    "the developer account is the operator account and has sudo (owner ruling: the clients already logged in there were used); the clients had no shell or file tool, so the model could not use sudo (Codex still listed the tools named in the item above)",
+    "the operator's home, which is the developer account's, holds 967 OpenFox files from earlier work; no run process executed, read or had on its PATH any of them (the clients had no shell or file tool), and openfox_absent covers every binary, installed directory, custody home and the run's PATH"
+  ],
+  "funding": {
+    "schema": "tos.service.acceptance-funding-receipts.v1",
+    "sender": "the local network's Genesis faucet, through local_pq_transactions.Faucet with journal /data/acceptance-faucet-journal",
+    "elections_service": "stopped for the quiet interval by acceptance-fund.sh and active again afterwards",
+    "run_by": "the coordinator, with the owner's authorization",
+    "transfers": [
+      {
+        "label": "provider-a",
+        "address": "0:01b5881b999aa16ab0f37a81b9ffe70b095854f2c89284a9b79958cf00a7eba7",
+        "amount_nanotos": 20000000000,
+        "lt": "88765000001",
+        "hash_prefix": "21675b43",
+        "read_back": "5/5"
+      },
+      {
+        "label": "buyer-a",
+        "address": "0:13179e45d9786df96e95c3ae7b2746133ed15c799d10e5157666768ba2ecc422",
+        "amount_nanotos": 10000000000,
+        "lt": "88768000001",
+        "hash_prefix": "750c0115",
+        "read_back": "5/5"
+      },
+      {
+        "label": "provider-b",
+        "address": "0:a27f1a61763ad56e887f2ac40dbcfd0c95e1dd8352c07a0faa6b0857b3f6a126",
+        "amount_nanotos": 20000000000,
+        "lt": "88771000001",
+        "hash_prefix": "1d18cc72",
+        "read_back": "5/5"
+      },
+      {
+        "label": "buyer-b",
+        "address": "0:7e872c859456666d140ac0c4f47c52b6bca72eea641746a4ac151a632d294d51",
+        "amount_nanotos": 10000000000,
+        "lt": "88775000001",
+        "hash_prefix": "287fcc18",
+        "read_back": "5/5"
+      }
+    ]
+  },
+  "session_harness_commits": [
+    {
+      "transcript": "private/transcripts/01-a-provider-offer-codex.jsonl",
+      "commit": "654acd2f550d46ad8c3924f5e093850e363df871",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/02-a-provider-offer-codex.jsonl",
+      "commit": "654acd2f550d46ad8c3924f5e093850e363df871",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/03-a-provider-offer-codex.jsonl",
+      "commit": "8672f70717f26adb8d07b63024430f2a7f437949",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/04-a-provider-offer-codex.jsonl",
+      "commit": "bab6d6ea335292a794a781763485308d51beff3d",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/05-a-provider-offer-finish-codex.jsonl",
+      "commit": "b8241c60fedb1770c30abacb1dbb8cb9d3d3a4fa",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/06-a-buy-r1-across-switch-claude.jsonl",
+      "commit": "b8241c60fedb1770c30abacb1dbb8cb9d3d3a4fa",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/07-a-result-r1-claude.jsonl",
+      "commit": "b8241c60fedb1770c30abacb1dbb8cb9d3d3a4fa",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/08-a-result-r1-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/09-a-records-acked-codex.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/10-a-buy-r2-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/11-a-result-r2-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/12-a-pause-for-refund-codex.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/13-a-buy-f-paused-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/14-a-status-f-refunded-claude.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/24-a-status-f-refunded-claude.jsonl",
+      "commit": "6bd30ef62549d5f3c3211a98f2cf32eb9a478f52",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/25-a-resume-own-codex.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/26-a-resume-operator-codex.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/37-a-resume-operator-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/38-a-resume-operator-finish-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/39-a-pause-stacked-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/40-a-resume-stacked-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/41-a-resume-stacked-finish-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/42-a-withdraw-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/43-a-withdraw-finish-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/44-a-records-final-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/14-b-provider-offer-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/15-b-provider-offer-finish-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/16-b-buy-r1-across-switch-codex.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/17-b-result-r1-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/18-b-records-acked-claude.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/19-b-buy-r2-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/20-b-result-r2-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/21-b-pause-for-refund-claude.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/22-b-buy-f-paused-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/23-b-status-f-refunded-codex.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/27-b-resume-own-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/28-b-resume-operator-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/29-b-resume-operator-finish-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/30-b-pause-stacked-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/31-b-resume-stacked-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/32-b-resume-stacked-finish-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/33-b-withdraw-claude.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/34-b-withdraw-finish-claude.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/35-b-records-final-claude.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    }
+  ],
+  "steps_with_several_sessions": [
+    "A:provider-offer",
+    "A:result-r1",
+    "A:resume-operator",
+    "A:resume-stacked",
+    "A:status-f-refunded",
+    "A:withdraw",
+    "B:provider-offer",
+    "B:resume-operator",
+    "B:resume-stacked",
+    "B:withdraw"
+  ],
+  "record_sha256": "4c5510cd2cc2b7f87959b5896510a13054e576ef80a66c0328e5a213f3b75439"
+}

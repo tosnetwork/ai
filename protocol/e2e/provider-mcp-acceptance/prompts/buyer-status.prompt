@@ -1,0 +1,7 @@
+This purchase was paid while the provider had paused admission; its response deadline has passed.
+
+1. Call tos_buyer_status with request_hash "{REQUEST_HASH}" and report its state (the purchase's own phase).
+2. Call tos_buyer_refund with request_hash "{REQUEST_HASH}". It runs the refund duty step that is due now, if any, and reports the duty's status and the operations already sent; when the refund is complete it sends nothing. Report the duty status and the operations.
+3. Call tos_buyer_purchases and report every purchase's request hash prefix and state, and the budget in use.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","request_hash":"{REQUEST_HASH}","state":"...","duty_status":"...","operations_sent":["..."]}

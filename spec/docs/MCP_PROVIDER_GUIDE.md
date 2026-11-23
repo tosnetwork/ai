@@ -13,10 +13,12 @@ spec" below), which governs where the two differ. The buying side is
 
 The guide describes the commands and flags of ai main once the MCP server
 `tos-service-provider-mcp` is merged (ai #131 and #132 for the library, the
-agent and the confirmer). The adapter is implemented, **not yet accepted**:
-the local agent-operated run of adapter spec section 10.2, with Claude Code
-and Codex each operating a provider, has not run. No paid call has been
-answered by a node operated through this adapter.
+agent and the confirmer). The adapter is implemented; its acceptance is
+open. The local agent-operated run of adapter spec section 10.2 ran once on
+2026-11-23 (`../deployments/local-agent-operated-provider-run-20261123.json`):
+Claude Code and Codex each operated a provider node that answered paid
+calls, with one developer account, the operator's own, for both clients
+(owner ruling), where section 10.2 asks for two.
 
 ## 1. How it works
 

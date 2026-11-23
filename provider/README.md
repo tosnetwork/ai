@@ -242,9 +242,13 @@ buying is `protocol/cmd/tos-service-buyer` and the MCP buyer server.
 ## Not here yet
 
 - **The acceptance of the MCP provider adapter.** The agent, the confirmer
-  and the MCP server are implemented and tested; the local agent-operated
-  run of the specification's section 10.2, with Claude Code and Codex each
-  operating a provider, has not run yet.
+  and the MCP server are implemented and tested. The local agent-operated
+  run of the specification's section 10.2 ran once on 2026-11-23, with
+  Claude Code and Codex each operating a provider
+  (`spec/deployments/local-agent-operated-provider-run-20261123.json`),
+  with one deviation: one developer account, the operator's own, ran both
+  clients (owner ruling). Acceptance stays open until a run with two
+  developer accounts, or until the owner waives that requirement.
 - **A live run on a public network.** No record shows this program serving a
   paid call on a public test network; the recorded paid-work runs used the
   same library inside another program.

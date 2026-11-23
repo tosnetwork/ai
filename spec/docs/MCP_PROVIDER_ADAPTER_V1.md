@@ -2,13 +2,18 @@
 
 ## Status and scope
 
-**Status:** implemented, not yet accepted. The library prerequisites of
+**Status:** implemented; run once under section 10.2 on 2026-11-23
+(`deployments/local-agent-operated-provider-run-20261123.json`) with one
+deviation: one developer account, the operator's own, ran both clients
+(owner ruling). Section 10 acceptance stays open until a run with two
+developer accounts, or until the owner waives that requirement in section
+12. The library prerequisites of
 section 13, the provider agent (`tos-service-provider agent`, package
 `provider/pkg/provideragent`), the confirmer (`tos-service-provider
 confirm`) and the MCP server `tos-service-provider-mcp` (package
 `provider/pkg/mcpprovider`) are implemented, with the tests of 10.1; the
-user guide is [`MCP_PROVIDER_GUIDE.md`](MCP_PROVIDER_GUIDE.md). No run of
-section 10.2 has used it yet, so the acceptance of section 10 is open. It is the
+user guide is [`MCP_PROVIDER_GUIDE.md`](MCP_PROVIDER_GUIDE.md). The run's
+driver is `protocol/e2e/provider-mcp-acceptance/`. It is the
 selling-side counterpart of
 [`MCP_BUYER_ADAPTER_V1.md`](MCP_BUYER_ADAPTER_V1.md) ("the buyer spec"
 below), and it is written against ai main at merge `57b1a448` and the

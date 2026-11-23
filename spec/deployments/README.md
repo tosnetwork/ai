@@ -41,6 +41,16 @@ evidence: the operator stopped the epoch-7 public test network (validators
 and both test relays) on 2026-11-21 (UTC), with data retained. It binds no
 chain data, cannot be verified from this repository and satisfies no gate.
 
+`local-agent-operated-provider-run-20261123.json` is the local agent-operated
+run of `MCP_PROVIDER_ADAPTER_V1.md` section 10.2 on this host's four-validator
+PQ network, with no OpenFox: Codex operated provider node a while Claude Code
+bought from it (assignment A), and Claude Code operated provider node b while
+Codex bought from it (B). The driver is `protocol/e2e/provider-mcp-acceptance/`.
+It is local and core-team-operated, not Gate D evidence
+(`qualifies_as_gate_d: false`); its `known_limitations` list the deviations
+from section 10.2 (one developer account, the operator's own, for both
+clients; harness-driven confirmers and `init`).
+
 Records replace host names and addresses with placeholders and keep only
 loopback: the multi-host relay records name their relays `<relay-1-host>` and
 `<relay-2-host>`, and the rooms records also replace namespace addresses and

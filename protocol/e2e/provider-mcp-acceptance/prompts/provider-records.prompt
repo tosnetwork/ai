@@ -1,0 +1,4 @@
+1. Call tos_provider_status and report offered, serving, the admission state, today's admissions and the actor's credited revenue.
+2. Call tos_provider_records with page_size 20 and report, for every record, its request hash prefix and operator_state. {EXTRA}
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","serving":true,"admission":"...","records":[{"request_hash":"...","operator_state":"..."}],"credited_revenue_nanotos":"..."}
