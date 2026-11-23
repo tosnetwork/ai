@@ -2031,6 +2031,11 @@ def cmd_step(x: str, name: str, finish_action: str | None = None) -> None:
     if spec["prompt"] == "buyer-result" and answer.get("accepted") is not True:
         save()
         fail(f"step {name}: the buyer agent has not accepted the result yet; run the step again shortly")
+    # tos_buyer_status shows the purchase's own phase; the refund duty's
+    # status is what tos_buyer_refund reports.
+    if spec["prompt"] == "buyer-status" and answer.get("duty_status") != "refunded":
+        save()
+        fail(f"step {name}: the buyer agent's refund duty reads {answer.get('duty_status')!r}, not refunded")
     if spec.get("finish") and spec["finish_kind"] != "resume" and answer.get("state") != "applied":
         save()
         fail(f"step {name}: the action ends {answer.get('state')!r}, not applied; see {session['transcript']}")
