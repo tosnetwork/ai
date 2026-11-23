@@ -1924,7 +1924,9 @@ def wait_applied(x: str, kind: str) -> None:
     time.sleep(20)
 
 
-def cmd_step(x: str, name: str) -> None:
+def cmd_step(x: str, name: str, finish_action: str | None = None) -> None:
+    """One step. With finish_action, only the continuation of an action an
+    earlier session of this step had confirmed and left applying."""
     if name not in STEPS:
         fail(f"unknown step {name}; steps: {', '.join(ORDER)}")
     a = state["assignments"][x]
@@ -1934,14 +1936,22 @@ def cmd_step(x: str, name: str) -> None:
     if missing:
         fail(f"steps before {name} have not run: {missing}")
     spec = STEPS[name]
-    hook(x, name, "before")
-    session = run_session(x, name)
+    if finish_action:
+        if not spec.get("finish") or not any(
+            c.get("identifier") == finish_action and c.get("typed") == "code" for c in state["confirmations"]
+        ):
+            fail(f"{finish_action} is not an action this run confirmed for a step with a continuation")
+        session = {"unexpected_tool_use": [], "unconfirmed_triggers": [], "exit": 0, "identifiers": {}}
+        answer = {"state": "applying", "action_id": finish_action, "action_reference": reference(finish_action)}
+    else:
+        hook(x, name, "before")
+        session = run_session(x, name)
+        answer = session.get("answer") or {}
     if session["unexpected_tool_use"]:
         fail(
             f"step {name}: the {session['client']} client used tools outside its MCP server "
             f"{session['unexpected_tool_use']}; the assignment stops; see {session['transcript']}"
         )
-    answer = session.get("answer") or {}
     # A confirmed action's send can outlast every request_confirmation the
     # session may make (the tool answers at once while the action applies).
     # The driver then waits for the applied effect itself and starts a
@@ -2260,6 +2270,8 @@ def main() -> None:
         per_assignment[COMMAND](ARGS[0])
     elif COMMAND == "step" and len(ARGS) == 2 and ARGS[0] in ASSIGNMENTS:
         cmd_step(ARGS[0], ARGS[1])
+    elif COMMAND == "step" and len(ARGS) == 4 and ARGS[0] in ASSIGNMENTS and ARGS[2] == "--finish":
+        cmd_step(ARGS[0], ARGS[1], ARGS[3])
     else:
         raise SystemExit(__doc__)
 
