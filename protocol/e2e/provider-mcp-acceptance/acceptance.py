@@ -1769,6 +1769,15 @@ def hook(x: str, name: str, which: str) -> None:
         )
         entry["call_utime"] = call and call["utime"]
         save()
+        # The buyer agent accepts the result after fetching it from the
+        # relay and then acks it; the provider's own record reading acked
+        # (custody file, read as the provider custody) shows that happened,
+        # so the model's result session does not start too early.
+        acked = poll(lambda: provider_record_state(x, entry["request_hash"]) == "acked", 900, 15)
+        entry["provider_record_before_result_session"] = provider_record_state(x, entry["request_hash"])
+        save()
+        if not acked:
+            fail(f"{label}: the provider's record did not reach acked within 15 minutes")
     elif action == "wait_refunded":
         label = spec["label"]
         entry = purchase(x, label)
@@ -1880,6 +1889,21 @@ def first_block_with_set(low: int, high: int, cell_hash: str) -> dict:
         seqno=high,
     )
     return {"seqno": high, "exact": True, "header": header and header["value"]}
+
+
+def provider_record_state(x: str, request_hash: str) -> str | None:
+    """The state of the provider node's own record of a request (records are
+    named by slot, so found by the request hash they hold)."""
+    directory = paths(x)["rail_state"] / "provider"
+    listed = run_as(PROVIDER, ["/usr/bin/find", directory, "-maxdepth", "1", "-name", "*.json"], check=False)
+    for name in listed.stdout.split():
+        try:
+            entry = json.loads(read_as(PROVIDER, name, check=False))
+        except ValueError:
+            continue
+        if entry.get("request_hash") == request_hash:
+            return entry.get("state")
+    return None
 
 
 def wait_applied(x: str, kind: str) -> None:
