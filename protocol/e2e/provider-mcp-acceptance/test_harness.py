@@ -105,3 +105,37 @@ def test_every_step_prompt_fills():
         }
         text = acceptance.prompt_for(spec["role"], spec["prompt"], values)
         assert "{" not in text.replace('{"', "").replace("{}", ""), name
+
+
+def test_unexpected_tools_flag_every_tool_outside_the_server(tmp_path):
+    claude = tmp_path / "claude.jsonl"
+    claude.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "id": "1", "name": "mcp__tos-buyer__tos_buyer_quote"},
+                        {"type": "tool_use", "id": "2", "name": "Bash"},
+                    ]
+                },
+            }
+        )
+        + "\n"
+    )
+    assert acceptance.unexpected_tools(claude, "claude", "tos-buyer") == [{"tool_use": "Bash"}]
+    codex = tmp_path / "codex.jsonl"
+    codex.write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}},
+                {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "tos-provider", "tool": "t"}},
+                {"type": "item.started", "item": {"type": "command_execution", "command": "id"}},
+                {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "other", "tool": "x"}},
+            ]
+        )
+        + "\n"
+    )
+    flagged = acceptance.unexpected_tools(codex, "codex", "tos-provider")
+    assert [f["item"] for f in flagged] == ["command_execution", "mcp_tool_call"]

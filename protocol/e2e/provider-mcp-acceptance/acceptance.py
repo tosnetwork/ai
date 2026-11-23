@@ -1184,6 +1184,19 @@ def client_command(client: str, x: str, role: str) -> tuple[list, bool]:
         "image_generation",
         "--disable",
         "in_app_browser",
+        # No image reading, no subagents, goals or sleep, no web search. The
+        # code-mode host stays: Codex 0.171 reaches MCP tools through it (a
+        # probe with it disabled listed no callable MCP tool).
+        "--disable",
+        "view_image",
+        "--disable",
+        "multi_agent",
+        "--disable",
+        "goals",
+        "--disable",
+        "sleep_tool",
+        "-c",
+        'web_search="disabled"',
         "-c",
         f'mcp_servers.{server}.command="{command}"',
         "-c",
@@ -1382,7 +1395,9 @@ def tool_results(event_value, names: dict) -> list:
             names[event_value["id"]] = str(event_value.get("name", ""))
         if event_value.get("type") == "tool_result" and event_value.get("tool_use_id") in names:
             found.append((names[event_value["tool_use_id"]], json.dumps(event_value.get("content"))))
-        if "tool" in event_value and ("result" in event_value or "output" in event_value):
+        # A Codex item that has started carries "result": null; only its
+        # completed form counts.
+        if "tool" in event_value and (event_value.get("result") is not None or event_value.get("output") is not None):
             found.append((str(event_value["tool"]), json.dumps(event_value.get("result", event_value.get("output")))))
         for value in event_value.values():
             found += tool_results(value, names)
@@ -1499,7 +1514,9 @@ def run_session(x: str, name: str) -> dict:
             item.join(timeout=960)
     answer = last_json(_final_text(transcript, client))
     tools_called = [tool for tool, _ in _calls(transcript)]
+    unexpected = unexpected_tools(transcript, client, server_name(role))
     session = {
+        "unexpected_tool_use": unexpected,
         "assignment": x,
         "step": name,
         "role": role,
@@ -1522,6 +1539,39 @@ def run_session(x: str, name: str) -> dict:
     state["sessions"].append(session)
     save()
     return session
+
+
+CODEX_ITEMS_ALLOWED = {"agent_message", "reasoning", "mcp_tool_call", "error", "todo_list"}
+
+
+def unexpected_tools(transcript: Path, client: str, server: str) -> list:
+    """Every tool use other than the role's own MCP server: for Claude Code a
+    tool_use not named mcp__<server>__*, for Codex an item that is not a
+    message, reasoning, error or a call to that server. Any entry stops the
+    assignment."""
+    found = []
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("type") == "tool_use" and not str(value.get("name", "")).startswith(f"mcp__{server}__"):
+                found.append({"tool_use": value.get("name")})
+            for inner in value.values():
+                walk(inner)
+        elif isinstance(value, list):
+            for inner in value:
+                walk(inner)
+
+    for event_value in _events(transcript):
+        if client == "claude":
+            walk(event_value)
+            continue
+        item = event_value.get("item") if str(event_value.get("type", "")).startswith("item.") else None
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type")
+        if kind not in CODEX_ITEMS_ALLOWED or (kind == "mcp_tool_call" and item.get("server") != server):
+            found.append({"item": kind, "server": item.get("server"), "tool": item.get("tool")})
+    return found
 
 
 def _events(transcript: Path) -> list:
@@ -1824,6 +1874,11 @@ def cmd_step(x: str, name: str) -> None:
     spec = STEPS[name]
     hook(x, name, "before")
     session = run_session(x, name)
+    if session["unexpected_tool_use"]:
+        fail(
+            f"step {name}: the {session['client']} client used tools outside its MCP server "
+            f"{session['unexpected_tool_use']}; the assignment stops; see {session['transcript']}"
+        )
     answer = session.get("answer") or {}
     if spec["prompt"] == "provider-offer" and answer.get("capability_id"):
         offer_file = answer.get("offer_file", "")

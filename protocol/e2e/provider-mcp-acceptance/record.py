@@ -238,6 +238,12 @@ def build(state: dict, run: Path, facts: dict) -> dict:
     check(
         "no OpenFox binary, source or configuration is present", facts["openfox_scan"]["absent"], facts["openfox_scan"]
     )
+    misuse = [
+        {"step": s["step"], "client": s["client"], "use": s.get("unexpected_tool_use")}
+        for s in state["sessions"]
+        if s.get("unexpected_tool_use")
+    ]
+    check("no model session used any tool outside its role's MCP server", not misuse, misuse)
     fee_values = [r["fee_nanotos"] for r in all_fees]
     passed = all(c["result"] == "pass" for c in checks)
     binaries = dict(facts["build"]["binaries"])
@@ -345,6 +351,9 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             "every endpoint is a local validator of this host",
             "one developer account ran both clients (the coordinator's decision), not two",
             "the paid request pending across the switch was held by stopping the provider agent, not by load",
+            "Codex 0.171 still lists, with its shell and file tools disabled and a read-only sandbox, its code-mode "
+            "exec (the host through which it calls MCP tools), apply_patch and its collaboration tools; the harness "
+            "stops a session that uses anything but the role's MCP server (check above)",
         ]
         + (
             [
