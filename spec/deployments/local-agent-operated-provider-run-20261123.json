@@ -25,10 +25,32 @@
           "root_hash": "K6HJnv3BKGU4c4OS0oevVJTkmv0YbhMt2xaYGPlzLOw=",
           "utime": 1795433155
         },
-        "seqno": 91532
+        "seqno": 91532,
+        "block": {
+          "seqno": 91532,
+          "root_hash": "K6HJnv3BKGU4c4OS0oevVJTkmv0YbhMt2xaYGPlzLOw=",
+          "file_hash": "i16sysOjGUw0zWkjRjUrVNc1tEqCLMejWxtTY5Fsp6E=",
+          "gen_utime": 1795433155,
+          "is_key_block": true,
+          "prev_key_block_seqno": 91382,
+          "agreeing": 5,
+          "of": 5
+        }
       },
       "config34_hash_before": "d71ce450f6f87642798bf47ceea31d0be6279ff0f0cbf3115303ff2b01343739",
       "config34_hash_after": "89c16ce3e8da0787bdc251c7a6263c4707b8f489351991815a6dff96a0969e0c",
+      "config34_boc_before_base64": null,
+      "config34_boc_after_base64": null,
+      "key_block": {
+        "seqno": 91532,
+        "root_hash": "K6HJnv3BKGU4c4OS0oevVJTkmv0YbhMt2xaYGPlzLOw=",
+        "file_hash": "i16sysOjGUw0zWkjRjUrVNc1tEqCLMejWxtTY5Fsp6E=",
+        "gen_utime": 1795433155,
+        "is_key_block": true,
+        "prev_key_block_seqno": 91382,
+        "agreeing": 5,
+        "of": 5
+      },
       "members_before": [
         {
           "consensus_key_id_hex": "83a4b496c996b3cc01e2ebf1e7643973c81cbf6e69688bedc4c344f6f0c94835",
@@ -98,10 +120,32 @@
           "root_hash": "rvONyWyQzPLQfbOgb/kLHtQWPVmq4Am5ziWBskYyn3I=",
           "utime": 1795433755
         },
-        "seqno": 93036
+        "seqno": 93036,
+        "block": {
+          "seqno": 93036,
+          "root_hash": "rvONyWyQzPLQfbOgb/kLHtQWPVmq4Am5ziWBskYyn3I=",
+          "file_hash": "VrE0r5xJTuLMBI8riWhLkven2WmvR6t7STKCZS8KRHY=",
+          "gen_utime": 1795433755,
+          "is_key_block": true,
+          "prev_key_block_seqno": 92885,
+          "agreeing": 5,
+          "of": 5
+        }
       },
       "config34_hash_before": "89c16ce3e8da0787bdc251c7a6263c4707b8f489351991815a6dff96a0969e0c",
       "config34_hash_after": "2dba635eacfeb9c71b1f96c23e2b6f4fb367bf8a16226ffdb94cdec5286df11c",
+      "config34_boc_before_base64": null,
+      "config34_boc_after_base64": null,
+      "key_block": {
+        "seqno": 93036,
+        "root_hash": "rvONyWyQzPLQfbOgb/kLHtQWPVmq4Am5ziWBskYyn3I=",
+        "file_hash": "VrE0r5xJTuLMBI8riWhLkven2WmvR6t7STKCZS8KRHY=",
+        "gen_utime": 1795433755,
+        "is_key_block": true,
+        "prev_key_block_seqno": 92885,
+        "agreeing": 5,
+        "of": 5
+      },
       "members_before": [
         {
           "consensus_key_id_hex": "83a4b496c996b3cc01e2ebf1e7643973c81cbf6e69688bedc4c344f6f0c94835",
@@ -172,7 +216,7 @@
   "source_commits": {
     "ai": "571e9c50e43cc7a23950fe13932abf4579c9e09d",
     "tos": "6224453b5f72f35968071121600c0a9c06f2106e",
-    "harness": "c85c3a158a07543863e9d4a3894a49d1db630b48",
+    "harness": "f6ceb60b32a7db76c06ddd3f21206d3ebba7fd77",
     "harness_tree_clean": true
   },
   "binaries": {
@@ -204,7 +248,7 @@
       "home of the buyer custody",
       "home of the developer account"
     ],
-    "at": "2026-11-23T13:00:11.317659+00:00"
+    "at": "2026-11-23T13:23:41.111576+00:00"
   },
   "accounts": [
     {
@@ -782,6 +826,11 @@
               "utime": 1795433188
             }
           ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "31bf5bc427c3c1341f81984ca6aa4f131c403eff6f66b37a274561eee6006da8"
+          },
           "verdict": {
             "assignment": "a",
             "checkpoint": {
@@ -810,6 +859,11 @@
               "utime": 1795433374
             }
           ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "e0d7561bb3e1b742095f3d8eda33e5ca675ebfe74fd80d10fcde0f1bd82ce6c8"
+          },
           "verdict": {
             "assignment": "a",
             "checkpoint": {
@@ -1505,6 +1559,11 @@
               "utime": 1795433786
             }
           ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "7e11804ec793e150d8a270e0c2b7520221350c74e4894c320e368098a7ef8454"
+          },
           "verdict": {
             "assignment": "b",
             "checkpoint": {
@@ -1533,6 +1592,11 @@
               "utime": 1795433938
             }
           ],
+          "result_tool": {
+            "accepted": true,
+            "calls": 1,
+            "response_hash": "e7660138c951a349dfc13191039e1cf99d6e567638eece4a4070c5c51340a5e6"
+          },
           "verdict": {
             "assignment": "b",
             "checkpoint": {
@@ -1750,6 +1814,75 @@
         "agreeing": 5,
         "of": 5,
         "wallet_balance_nanotos": 15540705003,
+        "ledger": {
+          "transactions": 12,
+          "history_complete": true,
+          "oldest_lt": 88765000001,
+          "balance_before_oldest_nanotos": 0,
+          "reconciles": true,
+          "rows": [
+            {
+              "lt": 105024000006,
+              "balance_before_nanotos": 15340951873,
+              "balance_after_nanotos": 15540705003
+            },
+            {
+              "lt": 105024000005,
+              "balance_before_nanotos": 14540955361,
+              "balance_after_nanotos": 15340951873
+            },
+            {
+              "lt": 105024000001,
+              "balance_before_nanotos": 14741166316,
+              "balance_after_nanotos": 14540955361
+            },
+            {
+              "lt": 92126000001,
+              "balance_before_nanotos": 14754295468,
+              "balance_after_nanotos": 14741166316
+            },
+            {
+              "lt": 91662000001,
+              "balance_before_nanotos": 14767424631,
+              "balance_after_nanotos": 14754295468
+            },
+            {
+              "lt": 90541000001,
+              "balance_before_nanotos": 14777790308,
+              "balance_after_nanotos": 14767424631
+            },
+            {
+              "lt": 90534000001,
+              "balance_before_nanotos": 16781426919,
+              "balance_after_nanotos": 14777790308
+            },
+            {
+              "lt": 90527000001,
+              "balance_before_nanotos": 17989001556,
+              "balance_after_nanotos": 16781426919
+            },
+            {
+              "lt": 88934000001,
+              "balance_before_nanotos": 19999345168,
+              "balance_after_nanotos": 17989001556
+            },
+            {
+              "lt": 88915000003,
+              "balance_before_nanotos": 19989348656,
+              "balance_after_nanotos": 19999345168
+            },
+            {
+              "lt": 88915000001,
+              "balance_before_nanotos": 20000000000,
+              "balance_after_nanotos": 19989348656
+            },
+            {
+              "lt": 88765000001,
+              "balance_before_nanotos": 0,
+              "balance_after_nanotos": 20000000000
+            }
+          ]
+        },
         "responds": [
           {
             "wallet_transaction": {
@@ -1763,11 +1896,13 @@
               "aborted": false
             },
             "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106576,
             "returned_nanotos": 0,
             "return_credit_transaction": null,
-            "fee_nanotos": 12106576,
-            "balance_before_nanotos": 14765335011,
-            "balance_after_nanotos": 14753228435
+            "fee_nanotos": 13129163,
+            "balance_before_nanotos": 14767424631,
+            "balance_after_nanotos": 14754295468
           },
           {
             "wallet_transaction": {
@@ -1781,11 +1916,13 @@
               "aborted": false
             },
             "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106565,
             "returned_nanotos": 0,
             "return_credit_transaction": null,
-            "fee_nanotos": 12106565,
-            "balance_before_nanotos": 14753228435,
-            "balance_after_nanotos": 14741121870
+            "fee_nanotos": 13129152,
+            "balance_before_nanotos": 14754295468,
+            "balance_after_nanotos": 14741166316
           }
         ]
       },
@@ -1794,6 +1931,75 @@
         "agreeing": 5,
         "of": 5,
         "wallet_balance_nanotos": 15540705023,
+        "ledger": {
+          "transactions": 12,
+          "history_complete": true,
+          "oldest_lt": 88771000001,
+          "balance_before_oldest_nanotos": 0,
+          "reconciles": true,
+          "rows": [
+            {
+              "lt": 103848000006,
+              "balance_before_nanotos": 15340951893,
+              "balance_after_nanotos": 15540705023
+            },
+            {
+              "lt": 103848000005,
+              "balance_before_nanotos": 14540955381,
+              "balance_after_nanotos": 15340951893
+            },
+            {
+              "lt": 103848000001,
+              "balance_before_nanotos": 14741166294,
+              "balance_after_nanotos": 14540955381
+            },
+            {
+              "lt": 93539000001,
+              "balance_before_nanotos": 14754295445,
+              "balance_after_nanotos": 14741166294
+            },
+            {
+              "lt": 93161000001,
+              "balance_before_nanotos": 14767424600,
+              "balance_after_nanotos": 14754295445
+            },
+            {
+              "lt": 92505000001,
+              "balance_before_nanotos": 14777790277,
+              "balance_after_nanotos": 14767424600
+            },
+            {
+              "lt": 92499000001,
+              "balance_before_nanotos": 16781426888,
+              "balance_after_nanotos": 14777790277
+            },
+            {
+              "lt": 92492000001,
+              "balance_before_nanotos": 17989001556,
+              "balance_after_nanotos": 16781426888
+            },
+            {
+              "lt": 89012000001,
+              "balance_before_nanotos": 19999345168,
+              "balance_after_nanotos": 17989001556
+            },
+            {
+              "lt": 88994000003,
+              "balance_before_nanotos": 19989348656,
+              "balance_after_nanotos": 19999345168
+            },
+            {
+              "lt": 88994000001,
+              "balance_before_nanotos": 20000000000,
+              "balance_after_nanotos": 19989348656
+            },
+            {
+              "lt": 88771000001,
+              "balance_before_nanotos": 0,
+              "balance_after_nanotos": 20000000000
+            }
+          ]
+        },
         "responds": [
           {
             "wallet_transaction": {
@@ -1807,11 +2013,13 @@
               "aborted": false
             },
             "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106568,
             "returned_nanotos": 0,
             "return_credit_transaction": null,
-            "fee_nanotos": 12106568,
-            "balance_before_nanotos": 14765334980,
-            "balance_after_nanotos": 14753228412
+            "fee_nanotos": 13129155,
+            "balance_before_nanotos": 14767424600,
+            "balance_after_nanotos": 14754295445
           },
           {
             "wallet_transaction": {
@@ -1825,19 +2033,21 @@
               "aborted": false
             },
             "attached_nanotos": 10000000,
+            "forwarding_fee_nanotos": 1022587,
+            "wallet_transaction_fees_nanotos": 2106564,
             "returned_nanotos": 0,
             "return_credit_transaction": null,
-            "fee_nanotos": 12106564,
-            "balance_before_nanotos": 14753228412,
-            "balance_after_nanotos": 14741121848
+            "fee_nanotos": 13129151,
+            "balance_before_nanotos": 14754295445,
+            "balance_after_nanotos": 14741166294
           }
         ]
       }
     },
     "summary": {
       "count": 4,
-      "highest_nanotos": 12106576,
-      "mean_nanotos": 12106568
+      "highest_nanotos": 13129163,
+      "mean_nanotos": 13129155
     }
   },
   "confirmations": [
@@ -2299,9 +2509,20 @@
       }
     },
     {
-      "name": "A: R1 and R2 were accepted by the buyer against the finalized response_hash",
+      "name": "A: R1 and R2 were accepted by the buyer against the finalized response_hash (read from the tos_buyer_result tool results, not from the model's answer)",
       "result": "pass",
-      "detail": null
+      "detail": {
+        "R1": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "31bf5bc427c3c1341f81984ca6aa4f131c403eff6f66b37a274561eee6006da8"
+        },
+        "R2": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "e0d7561bb3e1b742095f3d8eda33e5ca675ebfe74fd80d10fcde0f1bd82ce6c8"
+        }
+      }
     },
     {
       "name": "A: the provider's own records of R1 and R2 read acked (custody read; the model's tos_provider_records result shows the same record state)",
@@ -2451,6 +2672,31 @@
       "detail": 2
     },
     {
+      "name": "A: the owner wallet's ledger, rebuilt from its finalized transactions (values, forwarding fees and total fees), starts at zero from the finalized balance",
+      "result": "pass",
+      "detail": {
+        "transactions": 12,
+        "history_complete": true,
+        "balance_before_oldest_nanotos": 0
+      }
+    },
+    {
+      "name": "A: the ledger's balance before the wallet's withdraw_revenue send equals the harness's direct read before the step",
+      "result": "pass",
+      "detail": {
+        "ledger": 14741166316,
+        "direct_read": 14741166316
+      }
+    },
+    {
+      "name": "A: the ledger's balance after the withdrawal payout equals the harness's direct read",
+      "result": "pass",
+      "detail": {
+        "ledger": 15540705003,
+        "direct_read": 15540705003
+      }
+    },
+    {
       "name": "A: each client operated the role this assignment gives it",
       "result": "pass",
       "detail": null
@@ -2557,9 +2803,20 @@
       }
     },
     {
-      "name": "B: R1 and R2 were accepted by the buyer against the finalized response_hash",
+      "name": "B: R1 and R2 were accepted by the buyer against the finalized response_hash (read from the tos_buyer_result tool results, not from the model's answer)",
       "result": "pass",
-      "detail": null
+      "detail": {
+        "R1": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "7e11804ec793e150d8a270e0c2b7520221350c74e4894c320e368098a7ef8454"
+        },
+        "R2": {
+          "accepted": true,
+          "calls": 1,
+          "response_hash": "e7660138c951a349dfc13191039e1cf99d6e567638eece4a4070c5c51340a5e6"
+        }
+      }
     },
     {
       "name": "B: the provider's own records of R1 and R2 read acked (custody read; the model's tos_provider_records result shows the same record state)",
@@ -2709,6 +2966,31 @@
       "detail": 2
     },
     {
+      "name": "B: the owner wallet's ledger, rebuilt from its finalized transactions (values, forwarding fees and total fees), starts at zero from the finalized balance",
+      "result": "pass",
+      "detail": {
+        "transactions": 12,
+        "history_complete": true,
+        "balance_before_oldest_nanotos": 0
+      }
+    },
+    {
+      "name": "B: the ledger's balance before the wallet's withdraw_revenue send equals the harness's direct read before the step",
+      "result": "pass",
+      "detail": {
+        "ledger": 14741166294,
+        "direct_read": 14741166294
+      }
+    },
+    {
+      "name": "B: the ledger's balance after the withdrawal payout equals the harness's direct read",
+      "result": "pass",
+      "detail": {
+        "ledger": 15540705023,
+        "direct_read": 15540705023
+      }
+    },
+    {
       "name": "B: each client operated the role this assignment gives it",
       "result": "pass",
       "detail": null
@@ -2774,7 +3056,7 @@
           "home of the buyer custody",
           "home of the developer account"
         ],
-        "at": "2026-11-23T13:00:11.317659+00:00"
+        "at": "2026-11-23T13:23:41.111576+00:00"
       }
     },
     {
@@ -2788,10 +3070,10 @@
     "the confirmers were harness-driven: the real confirmers on pseudo-terminals the custody accounts opened, typing the code only for the action or purchase the model's own tool result named",
     "init of each provider and buyer node was harness-driven in the custody accounts",
     "every endpoint is a local validator of this host",
-    "one developer account ran both clients (the coordinator's decision), not two",
+    "one developer account ran both clients, not two (owner ruling)",
     "the paid request pending across the switch was held by stopping the provider agent, not by load",
-    "Codex 0.171 still lists, with its shell and file tools disabled and a read-only sandbox, its code-mode exec (the host through which it calls MCP tools), apply_patch and its collaboration tools; the harness stops a session that uses anything but the role's MCP server (check above)",
-    "the developer account is the operator account and has sudo (owner ruling: the clients already logged in there were used); the clients had no shell, file or other built-in tool, only the one MCP server of their role, so the model could not use it",
+    "Codex 0.171 still lists, with its shell and file tools disabled and a read-only sandbox, its code-mode exec (the host through which it calls MCP tools), apply_patch and its collaboration tools; no session used them. The tool-use check is not live: after each session exits, the driver reads its transcript (unexpected_tools) and cmd_step then stops the assignment on any tool use outside the role's MCP server (check above)",
+    "the developer account is the operator account and has sudo (owner ruling: the clients already logged in there were used); the clients had no shell or file tool, so the model could not use sudo (Codex still listed the tools named in the item above)",
     "the operator's home, which is the developer account's, holds 967 OpenFox files from earlier work; no run process executed, read or had on its PATH any of them (the clients had no shell or file tool), and openfox_absent covers every binary, installed directory, custody home and the run's PATH"
   ],
   "funding": {
@@ -2834,6 +3116,228 @@
       }
     ]
   },
+  "session_harness_commits": [
+    {
+      "transcript": "private/transcripts/01-a-provider-offer-codex.jsonl",
+      "commit": "654acd2f550d46ad8c3924f5e093850e363df871",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/02-a-provider-offer-codex.jsonl",
+      "commit": "654acd2f550d46ad8c3924f5e093850e363df871",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/03-a-provider-offer-codex.jsonl",
+      "commit": "8672f70717f26adb8d07b63024430f2a7f437949",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/04-a-provider-offer-codex.jsonl",
+      "commit": "bab6d6ea335292a794a781763485308d51beff3d",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/05-a-provider-offer-finish-codex.jsonl",
+      "commit": "b8241c60fedb1770c30abacb1dbb8cb9d3d3a4fa",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/06-a-buy-r1-across-switch-claude.jsonl",
+      "commit": "b8241c60fedb1770c30abacb1dbb8cb9d3d3a4fa",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/07-a-result-r1-claude.jsonl",
+      "commit": "b8241c60fedb1770c30abacb1dbb8cb9d3d3a4fa",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/08-a-result-r1-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/09-a-records-acked-codex.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/10-a-buy-r2-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/11-a-result-r2-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/12-a-pause-for-refund-codex.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/13-a-buy-f-paused-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/14-a-status-f-refunded-claude.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/24-a-status-f-refunded-claude.jsonl",
+      "commit": "6bd30ef62549d5f3c3211a98f2cf32eb9a478f52",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/25-a-resume-own-codex.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/26-a-resume-operator-codex.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/37-a-resume-operator-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/38-a-resume-operator-finish-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/39-a-pause-stacked-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/40-a-resume-stacked-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/41-a-resume-stacked-finish-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/42-a-withdraw-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/43-a-withdraw-finish-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/44-a-records-final-codex.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/14-b-provider-offer-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/15-b-provider-offer-finish-claude.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/16-b-buy-r1-across-switch-codex.jsonl",
+      "commit": "4401eadc403403499b1edc6b1985c5ff2fb8007c",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/17-b-result-r1-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/18-b-records-acked-claude.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/19-b-buy-r2-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/20-b-result-r2-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/21-b-pause-for-refund-claude.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/22-b-buy-f-paused-codex.jsonl",
+      "commit": "edc4b9e2c50617f56e0503690df0c249dc8a8978",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/23-b-status-f-refunded-codex.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/27-b-resume-own-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/28-b-resume-operator-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/29-b-resume-operator-finish-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/30-b-pause-stacked-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/31-b-resume-stacked-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/32-b-resume-stacked-finish-claude.jsonl",
+      "commit": "73d65e5ba2ec3b8548cda8c06928c48b178af986",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/33-b-withdraw-claude.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/34-b-withdraw-finish-claude.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    },
+    {
+      "transcript": "private/transcripts/35-b-records-final-claude.jsonl",
+      "commit": "8836fdd168b11f8dd16b854bb20340ca28d6dbaf",
+      "inferred": true
+    }
+  ],
   "steps_with_several_sessions": [
     "A:provider-offer",
     "A:result-r1",
@@ -2846,5 +3350,5 @@
     "B:resume-stacked",
     "B:withdraw"
   ],
-  "record_sha256": "f4657c31118ea1914b75f5a64b536422e87779d6e042b04fce035e5206667995"
+  "record_sha256": "4c5510cd2cc2b7f87959b5896510a13054e576ef80a66c0328e5a213f3b75439"
 }
