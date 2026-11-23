@@ -186,6 +186,12 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             (answers.get("result-r1") or {}).get("accepted") is True
             and (answers.get("result-r2") or {}).get("accepted") is True,
         )
+        check(
+            f"{label}: the provider's own records of R1 and R2 read acked (custody read; the model's "
+            "tos_provider_records result shows the same record state)",
+            all(purchases.get(k, {}).get("provider_record_before_result_session") == "acked" for k in ("R1", "R2")),
+            {k: purchases.get(k, {}).get("provider_record_before_result_session") for k in ("R1", "R2")},
+        )
         refund = f.get("refund_seen") or {}
         check(
             f"{label}: the paused call F was not answered and ended refunded (expire and claim_refund on chain)",
