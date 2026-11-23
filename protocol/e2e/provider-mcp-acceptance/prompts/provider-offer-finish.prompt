@@ -1,0 +1,7 @@
+The offer action {ACTION_ID} (reference {ACTION_REFERENCE}) was confirmed by the human and has been applied since.
+
+1. Call tos_provider_request_confirmation with action_id "{ACTION_ID}" and wait_seconds 45, and report its state and steps. Repeat it, at most 6 times, only while the state is applying.
+2. When the state is applied, call tos_provider_status and check offered true and serving true.
+3. Call tos_provider_export_offer and report the file path, capability_id, capability_version and sha256 it returns.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","action_id":"{ACTION_ID}","action_reference":"{ACTION_REFERENCE}","state":"...","capability_id":"...","capability_version":"...","offer_file":"...","offer_sha256":"..."}

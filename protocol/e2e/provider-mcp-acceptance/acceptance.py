@@ -1293,6 +1293,8 @@ STEPS = {
                 },
             )
         ],
+        "finish": "provider-offer-finish",
+        "finish_kind": "offer",
     },
     "buy-r1-across-switch": {
         "role": "buyer",
@@ -1330,6 +1332,8 @@ STEPS = {
         "prompt": "provider-resume",
         "before": "operator_pause",
         "confirm": [("tos_provider_resume", "provider", "resume", "confirm", {"Marker origin": "operator"})],
+        "finish": "provider-resume-finish",
+        "finish_kind": "resume",
         "after": "expect_resumed",
     },
     "pause-stacked": {
@@ -1342,6 +1346,8 @@ STEPS = {
         "role": "provider",
         "prompt": "provider-resume",
         "confirm": [("tos_provider_resume", "provider", "resume", "confirm", {"Marker origin": "operator"})],
+        "finish": "provider-resume-finish",
+        "finish_kind": "resume",
         "after": "expect_resumed",
     },
     "withdraw": {
@@ -1349,6 +1355,8 @@ STEPS = {
         "prompt": "provider-withdraw",
         "before": "balances_before_withdraw",
         "confirm": [("tos_provider_withdraw_preview", "provider", "withdraw", "confirm", {"Network": NETWORK_LABEL})],
+        "finish": "provider-withdraw-finish",
+        "finish_kind": "withdraw",
         "after": "withdrawal_facts",
     },
     "records-final": {
@@ -1456,21 +1464,27 @@ def confirm_into(results: list, x: str, trigger: tuple, identifier: str) -> None
     results.append(run_confirmer(x, program, identifier, kind, decision, expect))
 
 
-def run_session(x: str, name: str) -> dict:
+def run_session(x: str, name: str, finish: dict | None = None) -> dict:
+    """One model session of a step. With finish ({"ACTION_ID", ...}), the
+    step's continuation: the action was confirmed and has been applied, and
+    the session reads its outcome and does the rest of the task."""
     spec = STEPS[name]
     role = spec["role"]
     client = ASSIGNMENTS[x][f"{role}_client"]
-    prompt = prompt_for(role, spec["prompt"], step_values(x, name, spec))
+    if finish:
+        prompt = prompt_for(role, spec["finish"], {**step_values(x, name, spec), **finish})
+    else:
+        prompt = prompt_for(role, spec["prompt"], step_values(x, name, spec))
     template, on_stdin = client_command(client, x, role)
     argv = [prompt if part == "{PROMPT}" else part for part in template]
     client_cwd().mkdir(mode=0o700, exist_ok=True)
     command = as_cmd(DEVELOPER, argv, extra_env=CLIENT_ENV[client], chdir=client_cwd())
     index = len(state["sessions"]) + 1
-    transcript = TRANSCRIPTS / f"{index:02d}-{x}-{name}-{client}.jsonl"
+    transcript = TRANSCRIPTS / f"{index:02d}-{x}-{name}{'-finish' if finish else ''}-{client}.jsonl"
     TRANSCRIPTS.mkdir(mode=0o700, parents=True, exist_ok=True)
     started = now()
     names: dict = {}
-    pending = list(spec.get("confirm", []))
+    pending = [] if finish else list(spec.get("confirm", []))
     confirmers: list = []
     seen_ids: dict = {}
     # stderr goes to a file: a client that writes much to it can never block
@@ -1499,6 +1513,11 @@ def run_session(x: str, name: str) -> dict:
                     if not found:
                         continue
                     pending.remove(trigger)
+                    if trigger[1] == "provider" and "awaiting_confirmation" not in text:
+                        # The same key returned an action already decided
+                        # (a step run again): nothing to confirm.
+                        seen_ids[trigger[0]] = found.group(1)
+                        continue
                     seen_ids[trigger[0]] = found.group(1)
                     thread = threading.Thread(
                         target=confirm_into, args=(confirmers, x, trigger, found.group(1)), daemon=True
@@ -1519,6 +1538,7 @@ def run_session(x: str, name: str) -> dict:
         "unexpected_tool_use": unexpected,
         "assignment": x,
         "step": name,
+        "finish": bool(finish),
         "role": role,
         "client": client,
         "started_utc": started,
@@ -1862,6 +1882,48 @@ def first_block_with_set(low: int, high: int, cell_hash: str) -> dict:
     return {"seqno": high, "exact": True, "header": header and header["value"]}
 
 
+def wait_applied(x: str, kind: str) -> None:
+    """Wait, from custody and chain reads, until a confirmed action's effect
+    is in place: the offer's actor in the operator's status, the marker gone
+    for a resume, the withdraw_revenue at the actor for a withdrawal."""
+    p = paths(x)
+
+    def offered():
+        status = (
+            last_json(
+                run_as(
+                    PROVIDER,
+                    [BIN / "tos-service-provider", "status", "--rail-config", p["rail_config"]],
+                    vault=True,
+                    check=False,
+                ).stdout
+            )
+            or {}
+        )
+        return ((status.get("actor") or {}).get("address") or "") != ""
+
+    def resumed():
+        return (
+            run_as(PROVIDER, ["/usr/bin/test", "-e", p["rail_state"] / "admission-paused"], check=False).returncode == 1
+        )
+
+    def withdrawn():
+        wallet = state["assignments"][x]["wallets"][f"provider-{x}"]
+        read = chain.transactions(actor_of(x))
+        before = {t["hash"] for t in (state["assignments"][x].get("withdraw_before") or {}).get("withdrawals", [])}
+        return read and [
+            t
+            for t in chain.inbound(read["value"], chain.WITHDRAW_OPCODE, wallet)
+            if not t["aborted"] and t["hash"] not in before
+        ]
+
+    check = {"offer": offered, "resume": resumed, "withdraw": withdrawn}[kind]
+    if not poll(check, 1800, 15):
+        fail(f"the confirmed {kind} did not take effect within 30 minutes")
+    # The agent records the outcome after the effect; give it a moment.
+    time.sleep(20)
+
+
 def cmd_step(x: str, name: str) -> None:
     if name not in STEPS:
         fail(f"unknown step {name}; steps: {', '.join(ORDER)}")
@@ -1880,6 +1942,21 @@ def cmd_step(x: str, name: str) -> None:
             f"{session['unexpected_tool_use']}; the assignment stops; see {session['transcript']}"
         )
     answer = session.get("answer") or {}
+    # A confirmed action's send can outlast every request_confirmation the
+    # session may make (the tool answers at once while the action applies).
+    # The driver then waits for the applied effect itself and starts a
+    # continuation session that reads the outcome and finishes the task.
+    if spec.get("finish") and answer.get("state") == "applying" and answer.get("action_id"):
+        wait_applied(x, spec["finish_kind"])
+        session = run_session(
+            x, name, {"ACTION_ID": answer["action_id"], "ACTION_REFERENCE": answer.get("action_reference", "")}
+        )
+        if session["unexpected_tool_use"]:
+            fail(
+                f"step {name}: the {session['client']} client used tools outside its MCP server "
+                f"{session['unexpected_tool_use']}; the assignment stops; see {session['transcript']}"
+            )
+        answer = {**answer, **(session.get("answer") or {})}
     if spec["prompt"] == "provider-offer" and answer.get("capability_id"):
         offer_file = answer.get("offer_file", "")
         text = read_as(DEVELOPER, offer_file)
@@ -1920,6 +1997,12 @@ def cmd_step(x: str, name: str) -> None:
     if spec["prompt"] == "buyer-result" and answer.get("accepted") is not True:
         save()
         fail(f"step {name}: the buyer agent has not accepted the result yet; run the step again shortly")
+    if spec.get("finish") and spec["finish_kind"] != "resume" and answer.get("state") != "applied":
+        save()
+        fail(f"step {name}: the action ends {answer.get('state')!r}, not applied; see {session['transcript']}")
+    if spec["prompt"] == "provider-offer" and not a.get("offer"):
+        save()
+        fail(f"step {name}: no exported offer; see {session['transcript']}")
     if session["unconfirmed_triggers"] or session["exit"] != 0:
         save()
         fail(

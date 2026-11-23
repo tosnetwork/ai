@@ -1,6 +1,6 @@
 1. Call tos_provider_status and report the actor's credited revenue.
 2. Call tos_provider_withdraw_preview with all true and idempotency_key "{IDEM}". Report the amount, the destination and the action reference.
-3. Call tos_provider_request_confirmation with that action_id and wait_seconds 45. Repeat it, at most 14 times, while the state is awaiting_confirmation or applying.
+3. Call tos_provider_request_confirmation with that action_id and wait_seconds 45. Repeat it, at most 14 times, while the state is awaiting_confirmation. If it reads applying, stop here: do not call it again, and end your answer with state "applying" and the action_id; a later session reads the outcome and does step 4.
 4. When it is applied, call tos_provider_status and report the credited revenue and the latest withdrawal record.
 
 End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","action_id":"...","action_reference":"...","state":"...","amount_nanotos":"...","credited_after_nanotos":"..."}

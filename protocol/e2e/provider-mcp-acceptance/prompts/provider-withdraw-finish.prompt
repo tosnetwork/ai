@@ -1,0 +1,6 @@
+The withdrawal action {ACTION_ID} (reference {ACTION_REFERENCE}) was confirmed by the human and has been applied since.
+
+1. Call tos_provider_request_confirmation with action_id "{ACTION_ID}" and wait_seconds 45, and report its state. Repeat it, at most 6 times, only while the state is applying.
+2. Call tos_provider_status and report the credited revenue and the latest withdrawal record.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","action_id":"{ACTION_ID}","action_reference":"{ACTION_REFERENCE}","state":"...","amount_nanotos":"...","credited_after_nanotos":"..."}
