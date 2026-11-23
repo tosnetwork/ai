@@ -597,17 +597,24 @@ def openfox_scan() -> dict:
     """Every place the run's programs could come from or keep state in, for
     an OpenFox file name or the OpenFox module path."""
     hits = []
-    places = [BIN, Path("/opt/tos-acceptance-clients"), RUN / "bin"]
+    places = [BIN, Path("/opt/tos-acceptance-clients"), RUN / "bin", client_cwd()]
     for place in places:
         if place.exists():
             found = subprocess.run(["find", str(place), "-iname", "*openfox*"], capture_output=True, text=True)
             hits += found.stdout.split()
+    # Every account's home, and the PATH the run's processes get (the
+    # driver gives every one of them the same fixed PATH).
+    run_path = "/usr/local/bin:/usr/bin:/bin"
+    developer_home = []
     for account in (PROVIDER, BUYER, DEVELOPER):
         found = run_as(
             account, ["/usr/bin/find", home(account), "-iname", "*openfox*", "-not", "-path", "*/.cache/*"], check=False
-        )
-        hits += found.stdout.split()
-        which = run_as(account, ["/bin/sh", "-c", "command -v openfox || true"], check=False)
+        ).stdout.split()
+        if account == DEVELOPER and DEVELOPER_IS_OPERATOR:
+            developer_home += found
+        else:
+            hits += found
+        which = run_as(account, ["/bin/sh", "-c", f"PATH={run_path} command -v openfox || true"], check=False)
         hits += which.stdout.split()
     strings = []
     for name in BINARIES:
@@ -615,10 +622,19 @@ def openfox_scan() -> dict:
         if path.exists() and b"github.com/tosnetwork/openfox" in path.read_bytes():
             strings.append(name)
     return {
+        # Absent from everything the run executes, installs, reads or keeps
+        # state in. When the developer account is the operator's own, OpenFox
+        # files in its home are counted separately (no path is recorded):
+        # the clients had no shell or file tool, the MCP servers read only
+        # their flags' paths, and no run process has them on its PATH.
         "absent": not hits and not strings,
         "file_hits": hits,
         "binaries_linking_openfox": strings,
-        "scanned": [str(p) for p in places] + [f"home of {a}" for a in (PROVIDER, BUYER, DEVELOPER)],
+        "run_path": run_path,
+        "developer_home_is_operator_home": DEVELOPER_IS_OPERATOR,
+        "openfox_items_in_operator_home": len(developer_home),
+        "scanned": [str(p) for p in places]
+        + [f"home of the {role}" for role in ("provider custody", "buyer custody", "developer account")],
         "at": now(),
     }
 
@@ -2051,6 +2067,9 @@ def cmd_record() -> None:
             ).stdout.strip(),
             "openfox_scan": openfox_scan(),
             "developer_is_operator": DEVELOPER_IS_OPERATOR,
+            "funding": json.loads((PUBLIC / "funding-receipts.json").read_text())
+            if (PUBLIC / "funding-receipts.json").exists()
+            else None,
             "uids": {
                 role: uid(account)
                 for role, account in (

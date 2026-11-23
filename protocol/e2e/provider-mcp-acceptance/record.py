@@ -354,7 +354,18 @@ def build(state: dict, run: Path, facts: dict) -> dict:
             ]
             if facts.get("developer_is_operator")
             else []
+        )
+        + (
+            [
+                f"the operator's home, which is the developer account's, holds "
+                f"{facts['openfox_scan']['openfox_items_in_operator_home']} OpenFox files from earlier work; no run "
+                "process executed, read or had on its PATH any of them (the clients had no shell or file tool), and "
+                "openfox_absent covers every binary, installed directory, custody home and the run's PATH"
+            ]
+            if facts["openfox_scan"].get("openfox_items_in_operator_home")
+            else []
         ),
+        "funding": facts.get("funding"),
     }
     document["record_sha256"] = sha256_text(json.dumps(document, sort_keys=True, separators=(",", ":")))
     return document
