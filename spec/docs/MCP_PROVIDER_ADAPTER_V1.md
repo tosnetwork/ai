@@ -69,7 +69,7 @@ Key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
   digest, a command line, an executor path or a manifest.
 - **Changing the terms of a published actor.** The program has no
   `update-policy` verb (`provider/README.md`, "Custody"); a terms change is
-  done by the owner with `tosctl` and is out of V1 (open decision P6).
+  done by the owner with `tosctl` and is out of V1 (decision P6, section 12).
 - **Chat** or any Messenger lane: a rail configuration with a `chat` section
   or `messenger_socket` is refused, as the program refuses it.
 - **Acting for several providers.** One provider agent serves one rail
@@ -177,9 +177,10 @@ custody-owned regular file of mode `0600` or stricter, decoded strictly
   deploy funding, the respond budget, the offer file and gateway card paths,
   and `test_profile_actor`;
 - the **offer bounds** a previewed offer must lie in (4.9): lowest and
-  highest price, highest storage fee and cleanup bounty, and the allowed
-  range of response SLA and refund claim window, each inside the contract's
-  own bounds (`ActorTerms.ValidateFor`,
+  highest price, highest storage fee and cleanup bounty, the allowed range
+  of response SLA and refund claim window, and the allowed range of
+  `retention_seconds` (within 3,600 to 2,592,000), each inside the
+  contract's and the manifest profile's own bounds (`ActorTerms.ValidateFor`,
   `provider/pkg/servicebridge/setup_tosctl.go:430`);
 - the **autonomous bounds** of 2.5: `max_admissions_per_day` (default 50)
   and `min_wallet_nanotos`, the owner wallet balance below which admission
@@ -243,27 +244,80 @@ for a request, is bounded by:
 - **Pause marker:** while `<state_dir>/admission-paused` exists, or cannot
   be read, nothing new is admitted (`provider.go:293`, `pause.go`). Admitted
   work still executes, responds and delivers, or falls to the buyer's refund
-  path.
+  path. Who wrote the marker, and who may remove it, is decided by 2.6.
 - **Daily admissions:** `max_admissions_per_day`. The actor's own
   `rate_limit_per_day` would be the authoritative cap, but `offer` always
   publishes it as 0, unlimited (`setup_offer.go:381`), and the program cannot
   change it. The agent therefore enforces the cap at admission through an
   admission limiter that the library consults right after the pause check
-  (`provider.go:293`; library work, section 13). It counts provider records
-  whose request was admitted in the last 86,400 seconds of host time; at the
-  cap a task is held as if paused and admitted once the count falls. The
-  count is derived from the node's records, so the limiter adds no state.
+  (`provider.go:293`; library work, section 13). A provider record has no
+  admission time today: `ProviderRecord` (`provider.go:51`) carries only
+  `updated_unix`, which every later update moves. Section 13 therefore adds
+  one field to the record, `admitted_unix`, written once when the record is
+  first stored after `Gate.Admit` and never changed. The limiter counts the
+  records whose `admitted_unix` lies in the last 86,400 seconds of host time;
+  a record without the field (written before the change) counts as admitted
+  at its `updated_unix`, which can only over-count. At the cap a task is held
+  as if paused and admitted once the count falls. The field is new state in
+  the node's own record, owned by the library, not by the adapter.
 - **Wallet floor:** when the owner wallet's finalized balance falls below
-  `min_wallet_nanotos`, the agent writes the pause marker with the fixed
-  reason `wallet below the configured floor` and records the pause as its
-  own (8.2). Each `respond` and each relay deposit is paid from that
-  wallet, so a price below the respond fee could otherwise drain it. It
-  removes that pause by itself once the balance is again above the floor at
-  a later checkpoint, and never removes a pause it did not record.
+  `min_wallet_nanotos`, the agent writes an agent pause marker (2.6) with the
+  fixed reason `wallet below the configured floor`. Each `respond` is a
+  wallet message that pays network fees from that wallet, so a price below
+  the respond fee could otherwise drain it. Relay deposits are HTTP
+  store-and-forward and cost the wallet nothing. The agent lifts that pause
+  by itself once the balance is at or above the floor at a later checkpoint,
+  and only by the compare-and-remove of 2.6, so a pause anyone else wrote or
+  re-stamped is never lifted.
+
+**Residual fee exposure.** The floor is checked once per service interval,
+and work already admitted still responds. Below the floor the wallet can
+therefore still pay at most `(max_executions + R) × respond_fee`, where `R`
+is the number of requests already executed or responding when the floor is
+crossed, plus the respond retries the library makes for an ambiguous send
+(`provider.go:682`, at most one per minute per request while its window is
+open). The floor is set with that margin in mind; the run of 10.2 records the
+fee per respond so the margin can be chosen from a measured value.
 
 None of these bounds can be raised through MCP; they change only by editing
 the custody-owned configurations (and the executor's flags as root) and
 restarting.
+
+### 2.6 Pause origin and removal
+
+The operator must be able to stop admission at any time with the program,
+whether or not the agent runs, and a model must never be able to lift that
+stop. Today `PauseAdmission` refuses to replace an existing marker and
+reports `already_paused` (`pause.go:67`, CLI `node.go:176`), so an operator
+pause on top of an agent pause would leave the agent's marker unchanged and
+indistinguishable. Section 13 therefore changes the library and the program:
+
+- **Marker origin.** The marker (schema bumped to
+  `tos.openfox.rail-admission-pause.v2`) carries `origin`, either `operator`
+  or `agent`, and `stamp`, 16 random bytes in hex drawn at each write. A v1
+  marker reads as `origin = operator`.
+- **Operator pause re-stamps.** `tos-service-provider pause`, and a pause
+  the custody uid asks of the agent, always leave an `operator` marker. On a
+  marker that is already `operator` it changes nothing, as today. On an
+  `agent` marker it replaces the marker atomically with an `operator` marker
+  that keeps the first `paused_unix` and draws a new `stamp`. On an
+  unreadable marker it refuses and says so; admission stays paused.
+- **Agent pause.** The agent writes `origin = agent` only when no marker
+  exists; on an existing marker it changes nothing and reports the existing
+  origin.
+- **Compare-and-remove.** Every removal the agent makes, by a direct resume
+  (4.11) or by the wallet-floor lift (2.5), names the exact marker bytes it
+  expects and removes the marker only if the file still holds those bytes.
+  Pause, re-stamp and removal all run under one exclusive lock file in
+  `state_dir`, so a re-stamp between the agent's read and its removal makes
+  the removal fail with `MCP_PROVIDER_CONFLICT` and leaves the operator's
+  marker in place. The program's own `resume` stays unconditional: it is the
+  operator's command.
+
+The agent's pause-origin record (8.2) holds the bytes of each marker it
+wrote and why (`model` or `wallet_floor`); a marker whose bytes differ from
+the record, or whose origin is `operator`, is never removed by the agent
+without a confirmed action.
 
 ## 3. Setup without OpenFox
 
@@ -293,6 +347,16 @@ The guide for this adapter (section 13) states the order:
 4. in the MCP client: `tos_provider_preflight`, then
    `tos_provider_offer_preview` and `tos_provider_request_confirmation`;
    the human confirms in `tos-service-provider confirm` (section 5).
+
+**Permitted custody-side commands.** With the adapter in use, the custody
+account runs these program commands and no others as part of normal
+operation: `init` (preview and `--yes`); `preflight` after `init` and before
+the agent starts; `agent`; `confirm`; `pause` and `resume` as the operator's
+own stop and start (2.6); `withdraw --acknowledge`; and `status` for the
+operator's own inspection. `offer`, `withdraw` and `serve` are not run by
+hand while the agent runs (`serve` would be refused by the serve lock); any
+other use is recovery and, in the acceptance run, a CLI-fallback step
+(10.2).
 
 ### 3.2 Relays and two accounts on one host
 
@@ -325,13 +389,17 @@ Codex, the two clients of the acceptance run (section 10):
   ignores `structuredContent` or `outputSchema` loses nothing;
 - no tool depends on progress notifications, elicitation, sampling,
   resources, prompts or list-changed notifications. A progress notification
-  MAY be sent where the buyer spec sends one (4.10) and grants nothing;
+  MAY be sent where the buyer spec sends one (4.6) and grants nothing;
 - every tool returns within 30 seconds except
   `tos_provider_request_confirmation`, whose wait the caller chooses (0 to
-  300 seconds, default 45). Codex's default `tool_timeout_sec` is 60 seconds
-  (`MCP_BUYER_GUIDE.md` section 7.2); the default keeps the wait under it,
-  and the guide tells the user to raise the timeout before choosing a longer
-  wait.
+  300 seconds, default 45). The buyer's `tos_buyer_request_payment` defaults
+  to 120 seconds and its guide sets Codex's `tool_timeout_sec = 330`
+  (`MCP_BUYER_GUIDE.md` section 7.2). Here the default is 45 seconds so that
+  the tools work with Codex's default `tool_timeout_sec` of 60 seconds and no
+  client setting at all: a provider operator confirms rarely (an offer, a
+  withdrawal, a resume), so asking again while the answer is
+  `awaiting_confirmation` costs little. The provider guide still shows the
+  longer timeout for a user who wants longer waits.
 
 **Authority classes.** Every tool is one of:
 
@@ -472,13 +540,15 @@ Input: `price_nanotos`, `storage_fee_nanotos`, `cleanup_bounty_nanotos`
 (decimal strings, each greater than zero and at most 2^64-1),
 `response_sla_seconds`, `refund_claim_window_seconds` (integers),
 optional `capability_version` (1 to 128 bytes of `0x21` to `0x7e`, default
-`1.0.0`), optional `retention_seconds` (3,600 to 2,592,000, default 86,400),
-and `idempotency_key` (16 to 64 characters `[A-Za-z0-9_-]`).
+`1.0.0`), optional `retention_seconds` (default 86,400, the library's
+`DefaultRetentionSeconds`), and `idempotency_key` (16 to 64 characters
+`[A-Za-z0-9_-]`).
 
 The agent:
 
-1. refuses terms outside the offer bounds of 2.4 or the contract's bounds
-   (`ActorTerms.ValidateFor`) with `MCP_PROVIDER_BAD_INPUT`;
+1. refuses terms or a retention outside the offer bounds of 2.4 or the
+   contract's bounds (`ActorTerms.ValidateFor`) with
+   `MCP_PROVIDER_BAD_INPUT`;
 2. returns the existing action for a key already used with the same inputs,
    and refuses one used with other inputs (`MCP_PROVIDER_CONFLICT`);
 3. refuses with `MCP_PROVIDER_ALREADY_OFFERED` when the setup journal holds a
@@ -521,29 +591,35 @@ minutes), the action reference and `state = awaiting_confirmation`.
 ### 4.11 `tos_provider_pause` and `tos_provider_resume`
 
 `tos_provider_pause` input: optional `reason` (one line, at most 200 bytes of
-printable ASCII). It writes the pause marker with the reason prefixed by
-`mcp: ` (the marker holds at most 256 bytes, `pause.go:21`) and records in
-the pause-origin record (8.2) that the model made it. Pausing a node that is
-already paused changes nothing and reports `already_paused` with the
-existing origin. Pausing removes authority, so the model may do it without a
-human, as the buyer's `withdraw`.
+printable ASCII). It writes an `agent` marker (2.6) with the reason
+prefixed by `mcp: ` (the marker holds at most 256 bytes, `pause.go:21`) and
+records its bytes in the pause-origin record (8.2) as the model's. Pausing a
+node that is already paused changes nothing and reports `already_paused`
+with the existing origin. Pausing removes authority, so the model may do it
+without a human, as the buyer's `withdraw`.
 
 `tos_provider_resume` input: `idempotency_key`. Resuming restores the node's
 automatic signing for new requests, so:
 
-- **The model's own pause.** When the marker on disk is exactly the one the
-  pause-origin record names (same `paused_unix` and reason), the agent runs
-  `RunPreflight` and, only when it passes apart from the admission check
-  itself, removes the marker (`ResumeAdmission`) and the origin record. A
-  failing preflight refuses with `MCP_PROVIDER_NOT_READY` and the report.
-- **Any other pause.** A pause the operator wrote (`tos-service-provider
-  pause`, or the custody uid through the socket), the agent's wallet-floor
-  pause, a marker the agent cannot read, or a marker that differs from the
+- **The model's own pause.** The model resumes directly only when all of
+  these hold: the marker on disk is byte for byte the one the pause-origin
+  record holds as the model's, with `origin = agent`; the owner wallet's
+  finalized balance is at or above `min_wallet_nanotos`; and `RunPreflight`
+  passes apart from the admission check itself. The agent then removes the
+  marker by compare-and-remove against those bytes (2.6) and deletes the
+  origin record. A failing preflight refuses with `MCP_PROVIDER_NOT_READY`
+  and the report; a wallet under the floor refuses with
+  `MCP_PROVIDER_NOT_READY` and the balance; a marker that changed between
+  the check and the removal refuses with `MCP_PROVIDER_CONFLICT` and the
+  marker stays.
+- **Any other pause.** An `operator` marker (including one the operator
+  re-stamped over the model's pause), the agent's wallet-floor marker, a
+  marker the agent cannot read, or a marker whose bytes differ from the
   origin record is not resumed by the model. The tool stores a confirmable
-  `resume` action (8.1) with the marker's content and the preflight report as
-  its preview, and returns it with `state = awaiting_confirmation`. A wallet
-  floor pause that the agent can lift by itself is reported as such and
-  stores no action.
+  `resume` action (8.1) with the marker's bytes and the preflight report as
+  its preview, and returns it with `state = awaiting_confirmation`. A
+  wallet-floor marker that the agent will lift by itself once the floor is
+  met is reported as such and stores no action.
 
 ### 4.12 `tos_provider_request_confirmation`
 
@@ -580,11 +656,11 @@ cannot flood the confirmer.
 |---|---|---|
 | `init` | the human, with the program, as the custody account | it chooses every trust root (the pinned `tosctl`, wallet, endpoints, registry code, actor code hash, relays) and spends the registration's value; the agent cannot exist before it (3.1) |
 | offer (first publication, or finishing an interrupted one) | confirmable; the human in the confirmer | it spends the deploy funding and registration values and publishes the terms every later automatic `respond` is bound by; after it the node earns and signs on its own |
-| terms change (`update-policy`) | not in V1; the owner with `tosctl` | the program has no verb; open decision P6 |
-| withdraw | confirmable; the human in the confirmer | it is a value-carrying wallet send. The destination is fixed to the owner wallet by contract and the risk is bounded, so it could become a direct bounded action later (open decision P2); V1 keeps the program's previewed `--yes` boundary |
+| terms change (`update-policy`) | not in V1; the owner with `tosctl` | the program has no verb; decision P6 |
+| withdraw | confirmable; the human in the confirmer | it is a value-carrying wallet send. The destination is fixed to the owner wallet by contract and the risk is bounded, so it could become a direct bounded action later (decision P2); V1 keeps the program's previewed `--yes` boundary |
 | `withdraw --acknowledge` | the human, with the program | it closes a record on the operator's own judgment of facts finalized state cannot decide |
 | pause | the model, directly | it only removes authority |
-| resume of the model's own pause | the model, directly, after a passing preflight | it restores only what the model itself removed, with no wider authority than before the pause |
+| resume of the model's own pause | the model, directly, only with the marker bytes unchanged, the wallet floor met and a passing preflight (4.11) | it restores only what the model itself removed, with no wider authority than before the pause |
 | resume of any other pause | confirmable; the human in the confirmer | an operator pause is often a response to something the model cannot see (an executor fault, a key rotation, an incident); a wallet-floor pause protects the wallet |
 | packet, key card and `respond` signatures | the node, automatically, under 2.5 | the program's custody contract; each is bound to a finalized admitted request and a successful attested outcome |
 | cancelling a pending action | the model, directly | it only removes authority |
@@ -644,19 +720,51 @@ compared in constant time, and 3 wrong codes cancel the action.
 
 ### 6.1 Order
 
-On a matching code the agent:
+On a matching code the agent, holding its own action lock (8.1) from step 1
+to step 5 so that no two actions of the agent interleave:
 
 1. moves the action to `applying` durably (8.1);
-2. takes the setup run lock (`lockSetup`) through the library call;
-3. re-runs the same library call with `Yes = false` and the stored inputs,
-   and requires its preview to equal the confirmed one in every protocol
-   field (the checkpoint and timestamps excepted). A difference (a changed
-   wallet, actor address, attestor, credited amount below the confirmed
-   amount, or a new marker) moves the action to `expired` and sends nothing;
-4. runs the call with `Yes = true`: `RunOffer`, `RunWithdraw` with the
-   confirmed exact amount, or `ResumeAdmission`;
-5. stores the library's result and moves the action to `applied`, `failed`
-   or `ambiguous` (6.2).
+2. makes a **fresh library call** with `Yes = false` and the stored inputs,
+   and computes the comparison of 6.1.1 itself, from that fresh result and
+   its stored record. Nothing the client sent, and no earlier result, takes
+   part. A comparison that fails moves the action to `expired` and sends
+   nothing;
+3. runs the call with `Yes = true` and the same stored inputs: `RunOffer`,
+   `RunWithdraw` with the confirmed exact amount (never `all`), or the
+   compare-and-remove of 2.6 against the confirmed marker bytes;
+4. stores the library's result;
+5. moves the action to `applied`, `failed` or `ambiguous` (6.2).
+
+**The setup lock is not held across steps 2 and 3.** `RunOffer` and
+`RunWithdraw` each take the state directory's run lock (`lockSetup`,
+`setup_lock.go:28`) inside the call and release it when they return, and the
+lock does not wait, so the agent cannot hold it around both calls. The gap is
+safe for these reasons:
+
+- the `Yes = true` call uses the stored inputs, fixed at preview and bound by
+  the confirmation code; nothing in the gap can change what is asked;
+- under its own lock the `Yes = true` call re-reads the setup journal or the
+  withdrawal records and finalized state, and refuses or resumes exactly as
+  a second program run would. An offer step already sent in the gap is never
+  sent again, and a withdrawal sent in the gap makes the library report
+  `ErrWithdrawalPending` or refuse the amount as over credit;
+- a withdrawal's destination is the owner wallet by contract, and its amount
+  is the confirmed exact amount, so no interleaving can send value
+  elsewhere or send more than was confirmed;
+- `offer` and `withdraw` are not run by hand while the agent runs (3.1). A
+  hand run in the gap is refused with `ErrSetupBusy` if it overlaps either
+  call, and otherwise is caught by the re-read above.
+
+#### 6.1.1 Apply-time comparison
+
+The fresh `Yes = false` result must match the confirmed preview as follows.
+Every other field (checkpoint, chain time, generated time) is ignored.
+
+| Kind | Must hold |
+|---|---|
+| withdraw | `actor`, `destination` and `attached_nanotos` equal to the confirmed preview; `amount_nanotos` equal to the confirmed exact amount; the fresh `credited_revenue_nanotos` at least that amount |
+| offer | every `OfferPreview` field (`setup_offer.go:106`) equal to the confirmed preview, except `checkpoint` where present, and the list of planned steps equal |
+| resume | the marker file's bytes equal to the confirmed marker bytes, and a fresh `RunPreflight` passes apart from the admission check |
 
 ### 6.2 Outcomes and retries
 
@@ -717,14 +825,22 @@ once: only an action in `awaiting_confirmation` that was presented can enter
 
 ## 8. State and crash safety
 
-The node's own records stay authoritative and unchanged: the setup journal
-and run lock, the rail configuration, the railgate execution slots, the
-provider request records, the inbox, the courier and relay outbox journals,
-the relay keys and peer cards, the pause marker and the withdrawal records.
-The provider agent writes into them only through the library calls of 4.2.
-It adds exactly three things, in its own state directory (owner-only
-`0700`, atomic synced replacements, one agent per directory under an
-exclusive lock):
+The node's own records stay authoritative: the setup journal and run lock,
+the rail configuration, the railgate execution slots, the provider request
+records, the inbox, the courier and relay outbox journals, the relay keys and
+peer cards, the pause marker and the withdrawal records. The provider agent
+writes into them only through the library calls of 4.2 and the pause
+functions of 2.6.
+
+The adapter's library prerequisites change three of the node's own formats
+(section 13): the provider record gains `admitted_unix` (2.5), the pause
+marker gains `origin` and `stamp` with its v2 schema and a lock file (2.6),
+and `state_dir` gains the serve lock (2.4). These are library state, written
+by the library for every node, with or without the adapter.
+
+The adapter itself adds exactly three things, in its own state directory
+(owner-only `0700`, atomic synced replacements, one agent per directory under
+an exclusive lock, which is also the action lock of 6.1):
 
 ### 8.1 The action store
 
@@ -741,17 +857,21 @@ marker.
 
 ### 8.2 The pause-origin record
 
-When the agent writes the pause marker (for the model, or for the wallet
-floor), it records the marker's `paused_unix`, reason and the origin
-(`model`, `wallet_floor` or `custody`). The marker itself is unchanged and
-the node honours it alone; the record only decides who may lift it (4.11).
-A marker without a matching record is an operator pause.
+When the agent writes an `agent` marker (for the model, or for the wallet
+floor), it records the marker's exact bytes and why (`model` or
+`wallet_floor`), before it reports the pause. The node honours the marker
+alone; the record only decides whether the agent may lift it, and only by the
+compare-and-remove of 2.6 against those bytes (4.11). A marker without a
+record with the same bytes, and every `operator` marker, is an operator
+pause. A crash between writing the marker and the record leaves a marker the
+agent does not recognise, which the model then cannot lift: the safe
+direction.
 
 ### 8.3 What is not kept
 
 Rate counters and the serving report ring are memory only. The daily
-admission count is derived from the provider records. The agent keeps no
-copy of a key, a task source, a Receipt or an artifact.
+admission count is derived from the provider records' `admitted_unix`. The
+agent keeps no copy of a key, a task source, a Receipt or an artifact.
 
 A crash of the agent is a crash of `serve`: the node resumes from its records
 (an executing request is asked of the executor service again, an executed one
@@ -802,12 +922,32 @@ and its test seen failing):
    changes between confirmation and apply (wallet, actor, credited amount)
    expires and sends nothing; `--all` withdraws exactly the confirmed
    amount.
-5. **Pause and resume.** The model resumes its own pause only after a passing
-   preflight; an operator pause, a wallet-floor pause, an unreadable marker
-   and a marker replaced after the model's pause each need the confirmer.
-6. **Bounds.** At `max_admissions_per_day` a task is held and admitted after
-   the count falls; under the wallet floor admission pauses and resumes by
-   itself; a held task is never counted as a failed handling.
+5. **Pause and resume.**
+   - The model resumes its own pause only when the marker bytes match, the
+     wallet is at or above the floor and preflight passes; each of the three
+     failing refuses.
+   - An operator pause, a wallet-floor pause and an unreadable marker each
+     need the confirmer.
+   - **Stacked pause:** the model pauses, then the operator runs
+     `tos-service-provider pause`. The marker is re-stamped `operator` with
+     the first `paused_unix` kept, and the model's `tos_provider_resume`
+     becomes a confirmable action. The same with the agent stopped while
+     the operator pauses.
+   - **Stacked floor pause:** the floor pause is written, the operator
+     pauses on top, and the balance recovers. The agent does not lift the
+     marker.
+   - **Race:** a re-stamp between the agent's read and its removal makes the
+     compare-and-remove fail, and the operator marker stays (a test hook
+     between the two steps).
+   - A v1 marker reads as `operator`.
+6. **Bounds.**
+   - At `max_admissions_per_day` a task is held and admitted after the
+     count falls, counted by `admitted_unix`.
+   - A record updated many times after admission counts once, at its
+     admission time.
+   - Under the wallet floor admission pauses, and it resumes by itself once
+     the floor is met.
+   - A held task is never counted as a failed handling.
 7. **Crash safety.** The agent killed in each action state, and between the
    library's `--yes` send and its result: no action is applied twice; an
    `applying` withdrawal is resolved from its record; two agents, or an
@@ -849,26 +989,42 @@ Code and Codex replace OpenFox for using and accepting `ai`. The run MUST:
   a pause by the model, during which a second paid call is not admitted and
   ends refunded by the buyer agent's duties, then a resume by the model; an
   operator pause that the model's `tos_provider_resume` turns into a
-  confirmable action; and a withdrawal previewed, confirmed and applied,
+  confirmable action; a **stacked pause**: the model pauses, the operator
+  then pauses over it with `tos-service-provider pause`, and the model's
+  `tos_provider_resume` becomes a confirmable action instead of resuming;
+  each `respond`'s fee read from the owner wallet's finalized transactions;
+  and a withdrawal previewed, confirmed and applied,
   with the actor's credited revenue and the owner wallet's balance read
   independently of the provider's report (as PR #129's withdraw scenario
   reads them);
-- span a **validator-set switch**: the network's validator set changes (a
-  new set takes effect at a recorded masterchain block, with the config
-  parameter's hash before and after) while at least one paid request is
-  pending at the provider, that request is responded and accepted after the
-  switch, and a further purchase runs entirely after it. Both agents keep
-  their strict-majority reads through the switch;
+- span a **validator-set switch that changes membership**: a new validator
+  set takes effect at a recorded masterchain block, and at least one
+  validator of the old set is not in the new one and at least one validator
+  of the new set was not in the old one. A re-election of the same members,
+  which also changes the configuration's hash, does not count. The local
+  network's rotation, which alternates between member sets such as
+  {1, 2, 3, 7} and {1, 2, 3, 4}, meets this. During the switch at least one
+  paid request is pending at the provider; that request is responded and
+  accepted after the switch, and a further purchase runs entirely after it.
+  Both agents keep their strict-majority reads through the switch;
 - end with a **third, independent check**: `tos-service-verify`
   ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md)), built from a fresh
   clone, verifies every purchase from the buyers' `tos-service-buyer
-  evidence` exports at a quorum of the validators' endpoints, and the
-  provider-side facts (respond and withdrawal transactions, credited revenue)
-  are checked against the same finalized reads;
-- if a step had to fall back to the `tos-service-provider` CLI, it runs in
-  the custody account and so outside the adapter's custody separation; the
-  record lists each such step under `cli_fallback_steps`, and an assignment
-  with any fallback step does not count toward this acceptance.
+  evidence` exports at a quorum of the validators' endpoints.
+  `tos-service-verify` verifies purchases only. The provider-side facts
+  (respond and withdrawal transactions, credited revenue, respond fees,
+  wallet balances) are read by the harness itself at a strict majority of
+  the validators, never from the provider's own report, and the record says
+  which facts came from which reader;
+- CLI fallback: any provider step after `init` that is run with the
+  `tos-service-provider` CLI instead of through the adapter is a
+  **CLI-fallback step**. It runs in the custody account and so outside the
+  adapter's custody separation. The permitted custody-side commands of 3.1
+  (`init`, the preflight after `init`, `agent`, `confirm`, the operator's
+  `pause` and `resume` of the stacked-pause scenario, `status` for
+  inspection) are not fallback steps. The record lists each fallback step
+  under `cli_fallback_steps`, and an assignment with any fallback step does
+  not count toward this acceptance (decision P7).
 
 ### 10.3 The record
 
@@ -883,8 +1039,11 @@ least:
   `qualification_note` saying it is a local agent-operated run by the core
   team and not Gate D evidence;
 - `network` (network ID, genesis hashes, global config hash, validator
-  count 4) and `validator_set_switch` (block, time, config hash before and
-  after, the requests pending across it);
+  count 4) and `validator_set_switch`: the block and time at which the new
+  set took effect, the configuration's hash before and after, the member
+  list of each set (validator public key hashes and their local indices),
+  the members that left and that joined (each at least one), and the
+  requests pending across it;
 - `releases` and `source_commits` (`ai`, `tos`, the harness; no `openfox`
   key), `binaries` with SHA-256 of every binary including both clients and
   `tos-service-provider`, `tos-service-provider-mcp`,
@@ -901,11 +1060,18 @@ least:
   preview digest, how confirmed, outcome), the purchases (request hash,
   request ID, call, respond or refund transactions, `response_hash`,
   Receipt and artifact digests, final state), the pause and resume events
-  with their origin, the withdrawals (query ID, amount, transaction, the
-  independently read balances) and `cli_fallback_steps`;
+  with their origin and marker stamps (including the stacked pause), the
+  withdrawals (query ID, amount, transaction, the independently read
+  balances) and `cli_fallback_steps`;
+- `respond_fees` for every respond: the request, the respond transaction,
+  the fee it paid in nanoTOS, and the owner wallet's finalized balance before
+  and after it, with the reader (harness) and checkpoint. A summary gives the
+  highest and mean fee, against which the wallet floor (P3) is set;
 - `confirmations`: for every confirmed action and payment, which confirmer,
   on which terminal kind, driven by whom;
-- `verifier_output` (tool commit, verdict hashes, checkpoint, results);
+- `verifier_output` (tool commit, verdict hashes, checkpoint, results), for
+  purchases only, and `provider_facts_reader: "harness"` with the strict
+  majority reads the provider-side facts rest on;
 - `checks` (each with its result), `known_limitations` (at least: the core
   team operated every role; the confirmers were harness-driven; every
   endpoint is a local validator), and `record_sha256`.
@@ -921,13 +1087,15 @@ setups carry over. In addition:
 |---|---|---|
 | The model publishes ruinous terms (price below the respond fee, a refund window it cannot meet) | offers are confirmable and bounded by the custody-owned offer bounds (2.4); the confirmer states what a call pays | a human who confirms without reading |
 | The model withdraws revenue elsewhere | the destination is fixed to the owner wallet by contract; withdrawals are confirmable | fees |
-| The model resumes a node the operator stopped on purpose | only its own pause resumes directly, and only after a passing preflight (4.11) | none beyond the origin record |
-| Buyers drain the owner wallet through respond and deposit fees | the daily admission cap and the wallet floor (2.5); pause | fees up to the floor |
+| The model resumes a node the operator stopped on purpose, including an operator pause stacked on the model's own | operator pauses re-stamp the marker as `operator`; the agent removes only by compare-and-remove against the marker bytes it wrote, with the floor met and preflight passing (2.6, 4.11) | none at the lock |
+| Buyers drain the owner wallet through respond fees | the daily admission cap and the wallet floor (2.5); pause | `(max_executions + R) × respond_fee` below the floor, plus retries of ambiguous responds (2.5) |
 | Buyer text steers the model | section 9; the model holds no authority that signs | nuisance pauses |
 | The model reads secrets through status | the redaction of 4.3, enforced in the agent | none beyond its rules |
 | Two processes serve one node | the serve lock (2.4) | none at the lock |
 
-## 12. Owner decisions already given
+## 12. Decisions
+
+Owner rulings:
 
 - Test networks run locally on this host; there is no public network now.
   The acceptance of 10.2 is local and is not Gate D evidence.
@@ -936,14 +1104,46 @@ setups carry over. In addition:
 - An LLM as the worker is out of scope; it needs a new commerce profile
   behind the expansion gate.
 
+Decided for V1 on 2026-11-23, in the review of this specification (ai #130);
+the owner may reopen any of them:
+
+- **P1. Daily cap:** the agent enforces `max_admissions_per_day` now (2.5),
+  counted by the new `admitted_unix`. Using the actor's own
+  `rate_limit_per_day` waits for an `update-policy` verb (P6).
+- **P2. Withdraw without a human:** withdrawals stay confirmable in V1. A
+  direct `withdraw` of credited revenue with a per-day count may come later,
+  since the destination is fixed by contract.
+- **P3. Wallet floor:** default 2 TOS, pausing admission below it (2.5). The
+  run of 10.2 records the fee of every respond (10.3 `respond_fees`), and the
+  default is revisited from those values.
+- **P4. Resume of the model's own pause:** allowed directly, only with
+  matching marker bytes, the floor met and a passing preflight (4.11).
+- **P5. Packaging:** `agent` and `confirm` are verbs of
+  `tos-service-provider`; the MCP server is its own binary,
+  `tos-service-provider-mcp`, mirroring the buyer.
+- **P6. Terms changes:** an `update-policy` verb is added to the program
+  first, then a confirmable `tos_provider_update_policy_preview` in a V1.1 of
+  this adapter. Until then the owner changes terms with `tosctl`.
+- **P7. CLI fallback in acceptance:** a CLI-fallback step (10.2)
+  disqualifies its role assignment.
+
 ## 13. Implementation work and dependencies
 
 A follow-up implementation delivers, with the tests of 10.1:
 
-- `provider/pkg/servicebridge`: a serve lock on `state_dir`, taken by
-  `serve` and the agent; an admission limiter hook consulted after the pause
-  check (`provider.go:293`), held like a pause and counted from the provider
-  records; a read of the owner wallet's finalized balance for the floor;
+- `provider/pkg/servicebridge` and the program, as prerequisites of the
+  adapter:
+  - a serve lock on `state_dir`, taken by `serve` and the agent;
+  - `admitted_unix` in `ProviderRecord`, written once when the record is
+    first stored after `Gate.Admit`;
+  - an admission limiter hook consulted after the pause check
+    (`provider.go:293`), held like a pause and counted by `admitted_unix`;
+  - the v2 pause marker with `origin` and `stamp`, a pause lock file,
+    `PauseAdmission` with an origin, the operator re-stamp of an `agent`
+    marker, and a compare-and-remove `ResumeAdmissionIf(state_dir,
+    expected_bytes)`. The program's `pause` writes `operator` and re-stamps,
+    and its `resume` stays unconditional (2.6);
+  - a read of the owner wallet's finalized balance for the floor;
 - a provider agent package in `provider/` (socket, roles, re-validation,
   action store, pause-origin record, redaction, confirmation code and
   `decide`), and the verbs `tos-service-provider agent` and `confirm`;
@@ -958,28 +1158,6 @@ A follow-up implementation delivers, with the tests of 10.1:
 Dependencies: ai #127 (the output contract, and `RecordedPacketController`
 for an interrupted `init`) and ai #129 (the provider-buyer harness and its
 finding that `tosctl` cannot operate the test-profile actor, which keeps the
-refund scenario on the release actor's 3,600-second windows) should merge
-first. The tos-side fix that lets `tosctl` operate the test-profile actor
-would shorten the run by about an hour.
-
-## 14. Open decisions for the owner
-
-- **P1. Daily cap:** enforce `max_admissions_per_day` in the agent now
-  (recommended), or wait for an `update-policy` verb and use the actor's
-  `rate_limit_per_day`.
-- **P2. Withdraw without a human:** keep withdrawals confirmable in V1
-  (recommended); later allow a direct `withdraw` of credited revenue with a
-  per-day count, since the destination is fixed by contract.
-- **P3. Wallet floor default:** 2 TOS, pausing admission below it
-  (recommended); the right value depends on the respond fee on the local
-  network, which the run should record.
-- **P4. Resume of the model's own pause:** allow it directly after a passing
-  preflight (recommended), or always require the confirmer.
-- **P5. One program or two:** add `agent` and `confirm` as verbs of
-  `tos-service-provider` and ship the MCP server as its own binary
-  (recommended), mirroring the buyer.
-- **P6. Terms changes:** add an `update-policy` verb to the program first,
-  then a confirmable `tos_provider_update_policy_preview` in a V1.1 of this
-  adapter (recommended), rather than leaving terms changes to `tosctl`.
-- **P7. CLI fallback in acceptance:** a fallback step disqualifies its role
-  assignment (recommended), rather than counting with a note.
+refund scenario on the release actor's 3,600-second windows) MUST merge
+before the implementation. The tos-side fix that lets `tosctl` operate the
+test-profile actor would shorten the run by about an hour.
