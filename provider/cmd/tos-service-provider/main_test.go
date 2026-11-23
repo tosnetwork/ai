@@ -343,14 +343,88 @@ func TestInitContinuesWithThePacketControllerTheJournalRecords(t *testing.T) {
 	if got, err := packetController(absent, state); err == nil {
 		t.Fatalf("an unreadable journal gave the packet controller %q", got)
 	}
-	// Through the command: init stops before it does anything.
-	_, stderr, code := invoke(t, "init", "--rail-config", absent, "--state-dir", state, "--rpc", "http://127.0.0.1:1",
+	// Through the command: init stops before it does anything, prints
+	// nothing on standard output and ends with one reason line.
+	initCommand := []string{"init", "--rail-config", absent, "--state-dir", state, "--rpc", "http://127.0.0.1:1",
 		"--rpc", "http://127.0.0.1:2", "--rpc", "http://127.0.0.1:3", "--global-config", filepath.Join(root, "g.json"),
 		"--network-label", "1", "--tosctl", filepath.Join(root, "tosctl"), "--tosctl-config",
 		filepath.Join(root, "c.json"), "--wallet", "w", "--registry-code-boc", filepath.Join(root, "r.boc"),
-		"--actor-code-hash", fixtureCodeHash)
-	if code != exitFailed || !strings.Contains(stderr, "setup journal") {
-		t.Fatalf("init with an unreadable journal: exit %d, %q", code, stderr)
+		"--actor-code-hash", fixtureCodeHash}
+	stdout, stderr, code := invoke(t, initCommand...)
+	if code != exitFailed || stdout != "" || !strings.Contains(stderr, "setup journal") || !endsWithOneReason(stderr) {
+		t.Fatalf("init with an unreadable journal: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// A journal of another schema is refused the same way.
+	if err := os.Chmod(journal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journal, []byte(`{"schema": "another"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = invoke(t, initCommand...)
+	if code != exitFailed || stdout != "" || !strings.Contains(stderr, "another schema") || !endsWithOneReason(stderr) {
+		t.Fatalf("init with a journal of another schema: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, err := os.Stat(absent); !os.IsNotExist(err) {
+		t.Fatalf("init wrote a rail configuration: %v", err)
+	}
+	// The flag's help names the order of the lookup.
+	_, help, _ := invoke(t, "init", "-h")
+	if !strings.Contains(help, "the setup journal under --state-dir records, else the one the rail "+
+		"configuration records, else "+defaultPacketController) {
+		t.Errorf("init -h does not describe the packet controller lookup: %q", help)
+	}
+}
+
+// endsWithOneReason reports whether stderr ends with the program's reason
+// line and holds no other.
+func endsWithOneReason(stderr string) bool {
+	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+	reasons := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, programName+": ") {
+			reasons++
+		}
+	}
+	return reasons == 1 && strings.HasPrefix(lines[len(lines)-1], programName+": ") && strings.HasSuffix(stderr, "\n")
+}
+
+// Every command that does not succeed ends standard error with exactly one
+// line `tos-service-provider: <reason>`, also when it prints the usage or a
+// flag list first, so an agent reads the reason from the last line.
+func TestAFailureEndsWithOneReasonLine(t *testing.T) {
+	rail, state := providerDirectory(t, nil)
+	absent := filepath.Join(t.TempDir(), "absent.json")
+	for name, test := range map[string]struct {
+		arguments []string
+		code      int
+		reason    string
+	}{
+		"no command":           {nil, exitUsage, programName + ": no command given"},
+		"an unknown command":   {[]string{"sell"}, exitUsage, programName + `: unknown command "sell"`},
+		"an unknown flag":      {[]string{"status", "--no-such-flag"}, exitUsage, programName + ": flag provided"},
+		"a positional":         {[]string{"pause", "now"}, exitUsage, programName + ": " + programName + " pause takes"},
+		"a missing flag":       {[]string{"serve"}, exitUsage, programName + ": required flag(s) --rail-config"},
+		"a missing config":     {[]string{"status", "--rail-config", absent}, exitFailed, programName + ": "},
+		"a refused withdrawal": {[]string{"withdraw", "--rail-config", absent, "--all"}, exitFailed, programName + ": "},
+		"a not ready node":     {[]string{"preflight", "--rail-config", absent}, exitNotReady, programName + ": preflight"},
+		"an offer at price 0": {[]string{"offer", "--rail-config", rail, "--price", "0", "--storage-fee", "0.2",
+			"--cleanup-bounty", "0.1", "--response-sla", "3600", "--refund-claim-window", "3600",
+			"--executor-socket", filepath.Join(state, "absent.sock")}, exitFailed, programName + ": "},
+	} {
+		_, stderr, code := invoke(t, test.arguments...)
+		lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+		if code != test.code || !endsWithOneReason(stderr) || !strings.HasPrefix(lines[len(lines)-1], test.reason) {
+			t.Errorf("%s: exit %d, stderr %q", name, code, stderr)
+		}
+	}
+	// The usage that explains a refused command line comes before the reason.
+	_, stderr, _ := invoke(t, "sell")
+	if !strings.HasPrefix(stderr, "usage: "+programName) || !strings.Contains(stderr, "exit codes: ") {
+		t.Errorf("an unknown command: stderr %q", stderr)
+	}
+	if got := reasonLine(errors.Join(errors.New("first"), errors.New("second"))); got != "first; second" {
+		t.Errorf("a reason over two lines: %q", got)
 	}
 }
 

@@ -50,8 +50,12 @@ const (
 )
 
 // usageError marks an error in the arguments, as distinct from a command
-// that ran and failed.
-type usageError struct{ err error }
+// that ran and failed. help, when set, is printed on standard error before
+// the reason, so the reason stays the last line.
+type usageError struct {
+	err  error
+	help string
+}
 
 func (e *usageError) Error() string { return e.err.Error() }
 func (e *usageError) Unwrap() error { return e.err }
@@ -77,14 +81,26 @@ func main() {
 	os.Exit(code)
 }
 
-// run executes one command and returns its exit code.
+// run executes one command and returns its exit code. A command that did not
+// succeed ends standard error with exactly one line
+// `tos-service-provider: <reason>`: any help text comes before it, and a
+// reason that spans lines is joined into one.
 func run(ctx context.Context, arguments []string, std streams) int {
 	err := dispatch(ctx, arguments, std)
 	if err == nil {
 		return exitDone
 	}
-	fmt.Fprintln(std.err, programName+":", err)
+	var refused *usageError
+	if errors.As(err, &refused) && refused.help != "" {
+		fmt.Fprintln(std.err, refused.help)
+	}
+	fmt.Fprintln(std.err, programName+": "+reasonLine(err))
 	return exitCode(err)
+}
+
+// reasonLine is an error's text on one line.
+func reasonLine(err error) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(err.Error(), "\n", "; ")), " ")
 }
 
 // exitCode is the exit code of a command that ended with err.
@@ -112,7 +128,7 @@ var commands = map[string]command{
 
 func dispatch(ctx context.Context, arguments []string, std streams) error {
 	if len(arguments) == 0 {
-		return usagef("%s", usage)
+		return &usageError{err: errors.New("no command given"), help: usage}
 	}
 	verb, rest := arguments[0], arguments[1:]
 	if verb == "help" || verb == "-h" || verb == "--help" {
@@ -121,7 +137,7 @@ func dispatch(ctx context.Context, arguments []string, std streams) error {
 	}
 	handler, known := commands[verb]
 	if !known {
-		return usagef("unknown command %q\n%s", verb, usage)
+		return &usageError{err: fmt.Errorf("unknown command %q", verb), help: usage}
 	}
 	// The messages of the library name this program's commands.
 	if err := servicebridge.SetCommandLine(servicebridge.CommandLine{

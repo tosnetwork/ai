@@ -13,7 +13,8 @@ import (
 )
 
 // defaultPacketController names the vault controller `init` creates when
-// neither the flag nor an existing rail configuration names one.
+// neither the flag, the setup journal nor an existing rail configuration
+// names one.
 const defaultPacketController = "service-packet"
 
 // setupEnv reports previews and progress on standard error; standard output
@@ -111,8 +112,9 @@ func runInit(ctx context.Context, set *flag.FlagSet, arguments []string, std str
 		"URL (its value is never printed or stored)")
 	set.StringVar(&in.WalletName, "wallet", "", "tosctl wallet that owns and funds this node")
 	set.StringVar(&in.PacketController, "packet-controller", "", "vault controller that signs Agent Packets and "+
-		"controls the Agent, created if absent (default: the one the rail configuration records, else "+
-		defaultPacketController+")")
+		"controls the Agent, created if absent (default: the one the setup journal under --state-dir records, "+
+		"else the one the rail configuration records, else "+defaultPacketController+"; a setup journal that "+
+		"cannot be read stops init)")
 	set.StringVar(&in.RegistryCodeBOC, "registry-code-boc", "", "Native Registry code BOC file (base64)")
 	set.StringVar(&in.ActorCodeHash, "actor-code-hash", "", "pinned Service Actor release code hash "+
 		"(tvm-cell-sha256:<hex>)")

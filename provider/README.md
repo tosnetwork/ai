@@ -83,8 +83,12 @@ tos-service-provider withdraw --rail-config "$DIR/rail.json" --all --yes
 ### Output and exit codes
 
 Diagnostics (previews, progress, the reason of a failure) go to standard
-error, always ending, for a command that did not succeed, with one line
-`tos-service-provider: <reason>`. Standard output carries JSON or nothing:
+error. For every command that did not succeed (any exit code other than 0)
+the last line of standard error is exactly one line
+`tos-service-provider: <reason>`; text that explains it, such as the usage
+after an unknown command or no command, or a flag list after a malformed
+flag, comes before it, and a reason that would span lines is joined into
+one. Standard output carries JSON or nothing:
 
 - **On success** every command prints one JSON document. `serve` prints one
   JSON line, `{"serving": true, ...}`, and then runs until SIGINT or SIGTERM;
@@ -101,12 +105,20 @@ error, always ending, for a command that did not succeed, with one line
   program does not: `offer --price 0`, a response SLA out of range, or a
   missing or unreadable rail configuration print the report and exit 1,
   not 2.
-- **Nothing is printed on standard output** when the program refuses the
-  arguments (exit 2); when an existing rail configuration names another
-  carrier, a refusal that `init`, `offer` and `withdraw` make before they
-  start (exit 1); and when `serve`, `status`, `pause`, `resume`, `manifest`
-  or `metadata` fail, including a rail configuration that is missing,
-  unreadable, has no provider section or names another carrier (exit 1).
+- **Nothing is printed on standard output** in exactly these cases:
+  - the program refuses the arguments (exit 2);
+  - `init`, `offer` or `withdraw` (also `withdraw --acknowledge`) refuse
+    before they start because an existing rail configuration names another
+    carrier (exit 1);
+  - `init` without `--packet-controller` refuses before it starts because
+    the setup journal under `--state-dir` exists but cannot be read or has
+    another schema (exit 1);
+  - `status`, `pause`, `resume`, `manifest` or `metadata` fail, or `serve`
+    fails before it prints its `"serving": true` line, including a rail
+    configuration that is missing, unreadable, has no provider section or
+    names another carrier (exit 1); a `serve` that fails after that line
+    exits 1 with that one line on standard output;
+  - `<command> -h` (exit 0, below).
 - **`help`**, `-h` or `--help` as the command prints the usage as plain text
   on standard output and exits 0. `<command> -h` prints that command's flags
   as plain text on standard error, nothing on standard output, and exits 0.
