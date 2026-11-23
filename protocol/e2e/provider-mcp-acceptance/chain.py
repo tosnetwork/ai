@@ -167,8 +167,16 @@ def decode_transaction(transaction: dict) -> dict:
         facts["in"] = inbound
     for out in decoded.out_msgs:
         if isinstance(out.info, InternalMsgInfo):
+            # The sender pays the outbound message's forwarding fee (and any
+            # IHR fee) on top of its value; neither is part of total_fees.
             facts["out"].append(
-                {"to": _raw(out.info.dest), "value_nanotos": out.info.value_coins, "opcode": _opcode(out)}
+                {
+                    "to": _raw(out.info.dest),
+                    "value_nanotos": out.info.value_coins,
+                    "fwd_fee_nanotos": int(out.info.fwd_fee or 0),
+                    "ihr_fee_nanotos": int(out.info.ihr_fee or 0),
+                    "opcode": _opcode(out),
+                }
             )
     return facts
 
@@ -195,17 +203,22 @@ def paid_to(tx: dict, address: str) -> int:
     return sum(out["value_nanotos"] for out in tx.get("out", []) if out["to"] == address)
 
 
+def outbound_cost(out: dict) -> int:
+    """What one outbound internal message takes from its sender's balance."""
+    return out["value_nanotos"] + out.get("fwd_fee_nanotos", 0) + out.get("ihr_fee_nanotos", 0)
+
+
 def wallet_ledger(wallet: str, current_balance: int, txs: list) -> list:
     """Each wallet transaction with the wallet's balance before and after it,
     reconstructed backwards from the finalized current balance: after - before
-    = inbound value - outbound values - total fees. The newest transaction
-    first, as the endpoint lists them."""
+    = inbound value - (outbound values + their forwarding and IHR fees) -
+    total fees. The newest transaction first, as the endpoint lists them."""
     rows, after = [], current_balance
     for tx in txs:
         if not tx.get("decoded"):
             break
         received = (tx.get("in") or {}).get("value_nanotos") or 0
-        sent = sum(out["value_nanotos"] for out in tx["out"])
+        sent = sum(outbound_cost(out) for out in tx["out"])
         before = after - received + sent + tx["total_fees_nanotos"]
         rows.append({**tx, "balance_before_nanotos": before, "balance_after_nanotos": after})
         after = before
@@ -254,7 +267,7 @@ def respond_fees(wallet: str, actor: str) -> dict:
             )
         fee = (
             row["total_fees_nanotos"]
-            + attached[0]["value_nanotos"]
+            + outbound_cost(attached[0])
             - returned
             + (credit["total_fees_nanotos"] if credit else 0)
         )
@@ -264,6 +277,8 @@ def respond_fees(wallet: str, actor: str) -> dict:
                 "actor_transaction": actor_tx
                 and {"lt": actor_tx["lt"], "hash": actor_tx["hash"], "aborted": actor_tx["aborted"]},
                 "attached_nanotos": attached[0]["value_nanotos"],
+                "forwarding_fee_nanotos": attached[0]["fwd_fee_nanotos"] + attached[0]["ihr_fee_nanotos"],
+                "wallet_transaction_fees_nanotos": row["total_fees_nanotos"],
                 "returned_nanotos": returned,
                 "return_credit_transaction": credit and {"lt": credit["lt"], "hash": credit["hash"]},
                 "fee_nanotos": fee,
@@ -271,11 +286,31 @@ def respond_fees(wallet: str, actor: str) -> dict:
                 "balance_after_nanotos": (credit or row)["balance_after_nanotos"],
             }
         )
+    # The wallet is new to this run, so the ledger covers its whole history:
+    # rebuilt backwards from the finalized balance it must start at zero.
+    # A cost the ledger missed (a fee, a message) would show here.
+    oldest = ledger[-1] if ledger else None
+    complete = len(wallet_read["value"]) < 100
     return {
         "read": True,
         "agreeing": min(wallet_read["agreeing"], actor_read["agreeing"]),
         "of": wallet_read["of"],
         "wallet_balance_nanotos": current,
+        "ledger": {
+            "transactions": len(ledger),
+            "history_complete": complete,
+            "oldest_lt": oldest and oldest["lt"],
+            "balance_before_oldest_nanotos": oldest and oldest["balance_before_nanotos"],
+            "reconciles": bool(complete and oldest and oldest["balance_before_nanotos"] == 0),
+            "rows": [
+                {
+                    "lt": r["lt"],
+                    "balance_before_nanotos": r["balance_before_nanotos"],
+                    "balance_after_nanotos": r["balance_after_nanotos"],
+                }
+                for r in ledger
+            ],
+        },
         "responds": sorted(responds, key=lambda r: r["wallet_transaction"]["lt"]),
     }
 
@@ -362,6 +397,9 @@ def validator_set() -> dict | None:
         "agreeing": read["agreeing"],
         "of": read["of"],
         "config34_cell_hash": cell.hash.hex(),
+        # The bytes themselves, so a reviewer can re-check the set without a
+        # lite-client once the state is no longer served.
+        "config34_boc_base64": read["value"],
         "utime_since": decoded["utime_since"],
         "utime_until": decoded["utime_until"],
         "members": [
@@ -373,6 +411,26 @@ def validator_set() -> dict | None:
             for v in decoded["validators"]
         ],
     }
+
+
+def block_header(seqno: int):
+    """A masterchain block's identity and key-block facts, at a strict majority."""
+    read = majority(
+        "getBlockHeader",
+        lambda r: {
+            "seqno": int(r["id"]["seqno"]),
+            "root_hash": r["id"]["root_hash"],
+            "file_hash": r["id"]["file_hash"],
+            "gen_utime": int(r.get("gen_utime") or 0),
+            "is_key_block": bool(r.get("is_key_block")),
+            "prev_key_block_seqno": int(r.get("prev_key_block_seqno") or 0),
+        },
+        timeout=60,
+        workchain=-1,
+        shard=MASTERCHAIN_SHARD,
+        seqno=seqno,
+    )
+    return read and {**read["value"], "agreeing": read["agreeing"], "of": read["of"]}
 
 
 def membership(view: dict) -> list:

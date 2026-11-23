@@ -11,8 +11,26 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import acceptance  # noqa: E402
+import chain  # noqa: E402
 import custody_confirm  # noqa: E402
 import record  # noqa: E402
+
+TESTDATA = Path(__file__).resolve().parent / "testdata"
+
+
+def test_respond_cost_counts_the_outbound_forwarding_fee():
+    # A real owner-wallet transaction of the run (lt 91662000001): it sent
+    # one respond to the actor with 0.01 TOS attached. The wallet paid its
+    # own total_fees, the attached value and the message's forwarding fee.
+    tx = chain.decode_transaction(json.loads((TESTDATA / "respond-wallet-tx.json").read_text()))
+    assert tx["decoded"] and tx["total_fees_nanotos"] == 2_106_576
+    [out] = tx["out"]
+    assert out["opcode"] == chain.RESPOND_OPCODE
+    assert (out["value_nanotos"], out["fwd_fee_nanotos"], out["ihr_fee_nanotos"]) == (10_000_000, 1_022_587, 0)
+    assert chain.outbound_cost(out) == 11_022_587
+    [row] = chain.wallet_ledger("w", 1_000_000_000, [tx])
+    assert row["balance_before_nanotos"] - row["balance_after_nanotos"] == 13_129_163
+
 
 PROVIDER_SCREEN = """
 Action 1a2b-3c4d-5e6f-7a8b (offer) is waiting for your decision.
