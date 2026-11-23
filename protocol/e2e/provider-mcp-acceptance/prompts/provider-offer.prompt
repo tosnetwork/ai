@@ -1,0 +1,8 @@
+1. Call tos_provider_status and note offered, the admission state and the wallet against its floor.
+2. Call tos_provider_preflight. Only checks about the offer may fail. If any other check fails, stop and report it.
+3. Call tos_provider_offer_preview with price_nanotos "100000000", storage_fee_nanotos "200000000", cleanup_bounty_nanotos "100000000", response_sla_seconds 3600, refund_claim_window_seconds 3600 and idempotency_key "{IDEM}". Report the action reference and the planned steps.
+4. Call tos_provider_request_confirmation with that action_id and wait_seconds 45. Repeat it, at most 14 times, while the state is awaiting_confirmation or applying.
+5. When the state is applied, call tos_provider_status and check offered true and serving true.
+6. Call tos_provider_export_offer and report the file path, capability_id, capability_version and sha256 it returns.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","action_id":"...","action_reference":"...","state":"...","capability_id":"...","capability_version":"...","offer_file":"...","offer_sha256":"..."}

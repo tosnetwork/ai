@@ -1,0 +1,4 @@
+1. Call tos_provider_pause with reason "{REASON}".
+2. Call tos_provider_status and report the admission state and what the pause is recorded as.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","paused":true,"already_paused":false,"pause_recorded_as":"..."}

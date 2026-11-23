@@ -1,0 +1,9 @@
+Buy exactly one software-work run of the Go module in {SRC} from the provider whose offer file is {OFFER_FILE} (Capability {CAP_ID}, version {CAP_VER}).
+
+1. Call tos_buyer_quote with capability_id "{CAP_ID}", capability_version "{CAP_VER}", offer_file "{OFFER_FILE}" and source "local".
+2. Check the Quote. Stop and report, without preparing anything, unless all of these hold: carriable is true; price_nanotos is "100000000"; storage_fee_nanotos is "200000000"; response_sla_seconds is 3600; refund_claim_window_seconds is 3600.
+3. Call tos_buyer_prepare with that quote_id, source_path "{SRC}" and idempotency_key "{IDEM}". Report the request_hash and the purchase reference.
+4. Call tos_buyer_request_payment with the request_hash and wait_seconds 50. While the result is awaiting_confirmation, call it again, at most 10 times.
+5. Then call tos_buyer_status with the request_hash, at most 3 times, until the purchase is submitted or admitted.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","request_hash":"...","purchase_reference":"...","state":"...","quote_id":"..."}

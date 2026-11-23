@@ -1,0 +1,4 @@
+1. Call tos_buyer_status with request_hash "{REQUEST_HASH}" and report its state and the refund path it shows.
+2. Call tos_buyer_purchases and report every purchase's request hash prefix and state, and the budget in use.
+
+End your answer with one line of JSON and nothing after it: {"label":"{LABEL}","request_hash":"{REQUEST_HASH}","state":"..."}
