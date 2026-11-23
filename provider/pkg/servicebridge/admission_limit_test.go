@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/execution/pkg/railgate"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
@@ -224,6 +225,17 @@ func TestTheAdmissionTimeIsWrittenOnceAndNeverMoved(t *testing.T) {
 	}
 	if got := AdmissionsInLastDay([]ProviderRecord{later}, time.Unix(admittedAt+int64(AdmissionDay/time.Second), 0)); got != 0 {
 		t.Fatalf("an admission a day old counted %d", got)
+	}
+	// The provider's common update path (as after an execution ends) moves
+	// only updated_unix too.
+	fixture.clock.Set(time.Unix(admittedAt+600, 0))
+	key := railgate.SlotKey{QuoteCommitment: later.QuoteCommitment, Actor: later.Actor, RequestID: later.RequestID}
+	if err := node.provider.store(key, later, false); err != nil {
+		t.Fatal(err)
+	}
+	stored := node.record(t)
+	if stored.UpdatedUnix != admittedAt+600 || stored.AdmittedUnix != admittedAt {
+		t.Fatalf("after a store: updated %d, admitted %d", stored.UpdatedUnix, stored.AdmittedUnix)
 	}
 }
 
