@@ -42,8 +42,11 @@ type fakeLibrary struct {
 
 	credited    uint64
 	withdrawErr error
-	// withdrawActor is the actor a withdrawal preview names.
-	withdrawActor string
+	// withdrawActor is the actor a withdrawal preview names, and
+	// reportCredited, when set, the credit it reports in place of the one
+	// it checks: a library whose preview and check disagree.
+	withdrawActor  string
+	reportCredited string
 	// beforeSend runs when a send is asked for, before anything is recorded;
 	// withdrawSend runs after the record is written. Either may block.
 	beforeSend    func()
@@ -149,8 +152,12 @@ func (f *fakeLibrary) Withdraw(_ context.Context, in servicebridge.WithdrawInput
 	if actor == "" {
 		actor = testActor
 	}
+	credited := fmt.Sprint(f.credited)
+	if f.reportCredited != "" {
+		credited = f.reportCredited
+	}
 	result.Preview = &servicebridge.WithdrawPreview{Actor: actor, Destination: testWallet,
-		CreditedNano: fmt.Sprint(f.credited), AmountNano: fmt.Sprint(amount), AttachedNano: "100000000",
+		CreditedNano: credited, AmountNano: fmt.Sprint(amount), AttachedNano: "100000000",
 		RemainingNano: fmt.Sprint(f.credited - amount), Checkpoint: 9}
 	if !in.Yes {
 		f.mutex.Unlock()

@@ -124,6 +124,8 @@ func TestAWithdrawalWhoseStateMovedExpiresAndSendsNothing(t *testing.T) {
 		"credit fell below the amount": func(f *fakeLibrary) { f.credited = 1_000_000_000 },
 		"the actor changed":            func(f *fakeLibrary) { f.withdrawActor = testOther },
 		"nothing credited":             func(f *fakeLibrary) { f.credited = 0 },
+		// The comparison does not rely on the library's own refusal.
+		"less credit reported than the amount": func(f *fakeLibrary) { f.reportCredited = "1999999999" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			bed := newTestbed(t)
