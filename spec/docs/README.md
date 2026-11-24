@@ -60,6 +60,7 @@ application profiles above it.
 - [Accepted Quote TVM V1](ACCEPTED_QUOTE_TVM_V1.md)
 - [Service Actor TVM V1](SERVICE_ACTOR_TVM_V1.md)
 - [Service Actor Settlement Binding](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)
+- [USDC Settlement V1](USDC_SETTLEMENT_V1.md) (design)
 - [Stablecoin Escrow TVM V2](STABLECOIN_ESCROW_TVM_V2.md) (retired)
 - [Software Work Receipt TVM V1](SOFTWARE_WORK_RECEIPT_TVM_V1.md)
 - [Paid-Demand Accepted-Quote Binding V1](PAID_DEMAND_ACCEPTED_QUOTE_BINDING_V1.md) (retired)
