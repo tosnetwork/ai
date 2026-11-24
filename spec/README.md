@@ -215,6 +215,7 @@ contradict them.
 - Accepted Quote TVM cell: [`docs/ACCEPTED_QUOTE_TVM_V1.md`](docs/ACCEPTED_QUOTE_TVM_V1.md)
 - Service Actor TVM contract: [`docs/SERVICE_ACTOR_TVM_V1.md`](docs/SERVICE_ACTOR_TVM_V1.md)
 - Service Actor settlement binding: [`docs/SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](docs/SERVICE_ACTOR_SETTLEMENT_DESIGN.md)
+- USDC settlement (design): [`docs/USDC_SETTLEMENT_V1.md`](docs/USDC_SETTLEMENT_V1.md)
 - Retired stablecoin escrow (historical): [`docs/STABLECOIN_ESCROW_TVM_V2.md`](docs/STABLECOIN_ESCROW_TVM_V2.md)
 - Software-work Receipt TVM cell: [`docs/SOFTWARE_WORK_RECEIPT_TVM_V1.md`](docs/SOFTWARE_WORK_RECEIPT_TVM_V1.md)
 - Software-work execution and artifacts: [`docs/SOFTWARE_WORK_EXECUTION_V1.md`](docs/SOFTWARE_WORK_EXECUTION_V1.md)
