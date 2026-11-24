@@ -421,7 +421,7 @@ The token payouts are:
 - sweep to the caller;
 - provider revenue withdrawal;
 - return of a refused funding;
-- payout of a returned or unreturned entry;
+- payout of a returned entry;
 - owner recovery of surplus.
 
 For each of them, the paying contract must learn the outcome, **delivered** or
@@ -588,8 +588,7 @@ payout$_ kind:uint3 request_id:uint64 recipient:MsgAddressInt
 payout_auth$_ recipient_wallet:MsgAddressInt own_wallet:MsgAddressInt
   outcome_fee_lock:Coins ^ledger_undo = PayoutAuthV1;
 -- kind: 1 refund, 2 sweep, 3 revenue withdrawal, 4 funding return,
---       5 returned-entry claim, 6 surplus recovery, 7 returned-entry sweep,
---       8 unreturned claim
+--       5 returned-entry claim, 6 surplus recovery, 7 returned-entry sweep
 ```
 
 The transfer's `query_id` is the payout id.
@@ -932,8 +931,8 @@ sender (step 6).
 10. The token liability plus `price_per_call` stays within
     `max_token_liability` and `max_liability_per_actor`. Otherwise the reason
     is 1937 `exposure_cap`.
-    - **Token liability** is `pending + refundable + returned + unreturned +
-      in_flight`. Revenue is excluded.
+    - **Token liability** is `pending + refundable + returned + in_flight`.
+      Revenue is excluded.
     - **No cap** is written as `2^120 - 1`, the largest `Coins` value.
     - **Bypass.** The caps are per actor, so deploying many actors bypasses
       them. Only the aggregate watch of T14 sees that.
@@ -963,8 +962,9 @@ sender (step 6).
     within the legs of section 4, which delete it;
   - a flood of refused fundings therefore costs the flooder one
     `RETURN_BUDGET` plus the tokens per return, and leaves no entry behind.
-- If the return is itself refused or bounced, the amount stays attributed to
-  its sender in `unreturned` (5.4).
+- If the return is itself refused or bounced, the amount becomes an ordinary
+  `returned` entry with `caller = from`, keyed by the payout id (5.4). It
+  stays attributed to its sender and is never surplus.
 
 **Not funding.** Native value with a `call`-shaped body is not funding: a
 native `call` op is unknown on this rail (1910). Bridge mints credited straight
@@ -988,28 +988,49 @@ ConfigParam 84 admits no token call.
   `returned$_ caller:MsgAddressInt amount:Coins paying:uint64
   return_deadline:uint64 = ReturnedV1`. `paying` is the payout id in flight
   for the entry, or 0.
-- `unreturned:(HashmapE 256 ^Unreturned)`, keyed by the sender's account id:
-  `unreturned$_ amount:Coins paying:uint64 = UnreturnedV1`.
-  - It holds funded payments whose return was refused or bounced (5.2 step 6),
-    aggregated per sender.
-  - It is claimable only by that sender, through `claim_unreturned`.
-  - It is never surplus.
 - The token ledger, in atomic units: `pending_liability`,
-  `refundable_liability`, `returned_liability`, `unreturned_liability`,
-  `in_flight` and `withdrawable_token_revenue`.
+  `refundable_liability`, `returned_liability`, `in_flight` and
+  `withdrawable_token_revenue`.
 - The native ledger, in nanoTOS: `locked_storage_fees`, `locked_outcome_fees`,
   `withdrawable_tos_revenue` and the operating reserve.
-- Counters: `returned_count` (global), a per-caller returned count,
-  `unreturned_count` (keys) and `revenue_payouts_in_flight`.
-- `accepting_tokens` is derived, never stored. It is
-  `returned_count < MAX_RETURNED_GLOBAL and unreturned_count <
-  MAX_UNRETURNED_SENDERS`. While it is false, the actor admits no call.
+- Counters: `returned_count` (global), a per-caller returned count and
+  `revenue_payouts_in_flight`.
+- `accepting_tokens` is derived, never stored, and equals `returned_count <
+  MAX_RETURNED_GLOBAL`. While it is false, the actor admits no call. A full
+  `returned` store stops new admissions and never reclassifies money.
 
-**Destination validation.** `claim_refund`, `claim_returned` and
-`claim_unreturned` check, in
+A returned entry arises from a refused or bounced payout of any of these
+kinds:
+
+- a refund or sweep (kinds 1 and 2), with `caller` = the request's caller;
+- a funding return (kind 4), with `caller = from`.
+
+**Destination validation.** `claim_refund` and `claim_returned` check, in
 compute and before any state change, that `destination` is a canonical
 `addr_std` with no anycast, on workchain 0, and not the actor itself.
 Otherwise they fail with 1934 `invalid_destination`.
+
+**Claimant workchain.** No entry is claimed against a bare 256-bit account id:
+
+- A claim compares the message sender's full address with the stored
+  `caller`.
+- The per-caller counters are keyed by `slice_hash` of the full address, which
+  includes the workchain (SA:527-533). The token actor keeps that keying for
+  its returned count.
+
+The rail is workchain 0 only, so the actor also requires its counterparties to
+be there:
+
+- `call` admission requires `from` on workchain 0. Otherwise it refuses with
+  1934 and returns the tokens.
+- `claim_refund` and `claim_returned` refuse a sender off workchain 0 with
+  1934.
+
+A sender that is a contract unable to send the claim leaves its entry stranded
+until `return_deadline`. After that, `sweep_returned`, which anyone may send,
+pays the entry's `amount` to the stored `caller`, never to the sweeper (table
+below, kind 7). Receiving needs no action from the caller: its token wallet is
+deployed by the transfer's StateInit.
 
 **Recipients.** Every payout goes to a validated destination, the caller or the
 owner, never to the actor. Actor payouts carry `forward_tos_amount = 0` and a
@@ -1027,8 +1048,8 @@ into the payout record and its `ledger_undo`. Then:
   bounty amounts, and any revenue debit is re-credited.
 
   The one exception is kind 4. A funding return has no prior position, so a
-  bounce at S is treated like a refusal at R: the amount goes to
-  `unreturned[from]`, never to surplus.
+  bounce at S is treated like a refusal at R: the amount becomes a returned
+  entry for `from`, never surplus.
 
 A request's TOS side settles once, at the outcome of its payout, and settles
 the same way whether that payout is delivered or refused at R:
@@ -1049,20 +1070,18 @@ at S reverts the TOS side too.
 | `withdraw_revenue(token_amount, tos_amount)` | owner only; the TOS part as SA:963-994; `token_amount <= withdrawable_token_revenue`; `revenue_payouts_in_flight < 4` | `token_amount` to the owner (kind 3) | — | re-credit `withdrawable_token_revenue` |
 | `claim_returned(id, destination)` (`0x5354430A`) | caller only; the entry exists (else 1931); `paying == 0` (else **1930** `payout_in_flight`); destination validation | `amount` to `destination` (kind 5) | delete the entry | clear `paying`; the entry stays |
 | `sweep_returned(id)` (`0x5354430D`) | permissionless; `now >= return_deadline`; `paying == 0` (else 1930) | `amount` to the entry's **caller** (kind 7) | delete the entry | clear `paying`; set `return_deadline = now + 2,592,000` |
-| funding return (5.2) | — | `amount` to `from` (kind 4) | — | add `amount` to `unreturned[from]` (also on a bounce at S) |
-| `claim_unreturned(destination)` (`0x5354430E`) | the sender is a key of `unreturned` (else 1931); `paying == 0` (else 1930); destination validation | the key's `amount` to `destination` (kind 8) | delete the key | clear `paying`; the amount stays |
+| funding return (5.2) | — | `amount` to `from` (kind 4) | — | a returned entry for `from` with `return_deadline = now + 2,592,000`, keyed by the payout id (also on a bounce at S) |
 | `recover_surplus(amount)` (`0x5354430B`) | owner only; supersedes any pending balance query | after an accepted `take_balance`: `amount` to the owner (kind 6) | — | the amount stays surplus |
-| `abandon_payout(id)` (`0x5354430C`) | owner only; kind 3 or 6; `now >= created_at + PAYOUT_ABANDON_AGE` (else 1938) | — | — | — |
+| `abandon_payout(id)` (`0x5354430C`) | owner only; kind 3 or 6; `now >= created_at + PAYOUT_ABANDON_AGE` (else 1938); clears any pending balance query, so the owner re-queries | — | — | — |
 
 **Bounty on prompt claims.** The D3 incentive note
 ([`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md):407-421)
 is fixed: a delivered `claim_refund` pays the `cleanup_bounty` to the claimer.
 Claiming promptly is therefore never worse than sweeping.
 
-**No double payout from a returned or unreturned entry.**
+**No double payout from a returned entry.**
 
-- `claim_returned`, `sweep_returned` and `claim_unreturned` set `paying`
-  before they send.
+- `claim_returned` and `sweep_returned` set `paying` before they send.
 - A second claim, in the same block or later, fails with 1930 while the first
   is in flight.
 - The entry is deleted only on delivery.
@@ -1071,6 +1090,10 @@ Claiming promptly is therefore never worse than sweeping.
 `outcome_fee_lock` and removes its amount from `in_flight`. For kind 3 it also
 decrements `revenue_payouts_in_flight`. It credits nothing: the owner bears
 the risk, and tokens still in S show as surplus later.
+
+Abandoning while a balance query is pending clears that query, so the owner
+re-queries. Otherwise the abandoned amount would leave `in_flight` while the
+pending answer still counts it.
 
 **Counters on every exit path.** Payout creation moves the entry out of its
 dictionary into the payout's `ledger_undo`. The counters of live entries
@@ -1081,10 +1104,9 @@ change at the outcome, never at creation. `lock` is `locked_outcome_fees`.
 | 1 refund | `refundable -= p`; `in_flight += p`; `lock += l` | `in_flight -= p`; `live_count`, caller live, `locked_storage_fees` decrease; TOS settlement; `lock -= l` | as delivered, plus `returned += p`, `returned_count += 1`, caller returned `+= 1` | `in_flight -= p`; `refundable += p`; entry restored; `lock -= l` | not allowed |
 | 2 sweep | `pending` or `refundable -= p` (and `pending_count` unchanged); `in_flight += p`; `lock += l` | `in_flight -= p`; `live_count`, caller live, `locked_storage_fees` decrease, and `pending_count -= 1` if the entry was pending; TOS settlement; `lock -= l` | as delivered, plus the returned increments of kind 1 | `in_flight -= p`; liability and entry restored; `lock -= l` | not allowed |
 | 3 revenue | `withdrawable_token_revenue -= a`; `in_flight += a`; `revenue_payouts_in_flight += 1`; `lock += l` | `in_flight -= a`; `revenue_payouts_in_flight -= 1`; `lock -= l` | `in_flight -= a`; `withdrawable_token_revenue += a`; `revenue_payouts_in_flight -= 1`; `lock -= l` | as refused | `in_flight -= a`; `revenue_payouts_in_flight -= 1`; `lock -= l` |
-| 4 funding return | `in_flight += a`; `lock += l` | `in_flight -= a`; `lock -= l` | `in_flight -= a`; `unreturned += a`; `unreturned_count += 1` if the key is new; `lock -= l` | as refused | not allowed |
+| 4 funding return | `in_flight += a`; `lock += l` | `in_flight -= a`; `lock -= l` | `in_flight -= a`; `returned += a`; `returned_count += 1`; `from`'s returned count `+= 1`; `lock -= l` | as refused | not allowed |
 | 5 returned claim | `returned -= a`; `in_flight += a`; `paying = id`; `lock += l` | `in_flight -= a`; entry deleted; `returned_count -= 1`, caller returned `-= 1`; `lock -= l` | `in_flight -= a`; `returned += a`; `paying = 0`; `lock -= l` | as refused | not allowed |
 | 7 returned sweep | as kind 5 | as kind 5 | as kind 5, and `return_deadline` reset | as kind 5 refused, deadline unchanged | not allowed |
-| 8 unreturned claim | `unreturned -= a`; `in_flight += a`; `paying = id`; `lock += l` | `in_flight -= a`; key deleted; `unreturned_count -= 1`; `lock -= l` | `in_flight -= a`; `unreturned += a`; `paying = 0`; `lock -= l` | as refused | not allowed |
 | 6 surplus | `in_flight += a`; `lock += l` | `in_flight -= a`; `lock -= l` | `in_flight -= a` (back to surplus); `lock -= l` | as refused | `in_flight -= a`; `lock -= l` |
 
 **Storage bound.** Each structure is bounded as follows.
@@ -1092,8 +1114,7 @@ change at the outcome, never at creation. `lock` is `locked_outcome_fees`.
 - **`payouts`.** Each record exists only while in flight, and is created
   from:
   - a live entry, bounded by `MAX_LIVE_GLOBAL` (SA:202-203);
-  - a returned or unreturned entry, one in flight per entry because of
-    `paying`;
+  - a returned entry, one in flight per entry because of `paying`;
   - at most 4 revenue payouts;
   - at most one surplus payout per accepted balance answer;
   - a self-funded funding return, which is transient (5.2 step 6).
@@ -1102,22 +1123,19 @@ change at the outcome, never at creation. `lock` is `locked_outcome_fees`.
   - `MAX_RETURNED_PER_CALLER` is 16 and `MAX_RETURNED_GLOBAL` is 10,000.
   - At either cap, admission stops for that caller, or for everyone
     (`accepting_tokens`, 1935).
-  - A refusal of a refund or sweep already in flight still creates its entry,
-    because principal is never dropped. The global bound is therefore
-    `MAX_RETURNED_GLOBAL` plus the at most `MAX_LIVE_GLOBAL` payouts that were
-    in flight when admission stopped.
-- **`unreturned`.**
-  - Keys are distinct senders. `MAX_UNRETURNED_SENDERS` is 10,000.
-  - At the cap, `accepting_tokens` is false: the actor admits no call and
-    reclassifies no money.
-  - Later funded notifications are still returned, and a refused return is
-    still recorded under its sender.
-  - That overshoot needs a refused return to the sender's own, already
-    deployed wallet. Under B1-B5 such a refusal cannot happen: the wallet
-    exists, the credit is within supply, and R's gas is capped and funded.
-    `unreturned` is therefore empty under the bounds, and the cap is hard
-    under them.
-  - Outside the bounds, T14 alarms on any key.
+  - A refusal of a payout already in flight still creates its entry, because
+    principal is never dropped or reclassified. Those payouts are refunds and
+    sweeps (at most `MAX_LIVE_GLOBAL`) and funding returns. The global bound is
+    therefore `MAX_RETURNED_GLOBAL` plus the refunds and sweeps in flight when
+    admission stopped, plus refused funding returns.
+  - A funding return is refused only when the sender's own, already deployed
+    wallet fails the credit. Under B1-B5 that cannot happen: the wallet
+    exists, the credit is within supply, and R's gas is capped and funded. So
+    under the bounds, funding returns add no returned entry, and the bound is
+    `MAX_RETURNED_GLOBAL + MAX_LIVE_GLOBAL`.
+  - Outside the bounds, T14 alarms on any returned entry of kind 4.
+  - Every returned entry has a `return_deadline`, after which `sweep_returned`
+    deletes it on delivery. No entry is permanent.
 - **Refusal at R.** With destinations validated, a caller cannot induce a
   refusal at R under B3: the token wallet of any valid owner can be deployed
   and accepts the credit.
@@ -1126,40 +1144,61 @@ change at the outcome, never at creation. `lock` is `locked_outcome_fees`.
 
 1. **Query.** `recover_surplus` allocates a new payout id as `query_id`. It
    records `balance_query_id = query_id`, `query_floor = query_id` and
-   `delivered_since_floor = false`, then sends `provide_balance` to the
+   `delivered_since_floor_amount = 0`, then sends `provide_balance` to the
    actor's own wallet in mode 1 + 16. A newer `recover_surplus` supersedes the
    pending query: only the latest `balance_query_id` is ever accepted, so a
    lost `take_balance` never blocks recovery.
-2. **Guard.** While a query is pending, accepting a `transfer_delivered` for
-   any payout with id `>= query_floor` sets `delivered_since_floor = true`.
+2. **Correction.** While a query is pending, accepting a `transfer_delivered`
+   for any payout with id `>= query_floor` adds that payout's amount to
+   `delivered_since_floor_amount` (checked addition).
 3. **Answer.** `take_balance` from `own_wallet` is accepted only when its
-   `query_id` equals `balance_query_id`. It is refused with 1939
-   `balance_stale` (logged; the owner retries) when `delivered_since_floor` is
-   set. Otherwise the actor computes `surplus = balance - (pending +
-   refundable + returned + unreturned + in_flight +
-   withdrawable_token_revenue)`.
+   `query_id` equals `balance_query_id`. The actor computes:
+
+   ```text
+   surplus = balance - delivered_since_floor_amount
+             - (pending + refundable + returned + in_flight
+                + withdrawable_token_revenue)
+   ```
+
+   A negative result is treated as zero.
 4. **Pay.** If `amount <= surplus`, the actor creates a kind-6 payout to the
    owner. Otherwise it fails with 1936 `surplus_insufficient`. The query is
    cleared either way.
 
-Why the answer never over-counts. Messages from one account to another are
-processed in creation order, so consider each payout, and the notifications.
+**Why the answer never over-counts.** Messages from one account to another
+are processed in creation order. Compare, for every token, `balance` (as S
+saw it when answering) with what the actor subtracts at `take_balance`.
 
-- **A payout with id below the floor** was sent to S before `provide_balance`,
-  so S debited it before answering. If it is still in flight, it is both out
-  of `balance` and subtracted as `in_flight`. That is conservative.
-- **A payout with id at or above the floor** may be debited after S answers,
-  so `balance` still includes it.
-  - If its delivery report reaches the actor before `take_balance`, the ledger
-    has already dropped it. That is exactly the case step 3 refuses.
-  - Its refusal or bounce comes from S after `take_balance`, so it cannot
-    overtake.
-- **Notifications** that S sent before answering are processed before
-  `take_balance`. Credits S makes after answering are in neither `balance`
-  nor the ledger.
+- **A payout with id at or above the floor.** The actor sent it to S after
+  `provide_balance`, so S debits it only after answering, and `balance`
+  includes it. At `take_balance` it is in exactly one of two states:
+  - its delivery has already been accepted, so it has left `in_flight` and is
+    counted once in `delivered_since_floor_amount`;
+  - it is still in `in_flight`.
 
-T3 tests the race: `recover_surplus`, then a new payout, then its delivery
-before `take_balance`.
+  Its refusal, or a bounce, comes from S after `take_balance` and cannot
+  overtake. Each such payout is therefore subtracted exactly once, which makes
+  this case **exact**.
+- **A payout with id below the floor.** The actor sent it to S before
+  `provide_balance`, so S debited it before answering, and `balance` excludes
+  it.
+  - If its outcome was accepted before `take_balance`, its ledger change has
+    been applied:
+    - delivered: it is gone from both sides;
+    - refused, with S's restore before the answer: it is back in both.
+  - If it is still in flight, the actor subtracts it as `in_flight` although
+    `balance` excludes it. That under-counts. The tokens stay recoverable by a
+    later query.
+- **Notifications.** Those that S sent before answering are processed before
+  `take_balance`. Credits S makes after answering are in neither `balance` nor
+  the ledger.
+
+The computed surplus is therefore never more than the true unattributed
+balance. It is exact when no payout older than the query is still in flight.
+
+T3 tests the race in which a new payout is delivered between
+`recover_surplus` and `take_balance`. The amount correction subtracts it, and
+surplus is unchanged.
 
 Surplus is exactly the tokens whose attribution was lost through the sender's
 own error, or that the owner gave up:
@@ -1169,7 +1208,9 @@ own error, or that the owner gave up:
 - bridge mints credited straight to the actor (TW:294-326);
 - abandoned owner payouts that were in fact refused.
 
-A funded payment that the actor refuses is never surplus.
+A funded payment that the actor refuses is never surplus. A refused or bounced
+return of it is a returned entry for its sender, and admission stops before
+the returned store would ever force anything else (`accepting_tokens`).
 
 **Outcome log.** Every outcome emits `SAO1` (`0x53414f31`) `payout_id:uint64
 kind:uint3 request_id:uint64 recipient:MsgAddressInt amount:Coins
@@ -1195,7 +1236,6 @@ The ops use the prefix `0x5354430x`:
 | `recover_surplus` | 0B |
 | `abandon_payout` | 0C |
 | `sweep_returned` | 0D |
-| `claim_unreturned` | 0E |
 
 The `token_call` payload tag is `0x53544301`. The actor also handles the
 outcome inputs of 4.4 and `take_balance`.
@@ -1214,7 +1254,6 @@ Exit codes keep 1900-1929 with their meanings
 | 1936 | `surplus_insufficient` |
 | 1937 | `exposure_cap` |
 | 1938 | `abandon_too_early` |
-| 1939 | `balance_stale` |
 
 On the notification path these appear only as `SAF1` reasons, never as a
 throw.
@@ -1376,7 +1415,7 @@ actors, published as two Capability versions or two Capabilities.
 | `protocol/pkg/nativecore` | Codecs for the token terms, `SAT1`, `SAF1`, `SAO1`, schema 3 Accepted Quote, schema 2 Receipt and the key 20 token entry; the token release hash. |
 | `protocol/pkg/toschain` | The ConfigParam 84 reader (pinned entries only) with self-verification; actor-wallet derivation; history decoding of notifications, reports, balance answers and outcome logs. |
 | `protocol/pkg/serviceactor` | Both verification procedures ([`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md) section 2.4) for the token rail. Added checks: the asset route equals the manifest, the Quote and a pinned status-1 record; the funding notification came from the actor's derived wallet with the exact amount. New states: `paying` and `returned`. |
-| `protocol/pkg/buyersdk` | Builds the token transfer with the `token_call` payload. Refuses a `forward_tos_amount` below the full budget of 5.2, and validates destinations as 5.4 does. The journal records the transfer, the notification transaction and its `SAT1` or `SAF1`. Duties: `expire`, `claim_refund`, `claim_returned` while a returned entry exists, and `claim_unreturned` while the buyer holds an `unreturned` key. The preview states that underfunded or forward-less tokens become the provider's. |
+| `protocol/pkg/buyersdk` | Builds the token transfer with the `token_call` payload. Refuses a `forward_tos_amount` below the full budget of 5.2, and validates destinations as 5.4 does. The journal records the transfer, the notification transaction and its `SAT1` or `SAF1`. Duties: `expire`, `claim_refund`, and `claim_returned` while a returned entry exists, including one from a refused funding return. The preview states that underfunded or forward-less tokens become the provider's. |
 | `provider` (`servicebridge`, `tos-service-provider`, MCP provider) | Offers in atomic units within per-asset offer bounds ([`MCP_PROVIDER_ADAPTER_V1.md`](MCP_PROVIDER_ADAPTER_V1.md):201-206); `max_token_liability`; withdrawal of both revenues, with in-flight and refused outcomes; `recover_surplus` and `abandon_payout` behind confirmation; the actor TOS floor and the token-wallet floor (5.6). |
 | MCP buyer (`tos-service-buyer-mcp`) | Budgets per asset (`max_per_call_atomic`, `max_window_atomic`) on top of the existing nanoTOS limits ([`MCP_BUYER_ADAPTER_V1.md`](MCP_BUYER_ADAPTER_V1.md):1008-1020). The preview shows the price in the asset and every TOS cost separately ([`SETTLEMENT.md`](SETTLEMENT.md):152-155), and states 5.6. |
 | `tos-service-verify` | Accepts the token release hash; verifies the recognition record at the call checkpoint, the funding notification chain and the outcome logs. Its usage gains an asset option (`protocol/cmd/tos-service-verify/main.go`:44-46). |
@@ -1504,7 +1543,7 @@ USDC. T11 and T12 gate production.
 |---|---|---|---|---|---|
 | T1 | tos | `token-wallet.fc`: the reported transfer and the balance report (4.3); `R_GAS_LIMIT` and `S_BOUNCE_GAS`; the network-priced value check, including the action fine; `GETGASFEE` and `GETFORWARDFEE` wrappers in the bridge stdlib (global version 6 or later, STD:272-276); +16 on the reported sends and on the ordinary notification (a behaviour change, 4.7); a `SETTLEMENT-PROTOCOL.md` section; `verify-token-bridge.py` invariants; regenerated fixtures and evidence (4.7) | — | Sandbox on both VMs covers:<br>• delivered;<br>• refused at R by compute failure, by **R out of gas** (the bounce is still funded) and by action failure;<br>• an **S action-phase failure** (bounces to P);<br>• every S compute refusal;<br>• **ConfigParam 79 `wallet_gas_consumption` set too low** (the network-priced check still holds);<br>• **a gas or forward price change between legs**, within and beyond `REPORT_MARGIN`;<br>• rereport, clear, and a duplicate query id;<br>• spoof attempts (excesses, foreign delivered, forged refused), all ignored;<br>• `provide_balance`;<br>• `capBounceMsgBody` turned off fails the suite (pins the dependency).<br>Also: supply and balance are conserved in each case; each guard goes red when removed; gas is measured per leg; the mint path does no scaling. | L |
 | T2 | tos | ConfigParam 84 TL-B; a typed JSON-RPC view; 84 listed in ConfigParam 10 in genesis (GZ:414, GZ:419); `tosctl` decode and a proposal value builder | — | Round trip through `getConfigParam`; an uncritical proposal is refused (CFG:596-601); malformed records are refused by the decoder | M |
-| T3 | tos | `service-actor-token-code.fc` (section 5); Rust builders and decoder; sandbox; release manifests; bytecode check; vectors; exposure caps | T1, T2 | Every native sandbox case ported, plus:<br>• spoofed and foreign notifications;<br>• underfunded and below-`MIN_FUNDING_VALUE` notifications (nothing stored; surplus);<br>• a **malformed or absent ConfigParam 84** and a **malformed payload**, each taking the refusal path without a throw;<br>• every admission refusal ending in a funding return, with no stranded token;<br>• the exact-amount rule, status 2 and the exposure caps;<br>• every payout kind × {delivered, refused at R, bounced at S};<br>• **a double `claim_returned` in one block** (1930);<br>• **destination validation** (non-std, anycast, wc != 0, self: 1934);<br>• returned-entry caps and `sweep_returned`;<br>• a flood of refused fundings, leaving no entry and no surplus;<br>• a refused or bounced funding return, landing in `unreturned[from]`, and `claim_unreturned`, including a double claim (1930);<br>• `accepting_tokens` false at each cap;<br>• surplus recovery, covering:<br>&nbsp;&nbsp;– a notification in flight before `take_balance`;<br>&nbsp;&nbsp;– **the race where `recover_surplus` is followed by a new payout whose delivery arrives before `take_balance`** (1939, then a retry succeeds);<br>&nbsp;&nbsp;– a superseded query whose late `take_balance` is ignored;<br>• `abandon_payout`, checking every counter of the exit-path table;<br>• a failing in-handler send (bounty, `clear_refusal`, change) that leaves the outcome committed.<br>Also: the token invariant is checked after every step, and gas is measured on both VMs at capacity for every op and for `PRE_ACCEPT_GAS` and `OUTCOME_HANDLER_GAS`. | L |
+| T3 | tos | `service-actor-token-code.fc` (section 5); Rust builders and decoder; sandbox; release manifests; bytecode check; vectors; exposure caps | T1, T2 | Every native sandbox case ported, plus:<br>• spoofed and foreign notifications;<br>• underfunded and below-`MIN_FUNDING_VALUE` notifications (nothing stored; surplus);<br>• a **malformed or absent ConfigParam 84** and a **malformed payload**, each taking the refusal path without a throw;<br>• every admission refusal ending in a funding return, with no stranded token;<br>• the exact-amount rule, status 2 and the exposure caps;<br>• every payout kind × {delivered, refused at R, bounced at S};<br>• **a double `claim_returned` in one block** (1930);<br>• **destination validation** (non-std, anycast, wc != 0, self: 1934);<br>• returned-entry caps and `sweep_returned`;<br>• a flood of refused fundings, leaving no entry and no surplus;<br>• a refused or bounced funding return becoming a returned entry for `from` (never surplus), then claimed, double-claimed (1930) and swept to `from` after the deadline;<br>• `accepting_tokens` false at `MAX_RETURNED_GLOBAL`, with no money reclassified;<br>• senders off workchain 0 refused (1934);<br>• surplus recovery, covering:<br>&nbsp;&nbsp;– a notification in flight before `take_balance`;<br>&nbsp;&nbsp;– **the race where `recover_surplus` is followed by a new payout whose delivery arrives before `take_balance`** (subtracted through `delivered_since_floor_amount`, so surplus is unchanged);<br>&nbsp;&nbsp;– an older payout still in flight (under-counted, never over-counted);<br>&nbsp;&nbsp;– a superseded query whose late `take_balance` is ignored;<br>• `abandon_payout`, checking every counter of the exit-path table and clearing a pending query;<br>• a failing in-handler send (bounty, `clear_refusal`, change) that leaves the outcome committed.<br>Also: the token invariant is checked after every step, and gas is measured on both VMs at capacity for every op and for `PRE_ACCEPT_GAS` and `OUTCOME_HANDLER_GAS`. | L |
 | T4 | tos | `tosctl`: a token transfer with `token_call` and `--build-only`; `claim_returned`, `sweep_returned`, the two-part `withdraw_revenue`, `recover_surplus` and `abandon_payout`; top-ups of the actor and its wallet | T3 | The `--build-only` output is reproduced by `buyersdk` byte for byte; a below-budget forward and an invalid destination are refused | M |
 | T5 | tos-ops | Test USDC on the local net and the public testnet: a test bridge, a stand-in oracle signing v5 votes, ConfigParams 79 and 84 through `testnet-governance.py` (84 as critical), and a CEREMONY addendum | T1, T2 | `adopted` shows both params on every validator (CEREMONY:797); a test mint reaches a buyer wallet | M |
 | T6 | ai `spec/` | `SERVICE_ACTOR_TOKEN_TVM_V1.md`; the in-place edits of section 9; both proto copies; the T3 vectors copied byte for byte | T3 | The spec vectors equal the tos fixture; a negative corpus exists for every new rule | M |
@@ -1515,7 +1554,7 @@ USDC. T11 and T12 gate production.
 | T11 | relayer | Settlement v5 (vote layout, generations, `cancel_lock`, `activate_generation`) and the live loop | — | Simnet end to end against the v5 contracts | L |
 | T12 | tos, tos-ops, external | The bridge production gates (7.1). The two audits explicitly cover the T1 wallet change and the T3 token actor. Then the canary, then the ConfigParam 84 USDC record by validator vote | T1, T2, T11, T13 | Every SEC:97-113 item is checked; the record is adopted | XL |
 | T13 | external | An independent security review of the token-rail actor and the wallet change, against sections 4-5 | T1, T3 | Findings are resolved, or accepted by the owner, before T12's audits | M |
-| T14 | tos-ops, ai `provider/` | Monitoring per actor and asset:<br>• payouts in flight longer than N blocks;<br>• count and age of returned entries;<br>• any `unreturned` key;<br>• actor TOS balance against the backing floor;<br>• token-wallet TOS balance;<br>• S-side `refusals` size;<br>• aggregate token liability per asset against the bridge cap. | T3, T7 | Each alarm fires in a test that crosses its threshold, and stays silent below it | M |
+| T14 | tos-ops, ai `provider/` | Monitoring per actor and asset:<br>• payouts in flight longer than N blocks;<br>• count and age of returned entries;<br>• any returned entry from a refused funding return (kind 4);<br>• actor TOS balance against the backing floor;<br>• token-wallet TOS balance;<br>• S-side `refusals` size;<br>• aggregate token liability per asset against the bridge cap. | T3, T7 | Each alarm fires in a test that crosses its threshold, and stays silent below it | M |
 
 A refusal at R cannot be provoked on a live chain with the real wallet when the
 budget is correct. T10 therefore uses a test-only wallet build that refuses on
