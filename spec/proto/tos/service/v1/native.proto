@@ -330,16 +330,29 @@ message TOSContractIdentityV1 {
   string code_hash = 3;
 }
 
+// A recognized TOS-network token (docs/USDC_SETTLEMENT_V1.md section 3.1). On
+// the token rail every field must equal the actor's asset route, the pinned
+// ConfigParam 84 record with status 1 at the checkpoint, and manifest key 20.
 message TOSAssetIdentityV1 {
+  // The token master: workchain exactly 0, account_id exactly 32 bytes and not
+  // all zero, code_hash the master's (minter's) code hash as
+  // tvm-cell-sha256:<64 lowercase hex>.
   TOSContractIdentityV1 master = 1;
+  // tvm-cell-sha256:<64 lowercase hex>; the route's wallet_code_hash.
   string wallet_code_hash = 2;
+  // 0..255; equals the ConfigParam 84 record. Display only: amounts are atomic.
   uint32 decimals = 3;
 }
 
 // A Quote Proposal is gateway-local and non-canonical until accepted on TOS.
-// It settles on the Service Actor rail (docs/SERVICE_ACTOR_TVM_V1.md): the
-// price is native TOS and every rail field must equal finalized actor state
-// and manifest key 21 before a buyer builds a call.
+// It settles on one of two rails, which manifest key 21 and the pinned actor
+// code hash select, and every rail field must equal finalized actor state and
+// the manifest before a buyer builds a call:
+// - the native Service Actor (docs/SERVICE_ACTOR_TVM_V1.md): price_nanotos is
+//   set, and asset and price_atomic are unset;
+// - the token-rail Service Actor (docs/SERVICE_ACTOR_TOKEN_TVM_V1.md): asset
+//   and price_atomic are set, and price_nanotos is empty.
+// Any other combination is refused. storage_fee_nanotos is nanoTOS on both.
 message QuoteProposalV1 {
   // The stablecoin price, escrow terms and dispute policy of the retired
   // escrow rail.
@@ -361,13 +374,20 @@ message QuoteProposalV1 {
   uint32 policy_version = 13;
   // 64 lowercase hex; the actor's terms_hash for the quoted policy.
   string terms_hash = 14;
-  // Exact price_per_call in nanoTOS: positive, [1-9][0-9]*, below 2^120. A
-  // zero price is refused, as in ACCEPTED_QUOTE_TVM_V1 and SETTLEMENT.
+  // Native rail only. Exact price_per_call in nanoTOS: positive, [1-9][0-9]*,
+  // below 2^120. A zero price is refused, as in ACCEPTED_QUOTE_TVM_V1 and
+  // SETTLEMENT.
   string price_nanotos = 15;
   // Non-refundable storage fee in nanoTOS, same encoding and bound.
   string storage_fee_nanotos = 16;
   // mldsa44:<64 lowercase hex key id>; equals manifest key 21 field 5.
   string attestor_key_id = 17;
+  // Token rail only: the asset the actor's route fixes.
+  TOSAssetIdentityV1 asset = 18;
+  // Token rail only. Exact price_per_call in the asset's atomic units:
+  // positive, [1-9][0-9]*, below 2^120 (at most 37 digits). It is the
+  // actor's price_per_call and never a conversion from another asset.
+  string price_atomic = 19;
 }
 
 message AcceptedQuoteV1 {

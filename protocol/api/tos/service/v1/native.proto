@@ -136,15 +136,20 @@ message ResolveDNSAliasResponse {
 // account and code_hash prevents a different implementation being treated as
 // the same protocol asset.
 message TOSContractIdentityV1 { int32 workchain = 1; bytes account_id = 2; string code_hash = 3; }
+// A recognized TOS-network token: master on workchain 0 with its 32-byte
+// account id and minter code hash, the wallet code hash, and decimals 0..255,
+// each equal to the token actor's route and the pinned ConfigParam 84 record.
 message TOSAssetIdentityV1 {
   TOSContractIdentityV1 master = 1;
   string wallet_code_hash = 2;
   uint32 decimals = 3;
 }
 // A Quote Proposal is gateway-local and non-canonical until accepted on TOS.
-// It settles on the Service Actor rail: the price is native TOS and every
-// rail field must equal finalized actor state and manifest key 21 before a
-// buyer builds a call.
+// It settles on the native Service Actor rail (price_nanotos set, asset and
+// price_atomic unset) or on the token rail (asset and price_atomic set,
+// price_nanotos empty); any other combination is refused. Every rail field
+// must equal finalized actor state and the manifest before a buyer builds a
+// call.
 message QuoteProposalV1 {
   // The stablecoin price, escrow terms and dispute policy of the retired
   // escrow rail.
@@ -166,12 +171,18 @@ message QuoteProposalV1 {
   uint32 policy_version = 13;
   // 64 lowercase hex; the actor's terms_hash for the quoted policy.
   string terms_hash = 14;
-  // Exact price_per_call in nanoTOS: positive, [1-9][0-9]*, below 2^120.
+  // Native rail only. Exact price_per_call in nanoTOS: positive,
+  // [1-9][0-9]*, below 2^120.
   string price_nanotos = 15;
   // Non-refundable storage fee in nanoTOS, same encoding and bound.
   string storage_fee_nanotos = 16;
   // mldsa44:<64 lowercase hex key id>; equals manifest key 21 field 5.
   string attestor_key_id = 17;
+  // Token rail only: the asset the actor's route fixes.
+  TOSAssetIdentityV1 asset = 18;
+  // Token rail only: exact price_per_call in atomic units, [1-9][0-9]*,
+  // below 2^120.
+  string price_atomic = 19;
 }
 message AcceptedQuoteV1 {
   // The client-chosen execution signer of the retired escrow rail; the

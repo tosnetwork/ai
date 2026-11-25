@@ -1,0 +1,859 @@
+{
+  "schema": "tos.service.actor.token.v1.negative",
+  "specification": "docs/SERVICE_ACTOR_TOKEN_TVM_V1.md section 16.3",
+  "positive_vectors": "test-vectors/service-actor-token-conformance-vectors.json",
+  "generator": "scripts/reproduce-service-actor-token-v1.py --write",
+  "derivation": "BOCs are single stated edits of implementation-generated positive vectors or of the T3 sandbox test inputs, derived by the generator; no contract or Rust code runs in this repository",
+  "t3_tests": {
+    "repository": "github.com/tosnetwork/tos",
+    "sha": "7a32aa402944bb944a1c778197e491605f909df4",
+    "directory": "tosctl/src/node-control/contracts/tests/service_actor_token"
+  },
+  "decoder_negatives": [
+    {
+      "name": "sat1_wrong_tag",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "tag",
+      "statement": "the tag is SAT1 (0x53415431)",
+      "boc_base64": "te6ccgECAwEAAR8AAbtTQVIxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iAAAAAAyqgaQQAQGvAAAAACA+hAvrwgBAX14QAAAA4QAAAOEJo5FU8DsBFv2brFcVcxc6JeWGi+xk4Hfbjp5GKz7keBdTvfHXzv1or/F9tg3Yf9NlLBJrYEXBQQo5qPSLlbksuAIAwRERERERERERERERERERERERERERERERERERERERERERIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA="
+    },
+    {
+      "name": "sat1_trailing_bit",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no bit follows the last field",
+      "boc_base64": "te6ccgECAwEAAR8AAbtTQVQxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iAAAAAAyqgaQIAQGvAAAAACA+hAvrwgBAX14QAAAA4QAAAOEJo5FU8DsBFv2brFcVcxc6JeWGi+xk4Hfbjp5GKz7keBdTvfHXzv1or/F9tg3Yf9NlLBJrYEXBQQo5qPSLlbksuAIAwRERERERERERERERERERERERERERERERERERERERERERIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA="
+    },
+    {
+      "name": "sat1_trailing_reference",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "exactly one reference, the terms",
+      "boc_base64": "te6ccgECBAEAASIAArtTQVQxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iAAAAAAyqgaQQAQIBrwAAAAAgPoQL68IAQF9eEAAAAOEAAADhCaORVPA7ARb9m6xXFXMXOiXlhovsZOB3246eRis+5HgXU73x1879aK/xfbYN2H/TZSwSa2BFwUEKOaj0i5W5LLgDAAAAwRERERERERERERERERERERERERERERERERERERERERERIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA="
+    },
+    {
+      "name": "sat1_missing_terms",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "missing_field",
+      "statement": "the terms reference is present",
+      "boc_base64": "te6ccgEBAQEAYAAAu1NBVDEAAAAAAAAAAIALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5JT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT04AAAAAyqf+IAAAAADKqBpBA="
+    },
+    {
+      "name": "sat1_missing_refund_claim_deadline",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "missing_field",
+      "statement": "every field is present",
+      "boc_base64": "te6ccgECAwEAARcAAatTQVQxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iEAEBrwAAAAAgPoQL68IAQF9eEAAAAOEAAADhCaORVPA7ARb9m6xXFXMXOiXlhovsZOB3246eRis+5HgXU73x1879aK/xfbYN2H/TZSwSa2BFwUEKOaj0i5W5LLgCAMERERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABA"
+    },
+    {
+      "name": "sat1_caller_addr_none",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "address_required",
+      "statement": "caller is a MsgAddressInt",
+      "boc_base64": "te6ccgEBAwEA/gABeVNBVDEAAAAAAAAAACnp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enpwAAAABlU/8QAAAAAGVUDSCABAa8AAAAAID6EC+vCAEBfXhAAAADhAAAA4QmjkVTwOwEW/ZusVxVzFzol5YaL7GTgd9uOnkYrPuR4F1O98dfO/Wiv8X22Ddh/02UsEmtgRcFBCjmo9IuVuSy4AgDBEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQA=="
+    },
+    {
+      "name": "sat1_deadlines_disagree",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "deadlines_disagree",
+      "statement": "response_deadline + refund_claim_window == refund_claim_deadline",
+      "boc_base64": "te6ccgECAwEAAR8AAbtTQVQxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iAAAAAAyqgaQwAQGvAAAAACA+hAvrwgBAX14QAAAA4QAAAOEJo5FU8DsBFv2brFcVcxc6JeWGi+xk4Hfbjp5GKz7keBdTvfHXzv1or/F9tg3Yf9NlLBJrYEXBQQo5qPSLlbksuAIAwRERERERERERERERERERERERERERERERERERERERERERIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA="
+    },
+    {
+      "name": "sat1_terms_attestor_flag_without_key",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "attestor_flag_disagrees",
+      "statement": "has_attestor = 1 needs a non-zero key id",
+      "boc_base64": "te6ccgECAwEAAR8AAbtTQVQxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iAAAAAAyqgaQQAQGvAAAAACA+hAvrwgBAX14QAAAA4QAAAOEJo5FU8DsBFv2brFcVcxc6JeWGi+xk4Hfbjp5GKz7keBdTvfHXzv1or/F9tg3Yf9NlLBJrYEXBQQo5qPSLlbksuAIAwRERERERERERERERERERERERERERERERERERERERERERIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA="
+    },
+    {
+      "name": "sat1_terms_key_without_attestor",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "attestor_flag_disagrees",
+      "statement": "has_attestor = 0 needs a zero key id",
+      "boc_base64": "te6ccgECAwEAAR8AAbtTQVQxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iAAAAAAyqgaQQAQGvAAAAACA+hAvrwgBAX14QAAAA4QAAAOEJo5FU8DsBFv2brFcVcxc6JeWGi+xk4Hfbjp5GKz7keBdTvfHXzv1or/F9tg3Yf9NlLBJrYEXBQQo5qPSLlbksuAIAwRERERERERERERERERERERERERERERERERERERERERERIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMA="
+    },
+    {
+      "name": "sat1_terms_noncanonical_price",
+      "object": "sat1",
+      "base": "sat1",
+      "class": "t3_decoder",
+      "rule": "terms_not_canonical",
+      "statement": "the terms are the canonical encoding",
+      "boc_base64": "te6ccgECAwEAASAAAbtTQVQxAAAAAAAAAACAC1yOKVMa+pfNjnotewd/qLamPHYSCyt1KKEWtT725+SU9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09OAAAAAMqn/iAAAAAAyqgaQQAQGxAAAAADAAPoQL68IAQF9eEAAAAOEAAADhCaORVPA7ARb9m6xXFXMXOiXlhovsZOB3246eRis+5HgXU73x1879aK/xfbYN2H/TZSwSa2BFwUEKOaj0i5W5LLgCAMERERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABA"
+    },
+    {
+      "name": "terms_trailing_bit",
+      "object": "terms",
+      "base": "terms_cell",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no bit follows asset_wallet_code_hash",
+      "boc_base64": "te6ccgEBAgEAvgABrwAAAAAgPoQL68IAQF9eEAAAAOEAAADhCaORVPA7ARb9m6xXFXMXOiXlhovsZOB3246eRis+5HgXU73x1879aK/xfbYN2H/TZSwSa2BFwUEKOaj0i5W5LLwBAMERERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABA"
+    },
+    {
+      "name": "terms_trailing_reference",
+      "object": "terms",
+      "base": "terms_cell",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "exactly one reference, the tail",
+      "boc_base64": "te6ccgEBAwEAwQACrwAAAAAgPoQL68IAQF9eEAAAAOEAAADhCaORVPA7ARb9m6xXFXMXOiXlhovsZOB3246eRis+5HgXU73x1879aK/xfbYN2H/TZSwSa2BFwUEKOaj0i5W5LLgBAgDBEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAA"
+    },
+    {
+      "name": "terms_missing_tail",
+      "object": "terms",
+      "base": "terms_cell",
+      "class": "t3_decoder",
+      "rule": "missing_field",
+      "statement": "the tail is present",
+      "boc_base64": "te6ccgEBAQEAWgAArwAAAAAgPoQL68IAQF9eEAAAAOEAAADhCaORVPA7ARb9m6xXFXMXOiXlhovsZOB3246eRis+5HgXU73x1879aK/xfbYN2H/TZSwSa2BFwUEKOaj0i5W5LLg="
+    },
+    {
+      "name": "terms_tail_trailing_bit",
+      "object": "terms",
+      "base": "terms_cell",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no bit follows attestor_key_id",
+      "boc_base64": "te6ccgEBAgEAvgABrwAAAAAgPoQL68IAQF9eEAAAAOEAAADhCaORVPA7ARb9m6xXFXMXOiXlhovsZOB3246eRis+5HgXU73x1879aK/xfbYN2H/TZSwSa2BFwUEKOaj0i5W5LLgBAMERERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg"
+    },
+    {
+      "name": "terms_noncanonical_storage_fee",
+      "object": "terms",
+      "base": "terms_cell",
+      "class": "t3_decoder",
+      "rule": "terms_not_canonical",
+      "statement": "the terms are the canonical encoding",
+      "boc_base64": "te6ccgEBAgEAvwABsQAAAAAgPoUAC+vCAEBfXhAAAADhAAAA4QmjkVTwOwEW/ZusVxVzFzol5YaL7GTgd9uOnkYrPuR4F1O98dfO/Wiv8X22Ddh/02UsEmtgRcFBCjmo9IuVuSy4AQDBEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQA=="
+    },
+    {
+      "name": "saf1_wrong_tag",
+      "object": "saf1",
+      "base": "saf1_refused_amount",
+      "class": "t3_decoder",
+      "rule": "tag",
+      "statement": "the tag is SAF1 (0x53414631)",
+      "boc_base64": "te6ccgEBAQEAPAAAc1NBTzEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0g7cAAAAAAAAAAM="
+    },
+    {
+      "name": "saf1_trailing_bit",
+      "object": "saf1",
+      "base": "saf1_refused_amount",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no bit follows payout_id",
+      "boc_base64": "te6ccgEBAQEAPAAAdFNBRjEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0g7cAAAAAAAAAAI="
+    },
+    {
+      "name": "saf1_trailing_reference",
+      "object": "saf1",
+      "base": "saf1_refused_amount",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no reference",
+      "boc_base64": "te6ccgEBAgEAPwABc1NBRjEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0g7cAAAAAAAAAAMBAAA="
+    },
+    {
+      "name": "saf1_missing_payout_id",
+      "object": "saf1",
+      "base": "saf1_refused_amount",
+      "class": "t3_decoder",
+      "rule": "missing_field",
+      "statement": "every field is present",
+      "boc_base64": "te6ccgEBAQEANAAAY1NBRjEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0g7d"
+    },
+    {
+      "name": "saf1_from_addr_none",
+      "object": "saf1",
+      "base": "saf1_refused_amount",
+      "class": "t3_decoder",
+      "rule": "address_required",
+      "statement": "from is a MsgAddressInt",
+      "boc_base64": "te6ccgEBAQEAGwAAMVNBRjEAAAAAAAAATQgPpB24AAAAAAAAAAY="
+    },
+    {
+      "name": "saf1_reason_not_a_funding_reason",
+      "object": "saf1",
+      "base": "saf1_refused_amount",
+      "class": "resolver",
+      "rule": "resolver_reason_outside_set",
+      "statement": "reason is an admission reason or 1929",
+      "boc_base64": "te6ccgEBAQEAPAAAc1NBRjEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0g7sAAAAAAAAAAM="
+    },
+    {
+      "name": "saf1_underfunded_with_payout",
+      "object": "saf1",
+      "base": "saf1_underfunded",
+      "class": "resolver",
+      "rule": "resolver_underfunded_with_payout",
+      "statement": "reason 1929 (underfunded) names payout id 0",
+      "boc_base64": "te6ccgEBAQEAPAAAc1NBRjEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0A8SAAAAAAAAAAM="
+    },
+    {
+      "name": "sao1_wrong_tag",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "tag",
+      "statement": "the tag is SAO1 (0x53414f31)",
+      "boc_base64": "te6ccgEBAQEAOwAAcVNBQjEAAAAAAAAAASAAAAAAAAAAEADoN8CTZq52O7G+3n+dERj1QXu0RghjyBmxOapCUNgX+ID6BA=="
+    },
+    {
+      "name": "sao1_trailing_bit",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no bit follows outcome",
+      "boc_base64": "te6ccgEBAQEAOwAAcVNBTzEAAAAAAAAAASAAAAAAAAAAEADoN8CTZq52O7G+3n+dERj1QXu0RghjyBmxOapCUNgX+ID6Ag=="
+    },
+    {
+      "name": "sao1_trailing_reference",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no reference",
+      "boc_base64": "te6ccgEBAgEAPgABcVNBTzEAAAAAAAAAASAAAAAAAAAAEADoN8CTZq52O7G+3n+dERj1QXu0RghjyBmxOapCUNgX+ID6BAEAAA=="
+    },
+    {
+      "name": "sao1_missing_outcome",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "missing_field",
+      "statement": "every field is present",
+      "boc_base64": "te6ccgEBAQEAOwAAcVNBTzEAAAAAAAAAASAAAAAAAAAAEADoN8CTZq52O7G+3n+dERj1QXu0RghjyBmxOapCUNgX+ID6IA=="
+    },
+    {
+      "name": "sao1_kind_zero",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "kind_range",
+      "statement": "kind is 1-7",
+      "boc_base64": "te6ccgEBAQEAOwAAcVNBTzEAAAAAAAAAAQAAAAAAAAAAEADoN8CTZq52O7G+3n+dERj1QXu0RghjyBmxOapCUNgX+ID6BA=="
+    },
+    {
+      "name": "sao1_outcome_six",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "outcome_range",
+      "statement": "outcome is 0-5",
+      "boc_base64": "te6ccgEBAQEAOwAAcVNBTzEAAAAAAAAAASAAAAAAAAAAEADoN8CTZq52O7G+3n+dERj1QXu0RghjyBmxOapCUNgX+ID6NA=="
+    },
+    {
+      "name": "sao1_outcome_seven",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "outcome_range",
+      "statement": "outcome is 0-5",
+      "boc_base64": "te6ccgEBAQEAOwAAcVNBTzEAAAAAAAAAASAAAAAAAAAAEADoN8CTZq52O7G+3n+dERj1QXu0RghjyBmxOapCUNgX+ID6PA=="
+    },
+    {
+      "name": "sao1_recipient_addr_none",
+      "object": "sao1",
+      "base": "sao1.kind_1_delivered",
+      "class": "t3_decoder",
+      "rule": "address_required",
+      "statement": "recipient is a MsgAddressInt",
+      "boc_base64": "te6ccgEBAQEAGgAAL1NBTzEAAAAAAAAAASAAAAAAAAAAAQH0CA=="
+    },
+    {
+      "name": "sab1_wrong_tag",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "t3_decoder",
+      "rule": "tag",
+      "statement": "the tag is SAB1 (0x53414231)",
+      "boc_base64": "te6ccgEBAQEAJQAARVNBRjEAAAAAAAAABAAAAAAAAAAAEEZQ/QAAAAAAAAAAAALA"
+    },
+    {
+      "name": "sab1_trailing_bit",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no bit follows payout_id",
+      "boc_base64": "te6ccgEBAQEAJQAARVNBQjEAAAAAAAAABAAAAAAAAAAAEEZQ/QAAAAAAAAAAAALg"
+    },
+    {
+      "name": "sab1_trailing_reference",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "t3_decoder",
+      "rule": "trailing_data",
+      "statement": "no reference",
+      "boc_base64": "te6ccgEBAgEAKAABRVNBQjEAAAAAAAAABAAAAAAAAAAAEEZQ/QAAAAAAAAAAAALAAQAA"
+    },
+    {
+      "name": "sab1_missing_payout_id",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "t3_decoder",
+      "rule": "missing_field",
+      "statement": "every field is present",
+      "boc_base64": "te6ccgEBAQEAHQAANVNBQjEAAAAAAAAABAAAAAAAAAAAEEZQ/QAAQA=="
+    },
+    {
+      "name": "sab1_result_not_0_or_1936",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "resolver",
+      "rule": "resolver_result_outside_set",
+      "statement": "result is 0 or 1936",
+      "boc_base64": "te6ccgEBAQEAJQAARVNBQjEAAAAAAAAABAAAAAAAAAAAEEZQ/QAAgAAAAAAAAALA"
+    },
+    {
+      "name": "sab1_paid_without_payout",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "resolver",
+      "rule": "resolver_result_disagrees_with_payout",
+      "statement": "result 0 names its payout",
+      "boc_base64": "te6ccgEBAQEAJQAARVNBQjEAAAAAAAAABAAAAAAAAAAAEEZQ/QAAAAAAAAAAAABA"
+    },
+    {
+      "name": "sab1_refused_with_payout",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "resolver",
+      "rule": "resolver_result_disagrees_with_payout",
+      "statement": "result 1936 names no payout",
+      "boc_base64": "te6ccgEBAQEAJQAARVNBQjEAAAAAAAAABAAAAAAAAAAAEEZQ/QPIAAAAAAAAAALA"
+    },
+    {
+      "name": "sab1_surplus_with_target",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "resolver",
+      "rule": "resolver_surplus_with_target",
+      "statement": "purpose 0 (surplus) names target 0",
+      "boc_base64": "te6ccgEBAQEAJQAARVNBQjEAAAAAAAAABAAAAAAAAAACkEZQ/QAAAAAAAAAAAALA"
+    }
+  ],
+  "payload_positives": [
+    {
+      "name": "by_reference",
+      "statement": "bit 1 and the token_call by reference",
+      "boc_base64": "te6ccgEBAgEASgABAcABAIhTVEMBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "name": "inline",
+      "statement": "bit 0 and the token_call inline",
+      "boc_base64": "te6ccgEBAQEARwAAiSmqIYCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQA=="
+    }
+  ],
+  "payload_negatives": [
+    {
+      "name": "no_payload",
+      "rule": "a token_call is present (bit 0 and nothing inline)",
+      "expected_reason": 1939,
+      "boc_base64": "te6ccgEBAQEAAwAAAUA="
+    },
+    {
+      "name": "another_tag",
+      "rule": "the tag is 0x53544301",
+      "expected_reason": 1939,
+      "boc_base64": "te6ccgEBAgEASgABAcABAIhTVEOZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "name": "too_short",
+      "rule": "request_hash and expected_terms_hash are present",
+      "expected_reason": 1939,
+      "boc_base64": "te6ccgEBAgEAKgABAcABAEhTVEMBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    {
+      "name": "trailing_bits",
+      "rule": "no bit follows expected_terms_hash",
+      "expected_reason": 1939,
+      "boc_base64": "te6ccgEBAgEASwABAcABAIlTVEMBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMA="
+    },
+    {
+      "name": "trailing_reference",
+      "rule": "the token_call has no reference",
+      "expected_reason": 1939,
+      "boc_base64": "te6ccgEBAwEATQABAcABAYhTVEMBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAA=="
+    },
+    {
+      "name": "reference_and_trailing_bit",
+      "rule": "nothing follows the payload reference",
+      "expected_reason": 1939,
+      "boc_base64": "te6ccgEBAgEASgABAaABAIhTVEMBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    }
+  ],
+  "refusal_codes": [
+    {
+      "code": 9,
+      "name": "cell_underflow",
+      "path": "throw",
+      "raised_by": "any handler; anycast or addr_var addresses",
+      "tests": [
+        "payouts::claim_destinations_are_validated"
+      ]
+    },
+    {
+      "code": 62,
+      "name": "pq_key_length",
+      "path": "throw",
+      "raised_by": "rotate_attestor_key, respond",
+      "tests": [],
+      "not_executed": "asserted only as aborted (ported::malformed_attestor_keys_and_signatures_are_refused)"
+    },
+    {
+      "code": 63,
+      "name": "pq_malformed_key",
+      "path": "throw",
+      "raised_by": "rotate_attestor_key, respond",
+      "tests": [],
+      "not_executed": "asserted only as aborted (ported::malformed_attestor_keys_and_signatures_are_refused)"
+    },
+    {
+      "code": 1900,
+      "name": "not_owner",
+      "path": "throw",
+      "raised_by": "respond, owner ops",
+      "tests": [
+        "ported::only_owner_can_call_owner_only_operations",
+        "ported::respond_requires_owner_and_a_pending_request"
+      ]
+    },
+    {
+      "code": 1901,
+      "name": "inactive",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return"
+      ]
+    },
+    {
+      "code": 1902,
+      "name": "insufficient_payment",
+      "path": "reason; throw in update_policy",
+      "raised_by": "admission (zero price or cap, amount other than the price, value below the budget), update_policy",
+      "tests": [
+        "funding::the_exact_amount_rule_refuses_over_and_underpayment",
+        "funding::every_admission_refusal_ends_in_a_funding_return",
+        "ported::update_policy_enforces_every_bound"
+      ]
+    },
+    {
+      "code": 1903,
+      "name": "invalid_response_sla",
+      "path": "reason; throw in update_policy",
+      "raised_by": "admission, update_policy",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return",
+        "ported::update_policy_enforces_every_bound"
+      ]
+    },
+    {
+      "code": 1904,
+      "name": "invalid_refund_claim_window",
+      "path": "reason; throw in update_policy",
+      "raised_by": "admission, update_policy",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return",
+        "ported::update_policy_enforces_every_bound"
+      ]
+    },
+    {
+      "code": 1905,
+      "name": "invalid_cleanup_bounty",
+      "path": "reason; throw in update_policy",
+      "raised_by": "admission, update_policy",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return",
+        "ported::update_policy_enforces_every_bound"
+      ]
+    },
+    {
+      "code": 1906,
+      "name": "insufficient_storage_fee",
+      "path": "reason; throw in update_policy",
+      "raised_by": "admission, update_policy",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return",
+        "ported::update_policy_enforces_every_bound"
+      ]
+    },
+    {
+      "code": 1907,
+      "name": "capacity_exceeded_global",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "capacity::with_every_cap_full_a_further_funding_is_refused_and_returned",
+        "funding::every_admission_refusal_ends_in_a_funding_return"
+      ]
+    },
+    {
+      "code": 1908,
+      "name": "capacity_exceeded_caller",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return"
+      ]
+    },
+    {
+      "code": 1909,
+      "name": "request_id_overflow",
+      "path": "reason; throw in payout-creating ops",
+      "raised_by": "admission, payout-creating ops",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return"
+      ],
+      "not_executed": "the payout-id guards of the payout-creating ops are not executed by a test"
+    },
+    {
+      "code": 1910,
+      "name": "unknown_op",
+      "path": "throw",
+      "raised_by": "any",
+      "tests": [],
+      "not_executed": "asserted only as a refusal that leaves the balance unchanged (gas::* unknown op case)"
+    },
+    {
+      "code": 1911,
+      "name": "bad_response_signature",
+      "path": "throw",
+      "raised_by": "respond",
+      "tests": [
+        "ported::a_response_signed_for_another_network_is_refused",
+        "ported::malformed_attestor_keys_and_signatures_are_refused"
+      ]
+    },
+    {
+      "code": 1912,
+      "name": "response_window_closed",
+      "path": "throw",
+      "raised_by": "respond",
+      "tests": [
+        "ported::respond_boundary_is_exact"
+      ]
+    },
+    {
+      "code": 1913,
+      "name": "request_not_pending",
+      "path": "throw",
+      "raised_by": "respond, expire, getter get_request_attestor_key",
+      "tests": [
+        "ported::respond_requires_owner_and_a_pending_request",
+        "ported::duplicate_expire_claim_and_sweep_are_rejected"
+      ]
+    },
+    {
+      "code": 1914,
+      "name": "expire_too_early",
+      "path": "throw",
+      "raised_by": "expire",
+      "tests": [
+        "ported::expire_boundary_is_exact"
+      ]
+    },
+    {
+      "code": 1915,
+      "name": "expire_too_late",
+      "path": "throw",
+      "raised_by": "expire",
+      "tests": [
+        "ported::expire_boundary_is_exact"
+      ]
+    },
+    {
+      "code": 1916,
+      "name": "refund_claim_expired",
+      "path": "throw",
+      "raised_by": "claim_refund",
+      "tests": [
+        "ported::claim_refund_boundary_is_exact"
+      ]
+    },
+    {
+      "code": 1917,
+      "name": "refund_not_found",
+      "path": "throw",
+      "raised_by": "claim_refund",
+      "tests": [
+        "ported::duplicate_expire_claim_and_sweep_are_rejected"
+      ]
+    },
+    {
+      "code": 1918,
+      "name": "not_refund_caller",
+      "path": "throw",
+      "raised_by": "claim_refund, claim_returned",
+      "tests": [
+        "ported::only_the_original_caller_can_claim_their_refund",
+        "payouts::claim_destinations_are_validated"
+      ]
+    },
+    {
+      "code": 1919,
+      "name": "sweep_too_early",
+      "path": "throw",
+      "raised_by": "sweep_expired_request, sweep_returned",
+      "tests": [
+        "ported::sweep_boundary_is_exact",
+        "payouts::a_returned_entry_is_swept_to_its_caller_after_its_deadline"
+      ]
+    },
+    {
+      "code": 1920,
+      "name": "request_not_live",
+      "path": "throw",
+      "raised_by": "sweep_expired_request",
+      "tests": [
+        "ported::sweep_works_against_a_properly_expired_refund_entry_and_not_on_a_request_live_nowhere"
+      ]
+    },
+    {
+      "code": 1921,
+      "name": "insufficient_balance",
+      "path": "throw",
+      "raised_by": "payout-creating ops, abandon_payout",
+      "tests": [],
+      "not_executed": "reached only when storage fees took part of the message's own value; no test drives it"
+    },
+    {
+      "code": 1922,
+      "name": "insufficient_revenue",
+      "path": "throw",
+      "raised_by": "withdraw_revenue",
+      "tests": [
+        "ported::withdraw_revenue_is_capped_by_balance_and_never_takes_locked_fees"
+      ]
+    },
+    {
+      "code": 1923,
+      "name": "not_authorized",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return"
+      ]
+    },
+    {
+      "code": 1924,
+      "name": "rate_limited",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::every_admission_refusal_ends_in_a_funding_return"
+      ]
+    },
+    {
+      "code": 1925,
+      "name": "bad_attestor_key",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "ported::a_deployed_attestor_key_must_match_its_published_key_id_and_revocation_clears_it",
+        "funding::every_admission_refusal_ends_in_a_funding_return"
+      ]
+    },
+    {
+      "code": 1926,
+      "name": "terms_mismatch",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "ported::a_call_quoted_under_one_policy_is_refused_under_another"
+      ]
+    },
+    {
+      "code": 1927,
+      "name": "amount_range",
+      "path": "reason (before the capacity checks); throw on checked sums",
+      "raised_by": "admission, checked sums",
+      "tests": [
+        "ported::a_liability_that_would_go_negative_is_refused_with_the_range_code",
+        "funding::a_ledger_one_below_the_coins_bound_refuses_a_new_admission_with_amount_range"
+      ]
+    },
+    {
+      "code": 1928,
+      "name": "operating_reserve_unfunded",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "ported::solvency_admission_requires_existing_obligations_and_preserves_operator_excess"
+      ]
+    },
+    {
+      "code": 1929,
+      "name": "insufficient_execution_payment",
+      "path": "reason when underfunded; throw in payout ops",
+      "raised_by": "underfunded notification, payout-creating ops, recheck_payout, recover_surplus, withdraw_revenue",
+      "tests": [
+        "funding::underfunded_and_forwardless_transfers_store_nothing_and_become_surplus",
+        "ported::solvency_payouts_require_execution_budget"
+      ]
+    },
+    {
+      "code": 1930,
+      "name": "payout_in_flight",
+      "path": "throw",
+      "raised_by": "claim_returned, sweep_returned, withdraw_revenue, recover_surplus",
+      "tests": [
+        "payouts::a_double_claim_returned_in_one_block_is_refused_with_1930",
+        "capacity::surplus_payouts_in_flight_are_capped",
+        "ported::withdraw_revenue_is_capped_by_balance_and_never_takes_locked_fees"
+      ]
+    },
+    {
+      "code": 1931,
+      "name": "returned_not_found",
+      "path": "throw",
+      "raised_by": "claim_returned, sweep_returned",
+      "tests": [
+        "payouts::a_returned_entry_is_swept_to_its_caller_after_its_deadline"
+      ]
+    },
+    {
+      "code": 1932,
+      "name": "asset_route_invalid",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::a_route_naming_no_bridge_parameter_is_refused_and_returned"
+      ]
+    },
+    {
+      "code": 1933,
+      "name": "asset_not_recognized",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::an_absent_or_malformed_configparam_84_takes_the_refusal_path"
+      ]
+    },
+    {
+      "code": 1934,
+      "name": "invalid_destination",
+      "path": "reason at admission; throw elsewhere",
+      "raised_by": "admission (from off workchain 0), claim_refund, claim_returned, withdraw_revenue, recover_surplus",
+      "tests": [
+        "funding::a_sender_off_workchain_0_is_refused_and_its_tokens_are_logged_surplus",
+        "payouts::claim_destinations_are_validated"
+      ]
+    },
+    {
+      "code": 1935,
+      "name": "not_accepting_tokens",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::accepting_tokens_is_false_at_the_global_returned_cap_and_reclassifies_nothing",
+        "payouts::returned_entries_stop_admission_at_the_per_caller_cap"
+      ]
+    },
+    {
+      "code": 1936,
+      "name": "surplus_insufficient",
+      "path": "throw in recover_surplus; SAB1 result",
+      "raised_by": "recover_surplus, take_balance",
+      "tests": [
+        "surplus::surplus_recovery_pays_only_unattributed_tokens",
+        "surplus::an_older_payout_still_in_flight_is_under_counted_never_over_counted"
+      ]
+    },
+    {
+      "code": 1937,
+      "name": "exposure_cap",
+      "path": "reason; throw in update_policy",
+      "raised_by": "admission, update_policy",
+      "tests": [
+        "funding::the_exposure_caps_bound_the_token_liability",
+        "ported::update_policy_enforces_every_bound"
+      ]
+    },
+    {
+      "code": 1938,
+      "name": "abandon_too_early",
+      "path": "throw",
+      "raised_by": "abandon_payout",
+      "tests": [
+        "surplus::abandon_checks_every_counter_and_respects_a_young_query"
+      ]
+    },
+    {
+      "code": 1939,
+      "name": "malformed_payload",
+      "path": "reason",
+      "raised_by": "admission",
+      "tests": [
+        "funding::a_malformed_payload_takes_the_refusal_path_without_a_throw"
+      ]
+    },
+    {
+      "code": 1940,
+      "name": "payout_not_found",
+      "path": "throw",
+      "raised_by": "recheck_payout, abandon_payout",
+      "tests": [
+        "surplus::recheck_refuses_owner_kinds_early_and_absent_payouts"
+      ]
+    },
+    {
+      "code": 1941,
+      "name": "recheck_not_allowed",
+      "path": "throw",
+      "raised_by": "recheck_payout, abandon_payout",
+      "tests": [
+        "surplus::recheck_refuses_owner_kinds_early_and_absent_payouts",
+        "surplus::abandon_checks_every_counter_and_respects_a_young_query"
+      ]
+    },
+    {
+      "code": 1942,
+      "name": "recheck_too_early",
+      "path": "throw",
+      "raised_by": "recheck_payout",
+      "tests": [
+        "surplus::recheck_refuses_owner_kinds_early_and_absent_payouts"
+      ]
+    },
+    {
+      "code": 1943,
+      "name": "balance_query_busy",
+      "path": "throw",
+      "raised_by": "recheck_payout, recover_surplus, abandon_payout",
+      "tests": [
+        "surplus::the_supersede_rule_holds_for_every_pair_of_query_ops"
+      ]
+    },
+    {
+      "code": 1944,
+      "name": "attestor_keys_full",
+      "path": "reason at admission; throw in rotate_attestor_key",
+      "raised_by": "admission, rotate_attestor_key",
+      "tests": [
+        "capacity::attestor_rotation_is_refused_while_four_keys_are_named_and_allowed_after_they_resolve"
+      ]
+    }
+  ]
+}

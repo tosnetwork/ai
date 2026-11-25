@@ -292,8 +292,11 @@ making identity or transaction history portable only through itself.
 
 ## 9. Asset strategy
 
-Native TOS settles the current protocol domain; stablecoins issued on TOS
-Network are a deferred extension.
+Native TOS settles the current protocol domain. USDC and USDT, bridged onto
+TOS by the TOS token bridge and recognized by ConfigParam 84, are a second
+settlement option on a separate rail (owner decision 2026-11-24, team memo
+STATUS 13.580, amended 13.583); other stablecoins remain a deferred
+extension.
 
 ### TOS
 
@@ -307,21 +310,34 @@ Network are a deferred extension.
 
 The Accepted Quote fixes the actor, its terms and the exact nanoTOS price and
 non-refundable storage fee. Asset substitution after acceptance is impossible:
-the actor accepts and pays out only native TOS.
+the native actor accepts and pays out only native TOS.
 
-### TOS-network stablecoins (deferred)
+### TOS-network stablecoins
 
-Stablecoin pricing of software work, data and API access, compute, storage,
-inference, enterprise procurement, and longer-running agreements remains a
-later product direction. It waits for a stablecoin integration that reports
-payout outcomes on chain, under its own specification, gate, and security
-review. No conforming rail settles a stablecoin today.
+Software work may also be priced and settled in USDC or USDT on the token-rail
+Service Actor ([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md),
+design [`USDC_SETTLEMENT_V1.md`](USDC_SETTLEMENT_V1.md)). One actor settles one
+asset, fixed at deploy, and its Accepted Quote (schema 3) fixes that asset, so
+asset substitution after acceptance is impossible there too. Every token payout
+reports its outcome on chain. The rail is specified and implemented in tos, not
+released or deployed; it settles nothing until its work items, including an
+independent security review and the bridge production gates, are accepted.
+USDC goes first; USDT follows as configuration once USDC has run end to end.
 
-An external-chain token, custodial balance, bridged claim on another network,
-or gateway database balance is not a settlement asset under the initial TOS Service Protocol
-protocol. Supporting a stablecoin later requires its TOS contract identity,
-issuer identity, decimals, and operational status to be independently
-resolvable from finalized TOS state.
+A token minted on TOS by the TOS token bridge is a settlement asset only while
+ConfigParam 84 recognizes it: its master's account, its minter and wallet code
+hashes, its decimals and its status are resolvable from finalized TOS state,
+and the record re-derives from the codes of the bridge that ConfigParam 79 (or
+the source chain's bridge parameter) lists. For such a bridged asset (origin
+kind 1) the issuer identity is the bridge (`origin`) together with the source
+token on its home network; native issuance (kind 2) is reserved. A claim held
+on another network, a custodial balance and a gateway database balance stay
+excluded: none of them is a settlement asset.
+
+Stablecoin pricing of data and API access, compute, storage, inference,
+enterprise procurement, longer-running agreements, and any other stablecoin
+remain later product directions, each under its own specification, gate and
+security review.
 
 The business must not depend on token price appreciation as its primary revenue
 model.

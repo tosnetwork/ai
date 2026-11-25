@@ -437,7 +437,8 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
   (`cap_<64 hex>`, `agent_<64 hex>`, 64-hex hashes), versions against the
   manifest version syntax, strings bounded, unknown fields refused.
 - Amounts are decimal nanoTOS strings with a TOS rendering beside them, never
-  floating point.
+  floating point. A token-rail price is a decimal string of the asset's atomic
+  units named by its exact asset identity (section 6.1).
 - MCP tool annotations (`readOnlyHint`, `idempotentHint`, `destructiveHint`)
   are set as below. They are hints for the client and grant nothing.
 - Every result carries `structuredContent` matching the output schema and one
@@ -1023,6 +1024,39 @@ Limits change only by editing the custody-owned configuration and restarting
 the agent. No tool can read the configuration file or change a limit.
 Prepared records expire with their Quote and then stop reserving.
 
+### 6.1 Token-rail budgets (specified, not implemented)
+
+A purchase on the token-rail Service Actor
+([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md)) is priced in a
+recognized token and pays everything else in TOS. Its limits are per asset, on
+top of the nanoTOS limits above (`USDC_SETTLEMENT_V1.md` sections 6.3 and 6.4,
+work item T9):
+
+- `TokenAssetLimits`, one per pinned asset, keyed by the asset's exact identity
+  (master account, wallet code hash), never by ticker: `max_per_call_atomic`
+  and `max_window_atomic`, unsigned atomic units below `2^120`, counted over the
+  same `window` and record states as `max_window_nanotos`. A Quote in an asset
+  with no entry is refused at quote time. Amounts of two assets are never
+  converted into, netted against or summed with each other.
+- The nanoTOS limits still count the TOS side of a token purchase: the storage
+  fee, the funding transfer's `forward_tos_amount` (at least `storage_fee +
+  MIN_FUNDING_VALUE` from the actor's `get_funding_prices` at the quote's
+  checkpoint) and the value attached to it, and the `PAYOUT_FUNDING` of each
+  refund or returned-entry claim.
+- The agent refuses to build a funding transfer whose `forward_tos_amount` is
+  below that budget, and refuses while the actor's `get_accepting_tokens` is
+  false at the checkpoint: tokens sent underfunded, without a forward amount or
+  past the actor's caps become the provider's surplus, and the preview states
+  so (section 8).
+- The 64-bit bound of the `tosctl` path applies to the nanoTOS side only; a
+  token price is bounded by `2^120 - 1` atomic units.
+
+Amounts in tool results are decimal strings of the asset's atomic units with a
+rendering by the ConfigParam 84 record's `decimals` beside them, computed in
+integer arithmetic. The refund duties of section 11 gain `claim_returned` for
+every returned entry the buyer holds, including one from a refused funding
+return.
+
 ## 7. Carriability, delivery and result acceptance
 
 ### 7.1 A Quote that cannot be carried is never paid for
@@ -1287,6 +1321,20 @@ The preview also states:
   returns the price;
 - what a Receipt proves (4.9);
 - that the provider receives the whole source archive.
+
+For a token-rail purchase (section 6.1; `USDC_SETTLEMENT_V1.md` sections 5.6
+and 6.4) the preview also states:
+
+- the price in its asset, named by its pinned identity (the ticker is display
+  only), and every TOS cost separately;
+- that tokens sent to an actor underfunded, without a forward amount, or while
+  it is not accepting tokens become the provider's surplus;
+- that a refused refund or sweep leaves a returned entry the buyer claims with
+  `claim_returned`, and that a `claim_refund` whose payout is delivered or
+  refused pays the cleanup bounty to the buyer;
+- that the actor's own token wallet holds every customer's principal and that
+  keeping it funded for storage is the provider's operational duty, not a
+  contract guarantee.
 
 ## 9. Untrusted content and prompt-injection resistance
 

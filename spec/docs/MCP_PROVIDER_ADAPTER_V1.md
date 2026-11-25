@@ -365,6 +365,34 @@ wrote and why (`model` or `wallet_floor`); a marker whose bytes differ from
 the record, or whose origin is `operator`, is never removed by the agent
 without a confirmed action.
 
+### 2.7 Token-rail actors (specified, not implemented)
+
+A provider may also run token-rail Service Actors
+([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md)), one per
+recognized asset (`USDC_SETTLEMENT_V1.md` sections 6.3 and 6.4, work item T8).
+For them:
+
+- **Amounts.** The price, its offer bounds and the token revenue are decimal
+  strings of the asset's atomic units below `2^120`, named by the asset's exact
+  identity, with a rendering by its ConfigParam 84 `decimals`. The storage fee,
+  the cleanup bounty, TOS revenue and every wallet floor stay nanoTOS.
+- **Offer bounds per asset**: the lowest and highest price in atomic units for
+  each pinned asset, beside the existing nanoTOS bounds, and the actor's
+  `max_token_liability` (a positive atomic amount, or `2^120 - 1` for no cap).
+  An offer in an asset with no bounds is refused.
+- **Withdrawal** of both revenues by `withdraw_revenue(token_amount,
+  tos_amount)`, with the token part as a payout whose outcome is followed to
+  delivery or refusal; at most 4 are in flight.
+- **Recovery** by `recover_surplus` and `abandon_payout`, each behind a human
+  confirmation (section 5).
+- **Floors.** The actor's TOS balance above its backing floor, and the TOS
+  balance of the actor's own token wallet, which holds every customer's
+  principal, above a configured floor; the wallet-floor pause of 2.5 extends to
+  both.
+- **Default auto-pause.** On a monitoring freeze, pause or destroy alarm for an
+  asset, the node clears `active` on its own actors of that asset with its own
+  signed `update_policy`, under the pause rules of 2.6.
+
 ## 3. Setup without OpenFox
 
 ### 3.1 `init` stays a custody-side command
@@ -418,7 +446,8 @@ different hosts. The adapter adds nothing to relay use.
 The rules of the buyer spec 4.1 apply: typed input and output structs,
 constant tool metadata with no buyer, relay or chain text in it, inputs
 validated before any read, amounts as decimal nanoTOS strings with a TOS
-rendering beside them, annotations as below (hints that grant nothing),
+rendering beside them (token-rail amounts as in 2.7), annotations as below
+(hints that grant nothing),
 `structuredContent` matching the output schema plus one text block that
 renders the same content, and the finalized checkpoint named for every
 chain-derived value.

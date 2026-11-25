@@ -40,7 +40,7 @@ that association.
 | 17 | `endpoint_commitment` | non-zero SHA-256 digest |
 | 18 | `execution_signer_authorization` | non-zero SHA-256 digest of the attestor key text form |
 | 19 | `retention_seconds` | 3600 through 2592000 |
-| 20 | `supported_assets` | exactly one asset entry: native TOS |
+| 20 | `supported_assets` | exactly one asset entry: native TOS or one recognized TOS-network token |
 | 21 | `settlement` | settlement map |
 
 Schema digests are SHA-256 over the exact UTF-8 bytes, including the final
@@ -78,10 +78,32 @@ exit code zero.
 
 ## Asset
 
-Key 20 is an array of exactly one element, the native TOS entry: the map
-`{0: "native-tos"}` (key 0, the exact text). Amounts are nanoTOS. The Service
-Actor rail settles nothing else, so stablecoin identities are not admitted in
-this profile; a ticker is display metadata and never an asset identity.
+Key 20 is an array of exactly one element, in one of two forms:
+
+- **native TOS**: the map `{0: "native-tos"}` (key 0, the exact text). Amounts
+  are nanoTOS, and key 21 names the native Service Actor rail.
+- **a recognized TOS-network token**: the map `{0: "tos-token", 1: <master
+  account ID>, 2: <wallet code hash>, 3: <decimals>}`, where key 1 is a byte
+  string of 32 bytes (the master's account ID on workchain 0, not all zero),
+  key 2 a byte string of 32 bytes (not all zero), and key 3 an unsigned integer
+  of at most 255. The price is in the token's atomic units, and key 21 names
+  the token rail ([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md)).
+  The entry must equal the actor's asset route (master and
+  `wallet_code_hash`) and a pinned ConfigParam 84 record with status 1 at the
+  admission checkpoint, whose `decimals` it repeats
+  ([`USDC_SETTLEMENT_V1.md`](USDC_SETTLEMENT_V1.md) section 3.1). It names one
+  asset; USDC and USDT are two entries of ConfigParam 84 and two different key
+  20 values.
+
+No other form or key is admitted, and a cross-combination of rail and asset (a
+token entry with the native rail, or `native-tos` with the token rail) is
+refused. A ticker is display metadata and never an asset identity.
+
+The token form is specified here and in the token-rail document; its
+production encoder, vector and negative cases (one per mismatch) are T7 work
+(`USDC_SETTLEMENT_V1.md` section 8) and do not exist yet. Until they do, the
+frozen vector below covers the native form only, and a conforming tool admits
+only the native form.
 
 ## Settlement map
 
@@ -93,11 +115,15 @@ section 2.3):
 
 | Key | Field | Type and bound |
 |---:|---|---|
-| 1 | rail | exact `tos.service.service-actor.v1` |
+| 1 | rail | exact `tos.service.service-actor.v1` (native) or `tos.service.service-actor-token.v1` (token rail) |
 | 2 | actor workchain | exactly `0` |
 | 3 | actor account ID | byte string of 32 bytes, not all zero |
-| 4 | actor code hash | byte string of 32 bytes, not all zero; equals a published Service Actor release |
+| 4 | actor code hash | byte string of 32 bytes, not all zero; equals a published release of the rail field 1 names: the native Service Actor release, or the token-rail release `tos-service-actor-token-v1` |
 | 5 | attestor key | text form `mldsa44:<64 lowercase hex key id>` of a non-zero key ID |
+
+A verifier selects the rail by field 1 and the pinned code hash in field 4. A
+native rail string with a token-rail code hash, or the reverse, is refused, as
+is a rail that disagrees with key 20.
 
 Key 18 equals SHA-256 over the exact ASCII bytes of field 5. The attestor key is
 pinned by the manifest (D5): rotating it requires a new Capability version

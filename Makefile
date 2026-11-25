@@ -49,11 +49,17 @@ boundary-lint:
 
 # The closed PredictionMarket V1 release manifest must match its vectors, and
 # the independent reproducers must rebuild the Service Actor manifest vector
-# and the rail work frame vectors and refuse their negative cases.
+# and the rail work frame vectors and refuse their negative cases. The
+# token-rail Service Actor vectors must keep the digest of the tos fixture they
+# copy (byte equality with the fixture itself needs a tos checkout:
+# verify-service-actor-token-vector-copy.py --tos-repo DIR), and their
+# reproducer must rebuild its negative corpus and refuse every case.
 spec-check:
 	python3 spec/scripts/verify-prediction-market-compatibility.py
 	python3 -I spec/scripts/reproduce-software-work-manifest-v1-service-actor.py
 	python3 -I spec/scripts/reproduce-service-actor-rail-work-frames-v1.py
+	python3 -I spec/scripts/verify-service-actor-token-vector-copy.py
+	python3 -I spec/scripts/reproduce-service-actor-token-v1.py
 
 # Red controls for the rail work frame checks: every mutant must be caught by
 # its named test, and a mutant that does not apply or build is a script error.

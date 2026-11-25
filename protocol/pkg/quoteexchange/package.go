@@ -30,7 +30,12 @@ type Validated struct {
 func Validate(network *nativev1.NetworkDomain, request *nativev1.RequestQuoteProposalRequest,
 	value *nativev1.QuoteProposalPackageV1, now time.Time) (*Validated, error) {
 	validated, err := validatePortable(network, request, value)
-	if err != nil || now.IsZero() ||
+	if err != nil {
+		// Keep the specific refusal, for example a token-rail field on a
+		// native proposal (nativecore.ErrTokenRailFieldsOnNativeQuote).
+		return nil, err
+	}
+	if now.IsZero() ||
 		value.Proposal.ExpiresAtUnixSeconds <= uint64(now.Unix()) ||
 		value.Proposal.ExpiresAtUnixSeconds > uint64(now.Add(time.Hour).Unix()) {
 		return nil, errors.New("invalid Quote Proposal package identity or expiry")
