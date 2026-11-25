@@ -390,6 +390,35 @@ Deliver on the Service Actor rail:
   Codex each operated a provider and each bought, and the core team
   operated every role.
 
+Token-rail settlement in USDC and USDT (owner decision 2026-11-24, team memo
+STATUS 13.580, amended 13.583; design `docs/USDC_SETTLEMENT_V1.md`, whose
+section 8 lists T1-T18). It adds a second rail beside the native one and does
+not change this gate's acceptance rule:
+
+- 🟡 T1 reported-transfer and balance-report bridge wallet — merged on tos
+  main (tosnetwork/tos#512, merge `c447cf68d`); not deployed, and its audit is
+  part of T12;
+- 🟡 T2 ConfigParam 84 — merged on tos main (tosnetwork/tos#513, merge
+  `e40d28737`); no value is proposed on any network;
+- 🟡 T3 token-rail Service Actor — implemented in tosnetwork/tos#516
+  (review-approved head `12cf5522801a30806eeb7cda9ee85fbd051ecbca`), with
+  sandbox tests on both engines, measured gas and contract-execution vectors;
+  not merged, released or deployed;
+- 🟡 T6 normative specification — `docs/SERVICE_ACTOR_TOKEN_TVM_V1.md`; the T3
+  vectors copied byte for byte to
+  `test-vectors/service-actor-token-conformance-vectors.json` (provenance and
+  digest in its `.source.json`, checked by
+  `scripts/verify-service-actor-token-vector-copy.py`), reproduced
+  independently with the negative corpus
+  `test-vectors/service-actor-token-negative-v1.json` by
+  `scripts/reproduce-service-actor-token-v1.py` (both in `make spec-check`);
+  manifest key 20 token form, Accepted Quote schema 3, Receipt schema 2 and the
+  Quote Proposal fields 18-19 specified. Pending: recopy at the merged release
+  commit, and the production Go encoders, vectors and negatives of T7;
+- ⬜ T4 `tosctl`, T5 test USDC, T7-T9 `ai` implementation,
+  T10 live lifecycles, T11 relayer, T12 bridge production gates, T13
+  independent security review, T14 monitoring, T15-T18 USDT.
+
 Delivered earlier:
 
 - ✅ immutable software-work Capability manifest profile — canonical CBOR,
@@ -610,7 +639,10 @@ Deliver:
 - 🟡 endpoint diversity and finality incident procedures — runbook baseline
   exists; multi-operator exercise remains;
 - ⬜ load, storage, denial-of-service, and fee-budget evidence;
-- ⬜ TOS-network stablecoin accounting and operator compliance controls;
+- ⬜ TOS-network stablecoin accounting and operator compliance controls — for
+  the token rail, the bridge production gates (T12), the independent review
+  (T13) and the per-asset monitoring (T14) of `docs/USDC_SETTLEMENT_V1.md`
+  section 8;
 - 🟡 monitoring for code, state, quorum, finality, and economic divergence —
   required signals and stop-the-line rules are defined in the runbook;
 - 🟡 reproducible releases and signed deployment artifacts — repository-level

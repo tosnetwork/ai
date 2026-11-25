@@ -13,10 +13,19 @@ limited to machine-checkable software work settled in native TOS on the Service
 Actor contract ([`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md), binding
 rules in [`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)),
 objective release or refund, and narrowly bounded dispute evidence.
-Stablecoin pricing, additional TOS-network assets, subjective work,
+
+The same work may instead be priced and settled in one recognized TOS-network
+token on the token-rail Service Actor
+([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md), design
+[`USDC_SETTLEMENT_V1.md`](USDC_SETTLEMENT_V1.md)): USDC first and USDT second,
+both minted on TOS by the TOS token bridge, each a settlement asset only while
+ConfigParam 84 recognizes it. That rail meets the condition D8 set: every
+token payout is a reported transfer whose outcome comes back to the actor
+authenticated and at most once. It is specified and implemented in tos but not
+released or deployed, and it gates nothing until its work items (design
+section 8) are accepted. Assets other than these two, subjective work,
 generalized arbitration, and high-frequency payment channels require later
-roadmap gates. Stablecoin pricing in particular waits for a token integration
-that reports payout outcomes.
+roadmap gates.
 
 ## Quote Proposal
 
@@ -150,9 +159,16 @@ scope.
 ## Asset roles
 
 Native TOS pays contract execution, Registry operations, relaying, protocol
-security costs, and, in the current domain, the provider service itself. Wallets
-and accounting views must show the service price, the non-refundable storage
-fee, and network fees separately.
+security costs, and, on the native rail, the provider service itself. On the
+token rail the recognized token pays only the service price
+(`price_per_call`, in atomic units); the storage fee, the cleanup bounty, every
+allowance, the outcome locks, the operating reserve, the TOS attached to each
+token transfer and every network fee stay in native TOS
+(`USDC_SETTLEMENT_V1.md` section 6.5). A buyer of the token rail therefore
+holds both the token and TOS. Wallets and accounting views must show the
+service price in its asset, the non-refundable storage fee, and network fees
+separately, never convert one asset into another, and aggregate amounts per
+exact asset identity, never per ticker.
 
 ## Invariants
 

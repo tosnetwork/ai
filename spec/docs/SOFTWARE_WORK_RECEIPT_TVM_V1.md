@@ -11,7 +11,9 @@ owner to submit it as `respond`. Finalized Service Actor transactions remain
 the sole settlement authority.
 
 The first profile is intentionally fixed-price: the Receipt charge equals the
-quoted price, the request's snapshotted `price_per_call` in nanoTOS.
+quoted price, the request's snapshotted `price_per_call`, in nanoTOS for schema
+1 (the native rail) and in the asset's atomic units for schema 2 (the token
+rail, section "Schema 2: the token rail").
 
 ## Receipt cell
 
@@ -42,6 +44,29 @@ equals the quoted provider.
 The Quote commitment transitively binds the Capability ID, immutable version,
 manifest, endpoint, actor, terms, attestor, provider, and expiry.
 Bulk output, reports, source, and artifacts remain content-addressed off-chain.
+
+### Schema 2: the token rail
+
+A Receipt for a token-rail Service Actor
+([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md)) uses
+`schema = 2`. Every cell is as schema 1 except the economic cell:
+
+```text
+economic_v2$_ charged_atomic_amount:uint128 asset_master:uint256
+  provider_agent_id:uint256 = ReceiptEconomicV2;
+```
+
+`charged_atomic_amount` is in the asset's atomic units and equals the schema 3
+Accepted Quote's `price_atomic` (the request's snapshotted `price_per_call`);
+`asset_master` is the 256-bit account ID of that Quote's asset master on
+workchain 0. Attestor custody refuses to sign SRP2 for anything else (D9), as it
+does for schema 1, and refuses schema 1 for a token-rail request and schema 2
+for a native one. The token rail's `respond` is
+`respond#53544302` (`SERVICE_ACTOR_TOKEN_TVM_V1.md` section 7.2); its SRP2
+statement is unchanged and its `price` is atomic units.
+
+**Status.** Specified only. The production encoder, vectors and negative cases
+for schema 2 are T7 work (`USDC_SETTLEMENT_V1.md` section 8).
 
 The contract does not decode the Receipt. It does not check `exit_code`,
 `completed_at`, the charge, or any digest; any attested response before

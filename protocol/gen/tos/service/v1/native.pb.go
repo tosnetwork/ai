@@ -2649,6 +2649,9 @@ func (x *TOSContractIdentityV1) GetCodeHash() string {
 	return ""
 }
 
+// A recognized TOS-network token: master on workchain 0 with its 32-byte
+// account id and minter code hash, the wallet code hash, and decimals 0..255,
+// each equal to the token actor's route and the pinned ConfigParam 84 record.
 type TOSAssetIdentityV1 struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Master         *TOSContractIdentityV1 `protobuf:"bytes,1,opt,name=master,proto3" json:"master,omitempty"`
@@ -2710,9 +2713,11 @@ func (x *TOSAssetIdentityV1) GetDecimals() uint32 {
 }
 
 // A Quote Proposal is gateway-local and non-canonical until accepted on TOS.
-// It settles on the Service Actor rail: the price is native TOS and every
-// rail field must equal finalized actor state and manifest key 21 before a
-// buyer builds a call.
+// It settles on the native Service Actor rail (price_nanotos set, asset and
+// price_atomic unset) or on the token rail (asset and price_atomic set,
+// price_nanotos empty); any other combination is refused. Every rail field
+// must equal finalized actor state and the manifest before a buyer builds a
+// call.
 type QuoteProposalV1 struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	ProposalId             string                 `protobuf:"bytes,1,opt,name=proposal_id,json=proposalId,proto3" json:"proposal_id,omitempty"`
@@ -2730,12 +2735,18 @@ type QuoteProposalV1 struct {
 	PolicyVersion uint32 `protobuf:"varint,13,opt,name=policy_version,json=policyVersion,proto3" json:"policy_version,omitempty"`
 	// 64 lowercase hex; the actor's terms_hash for the quoted policy.
 	TermsHash string `protobuf:"bytes,14,opt,name=terms_hash,json=termsHash,proto3" json:"terms_hash,omitempty"`
-	// Exact price_per_call in nanoTOS: positive, [1-9][0-9]*, below 2^120.
+	// Native rail only. Exact price_per_call in nanoTOS: positive,
+	// [1-9][0-9]*, below 2^120.
 	PriceNanotos string `protobuf:"bytes,15,opt,name=price_nanotos,json=priceNanotos,proto3" json:"price_nanotos,omitempty"`
 	// Non-refundable storage fee in nanoTOS, same encoding and bound.
 	StorageFeeNanotos string `protobuf:"bytes,16,opt,name=storage_fee_nanotos,json=storageFeeNanotos,proto3" json:"storage_fee_nanotos,omitempty"`
 	// mldsa44:<64 lowercase hex key id>; equals manifest key 21 field 5.
 	AttestorKeyId string `protobuf:"bytes,17,opt,name=attestor_key_id,json=attestorKeyId,proto3" json:"attestor_key_id,omitempty"`
+	// Token rail only: the asset the actor's route fixes.
+	Asset *TOSAssetIdentityV1 `protobuf:"bytes,18,opt,name=asset,proto3" json:"asset,omitempty"`
+	// Token rail only: exact price_per_call in atomic units, [1-9][0-9]*,
+	// below 2^120.
+	PriceAtomic   string `protobuf:"bytes,19,opt,name=price_atomic,json=priceAtomic,proto3" json:"price_atomic,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2864,6 +2875,20 @@ func (x *QuoteProposalV1) GetStorageFeeNanotos() string {
 func (x *QuoteProposalV1) GetAttestorKeyId() string {
 	if x != nil {
 		return x.AttestorKeyId
+	}
+	return ""
+}
+
+func (x *QuoteProposalV1) GetAsset() *TOSAssetIdentityV1 {
+	if x != nil {
+		return x.Asset
+	}
+	return nil
+}
+
+func (x *QuoteProposalV1) GetPriceAtomic() string {
+	if x != nil {
+		return x.PriceAtomic
 	}
 	return ""
 }
@@ -3940,7 +3965,7 @@ const file_tos_service_v1_native_proto_rawDesc = "" +
 	"\x12TOSAssetIdentityV1\x12=\n" +
 	"\x06master\x18\x01 \x01(\v2%.tos.service.v1.TOSContractIdentityV1R\x06master\x12(\n" +
 	"\x10wallet_code_hash\x18\x02 \x01(\tR\x0ewalletCodeHash\x12\x1a\n" +
-	"\bdecimals\x18\x03 \x01(\rR\bdecimals\"\xbf\x05\n" +
+	"\bdecimals\x18\x03 \x01(\rR\bdecimals\"\x9c\x06\n" +
 	"\x0fQuoteProposalV1\x12\x1f\n" +
 	"\vproposal_id\x18\x01 \x01(\tR\n" +
 	"proposalId\x12#\n" +
@@ -3958,7 +3983,9 @@ const file_tos_service_v1_native_proto_rawDesc = "" +
 	"terms_hash\x18\x0e \x01(\tR\ttermsHash\x12#\n" +
 	"\rprice_nanotos\x18\x0f \x01(\tR\fpriceNanotos\x12.\n" +
 	"\x13storage_fee_nanotos\x18\x10 \x01(\tR\x11storageFeeNanotos\x12&\n" +
-	"\x0fattestor_key_id\x18\x11 \x01(\tR\rattestorKeyIdJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"\x0fattestor_key_id\x18\x11 \x01(\tR\rattestorKeyId\x128\n" +
+	"\x05asset\x18\x12 \x01(\v2\".tos.service.v1.TOSAssetIdentityV1R\x05asset\x12!\n" +
+	"\fprice_atomic\x18\x13 \x01(\tR\vpriceAtomicJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
 	"R\rmaximum_priceR\x13escrow_terms_digestR\x15dispute_policy_digest\"\xf4\x02\n" +
 	"\x0fAcceptedQuoteV1\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12)\n" +
@@ -4190,42 +4217,43 @@ var file_tos_service_v1_native_proto_depIdxs = []int32{
 	8,  // 42: tos.service.v1.ResolveDNSAliasResponse.resolver_path:type_name -> tos.service.v1.TOSAccountAddressV1
 	36, // 43: tos.service.v1.TOSAssetIdentityV1.master:type_name -> tos.service.v1.TOSContractIdentityV1
 	8,  // 44: tos.service.v1.QuoteProposalV1.actor:type_name -> tos.service.v1.TOSAccountAddressV1
-	38, // 45: tos.service.v1.AcceptedQuoteV1.proposal:type_name -> tos.service.v1.QuoteProposalV1
-	7,  // 46: tos.service.v1.AcceptedQuoteV1.reference:type_name -> tos.service.v1.ChainReference
-	6,  // 47: tos.service.v1.AcceptedQuoteV1.network:type_name -> tos.service.v1.NetworkDomain
-	4,  // 48: tos.service.v1.ListCapabilitiesRequest.context:type_name -> tos.service.v1.RequestContext
-	27, // 49: tos.service.v1.ListCapabilitiesResponse.capabilities:type_name -> tos.service.v1.NativeStateV1
-	27, // 50: tos.service.v1.CapabilitySearchResultV1.capability:type_name -> tos.service.v1.NativeStateV1
-	42, // 51: tos.service.v1.CapabilitySearchResultV1.gateway_local:type_name -> tos.service.v1.GatewayLocalCapabilityMetadataV1
-	4,  // 52: tos.service.v1.SearchCapabilitiesRequest.context:type_name -> tos.service.v1.RequestContext
-	43, // 53: tos.service.v1.SearchCapabilitiesResponse.results:type_name -> tos.service.v1.CapabilitySearchResultV1
-	4,  // 54: tos.service.v1.PublishSoftwareWorkManifestRequest.context:type_name -> tos.service.v1.RequestContext
-	27, // 55: tos.service.v1.PublishSoftwareWorkManifestResponse.capability:type_name -> tos.service.v1.NativeStateV1
-	4,  // 56: tos.service.v1.GetSoftwareWorkManifestRequest.context:type_name -> tos.service.v1.RequestContext
-	4,  // 57: tos.service.v1.RequestQuoteProposalRequest.context:type_name -> tos.service.v1.RequestContext
-	38, // 58: tos.service.v1.QuoteProposalPackageV1.proposal:type_name -> tos.service.v1.QuoteProposalV1
-	51, // 59: tos.service.v1.RequestQuoteProposalResponse.package:type_name -> tos.service.v1.QuoteProposalPackageV1
-	28, // 60: tos.service.v1.NativeService.SubmitNativeAction:input_type -> tos.service.v1.SubmitNativeActionRequest
-	30, // 61: tos.service.v1.NativeService.ResolveNativeState:input_type -> tos.service.v1.ResolveNativeStateRequest
-	34, // 62: tos.service.v1.DNSAliasService.ResolveDNSAlias:input_type -> tos.service.v1.ResolveDNSAliasRequest
-	40, // 63: tos.service.v1.CapabilityDiscoveryService.ListCapabilities:input_type -> tos.service.v1.ListCapabilitiesRequest
-	44, // 64: tos.service.v1.CapabilityDiscoveryService.SearchCapabilities:input_type -> tos.service.v1.SearchCapabilitiesRequest
-	46, // 65: tos.service.v1.CapabilityDiscoveryService.PublishSoftwareWorkManifest:input_type -> tos.service.v1.PublishSoftwareWorkManifestRequest
-	48, // 66: tos.service.v1.CapabilityDiscoveryService.GetSoftwareWorkManifest:input_type -> tos.service.v1.GetSoftwareWorkManifestRequest
-	50, // 67: tos.service.v1.CapabilityDiscoveryService.RequestQuoteProposal:input_type -> tos.service.v1.RequestQuoteProposalRequest
-	29, // 68: tos.service.v1.NativeService.SubmitNativeAction:output_type -> tos.service.v1.SubmitNativeActionResponse
-	31, // 69: tos.service.v1.NativeService.ResolveNativeState:output_type -> tos.service.v1.ResolveNativeStateResponse
-	35, // 70: tos.service.v1.DNSAliasService.ResolveDNSAlias:output_type -> tos.service.v1.ResolveDNSAliasResponse
-	41, // 71: tos.service.v1.CapabilityDiscoveryService.ListCapabilities:output_type -> tos.service.v1.ListCapabilitiesResponse
-	45, // 72: tos.service.v1.CapabilityDiscoveryService.SearchCapabilities:output_type -> tos.service.v1.SearchCapabilitiesResponse
-	47, // 73: tos.service.v1.CapabilityDiscoveryService.PublishSoftwareWorkManifest:output_type -> tos.service.v1.PublishSoftwareWorkManifestResponse
-	49, // 74: tos.service.v1.CapabilityDiscoveryService.GetSoftwareWorkManifest:output_type -> tos.service.v1.GetSoftwareWorkManifestResponse
-	52, // 75: tos.service.v1.CapabilityDiscoveryService.RequestQuoteProposal:output_type -> tos.service.v1.RequestQuoteProposalResponse
-	68, // [68:76] is the sub-list for method output_type
-	60, // [60:68] is the sub-list for method input_type
-	60, // [60:60] is the sub-list for extension type_name
-	60, // [60:60] is the sub-list for extension extendee
-	0,  // [0:60] is the sub-list for field type_name
+	37, // 45: tos.service.v1.QuoteProposalV1.asset:type_name -> tos.service.v1.TOSAssetIdentityV1
+	38, // 46: tos.service.v1.AcceptedQuoteV1.proposal:type_name -> tos.service.v1.QuoteProposalV1
+	7,  // 47: tos.service.v1.AcceptedQuoteV1.reference:type_name -> tos.service.v1.ChainReference
+	6,  // 48: tos.service.v1.AcceptedQuoteV1.network:type_name -> tos.service.v1.NetworkDomain
+	4,  // 49: tos.service.v1.ListCapabilitiesRequest.context:type_name -> tos.service.v1.RequestContext
+	27, // 50: tos.service.v1.ListCapabilitiesResponse.capabilities:type_name -> tos.service.v1.NativeStateV1
+	27, // 51: tos.service.v1.CapabilitySearchResultV1.capability:type_name -> tos.service.v1.NativeStateV1
+	42, // 52: tos.service.v1.CapabilitySearchResultV1.gateway_local:type_name -> tos.service.v1.GatewayLocalCapabilityMetadataV1
+	4,  // 53: tos.service.v1.SearchCapabilitiesRequest.context:type_name -> tos.service.v1.RequestContext
+	43, // 54: tos.service.v1.SearchCapabilitiesResponse.results:type_name -> tos.service.v1.CapabilitySearchResultV1
+	4,  // 55: tos.service.v1.PublishSoftwareWorkManifestRequest.context:type_name -> tos.service.v1.RequestContext
+	27, // 56: tos.service.v1.PublishSoftwareWorkManifestResponse.capability:type_name -> tos.service.v1.NativeStateV1
+	4,  // 57: tos.service.v1.GetSoftwareWorkManifestRequest.context:type_name -> tos.service.v1.RequestContext
+	4,  // 58: tos.service.v1.RequestQuoteProposalRequest.context:type_name -> tos.service.v1.RequestContext
+	38, // 59: tos.service.v1.QuoteProposalPackageV1.proposal:type_name -> tos.service.v1.QuoteProposalV1
+	51, // 60: tos.service.v1.RequestQuoteProposalResponse.package:type_name -> tos.service.v1.QuoteProposalPackageV1
+	28, // 61: tos.service.v1.NativeService.SubmitNativeAction:input_type -> tos.service.v1.SubmitNativeActionRequest
+	30, // 62: tos.service.v1.NativeService.ResolveNativeState:input_type -> tos.service.v1.ResolveNativeStateRequest
+	34, // 63: tos.service.v1.DNSAliasService.ResolveDNSAlias:input_type -> tos.service.v1.ResolveDNSAliasRequest
+	40, // 64: tos.service.v1.CapabilityDiscoveryService.ListCapabilities:input_type -> tos.service.v1.ListCapabilitiesRequest
+	44, // 65: tos.service.v1.CapabilityDiscoveryService.SearchCapabilities:input_type -> tos.service.v1.SearchCapabilitiesRequest
+	46, // 66: tos.service.v1.CapabilityDiscoveryService.PublishSoftwareWorkManifest:input_type -> tos.service.v1.PublishSoftwareWorkManifestRequest
+	48, // 67: tos.service.v1.CapabilityDiscoveryService.GetSoftwareWorkManifest:input_type -> tos.service.v1.GetSoftwareWorkManifestRequest
+	50, // 68: tos.service.v1.CapabilityDiscoveryService.RequestQuoteProposal:input_type -> tos.service.v1.RequestQuoteProposalRequest
+	29, // 69: tos.service.v1.NativeService.SubmitNativeAction:output_type -> tos.service.v1.SubmitNativeActionResponse
+	31, // 70: tos.service.v1.NativeService.ResolveNativeState:output_type -> tos.service.v1.ResolveNativeStateResponse
+	35, // 71: tos.service.v1.DNSAliasService.ResolveDNSAlias:output_type -> tos.service.v1.ResolveDNSAliasResponse
+	41, // 72: tos.service.v1.CapabilityDiscoveryService.ListCapabilities:output_type -> tos.service.v1.ListCapabilitiesResponse
+	45, // 73: tos.service.v1.CapabilityDiscoveryService.SearchCapabilities:output_type -> tos.service.v1.SearchCapabilitiesResponse
+	47, // 74: tos.service.v1.CapabilityDiscoveryService.PublishSoftwareWorkManifest:output_type -> tos.service.v1.PublishSoftwareWorkManifestResponse
+	49, // 75: tos.service.v1.CapabilityDiscoveryService.GetSoftwareWorkManifest:output_type -> tos.service.v1.GetSoftwareWorkManifestResponse
+	52, // 76: tos.service.v1.CapabilityDiscoveryService.RequestQuoteProposal:output_type -> tos.service.v1.RequestQuoteProposalResponse
+	69, // [69:77] is the sub-list for method output_type
+	61, // [61:69] is the sub-list for method input_type
+	61, // [61:61] is the sub-list for extension type_name
+	61, // [61:61] is the sub-list for extension extendee
+	0,  // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_tos_service_v1_native_proto_init() }

@@ -1,0 +1,13 @@
+{
+  "schema": "tos.service.vector-copy.v1",
+  "copy": "test-vectors/service-actor-token-conformance-vectors.json",
+  "source_repository": "github.com/tosnetwork/tos",
+  "source_pull_request": 516,
+  "source_sha": "12cf5522801a30806eeb7cda9ee85fbd051ecbca",
+  "source_path": "tosctl/src/node-control/contracts/tests/fixtures/service_actor_token/conformance-vectors.json",
+  "generated_by": "tosctl/src/node-control/contracts/tests/service_actor_token/ported.rs conformance_vectors_come_from_contract_execution",
+  "release_manifest": "crypto/smartcont/tos-service-actor-token-v1.release.json",
+  "release_code_hash": "tvm-cell-sha256:7c59bbdbc5108d82c7e2f9676987f7db4134d97155b88280851b784549ec6d97",
+  "sha256": "031238245e438b9fb08707c3486365ba1f379a36895fe2da2ebcc768264a4101",
+  "bytes": 34998
+}

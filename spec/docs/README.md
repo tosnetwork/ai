@@ -59,6 +59,7 @@ application profiles above it.
 - [Settlement](SETTLEMENT.md)
 - [Accepted Quote TVM V1](ACCEPTED_QUOTE_TVM_V1.md)
 - [Service Actor TVM V1](SERVICE_ACTOR_TVM_V1.md)
+- [Service Actor Token TVM V1](SERVICE_ACTOR_TOKEN_TVM_V1.md) (token rail: USDC, USDT)
 - [Service Actor Settlement Binding](SERVICE_ACTOR_SETTLEMENT_DESIGN.md)
 - [USDC Settlement V1](USDC_SETTLEMENT_V1.md) (design)
 - [Stablecoin Escrow TVM V2](STABLECOIN_ESCROW_TVM_V2.md) (retired)

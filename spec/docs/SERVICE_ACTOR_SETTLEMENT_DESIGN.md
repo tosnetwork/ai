@@ -567,7 +567,15 @@ the options that were weighed and records the one taken.
 - **D8 Settlement asset.** (a) native TOS for current-domain acceptance, and
   amend `PRODUCT_STRATEGY.md` §9 and `SETTLEMENT.md`; stablecoin pricing waits
   for a token integration that reports payout outcomes. (b) block acceptance on
-  stablecoin support. *Recommend (a)*. **Taken: (a).**
+  stablecoin support. *Recommend (a)*. **Taken: (a).** *Superseded as a
+  direction on 2026-11-24 (team memo STATUS 13.580, amended 13.583):* AI
+  services may also settle in USDC and USDT bridged by the TOS token bridge, on
+  the separate token-rail Service Actor that
+  [`USDC_SETTLEMENT_V1.md`](USDC_SETTLEMENT_V1.md) designs and
+  [`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md) specifies.
+  D8's condition stands and that rail meets it: every token payout reports its
+  outcome. The native rail of this document is unchanged and still settles
+  current-domain acceptance in native TOS.
 - **D9 Release condition.** (a) attestor custody refuses non-releasable
   Receipts, off-chain; (b) carry and decode the Receipt in `respond`.
   *Recommend (a)* for this profile; (b) costs gas and body size per call and
