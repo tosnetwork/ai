@@ -393,14 +393,48 @@ act.
 
 - When a new configuration is installed, every parameter is validated against
   a budget of 1,024 cells (`crypto/block/block.cpp`:1924).
-- A value over that budget, about 342 entries, makes the collator refuse the
-  configuration with a fatal error, and the masterchain halts
+- A value over that budget makes the collator refuse the configuration with a
+  fatal error, and the masterchain halts
   (`validator/impl/collator.cpp`:5308-5333).
+  - "About 342 entries" is an approximation. The real limit depends on the
+    shape of the dictionary and of each record.
+  - The builder therefore checks the actual cell count of the value, not an
+    entry count.
 - The config contract does not check this. Proposal tooling (the `tosctl`
-  value builder of T2, and `testnet-governance.py`) therefore refuses a value
-  with more than 16 entries, or one whose cell count exceeds the budget.
-- Readers treat a value with more than 16 entries as malformed and fail
-  closed.
+  value builder of T2, and `testnet-governance.py` of T5) therefore refuses:
+  - a value with more than 16 entries;
+  - a value whose cell count exceeds the budget;
+  - a value that does not validate against the full TL-B of section 3.1. A
+    malformed value halts the chain in the same way.
+- **Readers ignore unpinned entries, whatever their number.**
+  - A reader decodes the whole value strictly by TL-B, then uses only the
+    entries it pins.
+  - More than 16 entries raises a T14 alarm, not an error. No payout reads
+    ConfigParam 84 (5.3), so failing closed would protect no funds. It would
+    only stop every new purchase after a governance slip.
+  - A malformed or over-budget value can never be installed at all.
+
+**Rollout precondition: no ConfigParam 84 before every validator knows its
+TL-B.**
+
+- **Why.** `valid_config_data` validates every parameter in a new
+  configuration (`crypto/block/block.cpp`:1950). For an index with no TL-B
+  constructor, the validation of that parameter fails (`block.cpp`:1923-1924).
+  The collator then stops with `fatal_error("attempting to install invalid new
+  configuration")` (`collator.cpp`:5331-5333). Upstream ignores such a change;
+  this build makes it fatal.
+- **Consequence.** A node without the ConfigParam 84 TL-B halts on **any**
+  ConfigParam 84 value, well-formed or not.
+- **Precondition.** Every validator must run a node release that contains the
+  ConfigParam 84 TL-B (T2) before:
+  - any ConfigParam 84 proposal; and
+  - any zero state that contains ConfigParam 84.
+- **Tooling.** The T2 `tosctl` builder and proposal path, and T5
+  `testnet-governance.py`, refuse to propose ConfigParam 84 until every
+  current validator reports that release or a later one.
+- **General rule.** The same applies to any new ConfigParam in tos. Ship the
+  TL-B in a node release, confirm that every validator runs it, and only then
+  propose a value.
 
 **Self-verifying entry.** For kind 1, a reader re-derives the master from the
 entry and refuses any mismatch. **Every read below is taken at one block:** a
@@ -416,6 +450,15 @@ account, the master account and the code cells read from them.
      (TB:79-80). The bridge writes them back unchanged (TB:96-100).
    - Require `minter_code_hash == cell_hash(b_minter_code)` and
      `wallet_code_hash == cell_hash(b_wallet_code)`.
+   - **Pinned releases.** Clients, `ai` included, pin three code hashes and
+     require all of them:
+     - the bridge account's code hash equals the pinned bridge release;
+     - `cell_hash(b_wallet_code)` equals the pinned reported-transfer wallet
+       release (T1). This makes B1 of 4.5 checkable from state;
+     - `cell_hash(b_minter_code)` equals the pinned minter release.
+
+     A record can only point at codes that the vote itself names. The pins
+     make sure those codes are the audited ones.
 2. **The master's address, derived from the bridge's codes.** Compute
    `0:cell_hash(StateInit(b_minter_code, pack_minter_initial_data(content,
    b_wallet_code, -1:origin.bridge_address)))` (TU:44-56, TB:112-120), with
@@ -448,11 +491,18 @@ seqno and quorum:
 
 - ConfigParam 84;
 - the bridge ConfigParam;
-- the bridge account's data and its two code cells;
-- the master account's code and getter;
-- the 16-entry cap.
+- the bridge account's code hash, its data and its two code cells, checked
+  against the three pinned releases;
+- the master account's code and getter.
 
-A mismatch, or a read at another block, is a verification error.
+A mismatch in a pinned entry, or a read at another block, is a verification
+error. Unpinned entries are ignored, and a count above 16 raises only a T14
+alarm.
+
+**Historical verification needs archive state.** A resolver that checks an
+existing request re-runs this check at the request's admission seqno. That
+requires archive-state access to the bridge account at that seqno, not only
+current state, because a later bridge migration replaces the account (7.4).
 
 **Testnets.**
 
@@ -821,6 +871,8 @@ then does it call `set_gas_limit(OUTCOME_HANDLER_GAS)`.
 handler raises its gas limit. Each runs on its message's own value:
 
 - `call` funding through `transfer_notification` (5.2);
+- the absent-payout branch of `transfer_refused`, which answers with
+  `clear_refusal` on the report's own value;
 - the stale-record branch of `transfer_rereported`, where the wallet
   derivation is paid by the re-report's value;
 - `take_balance`, `recover_surplus`, `recheck_payout` and `abandon_payout`;
@@ -1842,7 +1894,7 @@ actors, published as two Capability versions or two Capabilities.
 | Component | Change |
 |---|---|
 | `protocol/pkg/nativecore` | Codecs for the token terms, `SAT1`, `SAF1`, `SAO1`, schema 3 Accepted Quote, schema 2 Receipt and the key 20 token entry; the token release hash. |
-| `protocol/pkg/toschain` | The ConfigParam 84 reader (pinned entries only, at most 16 entries) with the self-verification of 3.1. It reads the bridge account and takes its `b_minter_code` and `b_wallet_code`, derives the master with them, and checks the master's deployed code. Every read is at one masterchain seqno; actor-wallet derivation; history decoding of notifications, reports, balance answers and outcome logs. |
+| `protocol/pkg/toschain` | The ConfigParam 84 reader, with the self-verification of 3.1. It decodes the whole value strictly by TL-B and uses pinned entries only; more than 16 entries is a T14 alarm, not an error. It reads the bridge account, requires the bridge code, `b_minter_code` and `b_wallet_code` to equal the three pinned release hashes, derives the master with those codes, and checks the master's deployed code. Every read is at one masterchain seqno, using archive state for historical checks; actor-wallet derivation; history decoding of notifications, reports, balance answers and outcome logs. |
 | `protocol/pkg/serviceactor` | Both verification procedures ([`SERVICE_ACTOR_SETTLEMENT_DESIGN.md`](SERVICE_ACTOR_SETTLEMENT_DESIGN.md) section 2.4) for the token rail. Added checks: the asset route equals the manifest, the Quote and a pinned status-1 record; the funding notification came from the actor's derived wallet with the exact amount. New states: `paying` and `returned`. |
 | `protocol/pkg/buyersdk` | Builds the token transfer with the `token_call` payload. Refuses a `forward_tos_amount` below the full budget of 5.2, and validates destinations as 5.4 does. The journal records the transfer, the notification transaction and its `SAT1` or `SAF1`. Duties: `expire`, `claim_refund`, and `claim_returned` while a returned entry exists, including one from a refused funding return. The preview states that underfunded or forward-less tokens become the provider's. |
 | `provider` (`servicebridge`, `tos-service-provider`, MCP provider) | Offers in atomic units within per-asset offer bounds ([`MCP_PROVIDER_ADAPTER_V1.md`](MCP_PROVIDER_ADAPTER_V1.md):201-206); `max_token_liability`; withdrawal of both revenues, with in-flight and refused outcomes; `recover_surplus` and `abandon_payout` behind confirmation; the actor TOS floor and the token-wallet floor (5.6). |
@@ -1962,6 +2014,18 @@ The TOS side also needs ConfigParam 79 populated for the new bridge address
 (4.7), and the bridge listed in ConfigParam 31 (SEC:101). Recognition is
 proposed only after the canary has run under the caps.
 
+**Bridge migration.** Any change of `bridge_address` in ConfigParam 79 makes
+the existing record's bridge check fail (3.1). Its old minter is no longer the
+listed bridge's.
+
+- The record's status 2 or 3 must therefore be adopted **before**, or in the
+  same vote as, that change.
+- A new record for the new bridge's minter follows separately.
+
+Existing requests keep settling, because no payout reads recognition (5.3).
+Verifying them historically uses archive state at their admission seqno
+(3.1).
+
 ## 8. Work breakdown
 
 Sizes: S is up to 1 week, M is 1-3 weeks, L is 3-6 weeks, and XL is external
@@ -1971,7 +2035,7 @@ USDC. T11 and T12 gate production.
 | # | Repo | Item | Depends on | Acceptance | Size |
 |---|---|---|---|---|---|
 | T1 | tos | **Implemented:** tosnetwork/tos#512, head `0a3bdbe78`, approved; tests T-R1 to T-R15 (RSP:1835-1864). `token-wallet.fc`: the reported transfer and the balance report (4.3); `R_GAS_LIMIT`, `S_BOUNCE_GAS` and `S_TRANSFER_GAS`; the body cap (713); additive refusal records under `REFUSALS_LIMIT` (714); `transfer_rereported`; the network-priced value check, including S's compute and the action fine; `get_compute_fee` and `get_forward_fee` in the bridge stdlib (global version 6 or later, STD:272-276; `settlement.fc` already had equivalents); +16 on the reported sends and on the ordinary notification (a behaviour change, 4.7); a `SETTLEMENT-PROTOCOL.md` section; `verify-token-bridge.py` invariants; regenerated fixtures and evidence (4.7) | — | Sandbox on both VMs covers:<br>• delivered;<br>• refused at R by compute failure, by **R out of gas** (the bounce is still funded) and by action failure;<br>• an **S action-phase failure** (bounces to P);<br>• every S compute refusal;<br>• **ConfigParam 79 `wallet_gas_consumption` set too low** (the network-priced check still holds);<br>• **a gas or forward price change between legs**, within and beyond `REPORT_MARGIN`;<br>• rereport, clear, and a duplicate query id;<br>• spoof attempts (excesses, foreign delivered, forged refused), all ignored;<br>• `provide_balance`;<br>• `capBounceMsgBody` turned off fails the suite (pins the dependency).<br>Also: supply and balance are conserved in each case; each guard goes red when removed; gas is measured per leg; the mint path does no scaling. | L |
-| T2 | tos | ConfigParam 84 TL-B; a typed JSON-RPC view; 84 listed in ConfigParam 10 in genesis (GZ:414, GZ:419); `tosctl` decode and a proposal value builder that refuses more than 16 entries or a value over the 1,024-cell validation budget (3.1) | — | Round trip through `getConfigParam`; an uncritical proposal is refused (CFG:596-601); malformed records are refused by the decoder | M |
+| T2 | tos | ConfigParam 84 TL-B; a typed JSON-RPC view; 84 listed in ConfigParam 10 in genesis (GZ:414, GZ:419); `tosctl` decode and a proposal value builder that refuses more than 16 entries, a value over the 1,024-cell validation budget (actual cell count), and any value that fails the full TL-B (3.1); the proposal path refuses ConfigParam 84 until every current validator reports a node release with its TL-B (rollout precondition, 3.1) | — | Round trip through `getConfigParam`; an uncritical proposal is refused (CFG:596-601); malformed records are refused by the decoder and by the builder; **a node without the ConfigParam 84 TL-B refuses a configuration containing 84** (the halt the precondition prevents, shown in a sandbox or local net); the proposal path refuses while any validator reports an older release | M |
 | T3 | tos | `service-actor-token-code.fc` (section 5); Rust builders and decoder; sandbox; release manifests; bytecode check; vectors; exposure caps | T1, T2 | Every native sandbox case ported, plus:<br>• spoofed and foreign notifications;<br>• underfunded and below-`MIN_FUNDING_VALUE` notifications (nothing stored; surplus);<br>• a **malformed or absent ConfigParam 84** and a **malformed payload**, each taking the refusal path without a throw;<br>• every admission refusal ending in a funding return, with no stranded token;<br>• the exact-amount rule, status 2 and the exposure caps;<br>• every payout kind × {delivered, refused at R, bounced at S};<br>• **a double `claim_returned` in one block** (1930);<br>• **destination validation** (non-std, anycast, wc != 0, self: 1934);<br>• returned-entry caps and `sweep_returned`;<br>• a flood of refused fundings, leaving no entry and no surplus;<br>• a refused or bounced funding return becoming a returned entry for `from` (never surplus), then claimed, double-claimed (1930) and swept to `from` after the deadline;<br>• `accepting_tokens` false at `MAX_RETURNED_GLOBAL`, with no money reclassified;<br>• senders off workchain 0 refused (1934);<br>• surplus recovery, covering:<br>&nbsp;&nbsp;– a notification in flight before `take_balance`;<br>&nbsp;&nbsp;– **the race where `recover_surplus` is followed by a new payout whose delivery arrives before `take_balance`** (subtracted through `delivered_since_floor_amount`, so surplus is unchanged);<br>&nbsp;&nbsp;– an older payout still in flight (under-counted, never over-counted);<br>&nbsp;&nbsp;– a superseded query whose late `take_balance` is ignored;<br>• `abandon_payout`, checking every counter of the exit-path table, refused (1943) by a pending query younger than the TTL and clearing an older one;<br>• a failing in-handler send (bounty, `clear_refusal`, change) that leaves the outcome committed;<br>• **`transfer_rereported`**:<br>&nbsp;&nbsp;– for a pending payout, applied as its refusal and answered with `clear_refusal`;<br>&nbsp;&nbsp;– for an absent payout, answered with `clear_refusal` only;<br>&nbsp;&nbsp;– never swallowed by the catch-all;<br>• **a 714 `refusals_full` bounce from S** handled as an ordinary S refusal (pre-payout position), and likewise 712 and 713;<br>• **no permanent halt**: S driven to 32 records by refusals whose reports were dropped, then funded re-reports clear every record, and the next payout succeeds;<br>• a refusal at the limit that is not recorded and whose report is dropped: the payout stays `paying` and the tokens are back at S, and for kinds 3 and 6 recovery goes through `abandon_payout` and surplus;<br>• **`recheck_payout`**, covering:<br>&nbsp;&nbsp;– each buyer kind (1, 2, 4, 5, 7) after an unrecorded refusal whose report was dropped, converted to a returned entry with counters as the table;<br>&nbsp;&nbsp;– a lost delivery report with no surplus, where the payout stays `paying`;<br>&nbsp;&nbsp;– a lost delivery report with enough surplus, where the double payment comes from surplus only and every other liability stays backed;<br>&nbsp;&nbsp;– a late delivery or re-report after conversion (ignored, or `clear_refusal` only);<br>&nbsp;&nbsp;– the target resolved while the query is pending (no-op);<br>&nbsp;&nbsp;– kinds 3 and 6 refused (1941), too early (1942), and an absent id (1940);<br>&nbsp;&nbsp;– the supersede rule for each pair of `recover_surplus`, `recheck_payout` and `abandon_payout`: 1943 within `RECHECK_QUERY_TTL` of a pending query, superseded (or cleared) after it;<br>&nbsp;&nbsp;– a griefer loop of back-to-back queries does not block a victim's recheck indefinitely: the victim lands in a gap after an answer;<br>&nbsp;&nbsp;– a lost answer blocks the slot for at most the TTL;<br>• **a refusal report funded by the payout:** refused at R after a 9× price rise between the legs, with the ConfigParam 79 storage reserve at 0 and S at `REFUSALS_LIMIT`; the `transfer_refused` is delivered and the payout ends as refused;<br>• **a re-report mismatch** (a pending payout, another total): not cleared, logged;<br>• the measured gas of the actor's absent-payout re-report handler, published for re-reporters (4.4);<br>• **no gas drain (rule of 2.3):** for each actor handler, send a forged message (wrong sender, wrong amount or recipient, unknown payout or query id) and an underfunded genuine-shaped one. The actor's TOS balance, excluding the message's own value, is unchanged afterwards, and the code contains no `accept_message` and no raising `set_gas_limit` outside the authenticated outcome handlers.<br>Also: the token invariant is checked after every step, and gas is measured on both VMs at capacity for every op and for `PRE_ACCEPT_GAS` and `OUTCOME_HANDLER_GAS`. | L |
 | T4 | tos | `tosctl`: a token transfer with `token_call` and `--build-only`; `claim_returned`, `sweep_returned`, the two-part `withdraw_revenue`, `recover_surplus` and `abandon_payout`; top-ups of the actor and its wallet | T3 | The `--build-only` output is reproduced by `buyersdk` byte for byte; a below-budget forward and an invalid destination are refused | M |
 | T5 | tos-ops | Test USDC on the local net and the public testnet: a test bridge, a stand-in oracle signing v5 votes, ConfigParams 79 and 84 through `testnet-governance.py` (84 as critical), and a CEREMONY addendum | T1, T2 | `adopted` shows both params on every validator (CEREMONY:797); a test mint reaches a buyer wallet | M |
@@ -1981,9 +2045,9 @@ USDC. T11 and T12 gate production.
 | T9 | ai MCP buyer, gateway | Per-asset budgets and preview; gateway token proposals | T7 | The `MCP_BUYER_ADAPTER_V1.md` section 15 cases are extended; the gateway never adds or changes an asset | M |
 | T10 | all | Live lifecycles on a v16 local net, then on the public testnet: responded, refunded, swept, returned (a refusal forced by a test-only wallet build), funding refused, surplus recovered | T5, T7-T9 | Each is reconstructed by a second resolver, and the evidence is recorded as for the native rail | M |
 | T11 | relayer | Settlement v5 (vote layout, generations, `cancel_lock`, `activate_generation`) and the live loop | — | Simnet end to end against the v5 contracts | L |
-| T12 | tos, tos-ops, external | The bridge production gates (7.1). The two audits explicitly cover the T1 wallet change and the T3 token actor. Then the canary, then the ConfigParam 84 USDC record by validator vote | T1, T2, T11, T13 | Every SEC:97-113 item is checked; the record is adopted | XL |
+| T12 | tos, tos-ops, external | The bridge production gates (7.1). The two audits explicitly cover the T1 wallet change and the T3 token actor. Then the canary, then the ConfigParam 84 USDC record by validator vote, only after the rollout precondition of 3.1 holds. Any later change of ConfigParam 79 `bridge_address` follows the migration rule of 7.4: the old record's status 2 or 3 is adopted before, or together with, the change | T1, T2, T11, T13 | Every SEC:97-113 item is checked; every validator runs a node release with the ConfigParam 84 TL-B; the record is adopted; a migration rehearsal on testnet suspends the old record before or with the bridge change | XL |
 | T13 | external | An independent security review of the token-rail actor and the wallet change, against sections 4-5 | T1, T3 | Findings are resolved, or accepted by the owner, before T12's audits | M |
-| T14 | tos-ops, ai `provider/` | Monitoring per actor and asset:<br>• payouts in flight longer than N blocks;<br>• count and age of returned entries;<br>• any returned entry from a refused funding return (kind 4);<br>• actor TOS balance against the backing floor;<br>• token-wallet TOS balance;<br>• S-side `get_refusals_count()` against `REFUSALS_LIMIT`, with a funded `rereport_refusal` for each recorded query id;<br>• aggregate token liability per asset against the bridge cap. | T3, T7 | Each alarm fires in a test that crosses its threshold, and stays silent below it | M |
+| T14 | tos-ops, ai `provider/` | Monitoring per actor and asset:<br>• payouts in flight longer than N blocks;<br>• count and age of returned entries;<br>• any returned entry from a refused funding return (kind 4);<br>• actor TOS balance against the backing floor;<br>• token-wallet TOS balance;<br>• S-side `get_refusals_count()` against `REFUSALS_LIMIT`, with a funded `rereport_refusal` for each recorded query id;<br>• aggregate token liability per asset against the bridge cap;<br>• ConfigParam 84 holding more than 16 entries;<br>• a ConfigParam 79 `bridge_address` change while a record for the old bridge still has status 1. | T3, T7 | Each alarm fires in a test that crosses its threshold, and stays silent below it | M |
 
 **T3 follow-up in tos (not changed by this design).** The wallet's TL-B
 comment block lists the reported-transfer messages but omits
