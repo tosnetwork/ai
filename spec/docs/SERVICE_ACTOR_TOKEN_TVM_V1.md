@@ -205,11 +205,19 @@ The native ledger (`withdrawable_tos_revenue`, `locked_storage_fees`,
 a surplus query and 1 for a recheck query. The empty query is all zero bits
 with `requester = addr_none` (236 bits, SAT:588-590, SDK:1090-1102).
 
-**Token invariant.** The actor's token wallet balance is at least
-`attributed = pending_liability + refundable_liability + returned_liability +
-in_flight + withdrawable_token_revenue` (SDK:881-887). The rest of the balance
-is **surplus**. The token **liability** the exposure caps bound is the same sum
-without `withdrawable_token_revenue` (SDK:890-895).
+**Token invariant.** The actor's token wallet balance, plus the tokens of every
+payout that has left the wallet and whose outcome the actor has not yet applied,
+is at least `attributed = pending_liability + refundable_liability +
+returned_liability + in_flight + withdrawable_token_revenue` (SDK:881-887).
+During a payout S debits its balance before the outcome report reaches the
+actor, which keeps the amount in `in_flight` until then (section 8.3), so the
+wallet balance alone can be below `attributed` while a payout is in transit; a
+resolver or solvency monitor that checks the balance alone must therefore add
+the in-transit payouts, or check only at a point where none is in transit. When
+no payout is in transit, the rest of the balance is **surplus** (section 8.5
+explains why surplus is only ever under-counted while one is). The token
+**liability** the exposure caps bound is the same sum without
+`withdrawable_token_revenue` (SDK:890-895).
 
 ### 4.4 Requests
 
@@ -1314,8 +1322,9 @@ security review; the T10 live lifecycles. None is recorded.
 ## 17. Invariants
 
 1. Coin arithmetic is checked below `2^120`; no ledger goes negative.
-2. The token wallet balance covers `attributed` (section 4.3) after every
-   transaction; surplus is the rest.
+2. The token wallet balance plus the tokens of the payouts in transit (debited
+   at S, outcome not yet applied) covers `attributed` (section 4.3) after every
+   transaction; with no payout in transit, surplus is the rest of the balance.
 3. The actor's balance, net of the incoming message, covers
    `locked_storage_fees + locked_outcome_fees + MINIMUM_OPERATING_RESERVE`
    after every admission and withdrawal.
