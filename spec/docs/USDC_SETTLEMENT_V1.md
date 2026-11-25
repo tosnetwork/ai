@@ -2018,8 +2018,10 @@ proposed only after the canary has run under the caps.
 the existing record's bridge check fail (3.1). Its old minter is no longer the
 listed bridge's.
 
-- The record's status 2 or 3 must therefore be adopted **before**, or in the
-  same vote as, that change.
+- The record's status 2 or 3 must therefore be adopted **before** that change.
+  A proposal sets one parameter, and 84 (critical, 3 won rounds) and 79
+  (ordinary, 2) cannot share a vote. Proposal tooling refuses a ConfigParam 79
+  `bridge_address` proposal while a record of the old bridge still has status 1.
 - A new record for the new bridge's minter follows separately.
 
 Existing requests keep settling, because no payout reads recognition (5.3).
@@ -2045,7 +2047,7 @@ USDC. T11 and T12 gate production.
 | T9 | ai MCP buyer, gateway | Per-asset budgets and preview; gateway token proposals | T7 | The `MCP_BUYER_ADAPTER_V1.md` section 15 cases are extended; the gateway never adds or changes an asset | M |
 | T10 | all | Live lifecycles on a v16 local net, then on the public testnet: responded, refunded, swept, returned (a refusal forced by a test-only wallet build), funding refused, surplus recovered | T5, T7-T9 | Each is reconstructed by a second resolver, and the evidence is recorded as for the native rail | M |
 | T11 | relayer | Settlement v5 (vote layout, generations, `cancel_lock`, `activate_generation`) and the live loop | — | Simnet end to end against the v5 contracts | L |
-| T12 | tos, tos-ops, external | The bridge production gates (7.1). The two audits explicitly cover the T1 wallet change and the T3 token actor. Then the canary, then the ConfigParam 84 USDC record by validator vote, only after the rollout precondition of 3.1 holds. Any later change of ConfigParam 79 `bridge_address` follows the migration rule of 7.4: the old record's status 2 or 3 is adopted before, or together with, the change | T1, T2, T11, T13 | Every SEC:97-113 item is checked; every validator runs a node release with the ConfigParam 84 TL-B; the record is adopted; a migration rehearsal on testnet suspends the old record before or with the bridge change | XL |
+| T12 | tos, tos-ops, external | The bridge production gates (7.1). The two audits explicitly cover the T1 wallet change and the T3 token actor. Then the canary, then the ConfigParam 84 USDC record by validator vote, only after the rollout precondition of 3.1 holds. Any later change of ConfigParam 79 `bridge_address` follows the migration rule of 7.4: the old record's status 2 or 3 is adopted before the change (separate proposals; tooling refuses the 79 change while the old record has status 1) | T1, T2, T11, T13 | Every SEC:97-113 item is checked; every validator runs a node release with the ConfigParam 84 TL-B; the record is adopted; a migration rehearsal on testnet suspends the old record before or with the bridge change | XL |
 | T13 | external | An independent security review of the token-rail actor and the wallet change, against sections 4-5 | T1, T3 | Findings are resolved, or accepted by the owner, before T12's audits | M |
 | T14 | tos-ops, ai `provider/` | Monitoring per actor and asset:<br>• payouts in flight longer than N blocks;<br>• count and age of returned entries;<br>• any returned entry from a refused funding return (kind 4);<br>• actor TOS balance against the backing floor;<br>• token-wallet TOS balance;<br>• S-side `get_refusals_count()` against `REFUSALS_LIMIT`, with a funded `rereport_refusal` for each recorded query id;<br>• aggregate token liability per asset against the bridge cap;<br>• ConfigParam 84 holding more than 16 entries;<br>• a ConfigParam 79 `bridge_address` change while a record for the old bridge still has status 1. | T3, T7 | Each alarm fires in a test that crosses its threshold, and stays silent below it | M |
 
