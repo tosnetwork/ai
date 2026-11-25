@@ -819,10 +819,18 @@ Case analysis under B1-B5:
   because P attached the full budget. The bounce is accepted (row 3).
 - **(ii) R fails: in compute, out of its capped gas, or in its action phase.**
   R bounces with value left for the bounce fee (B3, 4.3). S's handler runs
-  with raised gas and records the refusal. Its report may fail on value, and
-  is then re-sent by `rereport_refusal`, which anyone may fund, as
-  `transfer_rereported`. This holds while S is below `REFUSALS_LIMIT`. At the
-  limit, a refusal is not recorded (4.5, "Outside the bounds").
+  with raised gas and records the refusal. Within B1-B5 its report is
+  funded: the bounce carries back value priced at `REPORT_MARGIN` (B2), and the
+  report is sent from it in mode 64+2. The record exists only as a fallback for
+  a report that fails on value, which requires a price rise beyond the margin.
+  Such a report is re-sent by `rereport_refusal`, which anyone may fund, as
+  `transfer_rereported`, while S is below `REFUSALS_LIMIT`. At the limit the
+  refusal is not recorded, but within B1-B5 its report is still delivered, so
+  the outcome guarantee needs no condition on refusal capacity or on the number
+  of concurrent transfers. Only a report dropped beyond the margin at the limit
+  leaves no outcome (4.5, "Outside the bounds"); `recheck_payout` (buyer kinds)
+  and `abandon_payout` (kinds 3 and 6) recover it. The storage claim of 5.2
+  rests on the same condition.
 - **(iii) R commits.** The `transfer_delivered` send commits together with the
   credit, under +16. Its value covers `PRE_ACCEPT_GAS` with margin (B2), and
   the rest of the handler is paid from the lock (B5).
