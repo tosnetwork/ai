@@ -401,8 +401,10 @@ not change this gate's acceptance rule:
 - 🟡 T2 ConfigParam 84 — merged on tos main (tosnetwork/tos#513, merge
   `e40d28737`); no value is proposed on any network;
 - 🟡 T3 token-rail Service Actor — implemented in tosnetwork/tos#516
-  (final head `12cf5522801a30806eeb7cda9ee85fbd051ecbca`, non-author review
-  APPROVE in the tos#516 PR comments), with
+  (final head `7a32aa402944bb944a1c778197e491605f909df4`, code hash
+  `4e797ecf…085a`; review record
+  https://github.com/tosnetwork/tos/pull/516#issuecomment-7168420438, final
+  non-author APPROVE at that head), with
   sandbox tests on both engines, measured gas and contract-execution vectors;
   not merged, released or deployed;
 - 🟡 T6 normative specification — `docs/SERVICE_ACTOR_TOKEN_TVM_V1.md`; the T3

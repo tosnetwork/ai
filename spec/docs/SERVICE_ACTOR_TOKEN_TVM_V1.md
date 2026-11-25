@@ -5,8 +5,10 @@ section 5 of the design [`USDC_SETTLEMENT_V1.md`](USDC_SETTLEMENT_V1.md) (work
 item T3). It settles one recognized TOS-network token (USDC, then USDT) through
 reported transfers of the bridge token wallet (T1). The contract is
 implemented in tosnetwork/tos#516 (open; final head
-`12cf5522801a30806eeb7cda9ee85fbd051ecbca`, non-author review APPROVE in the
-tos#516 PR comments); it is not merged, not released on
+`7a32aa402944bb944a1c778197e491605f909df4`, final non-author APPROVE at that
+head in the review record
+https://github.com/tosnetwork/tos/pull/516#issuecomment-7168420438); it is not
+merged, not released on
 tos main and not deployed on any network. This document describes that
 implementation exactly. Where it and the design text differ, this document and
 the implementation govern, and the design records the change with the
@@ -19,10 +21,10 @@ the authority; these values are copied from it:
 ```text
 contract    tos-service-actor-token-v1
 rail        tos.service.service-actor-token.v1
-code hash   tvm-cell-sha256:7c59bbdbc5108d82c7e2f9676987f7db4134d97155b88280851b784549ec6d97
-BOC sha256  sha256:b4ede03a1dec6eba4829886de2096eccdfb2bb6c000502d4b94c8a3fc93bcc09
-BOC size    12,843 bytes
-tos commit  92af6215c8067e9dbdc59924c519782bcb27dc0e
+code hash   tvm-cell-sha256:4e797ecffa62614831f53f03dbf94d851b6e6418fa3e84d05af8ba575df7085a
+BOC sha256  sha256:125aece02726d617df07a61f9cd46f0a27d87b6add4964bab2fc35075b4ebf64
+BOC size    14,317 bytes
+tos commit  6d59d09a82795436fedea6a114f4701c928db9bf
 compiler    FunC v0.4.6 (392bc162e)
 ```
 
@@ -41,9 +43,9 @@ pins a second build of the same source for test networks only. It sets
 else changes:
 
 ```text
-code hash   tvm-cell-sha256:0c2b8360061d236f3242c4fdf108b0ac0ffdad1fd2e5d606af28b5e2b8bf0ccb
-BOC sha256  sha256:b3891a3836af243e1fd45367ef624b8824495e0cf22bec349c5a6bd3ae7f6f41
-BOC size    12,843 bytes
+code hash   tvm-cell-sha256:edf727b8bb61786e33e3e00dc57fa1db41f8eeb6cbddc0382b3e8daf227e4c89
+BOC sha256  sha256:0482be914785ec7a1367137b3bb5fced63c944520af5b6fd57211fe0bd353bfe
+BOC size    14,317 bytes
 ```
 
 Production clients refuse it.
@@ -89,7 +91,7 @@ every lock and the operating reserve are nanoTOS.
 
 ## 2. Constants
 
-SAT:224-339. Changing any value is a contract change with its own release.
+SAT:224-373. Changing any value is a contract change with its own release.
 
 | Name | Value | Meaning |
 |---|---|---|
@@ -117,7 +119,7 @@ SAT:224-339. Changing any value is a contract change with its own release.
 | `TOKEN_WALLET_ALLOWANCE` | 0.3 TOS | the wallet storage reserve priced when no bridge parameter parses (section 11) |
 
 The wallet constants the actor prices against are frozen in the T1 wallet code
-(design 4.3) and copied at SAT:314-321: `R_GAS_LIMIT` 41,000,
+(design 4.3) and copied at SAT:348-355: `R_GAS_LIMIT` 41,000,
 `S_BOUNCE_GAS` 58,000, `S_TRANSFER_GAS` 127,000, `REPORT_MARGIN` 10,
 `CLEAR_REFUSAL_GAS` 52,000 and `S_REREPORT_GAS` 19,042 (twice the most
 measured at S's deepest `clear_refusal` and `rereport_refusal` paths). A
@@ -135,7 +137,7 @@ a bad length and a non-canonical chain, and 9 for a malformed wrapper.
 
 ## 4. Persistent data
 
-SAT:28-79, SAT:380-470. Every cell is read with `end_parse`; trailing data in
+SAT:28-79, SAT:414-504. Every cell is read with `end_parse`; trailing data in
 stored state is a contract fault and fails the transaction with exit 9.
 
 ### 4.1 Root
@@ -156,7 +158,7 @@ a payout; logs use it for "none".
 
 ### 4.2 Policy
 
-SAT:472-521:
+SAT:506-555:
 
 ```text
 policy$_ policy_version:uint32 price_per_call:Coins storage_fee:Coins
@@ -179,7 +181,7 @@ deploy-time inconsistency is refused at admission with reason 1925 (section
 
 ### 4.3 Accounting, token ledger and balance query
 
-SAT:39-51, SAT:393-412, SAT:523-556:
+SAT:39-51, SAT:427-446, SAT:557-590:
 
 ```text
 accounting$_ withdrawable_tos_revenue:Coins locked_storage_fees:Coins
@@ -201,17 +203,17 @@ balance_query$_ active:uint1 query_id:uint64 purpose:uint1 created_at:uint32
 The native ledger (`withdrawable_tos_revenue`, `locked_storage_fees`,
 `locked_outcome_fees`, the operating reserve) is in nanoTOS. `purpose` is 0 for
 a surplus query and 1 for a recheck query. The empty query is all zero bits
-with `requester = addr_none` (236 bits, SAT:554-556, SDK:1084-1096).
+with `requester = addr_none` (236 bits, SAT:588-590, SDK:1090-1102).
 
 **Token invariant.** The actor's token wallet balance is at least
 `attributed = pending_liability + refundable_liability + returned_liability +
-in_flight + withdrawable_token_revenue` (SDK:875-881). The rest of the balance
+in_flight + withdrawable_token_revenue` (SDK:881-887). The rest of the balance
 is **surplus**. The token **liability** the exposure caps bound is the same sum
-without `withdrawable_token_revenue` (SDK:884-889).
+without `withdrawable_token_revenue` (SDK:890-895).
 
 ### 4.4 Requests
 
-SAT:55-58, SAT:413-417, SAT:888-950, SAT:1013-1059:
+SAT:55-58, SAT:447-451, SAT:928-990, SAT:1053-1099:
 
 ```text
 requests$_ pending_requests:(HashmapE 64 ^PendingRequestV1)
@@ -236,11 +238,11 @@ restores the entry and keeps its reference); the entry is deleted at zero. `resp
 verifies against the key in `attestor_keys`, never against the policy.
 
 `caller_live_counts` is keyed by `slice_hash` of the caller's full address,
-workchain included (SAT:986-1003).
+workchain included (SAT:1026-1043).
 
 ### 4.5 Payouts and returned entries
 
-SAT:59-79, SAT:418-421, SAT:964-981, SAT:1063-1136:
+SAT:59-79, SAT:452-455, SAT:1004-1021, SAT:1103-1176:
 
 ```text
 payout_dicts$_ payouts:(HashmapE 64 ^PayoutV1)
@@ -289,7 +291,7 @@ returned$_ caller:MsgAddressInt amount:Coins paying:uint64
 
 ### 4.6 Asset route
 
-SAT:52-54, SAT:558-585; SDK:186-216:
+SAT:52-54, SAT:592-619; SDK:186-216:
 
 ```text
 asset_route$_ master:MsgAddressInt wallet_code_hash:uint256
@@ -302,12 +304,12 @@ asset_route$_ master:MsgAddressInt wallet_code_hash:uint256
   minter derives wallets with (the reported-transfer wallet of T1).
 - `bridge_config_param` names the asset's token bridge parameter, one of 79,
   81, 82 or 83 (T3 decision 4). The SDK refuses any other value at deploy
-  (SDK:476-480), and admission refuses one with 1932 (SAT:1572-1574).
+  (SDK:476-480), and admission refuses one with 1932 (SAT:1621-1623).
 
 No op changes the route. Admission refuses with 1932 while any of the three
 conditions fails, mirroring the native re-check of deploy data at `call`.
 
-**Wallet derivation** (SAT:594-628; SDK:1062-1082). The bridge wallet of
+**Wallet derivation** (SAT:628-662; SDK:1068-1088). The bridge wallet of
 `owner` under the route is `0:cell_hash(StateInit)` with
 
 ```text
@@ -327,7 +329,7 @@ resolvers reproduce it independently from the route in the account data.
 
 ## 5. `terms_hash`
 
-SAT:830-866; SDK:246-343:
+SAT:870-906; SDK:246-343:
 
 ```text
 terms_hash = cell_hash(token_terms)
@@ -341,7 +343,7 @@ terms_tail$_ metadata_hash:uint256 proof_scheme_hash:uint256
 
 - `asset_master` is the route master's 256-bit account id, and
   `asset_wallet_code_hash` the route's `wallet_code_hash`. A route whose master
-  is not canonical yields `asset_master = 0` (SAT:856-866); such a route admits
+  is not canonical yields `asset_master = 0` (SAT:896-906); such a route admits
   nothing (1932).
 - `terms_tail` is the native tail unchanged; `attestor_key_id` is zero when
   `has_attestor = 0`.
@@ -356,22 +358,22 @@ terms_tail$_ metadata_hash:uint256 proof_scheme_hash:uint256
 ## 6. Response statement (SRP2)
 
 As [`SERVICE_ACTOR_TVM_V1.md`](SERVICE_ACTOR_TVM_V1.md) section 6, unchanged
-(SAT:868-884): the same `srp2` and `srp2_tail` layouts, `GLOBALID`, the actor's
+(SAT:908-924): the same `srp2` and `srp2_tail` layouts, `GLOBALID`, the actor's
 own address, and `price` equal to the request's `price_per_call`, here in
 atomic units. The asset is bound through `terms_hash`.
 
 ## 7. Inbound messages
 
-SAT:81-106, SAT:1248-2008. Every body starts with `op:uint32 query_id:uint64`
-(SAT:1303-1304). An empty body is a plain top-up and is ignored (SAT:1300).
-`excesses` (`0xd53276db`) is accepted as value only (SAT:1442). An op that no
-branch handles fails with 1910 (SAT:1850-1852, SAT:2007); this includes the
+SAT:81-106, SAT:1288-2061. Every body starts with `op:uint32 query_id:uint64`
+(SAT:1343-1344). An empty body is a plain top-up and is ignored (SAT:1340).
+`excesses` (`0xd53276db`) is accepted as value only (SAT:1488). An op that no
+branch handles fails with 1910 (SAT:1905-1907, SAT:2060); this includes the
 native rail's `call#53564301`, so native value with a `call`-shaped body is not
 funding. Every lifecycle and owner handler ends its body parse with
 `end_parse` (exit 9 for trailing data or a missing field).
 
 Bounced messages are handled in section 8.6. A bounced message whose body has
-fewer than 96 bits after the bounce prefix is ignored (SAT:1257-1260).
+fewer than 96 bits after the bounce prefix is ignored (SAT:1297-1300).
 
 **Addresses with anycast or `addr_var`.** `LDMSGADDR` refuses them from global
 version 10, so a body naming one fails with exit 9 at its parse, before any
@@ -381,7 +383,7 @@ The checks below that refuse 1934 therefore see only `addr_std` and
 
 ### 7.1 Funding: `transfer_notification`
 
-SAT:1446-1658. The buyer sends an ordinary token `transfer` to the actor
+SAT:1492-1717. The buyer sends an ordinary token `transfer` to the actor
 (SDK:549-586):
 
 ```text
@@ -408,14 +410,14 @@ these steps, each on the notification's own value (it never raises its gas
 limit):
 
 1. **Foreign or spoofed notification** (the sender is not the actor's own
-   wallet, derived from the stored route; SAT:1450-1467). No token reached the
+   wallet, derived from the stored route; SAT:1496-1513). No token reached the
    actor's wallet and no state changes. The actor sends the sender, in mode 64
    and non-bounceable,
    `transfer query_id amount destination=from response_destination=from
    custom_payload=none forward_tos_amount=0 forward_payload=(inline, empty)`.
    A wallet the actor owns returns the tokens; anything else ignores it. A
    notification from a wallet of another master (a wrong asset) is this case.
-2. **Underfunded** (`msg_value < MIN_FUNDING_VALUE`; SAT:1468-1477). Nothing is
+2. **Underfunded** (`msg_value < MIN_FUNDING_VALUE`; SAT:1514-1523). Nothing is
    stored and the tokens are surplus. `SAF1` with reason 1929 and payout id 0
    is emitted only when `msg_value >= ADMISSION_GAS_ALLOWANCE`; otherwise
    nothing is sent (T3 decisions 7 and 15). If the value cannot pay for the
@@ -423,7 +425,7 @@ limit):
    surplus.
 3. **Authenticated and funded: from here nothing throws.** `from` is the
    caller, authenticated by the actor's wallet. Three parses run in
-   `try`/`catch` and feed a reason instead of throwing (SAT:1479-1550):
+   `try`/`catch` and feed a reason instead of throwing (SAT:1525-1599):
    - the payload: one bit `1` then exactly one reference and nothing else, or
      bit `0` and the payload inline; then the tag `0x53544301`, 256 + 256
      bits and nothing else. Any other shape gives 1939 `malformed_payload`
@@ -436,7 +438,7 @@ limit):
      `has_attestor = 0` the key must be absent and the id zero. Any failure,
      including a malformed key, gives 1925.
 4. **Admission checks**, in this order; the first failure is the refusal
-   reason (SAT:1552-1605):
+   reason (SAT:1601-1656):
 
    | # | Condition | Reason |
    |---:|---|---|
@@ -455,21 +457,44 @@ limit):
    | 13 | `open_access`, or `has_authorized_caller` and `from == authorized_caller` | 1923 |
    | 14 | `amount == price_per_call` exactly (overpayment and underpayment alike) | 1902 |
    | 15 | `msg_value >= storage_fee + MIN_FUNDING_VALUE` | 1902 |
-   | 16 | `live_count < MAX_LIVE_GLOBAL` | 1907 |
-   | 17 | `from`'s live count `< MAX_LIVE_PER_CALLER` | 1908 |
-   | 18 | `next_request_id < 2^64 - 1` | 1909 |
-   | 19 | the daily rate limit (`0` is unlimited) | 1924 |
-   | 20 | `returned_count < MAX_RETURNED_GLOBAL` and `from`'s returned count `< MAX_RETURNED_PER_CALLER` | 1935 |
-   | 21 | `liability + price_per_call <= min(max_token_liability, max_liability_per_actor)` | 1937 |
-   | 22 | `expected_terms_hash == terms_hash` (section 5) | 1926 |
-   | 23 | `backing >= locked_storage_fees + locked_outcome_fees + MINIMUM_OPERATING_RESERVE`, where `backing = max(balance - msg_value, 0)` | 1928 |
-   | 24 | `pending_liability + price`, `locked_storage_fees + storage_fee` and `backing + storage_fee` stay below `2^120` | 1927 |
+   | 16 | `pending_liability + price`, `locked_storage_fees + storage_fee` and `backing + storage_fee` stay below `2^120` | 1927 |
+   | 17 | `live_count < MAX_LIVE_GLOBAL` | 1907 |
+   | 18 | `from`'s live count `< MAX_LIVE_PER_CALLER` | 1908 |
+   | 19 | `next_request_id < 2^64 - 1` | 1909 |
+   | 20 | the daily rate limit (`0` is unlimited) | 1924 |
+   | 21 | `returned_count < MAX_RETURNED_GLOBAL` and `from`'s returned count `< MAX_RETURNED_PER_CALLER` | 1935 |
+   | 22 | `liability + price_per_call <= min(max_token_liability, max_liability_per_actor)` | 1937 |
+   | 23 | `expected_terms_hash == terms_hash` (section 5) | 1926 |
+   | 24 | `backing >= locked_storage_fees + locked_outcome_fees + MINIMUM_OPERATING_RESERVE`, where `backing = max(balance - msg_value, 0)` | 1928 |
 
    `liability` is `pending + refundable + returned + in_flight` (revenue
    excluded); `max_liability_per_actor` comes from the recognition record. The
    caps are per actor, so many actors can exceed them in aggregate; only the
    aggregate watch of T14 sees that.
-5. **Admitted** (SAT:1607-1638). The actor stores the pending request under
+
+   **Checked arithmetic and the no-throw guarantee** (SAT:224-271; the T3
+   checked-arithmetic change, review round 4 of tos#516). Every monetary
+   quantity uses checked or saturating helpers:
+
+   - Every predicate in the table and every budget of section 11 is computed
+     with saturating sums, products and differences, which never throw. A
+     saturated sum or product is capped at `MAX_COINS` (`2^120`), which no
+     Coins field holds, and each sits on the side of its comparison where a
+     larger value refuses. A difference below zero is zero.
+   - Row 16 (1927) now comes before the capacity checks. A pending liability
+     that would reach `2^120` is therefore refused with 1927, where it used to
+     reach the exposure cap and be refused with 1937 (TST
+     `funding::a_ledger_one_below_the_coins_bound_refuses_a_new_admission_with_amount_range`,
+     `funding::amounts_at_the_coins_bound_are_refused_by_a_predicate_and_never_thrown`).
+   - Each ledger mutation after acceptance is checked, and is guarded by a
+     predicate computed on the same values, so no checked mutation can throw
+     after a funded, authenticated notification is accepted.
+   - A saturated budget that is stored or sent as Coins (the transfer body's
+     `report_tos_amount`, a payout's `outcome_fee_lock`) cannot reach
+     `MAX_COINS` after acceptance. Any such saturation also saturates
+     `MIN_FUNDING_VALUE`, so the notification takes the underfunded branch
+     (step 2) first.
+5. **Admitted** (SAT:1658-1691). The actor stores the pending request under
    `request_id = next_request_id` with `caller = from`, the policy's price, fee,
    bounty and version, the deadlines `response_deadline = now + response_sla`
    and `refund_claim_deadline = response_deadline + refund_claim_window`, the
@@ -479,7 +504,7 @@ limit):
    `storage_fee` to `locked_storage_fees`; then `raw_reserve(backing +
    storage_fee, 0)`, emits `SAT1` (mode 1, section 9.1) and sends the change to
    `from` (mode 128).
-6. **Refused** (SAT:1640-1657). The tokens go back to `from` as a kind 4
+6. **Refused** (SAT:1693-1716). The tokens go back to `from` as a kind 4
    funding return paid from the notification's `RETURN_BUDGET`
    (section 8): `SAF1` names the reason and the payout id, then the reported
    transfer follows. No funding return is made, and `SAF1` names payout id 0,
@@ -488,9 +513,13 @@ limit):
    - `next_payout_id` is exhausted;
    - `returns_in_flight >= MAX_RETURNS_IN_FLIGHT` (T3 decision 2); or
    - `from` is not a canonical `addr_std` on workchain 0 (T3 decision 14; the
-     bridge forces workchain 0, so this is unreachable with the bridge wallet).
+     bridge forces workchain 0, so this is unreachable with the bridge wallet);
+     or
+   - the return would not fit its ledgers in Coins: `in_flight + amount`,
+     `locked_outcome_fees + outcome_fee_lock` or `backing + outcome_fee_lock`
+     would reach `2^120` (the checked-arithmetic change).
 
-   In those four cases nothing is stored and the tokens are surplus, recoverable
+   In those cases nothing is stored and the tokens are surplus, recoverable
    only by `recover_surplus`. In every other refusal the tokens stay attributed
    to `from` (section 8.3).
 
@@ -498,7 +527,7 @@ limit):
 
 ### 7.2 `respond`
 
-SAT:1663-1694:
+SAT:1722-1753:
 
 ```text
 respond#53544302 query_id:uint64 request_id:uint64 response_hash:uint256
@@ -516,7 +545,7 @@ storage_fee`. No message is sent.
 
 ### 7.3 `expire`
 
-SAT:1696-1714. `expire#53544303 query_id:uint64 request_id:uint64`.
+SAT:1755-1773. `expire#53544303 query_id:uint64 request_id:uint64`.
 Permissionless; pending (1913); `response_deadline <= now` (1914);
 `now < refund_claim_deadline` (1915). Moves the request to `refunds`
 (releasing its key reference) and its price from pending to refundable
@@ -524,7 +553,7 @@ liability. Capacity is not released.
 
 ### 7.4 `claim_refund`
 
-SAT:1718-1741:
+SAT:1777-1799:
 
 ```text
 claim_refund#53544304 query_id:uint64 request_id:uint64 destination:MsgAddressInt
@@ -542,7 +571,7 @@ the outcome.
 
 ### 7.5 `sweep_expired_request`
 
-SAT:1743-1778. `sweep_expired_request#53544305 query_id:uint64 request_id:uint64`.
+SAT:1801-1835. `sweep_expired_request#53544305 query_id:uint64 request_id:uint64`.
 Permissionless. Checks: the request is pending or refundable (1920);
 `next_payout_id < 2^64 - 1` (1909); `now >= refund_claim_deadline` (1919);
 `msg_value >= PAYOUT_FUNDING` (1929); `balance - msg_value >= 0` (1921).
@@ -553,7 +582,7 @@ sends it.
 
 ### 7.6 `claim_returned`
 
-SAT:1780-1804:
+SAT:1837-1860:
 
 ```text
 claim_returned#5354430a query_id:uint64 id:uint64 destination:MsgAddressInt
@@ -570,7 +599,7 @@ in flight (TST `payouts::a_double_claim_returned_in_one_block_is_refused_with_19
 
 ### 7.7 `sweep_returned`
 
-SAT:1806-1826. `sweep_returned#5354430d query_id:uint64 id:uint64`.
+SAT:1862-1881. `sweep_returned#5354430d query_id:uint64 id:uint64`.
 Permissionless. Checks: the entry exists (1931); `next_payout_id < 2^64 - 1`
 (1909); `now >= return_deadline` (1919); `paying == 0` (1930); `msg_value >=
 PAYOUT_FUNDING` (1929); `balance - msg_value >= 0` (1921). Effect as
@@ -579,7 +608,7 @@ sweeper.
 
 ### 7.8 `recheck_payout`
 
-SAT:1828-1847. `recheck_payout#5354430f query_id:uint64 id:uint64`.
+SAT:1883-1902. `recheck_payout#5354430f query_id:uint64 id:uint64`.
 Permissionless and funded. Checks: the payout exists (1940); its kind is 1, 2,
 4, 5 or 7 (1941); `now >= created_at + PAYOUT_RECHECK_AGE` (1942); no balance
 query younger than `RECHECK_QUERY_TTL` is pending (1943); `msg_value >=
@@ -591,11 +620,11 @@ actor's wallet, bounceable, mode 64 + 16. The answer is section 8.5.
 
 ### 7.9 Owner operations
 
-SAT:1849-2005. For `update_policy`, `rotate_attestor_key`, `revoke_attestor`,
+SAT:1904-2058. For `update_policy`, `rotate_attestor_key`, `revoke_attestor`,
 `withdraw_revenue`, `recover_surplus` and `abandon_payout`, any other op is
 1910 first, then a sender other than the owner is 1900.
 
-**`update_policy`** (SAT:1858-1890):
+**`update_policy`** (SAT:1913-1945):
 
 ```text
 update_policy#53544306 query_id:uint64
@@ -612,17 +641,17 @@ Bounds in order: 1903, 1904, 1905, 1906 (as admission), then `price_per_call
 the policy and `active` and sets `policy_version + 1`. It cannot change the
 route or the attestor.
 
-**`rotate_attestor_key`** (SAT:1892-1902). `rotate_attestor_key#53544307
+**`rotate_attestor_key`** (SAT:1947-1957). `rotate_attestor_key#53544307
 query_id:uint64 attestor_key:^StoredKeyV1`. Derives the key id (62, 63, 9),
 then refuses with **1944** `attestor_keys_full` while `attestor_key_count >=
 MAX_LIVE_ATTESTOR_KEYS` (T3 decision 3), whatever the key. Writes
 `has_attestor = 1`, the id and the key; `policy_version` is not bumped.
 
-**`revoke_attestor`** (SAT:1904-1910). `revoke_attestor#53544308
+**`revoke_attestor`** (SAT:1959-1965). `revoke_attestor#53544308
 query_id:uint64`. Writes the "no attestor" encoding. Pending requests keep
 naming their keys.
 
-**`withdraw_revenue`** (SAT:1912-1961):
+**`withdraw_revenue`** (SAT:1967-2015):
 
 ```text
 withdraw_revenue#53544309 query_id:uint64 token_amount:Coins tos_amount:Coins
@@ -641,7 +670,7 @@ Effect: `withdrawable_tos_revenue -= tos_amount`; with a token part,
 `tos_amount` is sent to the owner in mode 1, and the rest as the payout's
 value (section 8.1) or as change to the sender (mode 128).
 
-**`recover_surplus`** (SAT:1963-1981). `recover_surplus#5354430b
+**`recover_surplus`** (SAT:2017-2035). `recover_surplus#5354430b
 query_id:uint64 amount:Coins`. Checks: `amount > 0` (1936);
 `surplus_payouts_in_flight < MAX_SURPLUS_PAYOUTS` (1930); the owner canonical
 on workchain 0 (1934); no balance query younger than `RECHECK_QUERY_TTL` (1943);
@@ -651,7 +680,7 @@ on workchain 0 (1934); no balance query younger than `RECHECK_QUERY_TTL` (1943);
 `provide_balance(query_id)` to the actor's wallet, bounceable, mode 64 + 16
 (T3 decision 6). The answer is section 8.5.
 
-**`abandon_payout`** (SAT:1983-2005). `abandon_payout#5354430c query_id:uint64
+**`abandon_payout`** (SAT:2037-2058). `abandon_payout#5354430c query_id:uint64
 id:uint64`. Checks: the payout exists (1940); its kind is 3 or 6 (**1941**, T3
 decision 7); `now >= created_at + PAYOUT_ABANDON_AGE` (1938); no balance query
 younger than `RECHECK_QUERY_TTL` (1943; an older one is cleared, and the owner
@@ -664,7 +693,7 @@ still in S show later as surplus.
 
 ### 8.1 Sending a payout
 
-SAT:648-663, SAT:788-802, SAT:1110-1146.
+SAT:682-699, SAT:828-842, SAT:1150-1186.
 
 - **Creation** (`create_payout`): a fresh payout id, `recipient_wallet`
   derived, `outcome_fee_lock` computed at current prices, `in_flight +=
@@ -707,7 +736,7 @@ transaction.
 
 ### 8.2 Accepted outcome inputs
 
-SAT:1253-1369. Before raising its gas limit, each handler reads only the op,
+SAT:1293-1409. Before raising its gas limit, each handler reads only the op,
 the query id, the root and the `payouts` reference (`peek_payout`), compares
 the stored payout with the message, and only then calls
 `set_gas_limit(OUTCOME_HANDLER_GAS)`. A message that does not match never
@@ -720,7 +749,7 @@ raises the limit and ends on its own value.
 | `transfer_rereported#52545232 query_id total:Coins` | as `transfer_refused` | as `transfer_refused` | as `transfer_refused` |
 | bounce of `reported_transfer` (bounced body `op query_id amount ...`) | bounce sender `==` stored `own_wallet` | the payout exists and the bounced amount equals it | bounced at S (2); for kind 4 the ledger applies "refused" |
 
-**Non-matching and stale inputs** (SAT:1307-1360):
+**Non-matching and stale inputs** (SAT:1347-1400):
 
 - `transfer_delivered` for an absent payout, from another sender, or with
   another amount or recipient: ignored.
@@ -744,7 +773,7 @@ from the 256-bit bounce body and does not need it.
 
 ### 8.3 Ledger effects and the exit-path table
 
-SAT:1148-1226. `p` is the request's price, `a` the payout amount, `l` the lock.
+SAT:1188-1266. `p` is the request's price, `a` the payout amount, `l` the lock.
 Every accepted outcome deletes the payout and `locked_outcome_fees -= l`.
 "TOS settlement" is `locked_storage_fees -= storage_fee`,
 `withdrawable_tos_revenue += storage_fee - cleanup_bounty`, and the
@@ -772,7 +801,7 @@ it **returned**, a buyer-visible state with the action `claim_returned`.
 
 ### 8.4 Finishing an outcome
 
-SAT:1228-1244 (`finish_outcome`). With `backing` the balance before the
+SAT:1268-1284 (`finish_outcome`). With `backing` the balance before the
 outcome message, the actor saves state, then:
 
 1. emits `SAO1` (mode 1 + 2);
@@ -793,7 +822,7 @@ re-reporter.
 
 ### 8.5 Balance queries: surplus recovery and recheck
 
-SAT:1286-1296, SAT:1371-1440. At most one balance query is pending. Only a
+SAT:1326-1336, SAT:1411-1486. At most one balance query is pending. Only a
 `take_balance#52544232 query_id balance:Coins` from the actor's own wallet
 (derived on the message's value) whose `query_id` equals the pending query's
 id is accepted; any other is ignored. An accepted answer always clears the
@@ -801,7 +830,7 @@ query, then:
 
 - **Correction.** While a query is pending, every accepted
   `transfer_delivered` of a payout with id `>= floor` adds its amount to
-  `delivered_since_floor` (SAT:1323-1328).
+  `delivered_since_floor` (SAT:1363-1368).
 - **Surplus query.** `surplus = max(balance - delivered_since_floor -
   (pending + refundable + returned + withdrawable_token_revenue) - in_flight,
   0)`. If `0 < amount <= surplus` and a payout id is left, a kind 6 payout of
@@ -857,9 +886,9 @@ never lost.
 
 ## 9. External out-messages (logs)
 
-SAT:108-116, SAT:772-826. Every log is `ext_out_msg_info` with `src =
+SAT:108-116, SAT:812-866. Every log is `ext_out_msg_info` with `src =
 addr_none`, `dest = addr_none`, no `init`, the body by reference; in the
-finalized transaction `src` is the actor. Decoders (SDK:928-1058) refuse
+finalized transaction `src` is the actor. Decoders (SDK:934-1064) refuse
 another tag, a missing field, and trailing bits or references.
 
 ### 9.1 `SAT1` (request snapshot)
@@ -871,8 +900,8 @@ request_snapshot#53415431 request_id:uint64 caller:MsgAddressInt
 ```
 
 Emitted once per admitted call, mode 1, after the reserve and before the change
-(SAT:1627-1635). It is the native `SAR1` layout with the token terms cell.
-`terms_hash` is the cell hash of `terms`; a decoder (SDK:940-971) also refuses
+(SAT:1680-1688). It is the native `SAR1` layout with the token terms cell.
+`terms_hash` is the cell hash of `terms`; a decoder (SDK:946-977) also refuses
 terms that section 5 refuses and `response_deadline + refund_claim_window !=
 refund_claim_deadline` (checked addition).
 
@@ -896,7 +925,7 @@ outcome_log#53414f31 payout_id:uint64 kind:uint3 request_id:uint64
 
 `kind` is 1-7 and `outcome` is 0 delivered, 1 refused at R, 2 bounced at S, 3
 rechecked, 4 mismatch (logged only; `amount` is the reported one), 5
-abandoned. A decoder (SDK:1010-1028) refuses kind 0 and outcomes 6 and 7.
+abandoned. A decoder (SDK:1016-1034) refuses kind 0 and outcomes 6 and 7.
 Mode 1 + 2 in outcome handlers and on a recheck, mode 1 for a mismatch and an
 abandon.
 
@@ -926,7 +955,7 @@ not range-check these fields (section 16.3).
 
 ## 10. Recognition reads: ConfigParam 84 at admission only
 
-SAT:1498-1528. During admission, inside `try`/`catch`, the actor reads
+SAT:1544-1574. During admission, inside `try`/`catch`, the actor reads
 ConfigParam 84 (`SettlementAssets`, design 3.1 and the T2 TL-B):
 
 ```text
@@ -957,12 +986,12 @@ network without ConfigParam 84 admits no token call.
 
 ## 11. Funding values and bridge-parameter pricing
 
-SAT:636-749. Every TOS amount is priced at run time from the basechain gas and
+SAT:670-789. Every TOS amount is priced at run time from the basechain gas and
 forwarding prices; `get_funding_prices` returns them (section 14).
 
 The wallet's own value check also prices the bridge parameter's
 `wallet_gas_consumption` and `wallet_min_tos_for_storage`. The actor reads them
-(SAT:665-697) from the asset's own bridge parameter, the one the route names
+(SAT:701-733) from the asset's own bridge parameter, the one the route names
 (`bridge_config_param`), and, if that does not parse, from its negative slot
 (`-bridge_config_param`), which the bridge falls back to. The parse is
 `token_bridge_params_v1`: 8 + 256 + 256 bits skipped, the `oracles`
@@ -995,6 +1024,10 @@ REREPORT_FUNDING        = 2 × (gas_fee(S_REREPORT_GAS) + gas_fee(ABSENT_REPORT_
                                + gas_fee(CLEAR_REFUSAL_GAS) + 2F)
 ```
 
+Every `+` and `×` above is saturating at `MAX_COINS` (section 7.1, "Checked
+arithmetic"), so a budget never throws; a saturated budget refuses every
+funding as underfunded.
+
 `TRANSFER_BUDGET` is what the wallet's `reported_need` requires for the
 actor's one-cell body, with S's message to R carrying the wallet StateInit.
 A call's `forward_tos_amount` must be at least `storage_fee +
@@ -1003,7 +1036,7 @@ wallet with at least `REREPORT_FUNDING` (`get_rereport_funding`).
 
 ## 12. Gas
 
-SAT:323-331; FND "Gas"; TST `gas.rs`. Each constant is at least twice the most
+SAT:357-365; FND "Gas"; TST `gas.rs`. Each constant is at least twice the most
 either engine measured at capacity, with every dictionary at its deepest shape;
 CI replays every measured transaction in the native engine and reports the
 same gas.
@@ -1011,13 +1044,13 @@ same gas.
 | Constant | Value | Most measured | Bounds |
 |---|---:|---:|---|
 | `PRE_ACCEPT_GAS` | 24,000 | 10,026 | an outcome handler up to its `set_gas_limit` |
-| `OUTCOME_HANDLER_GAS` | 300,000 | 117,742 | a whole outcome handler (a refund or sweep refused at R) |
-| `ADMISSION_GAS` | 300,000 | 131,613 | the notification handler, with a 16-entry ConfigParam 84 whose last entry is the actor's master |
+| `OUTCOME_HANDLER_GAS` | 300,000 | 117,865 | a whole outcome handler (a refund or sweep refused at R) |
+| `ADMISSION_GAS` | 300,000 | 146,463 | the notification handler, with a 16-entry ConfigParam 84 whose last entry is the actor's master |
 | `ABSENT_REPORT_GAS` | 20,000 | 8,178 | the answer to a report of an absent payout |
 
 **Gas rule** (design 2.3). There is no `accept_message`. The only
-`set_gas_limit` calls are the three in the outcome handlers (SAT:1277,
-SAT:1320, SAT:1361), each after the payout lookup and the sender, amount (and
+`set_gas_limit` calls are the three in the outcome handlers (SAT:1317,
+SAT:1360, SAT:1401), each after the payout lookup and the sender, amount (and
 recipient) checks; from there the handler is paid from that payout's lock,
 once. Every other handler, the notification included, runs on the gas its own
 message bought. Mutation controls (TST `mutations.rs`) remove each handler's
@@ -1026,7 +1059,7 @@ and each mutant lets the matching forged message through.
 
 ## 13. State bound and the `accepting_tokens` headroom
 
-SAT:248-307; FND "State bound"; TST `capacity.rs`. A basechain account holds
+SAT:282-341; FND "State bound"; TST `capacity.rs`. A basechain account holds
 at most ConfigParam 43's `max_acc_state_cells` (65,536 at genesis). A state
 over it fails the action phase, and a failed notification leaves its tokens
 unattributed, so every growing structure is capped and the caps keep the worst
@@ -1034,19 +1067,20 @@ state at 80% of the limit (52,428 cells; T3 decision 1):
 
 | Part | Cells each | Count | Cells |
 |---|---:|---|---:|
-| base: code, policy, attestor key, route | | | 320 |
+| base: code, policy, attestor key, route | | | 360 |
 | live entry being swept, with its caller's counter | 9 | `MAX_LIVE_GLOBAL` = 1,500 | 13,500 |
 | returned entry being paid, with its caller's counter | 10 | 1,500 + 1,500 + 512 | 35,120 |
 | funding return in flight | 5 | `MAX_RETURNS_IN_FLIGHT` = 512 | 2,560 |
 | owner payout in flight | 5 | 4 revenue + 4 surplus | 40 |
 | attestor key named by pending requests | 15 | `MAX_LIVE_ATTESTOR_KEYS` = 4 | 60 |
 | one notification in flight | | | 10 |
-| total | | | 51,610 |
+| total | | | 51,650 |
 
 The returned count is `MAX_RETURNED_GLOBAL` plus every live entry and funding
 return, because a payout refused in flight still creates its entry; that
 over-counts. Each dictionary entry adds at most two cells. The sandbox builds
-the worst state with every cell distinct and counts 47,025 cells. In that
+the worst state with every cell distinct and counts 47,046 cells (the larger
+code of the checked-arithmetic change raised the base allowance from 320 to 360). In that
 state the test (`capacity::with_every_cap_full_a_further_funding_is_refused_and_returned`,
 built by `worst_state(1)`) leaves one funding-return slot free, so a further
 funding is refused (1907) and returned. With `returns_in_flight` at
@@ -1074,7 +1108,7 @@ cap. T14 alarms on funding returns in flight near it.
 
 ## 14. Getters
 
-SAT:2010-2164. Convenience only; resolvers decode the account data exactly.
+SAT:2063-2225. Convenience only; resolvers decode the account data exactly.
 
 | Getter | Returns |
 |---|---|
@@ -1083,6 +1117,7 @@ SAT:2010-2164. Convenience only; resolvers decode the account data exactly.
 | `get_token_ledger()` | `pending_liability, refundable_liability, returned_liability, in_flight, withdrawable_token_revenue` |
 | `get_balance_query()` | the balance query fields of section 4.3 |
 | `get_asset_route()` | `master, wallet_code_hash, wallet_code` |
+| `get_bridge_config_param()` | the route's `bridge_config_param` (any 32-bit value decodes; admission accepts only 79, 81, 82 or 83) |
 | `get_own_wallet()` | the actor's derived wallet |
 | `get_terms_hash()`, `get_terms()` | the current terms hash and cell |
 | `get_funding_prices()` | `MIN_FUNDING_VALUE, ADMISSION_GAS_ALLOWANCE, RETURN_BUDGET, report_tos_amount, outcome_fee_lock, PAYOUT_FUNDING` |
@@ -1097,7 +1132,7 @@ SAT:2010-2164. Convenience only; resolvers decode the account data exactly.
 | `get_request_attestor_key(id)` | the key a pending request names, or null; 1913 when not pending |
 | `get_pending_count()`, `get_live_count()` | the counters |
 
-The SDK's stack decoders range-check before narrowing (SDK:738-836): a kind
+The SDK's stack decoders range-check before narrowing (SDK:738-842): a kind
 outside 1-7, a 32-bit field above `2^32 - 1`, and `revenue_payouts_in_flight`,
 `returns_in_flight` or `surplus_payouts_in_flight` above their caps are
 refused.
@@ -1134,13 +1169,13 @@ reason on the notification path (never thrown there); "result" appears only in
 | 1918 | `not_refund_caller` | `claim_refund`, `claim_returned` (throw) |
 | 1919 | `sweep_too_early` | `sweep_expired_request`, `sweep_returned` (throw) |
 | 1920 | `request_not_live` | `sweep_expired_request` (throw) |
-| 1921 | `insufficient_balance` | `claim_refund`, `sweep_expired_request`, `claim_returned`, `sweep_returned`, `abandon_payout` (throw; defensive, unreachable while the balance includes the message) |
-| 1922 | `insufficient_revenue` | `withdraw_revenue` (throw) |
+| 1921 | `insufficient_balance` | `claim_refund`, `sweep_expired_request`, `claim_returned`, `sweep_returned`, `abandon_payout` (throw): the balance is below the message's own value, because storage fees took part of it |
+| 1922 | `insufficient_revenue` | `withdraw_revenue` (throw): the amounts exceed what is withdrawable, or, as for 1921, the balance is below the message's own value |
 | 1923 | `not_authorized` | admission (reason) |
 | 1924 | `rate_limited` | admission (reason) |
 | 1925 | `bad_attestor_key` | admission (reason) |
 | 1926 | `terms_mismatch` | admission (reason) |
-| 1927 | `amount_range` | admission (reason); every checked sum on supplied state (throw) |
+| 1927 | `amount_range` | admission (reason, before the capacity checks); every checked sum on supplied state (throw) |
 | 1928 | `operating_reserve_unfunded` | admission (reason) |
 | 1929 | `insufficient_execution_payment` | an underfunded notification (`SAF1` reason); every payout-creating op, `recheck_payout`, `recover_surplus`, `withdraw_revenue` (throw) |
 | 1930 | `payout_in_flight` | `claim_returned`, `sweep_returned`, `withdraw_revenue` (4 revenue payouts), `recover_surplus` (4 surplus payouts) (throw) |
@@ -1174,10 +1209,10 @@ byte:
 
 ```text
 source repo  github.com/tosnetwork/tos
-source sha   12cf5522801a30806eeb7cda9ee85fbd051ecbca  (tosnetwork/tos#516)
+source sha   7a32aa402944bb944a1c778197e491605f909df4  (tosnetwork/tos#516)
 source path  tosctl/src/node-control/contracts/tests/fixtures/service_actor_token/conformance-vectors.json
 spec copy    test-vectors/service-actor-token-conformance-vectors.json
-sha256       031238245e438b9fb08707c3486365ba1f379a36895fe2da2ebcc768264a4101 (34,998 bytes)
+sha256       f78ea0df4c70a0476000ccae035b32e554e727fa28a808a7c7a754c2a30e919a (52,944 bytes)
 ```
 
 The provenance is recorded in
@@ -1191,22 +1226,22 @@ section change together.
 
 The vectors cover the release code and its hash, the wallet code hash, the
 master, actor and actor-wallet addresses, the deploy data and its inputs, the
-terms cell and `terms_hash`, a funding transfer body, `SAT1`, `SAF1` for a
-refused amount and for an underfunded notification, `SAO1` for every payout
-kind under every outcome (delivered, refused at R, bounced at S) and four
-lifecycle cases, and `SAB1` of a surplus recovery.
+terms cell and `terms_hash`, the actor's `funding_prices` at the funding's
+state (`get_funding_prices`, the storage fee of `get_service_data` and
+`get_accepting_tokens`), a funding transfer body, `SAT1`, `SAF1` for a refused
+amount and for an underfunded notification, `SAO1` for every payout kind under
+every outcome (delivered, refused at R, bounced at S) and four lifecycle cases,
+and `SAB1` of a surplus recovery.
 
-**Gaps in these vectors**, to close when the T3 fixture is regenerated after
-tos#516 merges:
-
-- the deploy data has no attestor (`has_attestor = 0`), so no vector exercises
-  the terms tail, the `attestor_keys` dictionary or `respond` with
-  `has_attestor = 1`;
-- the actor's `get_funding_prices` at the vector state is not recorded, so the
-  funding transfer's `forward_tos_amount` can be checked against the full
-  `storage_fee + MIN_FUNDING_VALUE` budget only once a `funding_prices` field
-  (with `min_funding_value`) is added; the reproducer checks it in full when
-  the field is present and only the storage-fee part until then.
+An `attested` section covers an actor deployed with an attestor
+(`has_attestor = 1`): its deploy data with the stored ML-DSA-44 key, the key id
+and the key's SHA-256, its terms and `terms_hash`, its funding prices, its
+`SAT1`, and a signed `respond` that the actor accepted, given by the
+network's `global_id`, the request id, `response_hash`, the SRP2 domain hash
+and the signing context. The signature bytes are not pinned: ML-DSA-44 signing
+is hedged, so a response is identified by its request and `response_hash`
+(section 3). A verifier recomputes the domain hash and verifies a signature it
+is given; it never compares signature bytes.
 
 ### 16.2 Independent reproduction
 
@@ -1220,10 +1255,18 @@ reproduces:
 - every deploy-data field against `init`, and the empty ledgers, query and
   dictionaries;
 - the terms cell from the deploy data's policy and route, and `terms_hash`;
-- the funding transfer against section 7.1 and the `token_call` payload (the
-  forward budget as far as the vectors allow, section 16.1);
+- the funding prices' own relations (`MIN_FUNDING_VALUE =
+  ADMISSION_GAS_ALLOWANCE + RETURN_BUDGET`, `PAYOUT_FUNDING =
+  PAYOUT_GAS_ALLOWANCE + RETURN_BUDGET`), and the funding transfer against
+  section 7.1, its `forward_tos_amount` against the full `storage_fee +
+  MIN_FUNDING_VALUE` budget, and its `token_call` payload;
 - every log against section 9, including the kind and outcome that each
-  `SAO1` vector's name states.
+  `SAO1` vector's name states;
+- for the `attested` section: the actor address, the stored key's canonical
+  chain, its SHA-256, the key id from the key bytes (section 3), the terms
+  with `has_attestor = 1`, the `SAT1`, and the SRP2 domain hash of the
+  accepted `respond` from the snapshot, the actor address and `global_id`
+  (section 6).
 
 ### 16.3 Negative corpus
 
@@ -1282,7 +1325,8 @@ security review; the T10 live lifecycles. None is recorded.
    delivered refund or sweep (price to the caller or its destination), or a
    returned entry for its caller. The storage fee is never refunded.
 6. A correctly funded refusal stays attributed to its sender, except at
-   `MAX_RETURNS_IN_FLIGHT` and for a sender off workchain 0, where it is logged
+   `MAX_RETURNS_IN_FLIGHT`, for a sender off workchain 0, and for a return whose
+   ledgers would not fit in Coins, where it is logged
    surplus (section 7.1 step 6).
 7. No payout path reads ConfigParam 84.
 8. No `accept_message`; no gas raise outside the authenticated outcome

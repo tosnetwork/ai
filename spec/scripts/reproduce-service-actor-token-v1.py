@@ -31,6 +31,7 @@ OP_TRANSFER = 0x0F8A7EA5
 TOKEN_CALL = 0x53544301
 MAX_COINS = 1 << 120
 NO_TOKEN_CAP = MAX_COINS - 1
+PAYOUT_GAS_ALLOWANCE = 200_000_000  # 0.2 TOS
 BRIDGE_PARAMS = (79, 81, 82, 83)
 OUTCOMES = {"delivered": 0, "refused_at_r": 1, "bounced_at_s": 2}
 # Every reason a SAF1 may carry: the admission reasons and 1929 (underfunded).
@@ -323,13 +324,94 @@ def wallet_address(owner, master, code):
     return (0, int.from_bytes(Cell("00110", [code, data.cell()]).hash(), "big"))
 
 
+PQ_KEY_ID_DOMAIN = b"TOS-PQ-CONSENSUS-KEY-v1" + bytes([0x01, 0x00])
+MLDSA44_PUBLIC_KEY_BYTES = 1312
+
+
+def stored_key_bytes(wrapper):
+    """StoredKeyV1: len:uint32(=1312) and one reference to a canonical chain of
+    byte-aligned cells, 127 bytes and one reference each but the last."""
+    s = Slice(wrapper)
+    length = s.uint(32)
+    chain = s.ref()
+    s.end()
+    require(length == MLDSA44_PUBLIC_KEY_BYTES, "stored_key_length")
+    out = b""
+    while True:
+        require(len(chain.bits) % 8 == 0 and chain.bits, "stored_key_chain")
+        out += int(chain.bits, 2).to_bytes(len(chain.bits) // 8, "big")
+        if not chain.refs:
+            break
+        require(len(chain.bits) == 127 * 8 and len(chain.refs) == 1, "stored_key_chain")
+        chain = chain.refs[0]
+    require(len(out) == length, "stored_key_length")
+    return out
+
+
+def srp2_domain_hash(global_id, actor, request_id, request_hash, response_hash, caller, terms_hash, price,
+                     response_deadline, refund_claim_deadline):
+    """SERVICE_ACTOR_TVM_V1 section 6: cell_hash of the SRP2 statement."""
+    tail = Builder().std(caller[1], caller[0]).uint(terms_hash, 256).coins(price)
+    tail.uint(response_deadline, 64).uint(refund_claim_deadline, 64)
+    root = Builder().uint(0x53525032, 32).uint(global_id & 0xFFFFFFFF, 32).uint(actor[0] & 0xFF, 8)
+    root.uint(actor[1], 256).uint(request_id, 64).uint(request_hash, 256).uint(response_hash, 256)
+    return root.ref(tail.cell()).cell().hash()
+
+
+def check_funding_prices(prices, storage_fee):
+    """get_funding_prices is self-consistent (section 11)."""
+    values = {k: int(prices[k]) for k in ("min_funding_value", "admission_gas_allowance", "return_budget",
+                                          "report_tos_amount", "outcome_fee_lock", "payout_funding")}
+    require(int(prices["storage_fee"]) == storage_fee, "funding_prices_storage_fee")
+    require(values["min_funding_value"] == values["admission_gas_allowance"] + values["return_budget"],
+            "funding_prices_min_funding_value")
+    require(values["payout_funding"] == PAYOUT_GAS_ALLOWANCE + values["return_budget"],
+            "funding_prices_payout_funding")
+    require(values["return_budget"] > values["report_tos_amount"] + values["outcome_fee_lock"],
+            "funding_prices_return_budget")
+    require(all(0 < x < MAX_COINS for x in values.values()), "funding_prices_range")
+    require(prices["accepting_tokens"] is True, "funding_prices_accepting")
+    return values
+
+
 def check_vectors(v):
     code = from_boc(v["contract_code_boc_base64"])
     require(v["contract_code_hash"] == "tvm-cell-sha256:" + code.hash().hex(), "code_hash")
     require(v["rail"] == "tos.service.service-actor-token.v1", "rail")
-    data = from_boc(v["deploy_data_boc_base64"])
+    actor, p, master, wallet_code, key = check_deploy(v, code, from_boc(v["deploy_data_boc_base64"]), v["actor"])
+    require(key is None and p["has_attestor"] == 0 and p["attestor_key_id"] == 0, "attestor")
+    require(wallet_address(actor, master, wallet_code) == parse_text_address(v["actor_wallet"]), "actor_wallet")
+    check_rest(v, actor, p, master, wallet_code)
+    check_attested(v, code)
+
+
+def check_attested(v, code):
+    """The attested section: has_attestor = 1 terms, its SAT1, and the SRP2
+    domain hash of a signed respond (the signature itself is hedged and not
+    pinned)."""
+    a = v["attested"]
+    actor, p, master, _, key = check_deploy(v, code, from_boc(a["deploy_data_boc_base64"]), a["actor"])
+    require(key is not None and p["has_attestor"] == 1, "attested_attestor")
+    require(hashlib.sha256(key).hexdigest() == a["attestor_public_key_sha256"], "attested_public_key")
+    key_id = hashlib.sha256(PQ_KEY_ID_DOMAIN + key).hexdigest()
+    require(key_id == a["attestor_key_id"] and int(key_id, 16) == p["attestor_key_id"], "attested_key_id")
+    terms_cell = from_boc(a["terms_cell_boc_base64"])
+    require(decode_terms(terms_cell) == p and terms_cell.hash().hex() == a["terms_hash"], "attested_terms")
+    check_funding_prices(a["funding_prices"], p["storage_fee"])
+    sat1 = decode_sat1(from_boc(a["sat1"][0]))
+    require(sat1["terms_hash"] == a["terms_hash"] and sat1["terms"] == p, "attested_sat1")
+    r = a["respond"]
+    require(r["request_id"] == sat1["request_id"] and r["accepted"] is True, "attested_respond")
+    require(r["signature_context"] == "TOS-SERVICE-ACTOR-RESPOND-V1", "attested_context")
+    domain = srp2_domain_hash(r["global_id"], actor, sat1["request_id"], sat1["request_hash"],
+                              int(r["response_hash"], 16), sat1["caller"], int(sat1["terms_hash"], 16),
+                              p["price_per_call"], sat1["response_deadline"], sat1["refund_claim_deadline"])
+    require(domain.hex() == r["domain_hash"], "attested_domain_hash")
+
+
+def check_deploy(v, code, data, actor_text):
     actor = (0, int.from_bytes(Cell("00110", [code, data]).hash(), "big"))
-    require(actor == parse_text_address(v["actor"]), "actor_address")
+    require(actor == parse_text_address(actor_text), "actor_address")
 
     s = Slice(data)
     owner = s.address()
@@ -353,8 +435,10 @@ def check_vectors(v):
     require(open_access == 1 and has_auth == 0 and auth == owner and rate == 0, "access")
     p.update(metadata_hash=commitments.uint(256), proof_scheme_hash=commitments.uint(256),
              has_attestor=commitments.uint(1), attestor_key_id=commitments.uint(256))
-    require(commitments.uint(1) == 0 and p["has_attestor"] == 0 and p["attestor_key_id"] == 0, "attestor")
+    key = stored_key_bytes(commitments.ref()) if commitments.uint(1) else None
     commitments.end()
+    # The two encodings of section 4.2: no attestor, or a key whose id is stored.
+    require((key is None) == (p["has_attestor"] == 0 and p["attestor_key_id"] == 0), "attestor_encoding")
 
     native = [accounting.coins() for _ in range(3)]
     native += [accounting.uint(32), accounting.uint(32), accounting.uint(8), accounting.uint(32),
@@ -376,9 +460,12 @@ def check_vectors(v):
     require(bridge_param in BRIDGE_PARAMS, "route_bridge_param")
     require(requests.cell.bits == "0000" and payouts.cell.bits == "000", "empty_dictionaries")
     require(not requests.cell.refs and not payouts.cell.refs, "empty_dictionaries")
-    require(wallet_address(actor, master, wallet_code) == parse_text_address(v["actor_wallet"]), "actor_wallet")
 
     p.update(asset_master=master[1], asset_wallet_code_hash=wallet_code_hash)
+    return actor, p, master, wallet_code, key
+
+
+def check_rest(v, actor, p, master, wallet_code):
     terms_cell = from_boc(v["terms_cell_boc_base64"])
     require(decode_terms(terms_cell) == p and encode_terms(p).hash() == terms_cell.hash(), "terms")
     require(terms_cell.hash().hex() == v["terms_hash"], "terms_hash")
@@ -391,16 +478,10 @@ def check_vectors(v):
     f.address()
     require(f.uint(1) == 0, "funding_custom_payload")
     forward = f.coins()
-    # The full budget is storage_fee + MIN_FUNDING_VALUE (section 7.1). The
-    # vectors at 12cf5522 do not record the actor's get_funding_prices, so the
-    # budget is checked in full only when they carry `funding_prices`; without
-    # it only the storage-fee part is checkable.
-    prices = v.get("funding_prices")
-    if prices is not None:
-        budget = p["storage_fee"] + int(prices["min_funding_value"])
-        require(forward >= budget, "funding_forward_below_budget")
-    else:
-        require(forward > p["storage_fee"], "funding_forward_below_budget")
+    # The full budget of section 7.1, from the actor's own getters at the
+    # funding's state.
+    prices = check_funding_prices(v["funding_prices"], p["storage_fee"])
+    require(forward >= p["storage_fee"] + prices["min_funding_value"], "funding_forward_below_budget")
     payload = Cell(f.cell.bits[f.pos:], f.cell.refs)
     require(token_call_payload(payload)[1] == int(v["terms_hash"], 16), "funding_payload")
 
@@ -653,7 +734,7 @@ REFUSAL_CODES = [
     (1920, "request_not_live", "throw", "sweep_expired_request",
      ["ported::sweep_works_against_a_properly_expired_refund_entry_and_not_on_a_request_live_nowhere"], None),
     (1921, "insufficient_balance", "throw", "payout-creating ops, abandon_payout", [],
-     "defensive: the balance includes the incoming message, so it is unreachable"),
+     "reached only when storage fees took part of the message's own value; no test drives it"),
     (1922, "insufficient_revenue", "throw", "withdraw_revenue",
      ["ported::withdraw_revenue_is_capped_by_balance_and_never_takes_locked_fees"], None),
     (1923, "not_authorized", "reason", "admission", ["funding::every_admission_refusal_ends_in_a_funding_return"],
@@ -665,8 +746,10 @@ REFUSAL_CODES = [
       "funding::every_admission_refusal_ends_in_a_funding_return"], None),
     (1926, "terms_mismatch", "reason", "admission",
      ["ported::a_call_quoted_under_one_policy_is_refused_under_another"], None),
-    (1927, "amount_range", "reason; throw on checked sums", "admission, checked sums",
-     ["ported::a_liability_that_would_go_negative_is_refused_with_the_range_code"], None),
+    (1927, "amount_range", "reason (before the capacity checks); throw on checked sums",
+     "admission, checked sums",
+     ["ported::a_liability_that_would_go_negative_is_refused_with_the_range_code",
+      "funding::a_ledger_one_below_the_coins_bound_refuses_a_new_admission_with_amount_range"], None),
     (1928, "operating_reserve_unfunded", "reason", "admission",
      ["ported::solvency_admission_requires_existing_obligations_and_preserves_operator_excess"], None),
     (1929, "insufficient_execution_payment", "reason when underfunded; throw in payout ops",
@@ -734,7 +817,7 @@ def build_corpus(v):
                        "the T3 sandbox test inputs, derived by the generator; no contract or Rust code runs "
                        "in this repository"),
         "t3_tests": {"repository": "github.com/tosnetwork/tos",
-                     "sha": "12cf5522801a30806eeb7cda9ee85fbd051ecbca",
+                     "sha": "7a32aa402944bb944a1c778197e491605f909df4",
                      "directory": "tosctl/src/node-control/contracts/tests/service_actor_token"},
         "decoder_negatives": decoder,
         "payload_positives": [{"name": n, "statement": s, "boc_base64": to_boc(c)} for n, s, c in positives],

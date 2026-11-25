@@ -18,8 +18,11 @@ decisions in section 10 (team memo STATUS 13.581 and 13.583). Nothing here is
 normative until the normative documents named in section 9 are written.
 
 **Amendment, 2026-11-25 (T6).** The token-rail actor (T3) is implemented in
-tosnetwork/tos#516 (final head `12cf5522801a30806eeb7cda9ee85fbd051ecbca`, non-author review APPROVE in the tos#516 PR comments,
-not merged). Its normative layout is
+tosnetwork/tos#516 (final head `7a32aa402944bb944a1c778197e491605f909df4`,
+final non-author APPROVE at that head in the review record
+https://github.com/tosnetwork/tos/pull/516#issuecomment-7168420438; not
+merged). Its last change before that head made every monetary quantity
+checked or saturating (review round 4). Its normative layout is
 [`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md), which governs
 the actor wherever it and sections 4-5 here differ. The 16 decisions taken
 during the implementation are listed in section 11, and each passage below that
@@ -843,8 +846,8 @@ changes that a bounce at S reverts (5.4).
 
 Each gas constant is twice the maximum measured on both VMs, with `payouts` at
 its bound (T3). T3 measured, at capacity: `PRE_ACCEPT_GAS` 24,000 (most
-measured 10,026), `OUTCOME_HANDLER_GAS` 300,000 (117,742), `ADMISSION_GAS`
-300,000 (131,613, with a 16-entry ConfigParam 84 whose last entry is the
+measured 10,026), `OUTCOME_HANDLER_GAS` 300,000 (117,865), `ADMISSION_GAS`
+300,000 (146,463, with a 16-entry ConfigParam 84 whose last entry is the
 actor's master) and `ABSENT_REPORT_GAS` 20,000 (8,178) for the answer to a
 report of an absent payout
 ([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md) section 12).
@@ -1359,6 +1362,14 @@ to its sender (step 6).
    refused, with reason 1902 *(T3 decision 7)*.
 7. The value covers `storage_fee`, then `ADMISSION_GAS_ALLOWANCE`, then
    `RETURN_BUDGET`.
+7a. The new pending liability, storage lock and backing stay below `2^120`.
+   Otherwise the reason is 1927 `amount_range`. This check comes **before**
+   the capacity checks, so a pending liability that would reach `2^120` is
+   refused with 1927, where it was formerly 1937 *(the checked-arithmetic
+   change of tos#516, review round 4)*. Every predicate here is computed with
+   saturating arithmetic and never throws, and every ledger mutation after
+   admission is checked and guarded by the predicate computed on the same
+   values.
 8. Capacity, id overflow and the daily rate limit hold (SA:617-632).
 9. `returned_count < MAX_RETURNED_GLOBAL`, and `from`'s returned-entry count is
    below its cap (5.4). Otherwise the reason is 1935 `not_accepting_tokens`.
@@ -1418,8 +1429,10 @@ The implemented order and codes, which also refuse a zero price or a zero
   through `recover_surplus`, so no unclaimable returned entry outside the caps
   arises. The bridge wallet forces workchain 0 today, so this is unreachable.
   *(T3 decision 14.)*
-- No funding return is made, and `SAF1` names payout id 0, for a zero amount or
-  when payout ids are exhausted either.
+- No funding return is made, and `SAF1` names payout id 0, for a zero amount,
+  when payout ids are exhausted, or when the return would not fit its ledgers
+  in Coins (`in_flight + amount`, `locked_outcome_fees + lock` or
+  `backing + lock` reaching `2^120`; the checked-arithmetic change) either.
 - If the return is itself refused or bounced, the amount becomes an ordinary
   `returned` entry with `caller = from`, keyed by the payout id (5.4). It
   stays attributed to its sender and is never surplus.
@@ -1619,9 +1632,9 @@ ConfigParam 43's `max_acc_state_cells` (65,536 at genesis), and a state over it
 fails the action phase, which for a notification leaves its tokens
 unattributed. The caps are therefore sized so that the worst state, every cap
 full at once plus one notification in flight, stays at or below 80% of that
-limit: a bound of 51,610 cells against 52,428 (the cell arithmetic is in
+limit: a bound of 51,650 cells, with a 360-cell base allowance, against 52,428 (the cell arithmetic is in
 [`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md) section 13; the
-sandbox's real worst state is 47,025 cells). The caps are `MAX_LIVE_GLOBAL` =
+sandbox's real worst state is 47,046 cells). The caps are `MAX_LIVE_GLOBAL` =
 `MAX_RETURNED_GLOBAL` = 1,500 (the native rail's 100,000 would not fit),
 `MAX_RETURNS_IN_FLIGHT` = 512, `MAX_SURPLUS_PAYOUTS` = 4 beside the 4 revenue
 payouts, and `MAX_LIVE_ATTESTOR_KEYS` = 4. Admission refuses at the live and
@@ -1754,7 +1767,8 @@ own error, or that the owner gave up:
     *(T3 decision 2)*;
   - the sender is not a canonical `addr_std` on workchain 0 *(T3 decision
     14)*;
-  - and, trivially, a zero amount or exhausted payout ids.
+  - and, trivially, a zero amount, exhausted payout ids, or a return whose
+    ledgers would not fit in Coins (5.2 step 6).
 
 Every other funded payment that the actor refuses is returned to its sender
 and is never surplus. A refused or bounced return of it is a returned entry for
@@ -2481,7 +2495,7 @@ carries each into [`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.m
 
 | # | Decision | Here | TOK |
 |---:|---|---|---|
-| 1 | **State bound.** `MAX_LIVE_GLOBAL` = `MAX_RETURNED_GLOBAL` = 1,500, `MAX_RETURNS_IN_FLIGHT` = 512, `MAX_SURPLUS_PAYOUTS` = 4 beside the 4 revenue payouts, `MAX_LIVE_ATTESTOR_KEYS` = 4, keeping the worst state at or below 80% of ConfigParam 43's `max_acc_state_cells` (51,610 against 52,428; 47,025 measured). Admission refuses at the caps (1907, 1935) with a funding return, so no cap is exceeded. | 5.4 storage bound and cell bound; `recover_surplus` row | 2, 13 |
+| 1 | **State bound.** `MAX_LIVE_GLOBAL` = `MAX_RETURNED_GLOBAL` = 1,500, `MAX_RETURNS_IN_FLIGHT` = 512, `MAX_SURPLUS_PAYOUTS` = 4 beside the 4 revenue payouts, `MAX_LIVE_ATTESTOR_KEYS` = 4, keeping the worst state at or below 80% of ConfigParam 43's `max_acc_state_cells` (51,650 with a 360-cell base, against 52,428; 47,046 measured, after the checked-arithmetic change). Admission refuses at the caps (1907, 1935) with a funding return, so no cap is exceeded. | 5.4 storage bound and cell bound; `recover_surplus` row | 2, 13 |
 | 2 | **The funding-return cap cannot be avoided.** At 512 unresolved returns a refused funding makes no return: `SAF1` payout id 0, tokens surplus. `get_accepting_tokens` turns false 64 below each cap (448; 1,436; 1,436), and buyer tooling refuses to fund while it is false. | 5.2 step 6 (replaces "no cap applies to kind-4 payouts"); 5.4 `accepting_tokens` | 7.1 step 6, 13 |
 | 3 | **Attestor keys stored once**, with a reference count, released when the last pending request naming them leaves; at most 4 named at once; `rotate_attestor_key` refused with 1944 at that cap; a pending request's key reference always absent. | 5.4 state, 5.5, 5.7 | 4.4, 7.1, 7.9 |
 | 4 | **The asset route names its bridge parameter** (`bridge_config_param`, 79/81/82/83, SDK-checked); wallet pricing reads only it or its negative slot, with the 0.3 TOS fallback. | 5.1 | 4.6, 11 |

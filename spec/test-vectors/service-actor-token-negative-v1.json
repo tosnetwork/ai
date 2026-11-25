@@ -6,7 +6,7 @@
   "derivation": "BOCs are single stated edits of implementation-generated positive vectors or of the T3 sandbox test inputs, derived by the generator; no contract or Rust code runs in this repository",
   "t3_tests": {
     "repository": "github.com/tosnetwork/tos",
-    "sha": "12cf5522801a30806eeb7cda9ee85fbd051ecbca",
+    "sha": "7a32aa402944bb944a1c778197e491605f909df4",
     "directory": "tosctl/src/node-control/contracts/tests/service_actor_token"
   },
   "decoder_negatives": [
@@ -636,7 +636,7 @@
       "path": "throw",
       "raised_by": "payout-creating ops, abandon_payout",
       "tests": [],
-      "not_executed": "defensive: the balance includes the incoming message, so it is unreachable"
+      "not_executed": "reached only when storage fees took part of the message's own value; no test drives it"
     },
     {
       "code": 1922,
@@ -687,10 +687,11 @@
     {
       "code": 1927,
       "name": "amount_range",
-      "path": "reason; throw on checked sums",
+      "path": "reason (before the capacity checks); throw on checked sums",
       "raised_by": "admission, checked sums",
       "tests": [
-        "ported::a_liability_that_would_go_negative_is_refused_with_the_range_code"
+        "ported::a_liability_that_would_go_negative_is_refused_with_the_range_code",
+        "funding::a_ledger_one_below_the_coins_bound_refuses_a_new_admission_with_amount_range"
       ]
     },
     {
