@@ -77,3 +77,19 @@ func TestTokenFundingUncorrelatedOrDisappearedLiabilityRefuses(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenUnderfundedRefusalIsSurplusNotARefundPromise(t *testing.T) {
+	f := fundingFixture(t)
+	log := f.history.Transactions[0].Logs[0].Funding
+	log.Reason = 1929
+	log.PayoutID = 0
+	delete(f.account.Data.Payouts, 7)
+	v, err := ResolveTokenFundingRefusals(f.account, f.history)
+	if err != nil || len(v) != 1 || v[0].State != "surplus" || v[0].PayoutID != 0 {
+		t.Fatalf("%+v %v", v, err)
+	}
+	log.PayoutID = 7
+	if _, err = ResolveTokenFundingRefusals(f.account, f.history); err == nil {
+		t.Fatal("underfunded refusal promised a payout")
+	}
+}

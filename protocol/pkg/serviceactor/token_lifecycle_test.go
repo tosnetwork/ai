@@ -190,3 +190,54 @@ func TestTokenReplayMismatchLogAndIncompleteHistory(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenReplayRespondedAndSweptAreDistinctTerminalStates(t *testing.T) {
+	t.Run("responded", func(t *testing.T) {
+		f := newTokenReplayFixture(t)
+		f.add(toschain.TokenActorTransaction{Now: 105, Opcode: nativecore.ServiceActorTokenRespondOpcode, RequestID: 1, Sender: f.account.Data.Owner.Text(), ResponseHash: strings.Repeat("ab", 32)})
+		delete(f.account.Data.Pending, 1)
+		f.replay(t, 106, StatusResponded)
+	})
+	for _, throughReturned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sweep-returned-%t", throughReturned), func(t *testing.T) {
+			f := newTokenReplayFixture(t)
+			f.expire(t)
+			body, err := nativecore.BuildServiceActorTokenIDBody(nativecore.ServiceActorTokenSweepOpcode, 3, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transfer := func(id uint64) *cell.Cell {
+				return cell.BeginCell().MustStoreUInt(0x52545231, 32).MustStoreUInt(id, 64).MustStoreBigCoins(big.NewInt(1000)).MustStoreSlice(f.caller.Bits, f.caller.BitLen).MustStoreSlice(f.caller.Bits, f.caller.BitLen).MustStoreBigCoins(big.NewInt(20)).MustStoreBigCoins(big.NewInt(0)).MustStoreBoolBit(false).EndCell()
+			}
+			f.add(toschain.TokenActorTransaction{Now: 131, Opcode: nativecore.ServiceActorTokenSweepOpcode, RequestID: 1, Sender: f.caller.Text(), BodyBOC: tokenReplayBOC(body), Outputs: []toschain.TokenActorOutput{{Destination: f.account.OwnWallet, Bounce: true, BodyBOC: tokenReplayBOC(transfer(7))}}})
+			delete(f.account.Data.Refunds, 1)
+			f.account.Data.Payouts[7] = nativecore.ServiceActorTokenPayoutV1{Kind: 2, RequestID: 1, Amount: big.NewInt(1000), Recipient: f.caller}
+			f.replay(t, 132, StatusPaying)
+			id := uint64(7)
+			if throughReturned {
+				f.report(t, 0x52544631, 7, f.account.OwnWallet)
+				f.history.Transactions[len(f.history.Transactions)-1].Now = 132
+				delete(f.account.Data.Payouts, 7)
+				f.account.Data.Returned[7] = nativecore.ServiceActorTokenReturnedV1{Caller: f.caller, Amount: big.NewInt(1000)}
+				f.replay(t, 133, StatusReturned)
+				b, err := nativecore.BuildServiceActorTokenIDBody(nativecore.ServiceActorTokenSweepReturnedOpcode, 4, 7)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.add(toschain.TokenActorTransaction{Now: 134, Opcode: nativecore.ServiceActorTokenSweepReturnedOpcode, RequestID: 7, Sender: f.caller.Text(), BodyBOC: tokenReplayBOC(b), Outputs: []toschain.TokenActorOutput{{Destination: f.account.OwnWallet, Bounce: true, BodyBOC: tokenReplayBOC(transfer(8))}}})
+				delete(f.account.Data.Returned, 7)
+				f.account.Data.Payouts[8] = nativecore.ServiceActorTokenPayoutV1{Kind: 7, RequestID: 7, Amount: big.NewInt(1000), Recipient: f.caller}
+				id = 8
+				f.replay(t, 135, StatusPaying)
+			}
+			wallet, err := nativecore.DeriveServiceActorTokenWallet(f.caller.Text(), f.account.Data.Route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.report(t, 0x52544431, id, wallet)
+			f.history.Transactions[len(f.history.Transactions)-1].Now = 136
+			delete(f.account.Data.Payouts, id)
+			f.replay(t, 137, StatusSwept)
+		})
+	}
+}
