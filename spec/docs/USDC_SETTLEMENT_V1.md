@@ -618,7 +618,8 @@ without committing the `transfer_delivered` send.
    **Operational bound on ConfigParam 79.** The storage reserve,
    `wallet_min_tos_for_storage`, must cover `REPORT_MARGIN ×
    get_compute_fee(S_BOUNCE_GAS)`. This reserve is what funds the refusal of
-   a transfer whose bounce a price rise left short. It is a governance bound
+   a third-party transfer whose bounce a price rise left short; the actor's
+   payouts fund their refusal leg themselves (4.4). It is a governance bound
    on the parameter, not a contract check (RSP:1816-1824). T1 checks it for
    the configuration it runs (RT:1254-1255).
 3. **Restore and record** (RW:436-457). Restore the balance, then record the
