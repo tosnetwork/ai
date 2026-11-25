@@ -10,6 +10,9 @@ token bridge:
 The two differ only in configuration and in the risks of section 7.5. Every
 mechanism below applies to each independently.
 
+They do share one bridge. A failure of the bridge, or the exhaustion of its
+shared windows, affects both assets (6.3, 7.5).
+
 **Status:** design, 2026-11-24, amended 2026-11-25. The owner has taken the
 decisions in section 10 (team memo STATUS 13.581 and 13.583). Nothing here is
 normative until the normative documents named in section 9 are written.
@@ -453,6 +456,18 @@ TL-B.**
 - **General rule.** The same applies to any new ConfigParam in tos. Ship the
   TL-B in a node release, confirm that every validator runs it, and only then
   propose a value.
+
+**ConfigParam 84 is one value, so changes are serialized.** A proposal replaces
+the whole dictionary. Two proposals built from the same old value would
+silently drop each other's entry. Adding USDT, suspending one asset or
+migrating a bridge is therefore always one change at a time. Proposal tooling:
+
+- builds each change from the current installed value;
+- shows the diff, and asserts that it touches exactly one entry;
+- binds the proposal to the current value's hash, as the config contract
+  allows (`if_hash_equal`, TLB:668);
+- warns about, and refuses to stack on, any other pending ConfigParam 84
+  proposal.
 
 **Self-verifying entry.** For kind 1, a reader re-derives the master from the
 entry and refuses any mismatch. **Every read below is taken at one block:** a
@@ -1915,8 +1930,19 @@ and the USDT ConfigParam 84 entries (3.1).
   (`max_per_call_atomic`, `max_window_atomic` per asset, 6.4) and aggregation
   ([`AGENT_ECONOMY_METRICS_V1.md`](AGENT_ECONOMY_METRICS_V1.md):182-184). A
   price in one is never converted into, or netted against, the other.
-- **Failures stay local.** A suspended or failing entry for one asset affects
-  only that asset's actors and purchases.
+- **Asset failures stay local; bridge failures do not.** A suspended entry, an
+  issuer freeze, or a failing asset affects only that asset's actors and
+  purchases. Both assets cross the same bridge, though:
+  - a bridge or oracle failure stops minting and redemption for both;
+  - so does the exhaustion of the bridge's shared windows: at most
+    `SWAP_WINDOW = 16` EVM locks in flight at once, and at most
+    `CHANNEL_LIMIT = 8` minters per bridge (`settlement.fc`:125-126 under
+    `tvm/contracts/`).
+  - `Bridge.sol` keeps only a deny list (BS:21, BS:132), so locks of junk
+    ERC-20 tokens can occupy minter channels and the swap window.
+  - The controls are an oracle-side token allowlist (SEC:111), and opening
+    the USDT minter's channel early. Both are in T12 and T16, and the oracle
+    rule is in T11.
 - **Display.** The buyer preview names the asset by its pinned identity. The
   ticker is display only.
 
@@ -1986,6 +2012,15 @@ Added by this design:
   can blacklist addresses and pause transfers (external fact). A blacklisted
   bridge lock address would freeze the USDC that backs the wrapped supply on
   TOS. The TOS-side responses are those of 3.1.
+- **A blacklisted unlock receiver** (USDC and USDT alike).
+  - A recorded burn on TOS is final, but `unlock` to a blacklisted, or
+    paused, receiver reverts every time (BS:206). Those tokens are then
+    unredeemable to that receiver.
+  - Redemption tooling therefore reads the issuer contract's blacklist and
+    pause state for the receiver on Ethereum before it builds the burn. It
+    refuses a blacklisted receiver, and the burn preview warns about the
+    finality.
+  - The check is in T10 and T12.
 
 ### 7.2 Relayer gap
 
@@ -2101,6 +2136,10 @@ Verifying them historically uses archive state at their admission seqno
 - **Decimals.** USDT reports 6 decimals (external fact). `getDecimals`
   (BS:292-300) passes them into the `Lock` event, and from there into the
   minter content (TU:100-119). As for USDC, no scaling happens.
+
+  USDT declares `decimals` as `uint256`, while the bridge's interface expects
+  `uint8` (BS:13-15). The call decodes correctly only because the value, 6,
+  fits in `uint8`. T10 checks this against the deployed contract.
 - **Token disable.** Oracles can disable or re-enable a token by vote
   (`voteForDisableToken`, BS:242-258); `lock` refuses a disabled token
   (BS:132). This is the source-side stop for new USDT locks.
@@ -2121,9 +2160,34 @@ No USDT-specific contract code is needed.
     transfers, actor payouts and refunds keep working, because none of them
     touches Ethereum. But redemption to Ethereum stops, and the wrapped token
     trades at whatever the market believes about an unfreeze.
+  - **Destroy and pause.** Tether can also destroy a blacklisted address's
+    balance (`destroyBlackFunds`) and pause the whole contract (external
+    fact).
+    - If the bridge's USDT balance is destroyed, the wrapped supply on TOS is
+      **permanently unbacked**. No unfreeze can restore it.
+    - A pause stops `unlock`, `refundLock` and `lock` alike until it is
+      lifted.
+  - **Source-side stop.** When the freeze alarm fires, the oracles vote at
+    once:
+    - `voteForDisableToken(USDT)` (BS:242-258), after which `lock` refuses the
+      token (BS:132); or
+    - `voteForSwitchLock` (BS:229-239), which stops every lock.
+
+    The reason is that Tether's `transferFrom` is believed to check only the
+    sender's blacklist status, not the recipient's (external fact, to be
+    confirmed against the deployed contract). A `lock` into a blacklisted
+    bridge may then still succeed, and mint wrapped USDT that can never be
+    redeemed. This step is in the T14 runbook.
   - **TOS-side response.** ConfigParam 84 status 2 for the USDT entry stops
-    new purchases (3.1). Providers clear `active` at once (3.1, fast
-    controls). Existing requests settle in the frozen token, as admitted.
+    new purchases (3.1). Existing requests settle in the frozen token, as
+    admitted. No on-chain automatic stop is possible, because no TOS contract
+    can observe Ethereum. Two defaults stand in for one:
+    - **Provider auto-pause.** The provider runtime clears `active` on its own
+      USDT actors when a T14 freeze, pause or destroy alarm fires. This is
+      the provider's own signed `update_policy` (T8, T18).
+    - **Buyer refusal.** Buyer clients refuse USDT by local policy while the
+      alarm is up. They read the Ethereum state themselves: the bridge's
+      blacklist status and the contract's pause.
   - **Controls:**
     - a per-token lock cap on the EVM side (SEC:105), so that exposure is
       bounded. `Bridge.sol` has no cap today, only the supply bound
@@ -2131,7 +2195,9 @@ No USDT-specific contract code is needed.
       token, USDC included; it is not USDT-specific;
     - `max_liability_per_actor` for the USDT entry;
     - T14 monitoring of the bridge address's blacklist status in the USDT
-      contract.
+      contract, and of Tether's pause and `destroyBlackFunds` events.
+- **Blacklisted unlock receiver.** As for USDC (7.1), redemption tooling
+  checks the receiver's blacklist and pause status before building a burn.
 - **Fee switch.**
   - Locks credit the delta, as above.
   - Every buyer-facing and redeemer-facing preview shows the **received**
@@ -2179,17 +2245,17 @@ but it gates USDC production too.
 | T5 | tos-ops | Test USDC on the local net and the public testnet: a test bridge, a stand-in oracle signing v5 votes, ConfigParams 79 and 84 through `testnet-governance.py` (84 as critical), and a CEREMONY addendum | T1, T2 | `adopted` shows both params on every validator (CEREMONY:797); a test mint reaches a buyer wallet | M |
 | T6 | ai `spec/` | `SERVICE_ACTOR_TOKEN_TVM_V1.md`; the in-place edits of section 9; both proto copies; the T3 vectors copied byte for byte | T3 | The spec vectors equal the tos fixture; a negative corpus exists for every new rule | M |
 | T7 | ai `protocol/` | nativecore, toschain, serviceactor, buyersdk, purchaseevidence, `tos-service-verify` | T4, T6 | Every vector is reproduced; every state, including `paying` and `returned`, is derived from finalized data at one checkpoint; a mismatched master, wallet code hash, decimals or status is refused; unpinned ConfigParam 84 entries are ignored | L |
-| T8 | ai `provider/` | Token offers; both withdrawals; recovery and abandon; the floors; MCP provider tools | T7 | The `MCP_PROVIDER_ADAPTER_V1.md` section 10 cases are extended to a token actor | M |
+| T8 | ai `provider/` | Token offers; both withdrawals; recovery and abandon; the floors; MCP provider tools | T7 | The `MCP_PROVIDER_ADAPTER_V1.md` section 10 cases are extended to a token actor. **Default auto-pause:** on a T14 freeze, pause or destroy alarm for an asset, the provider runtime clears `active` on its own actors of that asset with its own signed `update_policy`, and a test shows that it does | M |
 | T9 | ai MCP buyer, gateway | Per-asset budgets and preview; gateway token proposals | T7 | The `MCP_BUYER_ADAPTER_V1.md` section 15 cases are extended; the gateway never adds or changes an asset | M |
-| T10 | all | Live lifecycles on a v16 local net, then on the public testnet: responded, refunded, swept, returned (a refusal forced by a test-only wallet build), funding refused, surplus recovered. **USDT cases** after USDC passes:<br>• the same lifecycles with a test USDT of 6 decimals behind the same bridge, under its own ConfigParam 84 entry and its own actors;<br>• on testnet, a fee-on-transfer variant of the test token, where the amount minted equals the bridge's received delta and the previews show the received amount;<br>• a lock and an unlock of a token whose `transfer` returns no `bool` | T5, T7-T9; T15-T17 for the USDT cases | Each is reconstructed by a second resolver, and the evidence is recorded as for the native rail. USDC and USDT actors run side by side, with no cross-asset effect | M |
-| T11 | relayer | Settlement v5 (vote layout, generations, `cancel_lock`, `activate_generation`) and the live loop | — | Simnet end to end against the v5 contracts | L |
-| T12 | tos, tos-ops, external | The bridge production gates (7.1). The two audits explicitly cover the T1 wallet change and the T3 token actor, and the USDT behavioural review of 7.5 (SEC:111: fee switch, blacklist, no-bool return, approval race, upgrade path). Then the canary, then the ConfigParam 84 USDC record by validator vote, and later the USDT record under its own canary, only after the rollout precondition of 3.1 holds. Any later change of ConfigParam 79 `bridge_address` follows the migration rule of 7.4: the old record's status 2 or 3 is adopted before the change (separate proposals; tooling refuses the 79 change while the old record has status 1) | T1, T2, T11, T13 | Every SEC:97-113 item is checked; every validator runs a node release with the ConfigParam 84 TL-B; the record is adopted; a migration rehearsal on testnet suspends the old record before or with the bridge change | XL |
+| T10 | all | Live lifecycles on a v16 local net, then on the public testnet: responded, refunded, swept, returned (a refusal forced by a test-only wallet build), funding refused, surplus recovered. **USDT cases** after USDC passes:<br>• the same lifecycles with a test USDT of 6 decimals behind the same bridge, under its own ConfigParam 84 entry and its own actors;<br>• on testnet, a fee-on-transfer variant of the test token, where the amount minted equals the bridge's received delta and the previews show the received amount;<br>• a lock and an unlock of a token whose `transfer` returns no `bool` | T5, T7-T9; T15-T17 for the USDT cases | Each is reconstructed by a second resolver, and the evidence is recorded as for the native rail. USDC and USDT actors run side by side, with no cross-asset effect. **Freeze rehearsal** with a test USDT that has blacklist and pause switches:<br>• blacklist the bridge;<br>• the oracles disable the token, and the alarm fires;<br>• providers auto-pause, and status 2 is proposed;<br>• existing requests still settle on TOS;<br>• redemption tooling refuses a blacklisted receiver (USDC and USDT).<br>Also: the `uint256` `decimals` of the deployed USDT decodes as 6 | M |
+| T11 | relayer | Settlement v5 (vote layout, generations, `cancel_lock`, `activate_generation`) and the live loop. **The oracle refuses to vote for locks of tokens not on its allowlist** (SEC:111), so junk ERC-20 locks cannot occupy minter channels or the swap window (6.3) | — | Simnet end to end against the v5 contracts; a lock of a non-allowlisted token gets no vote | L |
+| T12 | tos, tos-ops, external | The bridge production gates (7.1). The two audits explicitly cover the T1 wallet change and the T3 token actor, and the USDT behavioural review of 7.5 (SEC:111: fee switch, blacklist, no-bool return, approval race, upgrade path). Then the canary, then the ConfigParam 84 USDC record by validator vote, and later the USDT record under its own canary, only after the rollout precondition of 3.1 holds. Any later change of ConfigParam 79 `bridge_address` follows the migration rule of 7.4: the old record's status 2 or 3 is adopted before the change (separate proposals; tooling refuses the 79 change while the old record has status 1) | T1, T2, T11, T13 | Every SEC:97-113 item is checked; every validator runs a node release with the ConfigParam 84 TL-B; the record is adopted; a migration rehearsal on testnet suspends the old record before or with the bridge change. Also:<br>• the oracle-side token allowlist (USDC and USDT only) is in force;<br>• the USDT minter's channel is opened early, so that junk locks cannot take the last of the `CHANNEL_LIMIT` channels (6.3);<br>• redemption tooling's receiver blacklist and pause check (7.1) is reviewed | XL |
 | T13 | external | An independent security review of the token-rail actor and the wallet change, against sections 4-5 | T1, T3 | Findings are resolved, or accepted by the owner, before T12's audits | M |
-| T14 | tos-ops, ai `provider/` | Monitoring per actor and asset:<br>• payouts in flight longer than N blocks;<br>• count and age of returned entries;<br>• any returned entry from a refused funding return (kind 4);<br>• actor TOS balance against the backing floor;<br>• token-wallet TOS balance;<br>• S-side `get_refusals_count()` against `REFUSALS_LIMIT`, with a funded `rereport_refusal` for each recorded query id;<br>• aggregate token liability per asset against the bridge cap;<br>• ConfigParam 84 holding more than 16 entries;<br>• a ConfigParam 79 `bridge_address` change while a record for the old bridge still has status 1;<br>• for USDT: the bridge contract's blacklist status in the USDT contract, the EVM lock cap's headroom, any non-zero USDT transfer fee, and any upgrade of the USDT contract; each asset is monitored separately. | T3, T7 | Each alarm fires in a test that crosses its threshold, and stays silent below it | M |
+| T14 | tos-ops, ai `provider/` | Monitoring per actor and asset:<br>• payouts in flight longer than N blocks;<br>• count and age of returned entries;<br>• any returned entry from a refused funding return (kind 4);<br>• actor TOS balance against the backing floor;<br>• token-wallet TOS balance;<br>• S-side `get_refusals_count()` against `REFUSALS_LIMIT`, with a funded `rereport_refusal` for each recorded query id;<br>• aggregate token liability per asset against the bridge cap;<br>• ConfigParam 84 holding more than 16 entries;<br>• a ConfigParam 79 `bridge_address` change while a record for the old bridge still has status 1;<br>• for USDT: the bridge contract's blacklist status in the USDT contract, the EVM lock cap's headroom, any non-zero USDT transfer fee, and any upgrade of the USDT contract; each asset is monitored separately. | T3, T7 | Each alarm fires in a test that crosses its threshold, and stays silent below it. Further alarms:<br>• Tether `pause` and `destroyBlackFunds` events;<br>• for pending redemptions, the receiver's blacklist and pause status;<br>• swap-window occupancy against `SWAP_WINDOW` and minter-channel occupancy against `CHANNEL_LIMIT`.<br>**Runbook:** on a freeze, pause or destroy alarm, the oracles vote `voteForDisableToken` or `voteForSwitchLock` at once (7.5), providers auto-pause (T8), and status 2 is proposed | M |
 | T15 | tos-ops, governance | **The USDT ConfigParam 84 entry** (7.4): the second record, under the same critical vote and the bridge-anchored re-derivation of 3.1; first on testnet with a test USDT | T2, T5, USDC through T10 | The record re-derives from the listed bridge's codes at one block; both entries validate, and the value stays within the 16-entry and cell-budget checks | S |
-| T16 | tos (EVM) | **The per-token EVM lock cap** (SEC:105), set per token, with USDT's set independently of USDC's. It is bridge code required for every token (7.5) | — | A lock that would exceed its token's cap is refused; the caps are changed only by oracle vote; Hardhat tests for each token | M |
+| T16 | tos (EVM) | **The per-token EVM lock cap** (SEC:105), set per token, with USDT's set independently of USDC's. It is bridge code required for every token (7.5) | — | A lock that would exceed its token's cap is refused; the caps are changed only by oracle vote; Hardhat tests for each token. **Every SEC:105 cap is placed:**<br>• per-token and per-transaction caps in `Bridge.sol` `lock`;<br>• hourly and daily caps in `Bridge.sol` as rolling per-token sums, checked in `lock`;<br>• all of them also enforced by the oracle's own policy before it votes (T11).<br>Also: the token allowlist on the oracle side (6.3) | M |
 | T17 | ai | **A second pinned asset**: USDT release pins and the ConfigParam 84 entry in clients, budgets per asset, and asset-separated aggregation (6.3) | T7, T15 | USDC and USDT are verified and budgeted independently; a suspended USDT entry leaves USDC purchases unaffected | S |
-| T18 | providers, tos-ops | **USDT token actors**: deployment and offers of actors fixed to the USDT master, with their own `max_token_liability` | T3, T15, T17 | A USDT actor admits only USDT funding, and a USDC notification to it takes the foreign-notification path (5.2) | S |
+| T18 | providers, tos-ops | **USDT token actors**: deployment and offers of actors fixed to the USDT master, with their own `max_token_liability` | T3, T15, T17 | A USDT actor admits only USDT funding, and a USDC notification to it takes the foreign-notification path (5.2); the provider runtime auto-pauses USDT actors on a T14 freeze, pause or destroy alarm (T8), and buyer clients refuse USDT while the alarm is up | S |
 
 **T3 follow-up in tos (not changed by this design).** The wallet's TL-B
 comment block lists the reported-transfer messages but omits
