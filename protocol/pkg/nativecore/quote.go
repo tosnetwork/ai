@@ -39,11 +39,23 @@ type ServiceActorQuoteRailV1 struct {
 	AttestorKeyID [32]byte
 }
 
+// ErrTokenRailFieldsOnNativeQuote is returned for a native-rail Quote
+// Proposal that carries a token-rail field: asset (field 18) or price_atomic
+// (field 19). The two rails are exclusive (QuoteProposalV1 in native.proto).
+var ErrTokenRailFieldsOnNativeQuote = errors.New("native Quote Proposal carries a token-rail field (asset or price_atomic)")
+
 // ParseServiceActorQuoteRail validates proposal fields 11-17 exactly as
-// ACCEPTED_QUOTE_TVM_V1 bounds them.
+// ACCEPTED_QUOTE_TVM_V1 bounds them, and refuses the token-rail fields 18 and
+// 19, which only a token-rail proposal sets.
 func ParseServiceActorQuoteRail(proposal *nativev1.QuoteProposalV1) (ServiceActorQuoteRailV1, error) {
 	var rail ServiceActorQuoteRailV1
-	if proposal == nil || proposal.Actor == nil || proposal.Actor.Workchain != 0 || len(proposal.Actor.AccountId) != 32 {
+	if proposal == nil {
+		return rail, errors.New("Quote actor is not a workchain 0 account")
+	}
+	if proposal.Asset != nil || proposal.PriceAtomic != "" {
+		return rail, ErrTokenRailFieldsOnNativeQuote
+	}
+	if proposal.Actor == nil || proposal.Actor.Workchain != 0 || len(proposal.Actor.AccountId) != 32 {
 		return rail, errors.New("Quote actor is not a workchain 0 account")
 	}
 	rail.Actor = "0:" + hex.EncodeToString(proposal.Actor.AccountId)

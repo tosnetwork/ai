@@ -401,7 +401,8 @@ not change this gate's acceptance rule:
 - 🟡 T2 ConfigParam 84 — merged on tos main (tosnetwork/tos#513, merge
   `e40d28737`); no value is proposed on any network;
 - 🟡 T3 token-rail Service Actor — implemented in tosnetwork/tos#516
-  (review-approved head `12cf5522801a30806eeb7cda9ee85fbd051ecbca`), with
+  (final head `12cf5522801a30806eeb7cda9ee85fbd051ecbca`, non-author review
+  APPROVE in the tos#516 PR comments), with
   sandbox tests on both engines, measured gas and contract-execution vectors;
   not merged, released or deployed;
 - 🟡 T6 normative specification — `docs/SERVICE_ACTOR_TOKEN_TVM_V1.md`; the T3
@@ -413,7 +414,9 @@ not change this gate's acceptance rule:
   `test-vectors/service-actor-token-negative-v1.json` by
   `scripts/reproduce-service-actor-token-v1.py` (both in `make spec-check`);
   manifest key 20 token form, Accepted Quote schema 3, Receipt schema 2 and the
-  Quote Proposal fields 18-19 specified. Pending: recopy at the merged release
+  Quote Proposal fields 18-19 specified, and refused on a native proposal by
+  `nativecore.ParseServiceActorQuoteRail` (`ErrTokenRailFieldsOnNativeQuote`,
+  also through `quoteexchange.Validate`). Pending: recopy at the merged release
   commit, and the production Go encoders, vectors and negatives of T7;
 - ⬜ T4 `tosctl`, T5 test USDC, T7-T9 `ai` implementation,
   T10 live lifecycles, T11 relayer, T12 bridge production gates, T13

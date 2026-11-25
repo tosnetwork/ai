@@ -4,8 +4,9 @@
 section 5 of the design [`USDC_SETTLEMENT_V1.md`](USDC_SETTLEMENT_V1.md) (work
 item T3). It settles one recognized TOS-network token (USDC, then USDT) through
 reported transfers of the bridge token wallet (T1). The contract is
-implemented in tosnetwork/tos#516 (open, review-approved head
-`12cf5522801a30806eeb7cda9ee85fbd051ecbca`); it is not merged, not released on
+implemented in tosnetwork/tos#516 (open; final head
+`12cf5522801a30806eeb7cda9ee85fbd051ecbca`, non-author review APPROVE in the
+tos#516 PR comments); it is not merged, not released on
 tos main and not deployed on any network. This document describes that
 implementation exactly. Where it and the design text differ, this document and
 the implementation govern, and the design records the change with the
@@ -916,9 +917,11 @@ query must still be cleared.
 
 **Resolver checks beyond the T3 decoders.** The contract emits only the values
 above. A resolver additionally refuses: a `SAF1` reason outside the set of
-section 7.1 and 1929; a `SAB1` result other than 0 or 1936; a `SAB1` with
-result 0 and payout id 0, or with result 1936 and a non-zero payout id; and an
-`SAO1` whose fields differ from the payout it names. The T3 Rust decoders do
+section 7.1 and 1929; a `SAF1` with reason 1929 (underfunded) and a non-zero
+payout id, since an underfunded notification is never returned; a `SAB1`
+result other than 0 or 1936; a `SAB1` with result 0 and payout id 0, or with
+result 1936 and a non-zero payout id; a `SAB1` with purpose 0 (surplus) and a
+non-zero target; and an `SAO1` whose fields differ from the payout it names. The T3 Rust decoders do
 not range-check these fields (section 16.3).
 
 ## 10. Recognition reads: ConfigParam 84 at admission only
@@ -1043,8 +1046,13 @@ state at 80% of the limit (52,428 cells; T3 decision 1):
 The returned count is `MAX_RETURNED_GLOBAL` plus every live entry and funding
 return, because a payout refused in flight still creates its entry; that
 over-counts. Each dictionary entry adds at most two cells. The sandbox builds
-the worst state with every cell distinct and counts 47,025 cells; with every
-cap full a further funding is refused (1907) and returned.
+the worst state with every cell distinct and counts 47,025 cells. In that
+state the test (`capacity::with_every_cap_full_a_further_funding_is_refused_and_returned`,
+built by `worst_state(1)`) leaves one funding-return slot free, so a further
+funding is refused (1907) and returned. With `returns_in_flight` at
+`MAX_RETURNS_IN_FLIGHT` (512) the refused funding is not returned: it is logged
+surplus with payout id 0 (section 7.1 step 6; TST
+`capacity::at_the_funding_return_cap_a_refusal_is_logged_and_its_tokens_are_surplus`).
 
 **Headroom.** Admission stops exactly at the caps (1907, 1935). A refused
 funding at `MAX_RETURNS_IN_FLIGHT` unresolved returns cannot be returned (a
@@ -1188,6 +1196,18 @@ refused amount and for an underfunded notification, `SAO1` for every payout
 kind under every outcome (delivered, refused at R, bounced at S) and four
 lifecycle cases, and `SAB1` of a surplus recovery.
 
+**Gaps in these vectors**, to close when the T3 fixture is regenerated after
+tos#516 merges:
+
+- the deploy data has no attestor (`has_attestor = 0`), so no vector exercises
+  the terms tail, the `attestor_keys` dictionary or `respond` with
+  `has_attestor = 1`;
+- the actor's `get_funding_prices` at the vector state is not recorded, so the
+  funding transfer's `forward_tos_amount` can be checked against the full
+  `storage_fee + MIN_FUNDING_VALUE` budget only once a `funding_prices` field
+  (with `min_funding_value`) is added; the reproducer checks it in full when
+  the field is present and only the storage-fee part until then.
+
 ### 16.2 Independent reproduction
 
 `scripts/reproduce-service-actor-token-v1.py` (stdlib only, shares no code with
@@ -1200,7 +1220,8 @@ reproduces:
 - every deploy-data field against `init`, and the empty ledgers, query and
   dictionaries;
 - the terms cell from the deploy data's policy and route, and `terms_hash`;
-- the funding transfer against section 7.1 and the `token_call` payload;
+- the funding transfer against section 7.1 and the `token_call` payload (the
+  forward budget as far as the vectors allow, section 16.1);
 - every log against section 9, including the kind and outcome that each
   `SAO1` vector's name states.
 

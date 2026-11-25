@@ -45,6 +45,19 @@ def test_body(source, name):
     return source[match.end():match.end() + following.start()] if following else source[match.end():]
 
 
+def names_code(body, code, constant):
+    """The test names the code as its err:: constant (a whole identifier), or
+    as a whole-number literal inside an asserting call: assert*, refused_with,
+    refused_call or an exit_code comparison. A stray digit elsewhere does not
+    count."""
+    for name in {constant, ERR_NAMES.get(code, constant)}:
+        if re.search(r"\berr::" + re.escape(name) + r"\b", body):
+            return True
+    literal = r"(?<![0-9A-Za-z_.])" + str(code) + r"(?![0-9A-Za-z_.])"
+    context = r"(?:assert\w*!|refused_with|refused_call|exit_code)\s*\([^;]*?" + literal
+    return re.search(context, body) is not None
+
+
 def check_tests(repo, corpus):
     meta = corpus["t3_tests"]
     if meta["sha"] != json.loads(SOURCE.read_text())["source_sha"]:
@@ -60,9 +73,7 @@ def check_tests(repo, corpus):
             body = test_body(sources[module], name)
             if body is None:
                 fail(f"code {entry['code']}: no #[test] fn {test} at {meta['sha']}")
-            names = [f"err::{constant}", f"err::{ERR_NAMES.get(entry['code'], constant)}"]
-            literal = re.search(r"(?<![0-9])" + str(entry["code"]) + r"(?![0-9])", body)
-            if not any(n in body for n in names) and not literal:
+            if not names_code(body, entry["code"], constant):
                 fail(f"code {entry['code']}: {test} does not name it")
             checked += 1
     return checked

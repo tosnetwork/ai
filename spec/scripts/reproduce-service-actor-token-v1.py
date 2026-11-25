@@ -266,6 +266,8 @@ def decode_saf1(cell, resolver=True):
     s.end()
     if resolver:
         require(log["reason"] in FUNDING_REASONS, "resolver_reason_outside_set")
+        # An underfunded notification is never returned.
+        require(log["reason"] != 1929 or log["payout_id"] == 0, "resolver_underfunded_with_payout")
     return log
 
 
@@ -289,6 +291,8 @@ def decode_sab1(cell, resolver=True):
     if resolver:
         require(log["result"] in (0, 1936), "resolver_result_outside_set")
         require((log["result"] == 0) == (log["payout_id"] != 0), "resolver_result_disagrees_with_payout")
+        # A surplus query has no recheck target.
+        require(log["purpose"] == 1 or log["target"] == 0, "resolver_surplus_with_target")
     return log
 
 
@@ -386,7 +390,17 @@ def check_vectors(v):
     require(f.address()[:2] == actor, "funding_destination")
     f.address()
     require(f.uint(1) == 0, "funding_custom_payload")
-    require(f.coins() > p["storage_fee"], "funding_forward")
+    forward = f.coins()
+    # The full budget is storage_fee + MIN_FUNDING_VALUE (section 7.1). The
+    # vectors at 12cf5522 do not record the actor's get_funding_prices, so the
+    # budget is checked in full only when they carry `funding_prices`; without
+    # it only the storage-fee part is checkable.
+    prices = v.get("funding_prices")
+    if prices is not None:
+        budget = p["storage_fee"] + int(prices["min_funding_value"])
+        require(forward >= budget, "funding_forward_below_budget")
+    else:
+        require(forward > p["storage_fee"], "funding_forward_below_budget")
     payload = Cell(f.cell.bits[f.pos:], f.cell.refs)
     require(token_call_payload(payload)[1] == int(v["terms_hash"], 16), "funding_payload")
 
@@ -456,6 +470,7 @@ def decoder_cases(v):
     sat1 = from_boc(v["sat1"][0])
     terms = from_boc(v["terms_cell_boc_base64"])
     saf1 = from_boc(v["saf1_refused_amount"][0])
+    saf1_under = from_boc(v["saf1_underfunded"][0])
     sao1 = from_boc(v["sao1"]["kind_1_delivered"][0])
     sab1 = from_boc(v["sab1_surplus"][0])
     # Field offsets: SAT1 tag 32, request_id 64, caller 267, request_hash 256,
@@ -515,6 +530,9 @@ def decoder_cases(v):
         ("saf1", "saf1_reason_not_a_funding_reason", "saf1_refused_amount", "resolver",
          "resolver_reason_outside_set", "reason is an admission reason or 1929",
          set_bits(saf1, len(saf1.bits) - 64 - 16, 16, 1910)),
+        ("saf1", "saf1_underfunded_with_payout", "saf1_underfunded", "resolver",
+         "resolver_underfunded_with_payout", "reason 1929 (underfunded) names payout id 0",
+         set_bits(saf1_under, len(saf1_under.bits) - 64, 64, 1)),
         ("sao1", "sao1_wrong_tag", "sao1.kind_1_delivered", "t3_decoder", "tag", "the tag is SAO1 (0x53414f31)",
          with_tag(sao1, TAG_SAB1)),
         ("sao1", "sao1_trailing_bit", "sao1.kind_1_delivered", "t3_decoder", "trailing_data",
@@ -547,6 +565,9 @@ def decoder_cases(v):
         ("sab1", "sab1_refused_with_payout", "sab1_surplus", "resolver",
          "resolver_result_disagrees_with_payout", "result 1936 names no payout",
          set_bits(sab1, sab1_result, 16, 1936)),
+        ("sab1", "sab1_surplus_with_target", "sab1_surplus", "resolver",
+         "resolver_surplus_with_target", "purpose 0 (surplus) names target 0",
+         set_bits(sab1, 32 + 64 + 1, 64, 5)),
     ]
     return cases
 
@@ -616,7 +637,7 @@ REFUSAL_CODES = [
      ["ported::a_response_signed_for_another_network_is_refused",
       "ported::malformed_attestor_keys_and_signatures_are_refused"], None),
     (1912, "response_window_closed", "throw", "respond", ["ported::respond_boundary_is_exact"], None),
-    (1913, "request_not_pending", "throw", "respond, expire",
+    (1913, "request_not_pending", "throw", "respond, expire, getter get_request_attestor_key",
      ["ported::respond_requires_owner_and_a_pending_request", "ported::duplicate_expire_claim_and_sweep_are_rejected"],
      None),
     (1914, "expire_too_early", "throw", "expire", ["ported::expire_boundary_is_exact"], None),

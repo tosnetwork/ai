@@ -200,6 +200,15 @@
       "boc_base64": "te6ccgEBAQEAPAAAc1NBRjEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0g7sAAAAAAAAAAM="
     },
     {
+      "name": "saf1_underfunded_with_payout",
+      "object": "saf1",
+      "base": "saf1_underfunded",
+      "class": "resolver",
+      "rule": "resolver_underfunded_with_payout",
+      "statement": "reason 1929 (underfunded) names payout id 0",
+      "boc_base64": "te6ccgEBAQEAPAAAc1NBRjEAAAAAAAAATYALXI4pUxr6l82Oei17B3+otqY8dhILK3UooRa1Pvbn5IQH0A8SAAAAAAAAAAM="
+    },
+    {
       "name": "sao1_wrong_tag",
       "object": "sao1",
       "base": "sao1.kind_1_delivered",
@@ -333,6 +342,15 @@
       "rule": "resolver_result_disagrees_with_payout",
       "statement": "result 1936 names no payout",
       "boc_base64": "te6ccgEBAQEAJQAARVNBQjEAAAAAAAAABAAAAAAAAAAAEEZQ/QPIAAAAAAAAAALA"
+    },
+    {
+      "name": "sab1_surplus_with_target",
+      "object": "sab1",
+      "base": "sab1_surplus",
+      "class": "resolver",
+      "rule": "resolver_surplus_with_target",
+      "statement": "purpose 0 (surplus) names target 0",
+      "boc_base64": "te6ccgEBAQEAJQAARVNBQjEAAAAAAAAABAAAAAAAAAACkEZQ/QAAAAAAAAAAAALA"
     }
   ],
   "payload_positives": [
@@ -541,7 +559,7 @@
       "code": 1913,
       "name": "request_not_pending",
       "path": "throw",
-      "raised_by": "respond, expire",
+      "raised_by": "respond, expire, getter get_request_attestor_key",
       "tests": [
         "ported::respond_requires_owner_and_a_pending_request",
         "ported::duplicate_expire_claim_and_sweep_are_rejected"
