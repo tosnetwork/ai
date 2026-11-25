@@ -1,0 +1,152 @@
+{
+  "schema": "tos.service.token-rail.protocol.v1.vectors",
+  "sources": {
+    "contract_sha": "7a32aa402944bb944a1c778197e491605f909df4",
+    "contract_vectors_sha256": "f78ea0df4c70a0476000ccae035b32e554e727fa28a808a7c7a754c2a30e919a"
+  },
+  "network": {
+    "network_id": "tos:token-vector",
+    "genesis_root_hash": "sha256:8c0b8b6bc58c4df1fb131da191f2a2ce1ecdf81bd19fcaeba1ea9494b575a5eb",
+    "genesis_file_hash": "sha256:0a94f5c7a542cf2cf87d888f834fbf989fd9c8a633935efea3622b13d865281f"
+  },
+  "manifest": {
+    "protocol": "tos.service.software-work-manifest.v1",
+    "version": "2.0.0",
+    "name": "Deterministic Go test",
+    "description": "Run the committed Go test suite without network access.",
+    "operation": "test",
+    "accepted_source_kinds": [
+      "content-addressed-archive",
+      "immutable-repository-commit"
+    ],
+    "input_schema_digest": "sha256:7641459b76354fb28e44906e75d4029945ea80613afd6f6c78ad2f1068b8c2f7",
+    "output_schema_digest": "sha256:725f2703539892fef8386a5be1b2ec0e6cbc08edf395f92ff5f96fd96988e15e",
+    "toolchain_digest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+    "invocation": {
+      "executable": "/usr/local/go/bin/go",
+      "arguments": [
+        "test",
+        "-count=1",
+        "./..."
+      ],
+      "working_directory": "/workspace/source"
+    },
+    "network_policy": "none",
+    "limits": {
+      "cpu_millis": 120000,
+      "memory_bytes": 1073741824,
+      "scratch_bytes": 2147483648,
+      "output_bytes": 16777216,
+      "wall_clock_millis": 180000
+    },
+    "artifact_media_types": [
+      "application/vnd.tos.service.software-artifact.v1+tar"
+    ],
+    "report_media_types": [
+      "application/vnd.tos.service.test-report.v1+json"
+    ],
+    "success_condition": "exit-code-zero-and-valid-reports",
+    "refund_conditions": [
+      "no-attested-response-before-deadline"
+    ],
+    "endpoint_commitment": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+    "execution_signer_authorization": "sha256:aade790512722f63f07dc6cc47631f710a46529942ea776d62ce5f7c60b52e16",
+    "retention_seconds": 86400,
+    "supported_assets": [
+      {
+        "kind": "tos-token",
+        "master_account_id": "mjkVTwOwEW/ZusVxVzFzol5YaL7GTgd9uOnkYrPuR4E=",
+        "wallet_code_hash": "dTvfHXzv1or/F9tg3Yf9NlLBJrYEXBQQo5qPSLlbkss=",
+        "decimals": 6
+      }
+    ],
+    "settlement": {
+      "rail": "tos.service.service-actor-token.v1",
+      "actor_workchain": 0,
+      "actor_account_id": "6Yzv6Z6EQn2Vx5ufX1r1v3MQ0A109IYNJRioaeH3o8E=",
+      "actor_code_hash": "Tnl+z/piYUgx9T8D2/lNhRtuZBj6PoTQWvi6V133CFo=",
+      "attestor_key": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30"
+    }
+  },
+  "proposal": {
+    "capability_id": "cap_f69f7cd4e4bdc5a9515bd39bcfd79539d92d41b1b5db50e2b3ed41aaaf560919",
+    "capability_version": "2.0.0",
+    "provider_agent_id": "agent_2e1820a370bf0a0c4de1f7180b1f0617e355b33856ddc62977f8fdf31df08782",
+    "manifest_digest": "sha256:68c8b6205e7a2a0f30f569233097172240fd7d8316a127cddc03181c05f181dc",
+    "transport_binding_digest": "sha256:dca9babcd44775f2c19ef571964c01e2e75b15254d0d16f2349c8d446f76c44c",
+    "expires_at_unix_seconds": 1800000000,
+    "actor": {
+      "account_id": "6Yzv6Z6EQn2Vx5ufX1r1v3MQ0A109IYNJRioaeH3o8E="
+    },
+    "actor_code_hash": "tvm-cell-sha256:4e797ecffa62614831f53f03dbf94d851b6e6418fa3e84d05af8ba575df7085a",
+    "terms_hash": "f74cc3ead3f70e0dbba261cfb9f1344f234c4a9b37bd6f96a4378240c6055411",
+    "storage_fee_nanotos": "200000000",
+    "attestor_key_id": "mldsa44:4ec4fc7f64f02c9c9666bbc2f4935cff5a99213552cfe8ed2c6d37027bafce30",
+    "asset": {
+      "master": {
+        "account_id": "mjkVTwOwEW/ZusVxVzFzol5YaL7GTgd9uOnkYrPuR4E=",
+        "code_hash": "tvm-cell-sha256:99837a6e5b88bd35f9dd4302ca8e07df5c6365b65693e5f2650deb4b6fe11d45"
+      },
+      "wallet_code_hash": "tvm-cell-sha256:753bdf1d7cefd68aff17db60dd87fd3652c126b6045c1410a39a8f48b95b92cb",
+      "decimals": 6
+    },
+    "price_atomic": "1000"
+  },
+  "receipt": {
+    "QuoteCommitment": "tvm-cell-sha256:9ae1af4725cd2c69ad086450537c7ab955c99e5301724de3893b783d6e2abe7c",
+    "ExecutionID": "sha256:2ad0c527d97edf09a9f050b699bdd0441096a339d1b0bcf5b90de74267c7735a",
+    "InputDigest": "sha256:95a92145b020d34bc6d06d3de3f3425383bc881b01fb50db9a46c7cd8be3c29f",
+    "ResultDigest": "sha256:47bc7fc8a88e90bdc5b0e55ffb732381d05598aa088830a65481422c450a1009",
+    "ArtifactDigest": "sha256:32705bf282d486125f8e124b1c5195f1bb5179f37df82ee5420a2266afdcaa55",
+    "ReportDigest": "sha256:3f779ebf97e3f2ec8971dfb335c2a5fd22fb0a072960cd7d61cc0087abe6d16e",
+    "SourceDigest": "sha256:5a524a8131bc9a5dbcfa7c538a8da4c8472286e295267b2e4f767bac454906d0",
+    "ToolchainDigest": "sha256:9624bca74096f810c5b24e489521dde124fadcfa1808581648b38bdc1ba1b105",
+    "SandboxDigest": "sha256:3bc955718efa4a3c067e16fa67bd25f6fd8f5e788e207da3670f0e9e0010ff78",
+    "ChargedAtomicAmount": "1000",
+    "ProviderAgentID": "agent_2e1820a370bf0a0c4de1f7180b1f0617e355b33856ddc62977f8fdf31df08782",
+    "CompletedAt": 1799999000,
+    "ExitCode": 0,
+    "AssetMaster": [
+      154,
+      57,
+      21,
+      79,
+      3,
+      176,
+      17,
+      111,
+      217,
+      186,
+      197,
+      113,
+      87,
+      49,
+      115,
+      162,
+      94,
+      88,
+      104,
+      190,
+      198,
+      78,
+      7,
+      125,
+      184,
+      233,
+      228,
+      98,
+      179,
+      238,
+      71,
+      129
+    ]
+  },
+  "expected": {
+    "manifest_cbor_base64": "tQF4JXRvcy5zZXJ2aWNlLnNvZnR3YXJlLXdvcmstbWFuaWZlc3QudjECZTIuMC4wA3VEZXRlcm1pbmlzdGljIEdvIHRlc3QEeDdSdW4gdGhlIGNvbW1pdHRlZCBHbyB0ZXN0IHN1aXRlIHdpdGhvdXQgbmV0d29yayBhY2Nlc3MuBWR0ZXN0BoJ4GWNvbnRlbnQtYWRkcmVzc2VkLWFyY2hpdmV4G2ltbXV0YWJsZS1yZXBvc2l0b3J5LWNvbW1pdAd4R3NoYTI1Njo3NjQxNDU5Yjc2MzU0ZmIyOGU0NDkwNmU3NWQ0MDI5OTQ1ZWE4MDYxM2FmZDZmNmM3OGFkMmYxMDY4YjhjMmY3CHhHc2hhMjU2OjcyNWYyNzAzNTM5ODkyZmVmODM4NmE1YmUxYjJlYzBlNmNiYzA4ZWRmMzk1ZjkyZmY1Zjk2ZmQ5Njk4OGUxNWUJeEdzaGEyNTY6OTYyNGJjYTc0MDk2ZjgxMGM1YjI0ZTQ4OTUyMWRkZTEyNGZhZGNmYTE4MDg1ODE2NDhiMzhiZGMxYmExYjEwNQqjAXQvdXNyL2xvY2FsL2dvL2Jpbi9nbwKDZHRlc3RoLWNvdW50PTFlLi8uLi4DcS93b3Jrc3BhY2Uvc291cmNlC2Rub25lDKUBGgAB1MACGkAAAAADGoAAAAAEGgEAAAAFGgACvyANgXg0YXBwbGljYXRpb24vdm5kLnRvcy5zZXJ2aWNlLnNvZnR3YXJlLWFydGlmYWN0LnYxK3Rhcg6BeC9hcHBsaWNhdGlvbi92bmQudG9zLnNlcnZpY2UudGVzdC1yZXBvcnQudjEranNvbg94IGV4aXQtY29kZS16ZXJvLWFuZC12YWxpZC1yZXBvcnRzEIF4JG5vLWF0dGVzdGVkLXJlc3BvbnNlLWJlZm9yZS1kZWFkbGluZRF4R3NoYTI1NjpkY2E5YmFiY2Q0NDc3NWYyYzE5ZWY1NzE5NjRjMDFlMmU3NWIxNTI1NGQwZDE2ZjIzNDljOGQ0NDZmNzZjNDRjEnhHc2hhMjU2OmFhZGU3OTA1MTI3MjJmNjNmMDdkYzZjYzQ3NjMxZjcxMGE0NjUyOTk0MmVhNzc2ZDYyY2U1ZjdjNjBiNTJlMTYTGgABUYAUgaQAaXRvcy10b2tlbgFYIJo5FU8DsBFv2brFcVcxc6JeWGi+xk4Hfbjp5GKz7keBAlggdTvfHXzv1or/F9tg3Yf9NlLBJrYEXBQQo5qPSLlbkssDBhWlAXgidG9zLnNlcnZpY2Uuc2VydmljZS1hY3Rvci10b2tlbi52MQIAA1gg6Yzv6Z6EQn2Vx5ufX1r1v3MQ0A109IYNJRioaeH3o8EEWCBOeX7P+mJhSDH1PwPb+U2FG25kGPo+hNBa+LpXXfcIWgV4SG1sZHNhNDQ6NGVjNGZjN2Y2NGYwMmM5Yzk2NjZiYmMyZjQ5MzVjZmY1YTk5MjEzNTUyY2ZlOGVkMmM2ZDM3MDI3YmFmY2UzMA==",
+    "manifest_digest": "sha256:68c8b6205e7a2a0f30f569233097172240fd7d8316a127cddc03181c05f181dc",
+    "quote_boc_base64": "te6ccgECCQEAAh0ABAxOQVExAAMBAgMEAMCMC4trxYxN8fsTHaGR8qLOHs34G9Gfyuuh6pSUtXWl6wqU9celQs8s+H2Ij4NPv5if2cimM5Ne/qNiKxPYZSgfaneW3jc+X+KpUUL1nU48gx5cCHuu/0UlyoS0LcC2PJIBgPaffNTkvcWpUVvTm8/XlTnZLUGxtdtQ4rPtQaqvVgkZLhggo3C/CgxN4fcYCx8GF+NVszhW3cYpd/j98x3wh4IFAouAHTGd/TPQiE+yuPNz6+tet+5iGgGunpDBpKMVDTw+9Hgpzy/Z/0xMKQY+p+B7fymwo23Mgx9H0JoLXxdK677hC0AAAAAQBwgAQE7E/H9k8Cyclma7wvSTXP9amSE1Us/o7SxtNwJ7r84wAdDyKr1nc6sjKGkyGtSx5HrAyQj+v086K9EMgGYUD3QSYWjItiBeeioPMPVpIzCXFyJA/X2DFqEnzdwDGBwF8YHc3Km6vNRHdfLBnvVxlkwB4udbFSVNDRbyNJyNRG92xEwAAAAAa0nSAAYACjIuMC4wAE73TMPq0/cODbuiYc+58TRPI0xKmze9b5akN4JAxgVUESA+hAvrwgAAxYATRyKp4HYCLfs3WK4q5i50S8sNF9jJwO+3HTyMVn3I8DMwb03LcRemvzuoYFlRwPvrjGy2ytJ8vkyhvWlt/COorqd746+d+tFf4vtsG7D/pspYJNbAi4KCFHNR6Rcrcllg0A==",
+    "quote_hash": "tvm-cell-sha256:9ae1af4725cd2c69ad086450537c7ab955c99e5301724de3893b783d6e2abe7c",
+    "receipt_boc_base64": "te6ccgECBQEAAZAABCROV1IxAAIAAAAAa0nOGAAAAAABAgMEAMCa4a9HJc0saa0IZFBTfHq5VcmeUwFyTeOJO3g9biq+fCrQxSfZft8JqfBQtpm90EQQlqM50bC89bkN50Jnx3NalakhRbAg00vG0G094/NCU4O8iBsB+1DbmkbHzYvjwp8AwEe8f8iojpC9xbDlX/tzI4HQVZiqCIgwplSBQixFChAJMnBb8oLUhhJfjhJLHFGV8btRefN9+C7lQgoiZq/cqlU/d56/l+Py7Ilx37M1wqX9IvsKBylgzX1hzACHq+bRbgDAWlJKgTG8ml28+nxTio2kyEcihuKVJnsuT3Z7rEVJBtCWJLynQJb4EMWyTkiVId3hJPrc+hgIWBZIs4vcG6GxBTvJVXGO+ko8Bn4W+me9Jfb9j154jiB9o2cPDp4AEP94AKAAAAAAAAAAAAAAAAAAAAPomjkVTwOwEW/ZusVxVzFzol5YaL7GTgd9uOnkYrPuR4EuGCCjcL8KDE3h9xgLHwYX41WzOFbdxil3+P3zHfCHgg==",
+    "receipt_hash": "tvm-cell-sha256:dea0c4ca4c2736f1fc038166a7ef42f4f90dedd1ed251f7d9cf5a2f1d117d5d9"
+  }
+}

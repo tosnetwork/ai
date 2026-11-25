@@ -60,6 +60,7 @@ spec-check:
 	python3 -I spec/scripts/reproduce-service-actor-rail-work-frames-v1.py
 	python3 -I spec/scripts/verify-service-actor-token-vector-copy.py
 	python3 -I spec/scripts/reproduce-service-actor-token-v1.py
+	python3 -I spec/scripts/reproduce-service-actor-token-protocol-v1.py
 
 # Red controls for the rail work frame checks: every mutant must be caught by
 # its named test, and a mutant that does not apply or build is a script error.
