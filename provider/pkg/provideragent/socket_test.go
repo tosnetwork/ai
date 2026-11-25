@@ -176,9 +176,12 @@ func TestTheAgentRefusesToStart(t *testing.T) {
 		},
 		"the tosctl configuration is group writable": func(root string, _ *Config, lib *fakeLibrary) {
 			path := filepath.Join(root, "tosctl.conf")
-			if err := os.WriteFile(path, []byte("x"), 0o620); err != nil {
+			if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			// Set the mode explicitly: WriteFile's mode is masked by the
+			// process umask, and a 022 umask would clear the group-write bit.
+			mustChmod(t, path, 0o620)
 			lib.config.TOSCTL.ConfigPath = path
 		},
 		"the agent state is inside the rail state": func(root string, config *Config, _ *fakeLibrary) {
