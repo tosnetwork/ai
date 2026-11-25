@@ -15,6 +15,7 @@ env:
   # branch.
   TOS_HELPER_REPOSITORY: tosnetwork/tos
   TOS_HELPER_COMMIT: e35426d06a9a0258c7a50b56cb46d9dc4691332c
+  TOS_TOKEN_CLI_FIXTURE_COMMIT: bb388496634a6901d03c8db01ae92de70c831bd8
 
 jobs:
   test:
@@ -24,7 +25,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
-      # The two checkouts are siblings so the repository's own format and
+      # The source checkouts are siblings so the repository's own format and
       # vet checks never walk the helper's source tree.
       - uses: actions/checkout@v4
         with:
@@ -40,6 +41,15 @@ jobs:
           ref: ${{ env.TOS_HELPER_COMMIT }}
           path: tos
           persist-credentials: false
+      - name: Check out the pinned token CLI fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TOS_HELPER_REPOSITORY }}
+          ref: ${{ env.TOS_TOKEN_CLI_FIXTURE_COMMIT }}
+          path: tos-token-fixtures
+          persist-credentials: false
+      - name: Pin the token CLI fixture source for the tests
+        run: echo "TOS_SERVICE_TOKEN_CLI_REPO=$GITHUB_WORKSPACE/tos-token-fixtures" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
           # make verify checks the format of messenger's OpenMLS driver.

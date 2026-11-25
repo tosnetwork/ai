@@ -70,7 +70,10 @@ and its current terms at one quorum-finalized checkpoint, and calls it through
 `tosctl agent service send` with the quoted `expected_terms_hash`. The result
 is read back from the finalized call transaction and its request snapshot; an
 ambiguous submission is resolved from finalized state and never sent again.
-Settlement is native TOS; the stablecoin escrow and Paid Demand paths are
+The existing purchase runtime settles native TOS. The separate token-rail
+protocol builders, finalized resolver and public verifier are documented in
+[`docs/service-actor-token.md`](docs/service-actor-token.md); runtime integration
+and deployment gates remain separate. The escrow and Paid Demand paths are
 retired. See [`docs/buyer-sdk.md`](docs/buyer-sdk.md).
 
 The separate derived discovery boundary is documented in

@@ -64,6 +64,9 @@ func ParseServiceActorQuoteRail(proposal *nativev1.QuoteProposalV1) (ServiceActo
 		return rail, errors.New("invalid Quote actor code hash")
 	}
 	copy(rail.ActorCodeHash[:], code)
+	if rail.ActorCodeHash == ServiceActorTokenReleaseCodeHash || rail.ActorCodeHash == ServiceActorTokenTestProfileCodeHash {
+		return rail, errors.New("native Quote names token-rail code")
+	}
 	rail.PolicyVersion = proposal.PolicyVersion
 	if !lowerHex64Pattern.MatchString(proposal.TermsHash) {
 		return rail, errors.New("invalid Quote terms hash")
