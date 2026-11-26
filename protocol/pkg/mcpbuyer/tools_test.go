@@ -378,7 +378,7 @@ func TestTokenPurchaseKeepsExactAssetUnitsInMCPPreview(t *testing.T) {
 		t.Fatalf("preview: %+v %v", out, err)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	for _, want := range []string{"asset master", "1234567 atomic (1.234567)", "received 1234567 atomic", "actor actor", "funding-wallet", "funding budget 45000000", "provider surplus"} {
+	for _, want := range []string{"asset master", "1234567 atomic (1.234567)", "received 1234567 atomic", "actor actor", "funding-wallet", "minimum forward 45000000", "provider surplus"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}

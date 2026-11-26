@@ -14,7 +14,7 @@ token call records, confirmations, receipts and exports select explicit versions
 | Exact asset, transfer/received atomic amount, actor, funding wallet, native value and funding budget in preview | `TestTokenFundingPreviewKeepsExactUnitsAndDestinations`, `TestTokenPresentationShowsExactTransferAndSeparateBudgets`, `TestTokenPurchaseKeepsExactAssetUnitsInMCPPreview` |
 | Human confirmation binds exact funding, and changed terms/funding cannot silently proceed | `TestTokenFundingDocumentIsBoundByConfirmation`, `TestTokenBuyerReadmitsAndPreservesTheConfirmedFunding` |
 | One finalized checkpoint; inactive, unpinned, suspended or unbudgeted asset refused | `TestTokenLocalQuoteKeepsAssetAtomicPriceAndOneCheckpoint`, `TestTokenQuoteRefusesUnbudgetedSuspendedUnpinnedAndNonAccepting`, token discovery/provider tests |
-| Custody starts only after durable reservation; ambiguous submissions never resend | `TestTokenBuyerDurableCallAndAmbiguityNeverResend`, `TestTokenBuyerLifecycleReservesFundingBeforeCustodyAndDoesNotRepeat` |
+| Broadcast starts only after durable reservation; ambiguous submissions never resend | `TestTokenBuyerDurableCallAndAmbiguityNeverResend`, `TestTokenBuyerLifecycleReservesFundingBeforeCustodyAndDoesNotRepeat` |
 | Finalized admission decides outcome, existing liability survives suspension, incomplete history refused | `TestTokenBuyerResolvesOnlyTheMatchingFinalizedAdmission` |
 | Gateway carries fields 18/19 unchanged and cannot repair or mix rails | `TestTokenQuoteCarriagePreservesEveryProposalField`, `TestNativeQuoteWithTokenFieldsNeverSelectsTheTokenRail`, `TestMalformedTokenQuoteCannotBeRepairedByTheGateway` |
 | Token results use schema 2 and bind the exact asset | `TestTokenResultRequiresSchemaTwoAndItsExactAsset`, `TestReceiptBuilderAndAttestorKeepTokenSchemaSeparate`, `TestTokenReceiptBindingUsesAtomicPriceAndExactAsset` |
@@ -109,3 +109,36 @@ green fourteen-package run. New regressions are
 `TestTokenBuyerSurplusIsTerminalAndCountsAsSpentWithinTheWindow`,
 `TestTokenSurplusIsShownAsTerminalRatherThanAdmitted` and
 `TestTokenSurplusStatusDoesNotPromiseAFundingReturn`.
+
+## Non-author review fixes (2026-11-26)
+
+The non-broadcasting token preflight now precedes `BeginSend` and lifecycle send
+reservation. A failed preflight leaves a call prepared, or leaves no lifecycle
+send record, so a transient endpoint/build-only/JSON failure can be retried.
+`TestTokenBuyerRetriesAfterAPreflightFailure` and
+`TestTokenLifecycleRetriesAfterAPreflightFailure` exercise the production paths.
+Only actual submission starts the durable `sending` / ambiguous outcome path.
+
+Lifecycle attempts record the finalized wallet seqno and the native sender's
+conservative `valid_until` bound. After a later finalized checkpoint is strictly
+past that bound with an unchanged seqno, the old attempt is durably marked
+refused (not delivered), releasing its funding reservation before a new attempt.
+The regression tests cover before/at/after expiry, changed seqno, missing legacy
+bounds and failed wallet reads. Unknown legacy attempts still fail closed.
+
+Native quote validators now explicitly reject token-rail manifests. Additional
+fixes propagate confirmation JSON errors, refuse decimals above 255 before
+narrowing, label the threshold `minimum forward`, group imports correctly and
+name `TOS_SERVICE_TOKEN_CLI_REPO` when the default fixture location is unavailable.
+The configuration guide explicitly states that one agent is native-only or
+token-only, never both.
+
+All fifteen packages passed (the previous fourteen plus `quoteexchange`):
+665 top-level test passes, 1,136 including subtests, with the same two existing
+skips described above. Vet, spec-check, schema-check, boundary-lint, gofmt and
+whitespace checks passed under the thermal guard. All twenty-one previous
+controls plus seven new controls were killed, followed by the green full run.
+The new controls target both preflight orders, expiry, unchanged seqno, the
+strict expiry boundary, native/token manifest separation and decimal narrowing.
+A separate expected-failure check with the fixture override unset confirmed
+that the prerequisite error names that override. No Rust build ran.

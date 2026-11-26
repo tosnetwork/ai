@@ -28,12 +28,12 @@ func TestTokenFundingDocumentIsBoundByConfirmation(t *testing.T) {
 	r := tokenPreviewRecord()
 	p := PurchaseRecord{}
 	var nonce [ConfirmationNonceBytes]byte
-	original := ConfirmationCode(nonce, fieldsOf(r, p))
+	original := ConfirmationCode(nonce, checkedFields(t, r, p))
 	edits := []func(*buyersdk.CallRecord){func(r *buyersdk.CallRecord) { r.PriceAtomic = "1234568" }, func(r *buyersdk.CallRecord) { r.AssetMaster = "0:" + strings.Repeat("78", 32) }, func(r *buyersdk.CallRecord) { r.PreparedTokenMessage.Details["forward_tos_amount"] = "90000001" }, func(r *buyersdk.CallRecord) { r.PreparedTokenMessage.ValueNanotos = "100000001" }, func(r *buyersdk.CallRecord) { r.PreparedTokenMessage.BodyHash = strings.Repeat("cd", 32) }}
 	for i, edit := range edits {
 		r = tokenPreviewRecord()
 		edit(&r)
-		if ConfirmationCode(nonce, fieldsOf(r, p)) == original {
+		if ConfirmationCode(nonce, checkedFields(t, r, p)) == original {
 			t.Fatalf("edit %d reused the confirmation", i)
 		}
 	}
@@ -76,4 +76,13 @@ func TestTokenSurplusIsShownAsTerminalRatherThanAdmitted(t *testing.T) {
 	if got := stateOf(buyersdk.CallRecord{Phase: buyersdk.PhaseFundingSurplus}, PurchaseRecord{}, time.Unix(1, 0)); got != StateFundingSurplus {
 		t.Fatalf("surplus state: %s", got)
 	}
+}
+
+func checkedFields(t *testing.T, record buyersdk.CallRecord, purchase PurchaseRecord) ConfirmationFields {
+	t.Helper()
+	fields, err := fieldsOf(record, purchase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fields
 }

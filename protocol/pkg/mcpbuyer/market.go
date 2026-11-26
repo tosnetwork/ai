@@ -3,11 +3,11 @@ package mcpbuyer
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 
-	"encoding/hex"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"

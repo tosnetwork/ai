@@ -212,7 +212,7 @@ func TestTokenPresentationShowsExactTransferAndSeparateBudgets(t *testing.T) {
 	p.Purchase.PaymentNanoTOS = "100000000"
 	p.Budget.TokenAssets = []buyeragent.TokenBudgetView{{AssetKey: buyersdk.TokenAssetBudgetKey(p.Purchase.TokenFunding.AssetMaster, p.Purchase.TokenFunding.WalletCodeHash, 6), MaxPerCallAtomic: "2000000", MaxWindowAtomic: "5000000", ReservedAtomic: "1234567"}}
 	out := Render(p, nil)
-	for _, want := range []string{p.Purchase.TokenFunding.AssetMaster, p.Purchase.TokenFunding.TokenWallet, p.Purchase.Actor, "1234567 atomic (1.234567)", "received 1234567 atomic", "funding budget minimum", "45000000 nanoTOS", "Token budget:", "2000000", "5000000", "provider surplus", "returned entries"} {
+	for _, want := range []string{p.Purchase.TokenFunding.AssetMaster, p.Purchase.TokenFunding.TokenWallet, p.Purchase.Actor, "1234567 atomic (1.234567)", "received 1234567 atomic", "minimum forward", "45000000 nanoTOS", "Token budget:", "2000000", "5000000", "provider surplus", "returned entries"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in %s", want, out)
 		}

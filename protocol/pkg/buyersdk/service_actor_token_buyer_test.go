@@ -17,13 +17,20 @@ import (
 
 type tokenBuyerTestSession struct {
 	*saSession
-	builder     *tokenBuildSessionFixture
-	token       *toschain.TokenActorAccount
-	recognition *toschain.TokenAssetRecognition
-	history     *toschain.TokenActorHistory
-	accepting   bool
+	builder          *tokenBuildSessionFixture
+	token            *toschain.TokenActorAccount
+	recognition      *toschain.TokenAssetRecognition
+	history          *toschain.TokenActorHistory
+	accepting        bool
+	walletSeqnoError error
 }
 
+func (s *tokenBuyerTestSession) WalletSeqno(ctx context.Context, wallet string) (uint32, error) {
+	if s.walletSeqnoError != nil {
+		return 0, s.walletSeqnoError
+	}
+	return s.saSession.WalletSeqno(ctx, wallet)
+}
 func (s *tokenBuyerTestSession) BlockHashes() (string, string) { return s.builder.BlockHashes() }
 func (s *tokenBuyerTestSession) ResolveTokenActor(ctx context.Context, a string, p []toschain.TokenAssetPin, recognized bool) (*toschain.ResolvedTokenActor, error) {
 	r, err := s.builder.ResolveTokenActor(ctx, a, p, recognized)
@@ -73,27 +80,33 @@ func (r *tokenBuyerTestReader) BeginBuyerSession(context.Context) (ServiceActorS
 }
 
 type tokenBuyerTestSender struct {
-	buyer   *ServiceActorBuyer
-	sent    int
-	failure error
+	buyer            *ServiceActorBuyer
+	sent             int
+	failure          error
+	preflightFailure error
+	preflights       int
 }
 
 func (s *tokenBuyerTestSender) PreflightToken(_ context.Context, p *TokenPreparedMessage) error {
+	s.preflights++
+	if s.preflightFailure != nil {
+		return s.preflightFailure
+	}
 	records, err := s.buyer.config.Journal.Records()
 	if err != nil {
 		return err
 	}
 	for _, r := range records {
 		if sameTokenMessage(r.PreparedTokenMessage, p) && r.Phase == PhaseSending {
-			return nil
+			return errors.New("broadcast reservation preceded preflight")
 		}
 		for _, send := range r.Lifecycle {
 			if sameTokenMessage(send.PreparedTokenMessage, p) && send.Phase == PhaseSending {
-				return nil
+				return errors.New("lifecycle broadcast reservation preceded preflight")
 			}
 		}
 	}
-	return errors.New("preflight signing started before durable reservation")
+	return s.preflightFailure
 }
 func (s *tokenBuyerTestSender) SendToken(_ context.Context, p *TokenPreparedMessage) error {
 	records, err := s.buyer.config.Journal.Records()
@@ -397,5 +410,131 @@ func TestTokenBuyerSurplusIsTerminalAndCountsAsSpentWithinTheWindow(t *testing.T
 				t.Fatal("surplus call was resent")
 			}
 		})
+	}
+}
+
+func TestTokenBuyerRetriesAfterAPreflightFailure(t *testing.T) {
+	f, _, sender := newTokenBuyerFixture(t)
+	r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender.preflightFailure = errors.New("temporary build-only failure")
+	if _, err = f.buyer.Call(context.Background(), r.RequestHash); !errors.Is(err, sender.preflightFailure) {
+		t.Fatalf("preflight failure: %v", err)
+	}
+	stored, err := f.buyer.Journal().Read(r.RequestHash)
+	if err != nil || stored.Phase != PhasePrepared || sender.sent != 0 {
+		t.Fatalf("preflight changed the reservation: %+v %v", stored, err)
+	}
+	sender.preflightFailure = nil
+	sent, err := f.buyer.Call(context.Background(), r.RequestHash)
+	if err != nil || sent.Phase != PhaseSubmitted || sender.sent != 1 {
+		t.Fatalf("retry did not submit: %+v %v", sent, err)
+	}
+}
+
+func TestTokenLifecycleRetriesAfterAPreflightFailure(t *testing.T) {
+	f, reader, sender := newTokenBuyerFixture(t)
+	r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.buyer.Call(context.Background(), r.RequestHash); err != nil {
+		t.Fatal(err)
+	}
+	landTokenBuyerCall(t, f, reader, r)
+	report, err := f.buyer.Resolve(context.Background(), r.RequestHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(int64(report.ResponseDeadline)+1, 0)
+	reader.s.wallet.chainTime = now
+	reader.s.builder.snapshot.ReadAt.GenUtime = uint32(now.Unix())
+	f.buyer.config.Now = func() time.Time { return now }
+	sender.preflightFailure = errors.New("temporary lifecycle build-only failure")
+	if _, err = f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire); !errors.Is(err, sender.preflightFailure) {
+		t.Fatalf("preflight failure: %v", err)
+	}
+	stored, err := f.buyer.Journal().Read(r.RequestHash)
+	if err != nil || len(stored.Lifecycle) != 0 || sender.sent != 1 {
+		t.Fatalf("preflight created a send: %+v %v", stored, err)
+	}
+	sender.preflightFailure = nil
+	sent, err := f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire)
+	if err != nil || len(sent.Lifecycle) != 1 || sent.Lifecycle[0].Phase != PhaseSubmitted || sender.sent != 2 {
+		t.Fatalf("retry did not submit: %+v %v", sent, err)
+	}
+}
+
+func TestTokenLifecycleRetriesOnlyAfterFinalizedExpiryWithoutAConsumedSeqno(t *testing.T) {
+	for _, scenario := range []string{"before", "at bound", "after", "seqno changed", "missing bound", "wallet read failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, reader, sender := newTokenBuyerFixture(t)
+			r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.buyer.Call(context.Background(), r.RequestHash); err != nil {
+				t.Fatal(err)
+			}
+			landTokenBuyerCall(t, f, reader, r)
+			report, err := f.buyer.Resolve(context.Background(), r.RequestHash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Unix(int64(report.ResponseDeadline)+1, 0)
+			reader.s.wallet.chainTime = now
+			reader.s.wallet.seqno = 5
+			reader.s.builder.snapshot.ReadAt.GenUtime = uint32(now.Unix())
+			f.buyer.config.Now = func() time.Time { return now }
+			sender.failure = errors.New("submission answer lost")
+			ambiguous, err := f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire)
+			if err == nil || len(ambiguous.Lifecycle) != 1 || ambiguous.Lifecycle[0].Phase != PhaseAmbiguous {
+				t.Fatalf("not ambiguous: %+v %v", ambiguous, err)
+			}
+			first := ambiguous.Lifecycle[0]
+			if first.WalletSeqno != 5 || first.ValidUntilBoundUnix != LifecycleValidUntilBound(now) {
+				t.Fatalf("missing signing bounds: %+v", first)
+			}
+			sender.failure = nil
+			later := time.Unix(first.ValidUntilBoundUnix+1, 0)
+			switch scenario {
+			case "before":
+				later = time.Unix(first.ValidUntilBoundUnix-1, 0)
+			case "at bound":
+				later = time.Unix(first.ValidUntilBoundUnix, 0)
+			case "seqno changed":
+				reader.s.wallet.seqno = 6
+			case "missing bound":
+				if _, err = f.buyer.Journal().Transition(r.RequestHash, []CallPhase{PhaseAdmitted}, func(record *CallRecord) error { record.Lifecycle[0].ValidUntilBoundUnix = 0; return nil }); err != nil {
+					t.Fatal(err)
+				}
+			case "wallet read failed":
+				reader.s.walletSeqnoError = errors.New("wallet checkpoint unavailable")
+			}
+			reader.s.wallet.chainTime = later
+			reader.s.builder.snapshot.ReadAt.GenUtime = uint32(later.Unix())
+			now = later
+			retried, err := f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire)
+			if scenario == "after" {
+				if err != nil || sender.sent != 3 || len(retried.Lifecycle) != 2 || retried.Lifecycle[0].Phase != PhaseRefused || retried.Lifecycle[1].Phase != PhaseSubmitted || retried.Lifecycle[0].QueryID == retried.Lifecycle[1].QueryID {
+					t.Fatalf("expired retry: %+v %v sends=%d", retried, err, sender.sent)
+				}
+			} else if err == nil || sender.sent != 2 {
+				t.Fatalf("unproved retry: %+v %v sends=%d", retried, err, sender.sent)
+			}
+		})
+	}
+}
+
+func TestTokenBuyerRefusesDecimalsThatDoNotFitInAByte(t *testing.T) {
+	if d, err := tokenAssetDecimals(255); err != nil || d != 255 {
+		t.Fatalf("byte boundary: %d %v", d, err)
+	}
+	for _, d := range []uint32{256, 511, 1<<32 - 1} {
+		if _, err := tokenAssetDecimals(d); err == nil {
+			t.Fatalf("decimals %d silently narrowed", d)
+		}
 	}
 }

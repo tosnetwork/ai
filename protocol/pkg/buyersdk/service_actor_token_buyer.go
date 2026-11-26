@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"math"
 	"math/big"
 	"time"
 
@@ -19,6 +20,14 @@ import (
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 	"google.golang.org/protobuf/proto"
 )
+
+// tokenAssetDecimals refuses narrowing outside the on-chain byte field.
+func tokenAssetDecimals(value uint32) (uint8, error) {
+	if value > math.MaxUint8 {
+		return 0, errors.New("token asset decimals exceed 255")
+	}
+	return uint8(value), nil
+}
 
 // TokenMessageSender submits the exact prepared token wallet body. It must not
 // rebuild the transfer or change the confirmed funding amounts.
@@ -64,6 +73,10 @@ func (b *ServiceActorBuyer) prepareToken(ctx context.Context, request *nativev1.
 	if err != nil {
 		return CallRecord{}, err
 	}
+	decimals, err := tokenAssetDecimals(v.Rail.Asset.Decimals)
+	if err != nil {
+		return CallRecord{}, err
+	}
 	session, admission, err := b.tokenAdmission(ctx, v)
 	if err != nil {
 		return CallRecord{}, err
@@ -96,7 +109,7 @@ func (b *ServiceActorBuyer) prepareToken(ctx context.Context, request *nativev1.
 		return CallRecord{}, err
 	}
 	r := CallRecord{Schema: tokenCallRecordSchema, Rail: nativecore.ServiceActorTokenRail,
-		AssetMaster: "0:" + hex.EncodeToString(v.Rail.Asset.Master.AccountId), AssetWalletCodeHash: v.Rail.Asset.WalletCodeHash, AssetDecimals: uint8(v.Rail.Asset.Decimals), PriceAtomic: v.Rail.PriceAtomic.String(), PreparedTokenMessage: prepared,
+		AssetMaster: "0:" + hex.EncodeToString(v.Rail.Asset.Master.AccountId), AssetWalletCodeHash: v.Rail.Asset.WalletCodeHash, AssetDecimals: decimals, PriceAtomic: v.Rail.PriceAtomic.String(), PreparedTokenMessage: prepared,
 		RequestHash: hex.EncodeToString(rh[:]), QueryID: query, NetworkID: b.config.Network.NetworkId, GenesisRootHash: b.config.Network.GenesisRootHash, GenesisFileHash: b.config.Network.GenesisFileHash, BuyerWallet: b.config.BuyerWallet, Actor: admission.Binding.Actor, ActorCodeHash: b.config.ActorCodeHash,
 		CapabilityID: v.Proposal.CapabilityId, CapabilityVersion: v.Proposal.CapabilityVersion, PackageBase64: base64.StdEncoding.EncodeToString(raw), BuyerAddressInReq: request.BuyerAddress, AcceptedQuoteBOC: base64.StdEncoding.EncodeToString(quote.ToBOCWithOptions(cell.BOCSerializeOptions{})), QuoteCommitment: commitment,
 		ExecutionID: hex.EncodeToString(executionID[:]), InputDigest: hex.EncodeToString(inputDigest[:]), TermsHash: hex.EncodeToString(v.Rail.TermsHash[:]), PolicyVersion: v.Rail.PolicyVersion, StorageFeeNanoTOS: v.Rail.StorageFee.String(), AttestorKeyID: mldsa44.KeyIDText(admission.Binding.AttestorKeyID), PaymentNanoTOS: prepared.ValueNanotos,
@@ -130,6 +143,10 @@ func (b *ServiceActorBuyer) reconstructToken(r CallRecord) (*quoteexchange.Valid
 	if r.BuyerAddressInReq != r.BuyerWallet || r.ExpiresAtUnix != v.Proposal.ExpiresAtUnixSeconds || r.PolicyVersion != v.Rail.PolicyVersion || r.AttestorKeyID != mldsa44.KeyIDText(v.Rail.AttestorKeyID) {
 		return nil, rh, errors.New("token journal policy or expiry differs from Quote")
 	}
+	decimals, err := tokenAssetDecimals(v.Rail.Asset.Decimals)
+	if err != nil {
+		return nil, rh, err
+	}
 	q, commitment, err := nativecore.BuildAcceptedTokenQuoteCommitment(b.config.Network, v.Proposal)
 	if err != nil || commitment != r.QuoteCommitment || base64.StdEncoding.EncodeToString(q.ToBOCWithOptions(cell.BOCSerializeOptions{})) != r.AcceptedQuoteBOC {
 		return nil, rh, errors.New("token Accepted Quote does not reproduce")
@@ -147,7 +164,7 @@ func (b *ServiceActorBuyer) reconstructToken(r CallRecord) (*quoteexchange.Valid
 	if err != nil || !bytes.Equal(req.Hash(), rh[:]) {
 		return nil, rh, errors.New("token request hash does not reproduce")
 	}
-	if v.Rail.Actor != r.Actor || hex.EncodeToString(v.Rail.TermsHash[:]) != r.TermsHash || v.Rail.PriceAtomic.String() != r.PriceAtomic || v.Rail.StorageFee.String() != r.StorageFeeNanoTOS || "0:"+hex.EncodeToString(v.Rail.Asset.Master.AccountId) != r.AssetMaster || v.Rail.Asset.WalletCodeHash != r.AssetWalletCodeHash || uint8(v.Rail.Asset.Decimals) != r.AssetDecimals || r.PreparedTokenMessage.ValueNanotos != r.PaymentNanoTOS {
+	if v.Rail.Actor != r.Actor || hex.EncodeToString(v.Rail.TermsHash[:]) != r.TermsHash || v.Rail.PriceAtomic.String() != r.PriceAtomic || v.Rail.StorageFee.String() != r.StorageFeeNanoTOS || "0:"+hex.EncodeToString(v.Rail.Asset.Master.AccountId) != r.AssetMaster || v.Rail.Asset.WalletCodeHash != r.AssetWalletCodeHash || decimals != r.AssetDecimals || r.PreparedTokenMessage.ValueNanotos != r.PaymentNanoTOS {
 		return nil, rh, errors.New("token journal rail does not reproduce")
 	}
 	return v, rh, nil
@@ -187,6 +204,9 @@ func (b *ServiceActorBuyer) callToken(ctx context.Context, r CallRecord) (CallRe
 	if !sameTokenMessage(r.PreparedTokenMessage, fresh) {
 		return r, errors.New("token funding changed; withdraw this preparation and prepare again")
 	}
+	if err = b.config.TokenSender.PreflightToken(ctx, fresh); err != nil {
+		return r, err
+	}
 	r, err = b.config.Journal.BeginSend(r.RequestHash, b.config.Limits, b.config.Now())
 	if err != nil {
 		return r, err
@@ -199,10 +219,7 @@ func (b *ServiceActorBuyer) callToken(ctx context.Context, r CallRecord) (CallRe
 			panic(v)
 		}
 	}()
-	err = b.config.TokenSender.PreflightToken(sendCtx, fresh)
-	if err == nil {
-		err = b.config.TokenSender.SendToken(sendCtx, fresh)
-	}
+	err = b.config.TokenSender.SendToken(sendCtx, fresh)
 	next := PhaseSubmitted
 	if errors.Is(err, ErrCallNotStarted) {
 		next = PhasePrepared
@@ -330,7 +347,7 @@ func (b *ServiceActorBuyer) resolveToken(ctx context.Context, r CallRecord) (*Re
 }
 
 // sendTokenLifecycle derives the destination and funding from one finalized
-// snapshot, persists the exact message before custody, and never guesses that
+// snapshot, preflights without broadcast, persists before sending, and never guesses that
 // a paying return has arrived. Earlier attempts require exact actor execution.
 func (b *ServiceActorBuyer) sendTokenLifecycle(ctx context.Context, r CallRecord, operation string) (CallRecord, error) {
 	if b.config.TokenSender == nil {
@@ -417,8 +434,39 @@ func (b *ServiceActorBuyer) sendTokenLifecycle(ctx context.Context, r CallRecord
 		}
 		id = *r.RequestID
 	}
+	seqno, err := session.WalletSeqno(ctx, r.BuyerWallet)
+	if err != nil {
+		return r, errors.Join(ErrCallNotStarted, err)
+	}
 	for _, old := range r.Lifecycle {
-		if old.Operation != operation || old.Phase == PhasePrepared {
+		if old.Operation != operation || old.Phase == PhasePrepared || old.Phase == PhaseRefused {
+			continue
+		}
+		if old.ValidUntilBoundUnix > 0 && session.ChainTime().Unix() > old.ValidUntilBoundUnix && seqno == old.WalletSeqno {
+			beforeCount := len(r.Lifecycle)
+			settled, err := b.config.Journal.Transition(r.RequestHash, []CallPhase{r.Phase}, func(record *CallRecord) error {
+				if len(record.Lifecycle) != beforeCount {
+					return ErrLifecycleUnsettled
+				}
+				for i := range record.Lifecycle {
+					send := &record.Lifecycle[i]
+					if send.QueryID == old.QueryID && send.Operation == old.Operation {
+						if send.Phase != old.Phase && send.Phase != PhaseRefused {
+							return ErrLifecycleUnsettled
+						}
+						// The finalized clock is past the signing bound and no
+						// wallet sequence was consumed: this attempt never landed.
+						send.Phase = PhaseRefused
+						record.UpdatedUnix = b.config.Now().Unix()
+						return nil
+					}
+				}
+				return ErrLifecycleUnsettled
+			})
+			if err != nil {
+				return r, err
+			}
+			r = settled
 			continue
 		}
 		executed := false
@@ -446,8 +494,11 @@ func (b *ServiceActorBuyer) sendTokenLifecycle(ctx context.Context, r CallRecord
 	if len(prepared.Warnings) != 0 {
 		return r, ErrLifecycleUnsettled
 	}
+	if err = b.config.TokenSender.PreflightToken(ctx, prepared); err != nil {
+		return r, err
+	}
 	now := b.config.Now()
-	record, err := b.config.Journal.beginTokenLifecycle(r, LifecycleSend{Operation: operation, QueryID: query, Phase: PhaseSending, SentUnix: now.Unix(), PreparedTokenMessage: prepared}, b.config.Limits, now)
+	record, err := b.config.Journal.beginTokenLifecycle(r, LifecycleSend{Operation: operation, QueryID: query, Phase: PhaseSending, SentUnix: now.Unix(), WalletSeqno: seqno, ValidUntilBoundUnix: LifecycleValidUntilBound(now), PreparedTokenMessage: prepared}, b.config.Limits, now)
 	if err != nil {
 		return r, err
 	}
@@ -468,12 +519,9 @@ func (b *ServiceActorBuyer) sendTokenLifecycle(ctx context.Context, r CallRecord
 			panic(value)
 		}
 	}()
-	sendCtx, cancel := context.WithTimeout(ctx, LifecycleSendTimeout)
+	sendCtx, cancel := context.WithDeadline(ctx, now.Add(LifecycleSendTimeout))
 	defer cancel()
-	sendErr := b.config.TokenSender.PreflightToken(sendCtx, prepared)
-	if sendErr == nil {
-		sendErr = b.config.TokenSender.SendToken(sendCtx, prepared)
-	}
+	sendErr := b.config.TokenSender.SendToken(sendCtx, prepared)
 	phase := PhaseSubmitted
 	if errors.Is(sendErr, ErrCallNotStarted) {
 		phase = PhasePrepared

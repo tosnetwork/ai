@@ -258,7 +258,7 @@ func Render(p buyeragent.Presentation, sensitive []string) string {
 		line("Token asset:      %s; wallet code %s; decimals %d", field(f.AssetMaster), field(f.WalletCodeHash), f.Decimals)
 		line("Token transfer:   %s atomic (%s); received %s atomic", field(f.AmountAtomic), buyeragent.AtomicAmount(f.AmountAtomic, f.Decimals), field(f.ReceivedAtomic))
 		line("Funding wallet:   %s -> actor %s", field(f.TokenWallet), field(purchase.Actor))
-		line("Forward amount:   %s; funding budget minimum %s", TOS(f.ForwardNanoTOS), TOS(f.MinimumForwardNanoTOS))
+		line("Forward amount:   %s; minimum forward %s", TOS(f.ForwardNanoTOS), TOS(f.MinimumForwardNanoTOS))
 		line("WARNING: underfunded transfers or transfers without a forward amount can become provider surplus. Fund only while accepting tokens.")
 		line("Refused payouts leave returned entries to claim; the provider must fund its token wallet for storage.")
 		for _, limit := range p.Budget.TokenAssets {

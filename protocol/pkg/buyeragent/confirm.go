@@ -38,10 +38,14 @@ type ConfirmationFields struct {
 
 // fieldsOf takes the bound fields from the agent's own records, never from
 // a request.
-func fieldsOf(record buyersdk.CallRecord, purchase PurchaseRecord) ConfirmationFields {
+func fieldsOf(record buyersdk.CallRecord, purchase PurchaseRecord) (ConfirmationFields, error) {
+	funding, err := tokenConfirmation(record)
+	if err != nil {
+		return ConfirmationFields{}, err
+	}
 	return ConfirmationFields{NetworkID: record.NetworkID, BuyerWallet: record.BuyerWallet, Actor: record.Actor,
 		RequestHash: record.RequestHash, TermsHash: record.TermsHash, QuoteCommitment: record.QuoteCommitment,
-		PaymentNanoTOS: record.PaymentNanoTOS, SourceDigest: purchase.SourceDigest, TokenFunding: tokenConfirmation(record)}
+		PaymentNanoTOS: record.PaymentNanoTOS, SourceDigest: purchase.SourceDigest, TokenFunding: funding}, nil
 }
 
 // ConfirmationCode derives the code of one presentation:

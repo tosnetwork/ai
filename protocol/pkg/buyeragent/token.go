@@ -38,15 +38,18 @@ func tokenFunding(record buyersdk.CallRecord) *TokenFundingView {
 
 // The receipt and terms already bind the token amount. Binding the exact
 // funding document as well prevents a fee change from reusing a human's code.
-func tokenConfirmation(record buyersdk.CallRecord) string {
+func tokenConfirmation(record buyersdk.CallRecord) (string, error) {
 	if record.PreparedTokenMessage == nil {
-		return ""
+		return "", nil
 	}
-	raw, _ := json.Marshal(struct {
+	raw, err := json.Marshal(struct {
 		Funding  *TokenFundingView
 		BodyHash string
 	}{tokenFunding(record), record.PreparedTokenMessage.BodyHash})
-	return string(raw)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 // AtomicAmount renders by integer arithmetic only; no floating-point conversion

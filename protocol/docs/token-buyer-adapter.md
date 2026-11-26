@@ -9,6 +9,10 @@ nor the MCP client receives them.
 
 ## Owner policy
 
+One agent configuration is token-only or native-only, never both. Run separate
+configurations, private state directories and sockets to use both rails. A
+token-only configuration may pin multiple independent token assets.
+
 Use the token actor's pinned release hash as `actor_code_hash`. Add an optional
 `token_assets` array to the owner-private agent configuration. Each entry has:
 
@@ -39,13 +43,16 @@ confirmed amount.
 The preview and terminal confirmation distinguish token principal from native
 fees. They show the pinned asset identity, decimal rendering alongside atomic
 units, exact transfer and received amount, token wallet, actor, attached native
-value, forwarded native amount and minimum funding budget. The supported pinned
+value, forwarded native amount and minimum forward. The supported pinned
 token-wallet code transfers principal without a token transfer fee; the received
 amount equals the transfer amount. This is not support for arbitrary
 fee-charging token wallets. Source-side transfer fees do not change that claim.
 
 The confirmation code binds the exact funding document as well as the quote,
-request and archive. An ambiguous submission remains reserved and is not sent
+request and archive. The non-broadcasting build-only preflight runs before the
+journal enters `sending`; a preflight refusal leaves the call prepared and
+retryable, or leaves no lifecycle attempt. The broadcast is still journaled
+before submission. An ambiguous submission remains reserved and is not sent
 again. Finalized notification/admission and authenticated payout outcomes decide
 its status; a sequence number alone is not settlement. A finalized funding
 refusal with no payout is terminal `funding_surplus`: no request was admitted
@@ -76,3 +83,12 @@ verifier still have to execute that acceptance run.
 
 See [the verification record](token-buyer-verification.md) for acceptance tests,
 commands and the remaining network acceptance gate.
+
+An uncertain token lifecycle attempt records the finalized wallet seqno and the
+same conservative `valid_until` upper bound used by the native sender. A retry
+is allowed after a finalized checkpoint passes that bound with the seqno
+unchanged, proving the attempt never executed; the old attempt is durably marked
+refused before a new one is submitted. At the bound, with a changed seqno or a
+missing legacy bound, the adapter continues to refuse a retry unless exact
+execution is established. A build-only preflight never broadcasts; signing a
+later retry with the same wallet seqno cannot make two wallet messages execute.

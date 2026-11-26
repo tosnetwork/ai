@@ -772,13 +772,17 @@ func (a *Agent) Present(requestHash string) (Presentation, error) {
 	if err != nil {
 		return Presentation{}, refusal(CodeOfferInvalid, "the stored Quote no longer validates", err)
 	}
+	fields, err := fieldsOf(record, purchase)
+	if err != nil {
+		return Presentation{}, err
+	}
 	return Presentation{Purchase: a.viewOf(record, purchase), NetworkID: record.NetworkID, BuyerWallet: record.BuyerWallet,
 		Budget: budget, ProviderAgentID: validated.Proposal.ProviderAgentId, ManifestDigest: validated.Proposal.ManifestDigest,
 		ProviderName: validated.Manifest.Name, ProviderDescription: validated.Manifest.Description,
 		ResponseSLASeconds: record.ResponseSLASeconds, RefundClaimWindowSeconds: record.RefundClaimWindowSeconds,
 		RetentionSeconds: validated.Manifest.RetentionSeconds, CleanupBountyNanoTOS: record.CleanupBountyNanoTOS,
 		AllowanceNanoTOS: strconv.Itoa(nativecore.ServiceActorAdmissionGasAllowance), NowUnix: now.Unix(),
-		Code:           ConfirmationCode(nonce, fieldsOf(record, purchase)),
+		Code:           ConfirmationCode(nonce, fields),
 		ValidUntilUnix: time.Unix(purchase.PresentedUnix, 0).Add(ConfirmationLifetime).Unix()}, nil
 }
 
@@ -850,7 +854,11 @@ func (a *Agent) decideLocked(params DecideParams) (buyersdk.CallRecord, Purchase
 	if err != nil {
 		return record, purchase, PurchaseView{}, false, err
 	}
-	if !codesMatch(ConfirmationCode(nonce, fieldsOf(record, purchase)), params.Code) {
+	fields, err := fieldsOf(record, purchase)
+	if err != nil {
+		return record, purchase, PurchaseView{}, false, err
+	}
+	if !codesMatch(ConfirmationCode(nonce, fields), params.Code) {
 		purchase.CodeFailures++
 		if err := a.store.writePurchase(purchase); err != nil {
 			return record, purchase, PurchaseView{}, false, err
