@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
@@ -83,10 +84,15 @@ func resolveTokenAction(ctx context.Context, s TokenSession, c NodeConfig, r *To
 						if b.Purpose != 1 || b.Target != r.Input.ID {
 							return errors.New("recheck log mismatch")
 						}
-						if _, ok := a.Data.Returned[r.Input.ID]; ok {
-							r.State = "returned"
-						} else {
-							r.State = "finalized"
+						requests, err := serviceactor.ReplayTokenRequests(a, history, s.ChainTime())
+						if err != nil {
+							return err
+						}
+						r.State = "finalized"
+						for _, request := range requests {
+							if request.PayoutID == r.Input.ID && request.Status == serviceactor.StatusReturned {
+								r.State = "returned"
+							}
 						}
 						return nil
 					}
