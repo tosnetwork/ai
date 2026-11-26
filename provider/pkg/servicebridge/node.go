@@ -28,7 +28,8 @@ import (
 // It names custody (tosctl, the vault) but holds no key material: the vault
 // URL is read from the environment variable VaultURLEnv.
 type NodeConfig struct {
-	Network NetworkConfig `json:"network"`
+	Token   *TokenProviderConfig `json:"token,omitempty"`
+	Network NetworkConfig        `json:"network"`
 	// GlobalConfigFile is the chain global configuration tosctl derives the
 	// Native Registry identity domain from; `init` records it for `offer`.
 	GlobalConfigFile string       `json:"chain_global_config_file,omitempty"`
@@ -200,6 +201,11 @@ func LoadNodeConfig(path string) (NodeConfig, error) {
 	}
 	if err := readJSON(path, 1<<20, &config); err != nil {
 		return config, fmt.Errorf("servicebridge: rail configuration: %w", err)
+	}
+	if config.Token != nil {
+		if err := config.Token.Validate(); err != nil {
+			return config, err
+		}
 	}
 	return config, nil
 }

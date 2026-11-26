@@ -27,7 +27,7 @@ import (
 const programName = "tos-service-provider"
 
 const usage = "usage: " + programName + " <init|offer|preflight|serve|status|pause|resume|withdraw|manifest|metadata|" +
-	"agent|confirm> [flags]\n" +
+	"agent|confirm|token> [flags]\n" +
 	"  init       establish this node's Agent identity and write its rail configuration\n" +
 	"  offer      publish the offer: Service Actor, manifest, Capability and policy\n" +
 	"  preflight  check that the node is ready to admit paid work (no chain effect)\n" +
@@ -38,6 +38,7 @@ const usage = "usage: " + programName + " <init|offer|preflight|serve|status|pau
 	"  withdraw   withdraw the actor's credited revenue to the owner wallet\n" +
 	"  manifest   build the canonical manifest of a Capability (no chain effect)\n" +
 	"  metadata   print the metadata hash the actor policy must carry\n" +
+	"  token      inspect token offers or preview/apply confirmed token operations\n" +
 	"  agent      run the node for the MCP provider adapter and serve its agent socket\n" +
 	"  confirm    confirm or decline the adapter's pending actions, on a custody terminal\n" +
 	"exit codes: 0 done; 1 the command failed; 2 the arguments were refused; 3 preflight found the node not ready; " +
@@ -127,7 +128,7 @@ type command func(ctx context.Context, set *flag.FlagSet, arguments []string, st
 var commands = map[string]command{
 	"init": runInit, "offer": runOffer, "preflight": runPreflight, "serve": runServe, "status": runStatus,
 	"pause": runPause, "resume": runResume, "withdraw": runWithdraw, "manifest": runManifest, "metadata": runMetadata,
-	"agent": runAgent, "confirm": runConfirm,
+	"agent": runAgent, "confirm": runConfirm, "token": runToken,
 }
 
 func dispatch(ctx context.Context, arguments []string, std streams) error {

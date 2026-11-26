@@ -39,6 +39,24 @@ func decode(raw json.RawMessage, value any) error {
 // checked the schema, the method and the role.
 func (a *Agent) Handle(ctx context.Context, role agentsocket.Role, method string, raw json.RawMessage) (any, error) {
 	switch method {
+	case agentapi.MethodTokenPreview:
+		var p agentapi.TokenPreviewParams
+		if err := decode(raw, &p); err != nil {
+			return nil, err
+		}
+		return a.TokenPreview(ctx, role, p)
+	case agentapi.MethodTokenStatus:
+		var p agentapi.TokenActorParams
+		if err := decode(raw, &p); err != nil {
+			return nil, err
+		}
+		return a.TokenStatus(ctx, role, p)
+	case agentapi.MethodTokenOffer:
+		var p agentapi.TokenActorParams
+		if err := decode(raw, &p); err != nil {
+			return nil, err
+		}
+		return a.TokenOffer(ctx, role, p)
 	case agentapi.MethodStatus, agentapi.MethodPreflight, agentapi.MethodOfferDescribe, agentapi.MethodExportOffer,
 		agentapi.MethodPending:
 		var params agentapi.Empty

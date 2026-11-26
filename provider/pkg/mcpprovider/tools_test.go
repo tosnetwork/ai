@@ -114,7 +114,7 @@ func checkSubset(t *testing.T, where string, schema any) {
 	}
 }
 
-// The tool list a client loads: twelve fixed tools, each input an object
+// The tool list a client loads: the fixed tools, each input an object
 // schema in the keyword subset Claude Code and Codex both accept, with its
 // output schema in the same subset, constant annotations, and a description
 // that says what is untrusted.
@@ -122,7 +122,7 @@ func TestTheToolListLoadsInBothClients(t *testing.T) {
 	tools := listTools(t)
 	want := map[string]bool{ToolStatus: true, ToolRecords: true, ToolPreflight: true, ToolOfferDescribe: true,
 		ToolExportOffer: false, ToolPause: false, ToolResume: false, ToolOfferPreview: false, ToolWithdrawPreview: false,
-		ToolRequestConfirmation: false, ToolActions: true, ToolCancel: false}
+		ToolRequestConfirmation: false, ToolActions: true, ToolCancel: false, ToolTokenStatus: true, ToolTokenOffer: true, ToolTokenPreview: false}
 	if len(tools) != len(want) {
 		t.Fatalf("%d tools", len(tools))
 	}

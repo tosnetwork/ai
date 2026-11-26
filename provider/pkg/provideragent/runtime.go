@@ -115,6 +115,14 @@ func (r *Runtime) runBounds(ctx context.Context) {
 	ticker := time.NewTicker(r.options.Interval)
 	defer ticker.Stop()
 	for {
+		if token, ok := r.agent.lib.(TokenLibrary); ok {
+			checkCtx, cancel := context.WithTimeout(ctx, preflightTimeout)
+			err := token.TokenSafety(checkCtx)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				r.agent.Report("token safety", err)
+			}
+		}
 		if _, err := r.agent.CheckWalletFloor(ctx); err != nil && ctx.Err() == nil {
 			r.agent.Report("wallet floor", err)
 		}

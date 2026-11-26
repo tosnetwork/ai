@@ -70,6 +70,12 @@ func newRedactor(rail servicebridge.NodeConfig, config Config, railPath, vaultUR
 		add("provider.offer_file", provider.OfferFile)
 		add("provider.gateway_key_card_file", provider.GatewayCardFile)
 	}
+	if rail.Token != nil {
+		add("token.monitor_report", rail.Token.MonitorReport)
+		for _, actor := range rail.Token.Actors {
+			add("token.manifest_file", actor.ManifestFile)
+		}
+	}
 	add("agent.state_dir", config.StateDir)
 	add("agent.socket_dir", config.SocketDir)
 	add("offer.executor_socket", config.Offer.ExecutorSocket)

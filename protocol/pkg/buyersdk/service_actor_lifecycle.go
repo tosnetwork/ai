@@ -409,3 +409,12 @@ func (b *ServiceActorBuyer) lifecycleSettled(ctx context.Context, session Servic
 	}
 	return nil
 }
+
+// CheckSubmissionEndpoints checks a pinned custody configuration against the
+// finalized reader before an application broadcasts its journaled exact BOC.
+func CheckSubmissionEndpoints(ctx context.Context, config []byte, vetter EndpointVetter) error {
+	if ctx == nil || vetter == nil {
+		return errors.New("missing custody endpoint verifier")
+	}
+	return checkTOSCTLEndpoints(ctx, config, vetter)
+}
