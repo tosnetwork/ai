@@ -73,6 +73,8 @@ type ServiceActorBuyerConfig struct {
 	ActorCodeHash string
 	BuyerWallet   string
 	Sender        ServiceActorSender
+	TokenSender   TokenMessageSender
+	TokenPins     []toschain.TokenAssetPin
 	// Lifecycle sends expire, claim_refund and sweep; nil leaves the buyer
 	// without refund duties.
 	Lifecycle ServiceActorLifecycleSender
@@ -92,7 +94,7 @@ type ServiceActorBuyer struct {
 // NewServiceActorBuyer refuses an incomplete configuration; the actor code
 // hash must be pinned to a Service Actor release.
 func NewServiceActorBuyer(config ServiceActorBuyerConfig) (*ServiceActorBuyer, error) {
-	if config.Reader == nil || config.Manifests == nil || config.Network == nil || config.Sender == nil ||
+	if config.Reader == nil || config.Manifests == nil || config.Network == nil || (config.Sender == nil && config.TokenSender == nil) ||
 		config.Journal == nil || !config.Limits.valid() || !isRawAddress(config.BuyerWallet) {
 		return nil, errors.New("invalid Service Actor buyer configuration")
 	}
@@ -107,7 +109,7 @@ func NewServiceActorBuyer(config ServiceActorBuyerConfig) (*ServiceActorBuyer, e
 		config.Random = func(value []byte) error { _, err := rand.Read(value); return err }
 	}
 	config.Network = proto.Clone(config.Network).(*nativev1.NetworkDomain)
-	discovery, err := serviceactorindex.NewDiscovery(indexReader{reader: config.Reader}, config.Network, config.Manifests, config.ActorCodeHash)
+	discovery, err := serviceactorindex.NewDiscovery(indexReader{reader: config.Reader}, config.Network, config.Manifests, config.ActorCodeHash, config.TokenPins...)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +154,9 @@ func (b *ServiceActorBuyer) Prepare(ctx context.Context, request *nativev1.Reque
 	value *nativev1.QuoteProposalPackageV1, executionID, inputDigest [32]byte) (CallRecord, error) {
 	if request == nil || request.BuyerAddress != b.config.BuyerWallet {
 		return CallRecord{}, errors.New("the Quote request does not name this buyer wallet")
+	}
+	if isTokenPackage(value) {
+		return b.prepareToken(ctx, request, value, executionID, inputDigest)
 	}
 	now := b.config.Now()
 	validated, err := quoteexchange.Validate(b.config.Network, request, value, now)
@@ -322,6 +327,12 @@ func (b *ServiceActorBuyer) Call(ctx context.Context, requestHash string) (CallR
 	if record.Phase != PhasePrepared {
 		return record, fmt.Errorf("call %s is %s and is never sent again", requestHash, record.Phase)
 	}
+	if record.Schema == tokenCallRecordSchema {
+		return b.callToken(ctx, record)
+	}
+	if b.config.Sender == nil {
+		return record, errors.New("native sender is not configured")
+	}
 	validated, intent, err := b.reconstruct(record)
 	if err != nil {
 		return record, err
@@ -378,7 +389,10 @@ func (b *ServiceActorBuyer) Call(ctx context.Context, requestHash string) (CallR
 
 // RequestReport is a verified view of a call's request at one checkpoint.
 type RequestReport struct {
-	Checkpoint uint64 `json:"checkpoint"`
+	TokenOutcome *toschain.TokenActorTransaction `json:"token_outcome,omitempty"`
+	PayoutID     *uint64                         `json:"payout_id,omitempty"`
+	ReturnedID   *uint64                         `json:"returned_id,omitempty"`
+	Checkpoint   uint64                          `json:"checkpoint"`
 	// ChainTime is the checkpoint's chain time (Unix seconds), the clock
 	// of every deadline the report is judged against.
 	ChainTime           int64                      `json:"chain_time,omitempty"`
@@ -408,6 +422,9 @@ func (b *ServiceActorBuyer) Resolve(ctx context.Context, requestHash string) (*R
 	}
 	if record.Phase == PhasePrepared || record.Phase == PhaseSending || record.Phase == PhaseWithdrawn {
 		return &RequestReport{Phase: record.Phase}, nil
+	}
+	if record.Schema == tokenCallRecordSchema {
+		return b.resolveToken(ctx, record)
 	}
 	validated, intent, err := b.reconstruct(record)
 	if err != nil {

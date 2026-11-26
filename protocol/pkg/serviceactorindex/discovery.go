@@ -9,7 +9,9 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,37 +19,40 @@ import (
 // at one finalized checkpoint, passes binding steps 1-4 and admission steps
 // 5-7. Step 8 needs a Quote and is run by the buyer before calling.
 type Offer struct {
-	Checkpoint          uint64 `json:"checkpoint"`
-	CapabilityID        string `json:"capability_id"`
-	CapabilityVersion   string `json:"capability_version"`
-	ProviderAgentID     string `json:"provider_agent_id"`
-	ManifestDigest      string `json:"manifest_digest"`
-	Actor               string `json:"actor"`
-	ActorCodeHash       string `json:"actor_code_hash"`
-	AttestorKeyID       string `json:"attestor_key_id"`
-	PolicyVersion       uint32 `json:"policy_version"`
-	TermsHash           string `json:"terms_hash"`
-	PriceNanoTOS        string `json:"price_nanotos"`
-	StorageFeeNanoTOS   string `json:"storage_fee_nanotos"`
-	CleanupBountyNano   string `json:"cleanup_bounty_nanotos"`
-	ResponseSLASeconds  uint32 `json:"response_sla_seconds"`
-	RefundWindowSeconds uint32 `json:"refund_claim_window_seconds"`
-	OpenAccess          bool   `json:"open_access"`
+	Asset               *nativev1.TOSAssetIdentityV1 `json:"asset,omitempty"`
+	PriceAtomic         string                       `json:"price_atomic,omitempty"`
+	Checkpoint          uint64                       `json:"checkpoint"`
+	CapabilityID        string                       `json:"capability_id"`
+	CapabilityVersion   string                       `json:"capability_version"`
+	ProviderAgentID     string                       `json:"provider_agent_id"`
+	ManifestDigest      string                       `json:"manifest_digest"`
+	Actor               string                       `json:"actor"`
+	ActorCodeHash       string                       `json:"actor_code_hash"`
+	AttestorKeyID       string                       `json:"attestor_key_id"`
+	PolicyVersion       uint32                       `json:"policy_version"`
+	TermsHash           string                       `json:"terms_hash"`
+	PriceNanoTOS        string                       `json:"price_nanotos"`
+	StorageFeeNanoTOS   string                       `json:"storage_fee_nanotos"`
+	CleanupBountyNano   string                       `json:"cleanup_bounty_nanotos"`
+	ResponseSLASeconds  uint32                       `json:"response_sla_seconds"`
+	RefundWindowSeconds uint32                       `json:"refund_claim_window_seconds"`
+	OpenAccess          bool                         `json:"open_access"`
 	// StorageFeeRefundable is always false: the storage fee is not refunded.
 	StorageFeeRefundable bool `json:"storage_fee_refundable"`
 }
 
 // Discovery answers offer queries from finalized state.
 type Discovery struct {
-	reader   Reader
-	network  *nativev1.NetworkDomain
-	manifest serviceactor.ManifestSource
-	codeHash [32]byte
+	reader    Reader
+	network   *nativev1.NetworkDomain
+	manifest  serviceactor.ManifestSource
+	codeHash  [32]byte
+	tokenPins []toschain.TokenAssetPin
 }
 
 // NewDiscovery pins the network, the Service Actor release code hash and
 // the manifest source.
-func NewDiscovery(reader Reader, network *nativev1.NetworkDomain, manifests serviceactor.ManifestSource, actorCodeHash string) (*Discovery, error) {
+func NewDiscovery(reader Reader, network *nativev1.NetworkDomain, manifests serviceactor.ManifestSource, actorCodeHash string, pins ...toschain.TokenAssetPin) (*Discovery, error) {
 	if reader == nil || network == nil || manifests == nil {
 		return nil, errors.New("incomplete Service Actor discovery configuration")
 	}
@@ -55,7 +60,7 @@ func NewDiscovery(reader Reader, network *nativev1.NetworkDomain, manifests serv
 	if err != nil {
 		return nil, err
 	}
-	return &Discovery{reader: reader, network: proto.Clone(network).(*nativev1.NetworkDomain), manifest: manifests, codeHash: codeHash}, nil
+	return &Discovery{reader: reader, network: proto.Clone(network).(*nativev1.NetworkDomain), manifest: manifests, codeHash: codeHash, tokenPins: append([]toschain.TokenAssetPin(nil), pins...)}, nil
 }
 
 func codeHashBytes(value string) ([32]byte, error) {
@@ -89,6 +94,9 @@ func (d *Discovery) DiscoverOffer(ctx context.Context, candidate Candidate, buye
 }
 
 func (d *Discovery) discoverAt(ctx context.Context, session Session, candidate Candidate, buyer string) (*Offer, error) {
+	if d.codeHash == nativecore.ServiceActorTokenReleaseCodeHash || d.codeHash == nativecore.ServiceActorTokenTestProfileCodeHash {
+		return d.discoverTokenAt(ctx, session, candidate, buyer)
+	}
 	evidence, err := serviceactor.Gather(ctx, session, d.network, d.manifest, candidate.CapabilityID, candidate.Version)
 	if err != nil {
 		return nil, err

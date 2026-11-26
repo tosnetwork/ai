@@ -41,42 +41,49 @@ const (
 )
 
 const callRecordSchema = "tos.service.service-actor-call.v1"
+const tokenCallRecordSchema = "tos.service.service-actor-token-call.v1"
 
 // CallRecord is the durable record of one Service Actor purchase. It holds
 // every input the call and its later resolution need.
 type CallRecord struct {
-	Schema             string    `json:"schema"`
-	RequestHash        string    `json:"request_hash"`
-	QueryID            uint64    `json:"query_id"`
-	NetworkID          string    `json:"network_id"`
-	GenesisRootHash    string    `json:"genesis_root_hash"`
-	GenesisFileHash    string    `json:"genesis_file_hash"`
-	BuyerWallet        string    `json:"buyer_wallet"`
-	Actor              string    `json:"actor"`
-	ActorCodeHash      string    `json:"actor_code_hash"`
-	CapabilityID       string    `json:"capability_id"`
-	CapabilityVersion  string    `json:"capability_version"`
-	PackageBase64      string    `json:"package_base64"`
-	BuyerAddressInReq  string    `json:"request_buyer_address"`
-	AcceptedQuoteBOC   string    `json:"accepted_quote_boc"`
-	QuoteCommitment    string    `json:"quote_commitment"`
-	ExecutionID        string    `json:"execution_id"`
-	InputDigest        string    `json:"input_digest"`
-	TermsHash          string    `json:"terms_hash"`
-	PolicyVersion      uint32    `json:"policy_version"`
-	PriceNanoTOS       string    `json:"price_nanotos"`
-	StorageFeeNanoTOS  string    `json:"storage_fee_nanotos"`
-	AttestorKeyID      string    `json:"attestor_key_id"`
-	PaymentNanoTOS     string    `json:"payment_nanotos"`
-	ExpiresAtUnix      uint64    `json:"expires_at_unix_seconds"`
-	Phase              CallPhase `json:"phase"`
-	CreatedUnix        int64     `json:"created_unix"`
-	UpdatedUnix        int64     `json:"updated_unix"`
-	SentUnix           int64     `json:"sent_unix,omitempty"`
-	RequestID          *uint64   `json:"request_id,omitempty"`
-	CallTransactionLT  uint64    `json:"call_transaction_lt,omitempty"`
-	CallTransactionHex string    `json:"call_transaction_hash,omitempty"`
-	ExitCode           int32     `json:"exit_code,omitempty"`
+	Rail                 string                `json:"rail,omitempty"`
+	AssetMaster          string                `json:"asset_master,omitempty"`
+	AssetWalletCodeHash  string                `json:"asset_wallet_code_hash,omitempty"`
+	AssetDecimals        uint8                 `json:"asset_decimals,omitempty"`
+	PriceAtomic          string                `json:"price_atomic,omitempty"`
+	PreparedTokenMessage *TokenPreparedMessage `json:"prepared_token_message,omitempty"`
+	Schema               string                `json:"schema"`
+	RequestHash          string                `json:"request_hash"`
+	QueryID              uint64                `json:"query_id"`
+	NetworkID            string                `json:"network_id"`
+	GenesisRootHash      string                `json:"genesis_root_hash"`
+	GenesisFileHash      string                `json:"genesis_file_hash"`
+	BuyerWallet          string                `json:"buyer_wallet"`
+	Actor                string                `json:"actor"`
+	ActorCodeHash        string                `json:"actor_code_hash"`
+	CapabilityID         string                `json:"capability_id"`
+	CapabilityVersion    string                `json:"capability_version"`
+	PackageBase64        string                `json:"package_base64"`
+	BuyerAddressInReq    string                `json:"request_buyer_address"`
+	AcceptedQuoteBOC     string                `json:"accepted_quote_boc"`
+	QuoteCommitment      string                `json:"quote_commitment"`
+	ExecutionID          string                `json:"execution_id"`
+	InputDigest          string                `json:"input_digest"`
+	TermsHash            string                `json:"terms_hash"`
+	PolicyVersion        uint32                `json:"policy_version"`
+	PriceNanoTOS         string                `json:"price_nanotos"`
+	StorageFeeNanoTOS    string                `json:"storage_fee_nanotos"`
+	AttestorKeyID        string                `json:"attestor_key_id"`
+	PaymentNanoTOS       string                `json:"payment_nanotos"`
+	ExpiresAtUnix        uint64                `json:"expires_at_unix_seconds"`
+	Phase                CallPhase             `json:"phase"`
+	CreatedUnix          int64                 `json:"created_unix"`
+	UpdatedUnix          int64                 `json:"updated_unix"`
+	SentUnix             int64                 `json:"sent_unix,omitempty"`
+	RequestID            *uint64               `json:"request_id,omitempty"`
+	CallTransactionLT    uint64                `json:"call_transaction_lt,omitempty"`
+	CallTransactionHex   string                `json:"call_transaction_hash,omitempty"`
+	ExitCode             int32                 `json:"exit_code,omitempty"`
 	// The admitted policy's response SLA, refund claim window and cleanup
 	// bounty. They are fields of the terms whose hash the call pins, so
 	// they are exactly the terms the call is admitted under.
@@ -90,6 +97,7 @@ type CallRecord struct {
 
 // ServiceActorLimits bounds what the buyer may reserve.
 type ServiceActorLimits struct {
+	TokenAssets       map[string]TokenAssetLimits
 	Window            time.Duration
 	MaxCalls          int
 	MaxPerCallNanoTOS *big.Int
@@ -100,7 +108,19 @@ type ServiceActorLimits struct {
 	MaxPrepared int
 }
 
+// TokenAssetLimits bounds principal in the asset's atomic units.
+type TokenAssetLimits struct{ MaxPerCallAtomic, MaxWindowAtomic *big.Int }
+
+// TokenAssetBudgetKey binds every immutable asset identity field.
+func TokenAssetBudgetKey(master, walletCodeHash string, decimals uint8) string {
+	return fmt.Sprintf("%s|%s|%d", master, walletCodeHash, decimals)
+}
 func (l ServiceActorLimits) valid() bool {
+	for key, limit := range l.TokenAssets {
+		if key == "" || limit.MaxPerCallAtomic == nil || limit.MaxPerCallAtomic.Sign() <= 0 || limit.MaxPerCallAtomic.BitLen() > 120 || limit.MaxWindowAtomic == nil || limit.MaxWindowAtomic.BitLen() > 120 || limit.MaxWindowAtomic.Cmp(limit.MaxPerCallAtomic) < 0 {
+			return false
+		}
+	}
 	return l.Window > 0 && l.Window <= 31*24*time.Hour && l.MaxCalls > 0 && l.MaxCalls <= 100_000 &&
 		l.MaxPerCallNanoTOS != nil && l.MaxPerCallNanoTOS.Sign() > 0 && l.MaxWindowNanoTOS != nil &&
 		l.MaxWindowNanoTOS.Cmp(l.MaxPerCallNanoTOS) >= 0 && l.MaxPrepared >= 0 && l.MaxPrepared <= l.MaxCalls
@@ -236,8 +256,39 @@ func fitsBudget(records []CallRecord, candidate CallRecord, limits ServiceActorL
 		total.Add(total, amount)
 		calls++
 	}
+	for _, record := range records {
+		for _, send := range record.Lifecycle {
+			amount, err := lifecycleTokenReservation(send, now, limits.Window)
+			if err != nil {
+				return err
+			}
+			total.Add(total, amount)
+		}
+	}
 	if calls > limits.MaxCalls || total.Cmp(limits.MaxWindowNanoTOS) > 0 {
 		return budgetError("the call exceeds the buyer's window budget")
+	}
+	if candidate.Schema == tokenCallRecordSchema {
+		key := TokenAssetBudgetKey(candidate.AssetMaster, candidate.AssetWalletCodeHash, candidate.AssetDecimals)
+		limit, exists := limits.TokenAssets[key]
+		principal, valid := new(big.Int).SetString(candidate.PriceAtomic, 10)
+		if !exists || !valid || principal.Sign() <= 0 || principal.Cmp(limit.MaxPerCallAtomic) > 0 {
+			return budgetError("the token call exceeds the per-asset per-call limit")
+		}
+		sum := new(big.Int).Set(principal)
+		for _, existing := range records {
+			if existing.RequestHash == candidate.RequestHash || existing.Schema != tokenCallRecordSchema || !existing.reservation(now, limits.Window) || TokenAssetBudgetKey(existing.AssetMaster, existing.AssetWalletCodeHash, existing.AssetDecimals) != key {
+				continue
+			}
+			amount, ok := new(big.Int).SetString(existing.PriceAtomic, 10)
+			if !ok || amount.Sign() <= 0 {
+				return errors.New("invalid journal token principal")
+			}
+			sum.Add(sum, amount)
+		}
+		if sum.Cmp(limit.MaxWindowAtomic) > 0 {
+			return budgetError("the token call exceeds the per-asset window limit")
+		}
 	}
 	return nil
 }
@@ -245,7 +296,7 @@ func fitsBudget(records []CallRecord, candidate CallRecord, limits ServiceActorL
 // Create stores a new prepared record after checking that its request hash
 // and query id were never used and that its reservation fits the limits.
 func (j *ServiceActorJournal) Create(record CallRecord, limits ServiceActorLimits, now time.Time) error {
-	if record.Schema != callRecordSchema || record.Phase != PhasePrepared || !validHex64(record.RequestHash) || record.QueryID == 0 {
+	if !validRecordRail(record) || record.Phase != PhasePrepared || !validHex64(record.RequestHash) || record.QueryID == 0 {
 		return errors.New("invalid Service Actor call record")
 	}
 	if !limits.valid() {
@@ -319,6 +370,13 @@ func (j *ServiceActorJournal) Reserved(limits ServiceActorLimits, now time.Time)
 			return err
 		}
 		for _, record := range records {
+			for _, send := range record.Lifecycle {
+				amount, err := lifecycleTokenReservation(send, now, limits.Window)
+				if err != nil {
+					return err
+				}
+				total.Add(total, amount)
+			}
 			if !record.reservation(now, limits.Window) {
 				continue
 			}
@@ -459,7 +517,7 @@ func (j *ServiceActorJournal) readUnlocked(requestHash string) (CallRecord, erro
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return record, errors.New("journal record has trailing data")
 	}
-	if record.Schema != callRecordSchema || record.RequestHash != requestHash {
+	if !validRecordRail(record) || record.RequestHash != requestHash {
 		return record, errors.New("journal record names another call")
 	}
 	return record, nil
@@ -509,4 +567,107 @@ func (j *ServiceActorJournal) writeUnlocked(record CallRecord) error {
 	}
 	defer directory.Close()
 	return directory.Sync()
+}
+
+func validRecordRail(r CallRecord) bool {
+	if r.Schema == callRecordSchema {
+		return r.Rail == "" && r.PreparedTokenMessage == nil && r.PriceAtomic == "" && r.AssetMaster == "" && r.AssetWalletCodeHash == ""
+	}
+	return r.Schema == tokenCallRecordSchema && r.Rail != "" && r.PreparedTokenMessage != nil && r.AssetMaster != "" && r.AssetWalletCodeHash != "" && r.PriceAtomic != ""
+}
+
+// ReservedToken returns held principal separately for each complete asset identity.
+func (j *ServiceActorJournal) ReservedToken(limits ServiceActorLimits, now time.Time) (map[string]*big.Int, error) {
+	if !limits.valid() {
+		return nil, errors.New("invalid buyer limits")
+	}
+	out := map[string]*big.Int{}
+	err := j.withLock(func() error {
+		records, err := j.recordsUnlocked()
+		if err != nil {
+			return err
+		}
+		for _, r := range records {
+			if r.Schema != tokenCallRecordSchema || !r.reservation(now, limits.Window) {
+				continue
+			}
+			amount, ok := new(big.Int).SetString(r.PriceAtomic, 10)
+			if !ok || amount.Sign() <= 0 {
+				return errors.New("invalid journal token principal")
+			}
+			key := TokenAssetBudgetKey(r.AssetMaster, r.AssetWalletCodeHash, r.AssetDecimals)
+			if out[key] == nil {
+				out[key] = new(big.Int)
+			}
+			out[key].Add(out[key], amount)
+		}
+		return nil
+	})
+	return out, err
+}
+
+func lifecycleTokenReservation(send LifecycleSend, now time.Time, window time.Duration) (*big.Int, error) {
+	if send.PreparedTokenMessage == nil || send.Phase == PhasePrepared || send.Phase == PhaseWithdrawn || send.Phase == PhaseRefused || (send.Phase == PhaseSubmitted && send.SentUnix <= now.Add(-window).Unix()) {
+		return new(big.Int), nil
+	}
+	amount, ok := new(big.Int).SetString(send.PreparedTokenMessage.ValueNanotos, 10)
+	if !ok || amount.Sign() <= 0 {
+		return nil, errors.New("invalid token lifecycle funding")
+	}
+	return amount, nil
+}
+
+func (j *ServiceActorJournal) beginTokenLifecycle(before CallRecord, send LifecycleSend, limits ServiceActorLimits, now time.Time) (CallRecord, error) {
+	var result CallRecord
+	if !limits.valid() {
+		return result, errors.New("invalid buyer limits")
+	}
+	err := j.withLock(func() error {
+		records, err := j.recordsUnlocked()
+		if err != nil {
+			return err
+		}
+		current, err := j.readUnlocked(before.RequestHash)
+		if err != nil {
+			return err
+		}
+		if current.Phase != before.Phase || len(current.Lifecycle) != len(before.Lifecycle) {
+			return ErrLifecycleUnsettled
+		}
+		amount, err := lifecycleTokenReservation(send, now, limits.Window)
+		if err != nil {
+			return err
+		}
+		if amount.Cmp(limits.MaxPerCallNanoTOS) > 0 {
+			return budgetError("token lifecycle funding exceeds the per-call limit")
+		}
+		total := new(big.Int).Set(amount)
+		for _, r := range records {
+			if r.reservation(now, limits.Window) {
+				v, ok := new(big.Int).SetString(r.PaymentNanoTOS, 10)
+				if !ok || v.Sign() <= 0 {
+					return errors.New("invalid journal payment")
+				}
+				total.Add(total, v)
+			}
+			for _, old := range r.Lifecycle {
+				v, err := lifecycleTokenReservation(old, now, limits.Window)
+				if err != nil {
+					return err
+				}
+				total.Add(total, v)
+			}
+		}
+		if total.Cmp(limits.MaxWindowNanoTOS) > 0 {
+			return budgetError("token lifecycle funding exceeds the window limit")
+		}
+		current.Lifecycle = append(current.Lifecycle, send)
+		current.UpdatedUnix = now.Unix()
+		if err = j.writeUnlocked(current); err != nil {
+			return err
+		}
+		result = current
+		return nil
+	})
+	return result, err
 }

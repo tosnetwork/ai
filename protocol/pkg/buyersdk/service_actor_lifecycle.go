@@ -149,10 +149,11 @@ func (s *TOSCTLServiceActorSender) SendLifecycle(ctx context.Context, intent Lif
 // this entry, says whether the send took effect; the entry only bounds how
 // often the buyer sends.
 type LifecycleSend struct {
-	Operation string    `json:"operation"`
-	QueryID   uint64    `json:"query_id"`
-	Phase     CallPhase `json:"phase"`
-	SentUnix  int64     `json:"sent_unix"`
+	PreparedTokenMessage *TokenPreparedMessage `json:"prepared_token_message,omitempty"`
+	Operation            string                `json:"operation"`
+	QueryID              uint64                `json:"query_id"`
+	Phase                CallPhase             `json:"phase"`
+	SentUnix             int64                 `json:"sent_unix"`
 	// WalletSeqno is the buyer wallet's seqno at a finalized checkpoint read
 	// before the send.
 	WalletSeqno uint32 `json:"wallet_seqno"`
@@ -210,6 +211,11 @@ var (
 // lifecycleSettled); otherwise SendLifecycle returns ErrLifecycleUnsettled
 // and sends nothing.
 func (b *ServiceActorBuyer) SendLifecycle(ctx context.Context, requestHash, operation string) (CallRecord, error) {
+	if record, err := b.config.Journal.Read(requestHash); err != nil {
+		return CallRecord{}, err
+	} else if record.Schema == tokenCallRecordSchema {
+		return b.sendTokenLifecycle(ctx, record, operation)
+	}
 	if b.config.Lifecycle == nil {
 		return CallRecord{}, ErrNoLifecycleSender
 	}
