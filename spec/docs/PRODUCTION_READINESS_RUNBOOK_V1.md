@@ -113,3 +113,21 @@ Before publication, run
 The validator intentionally rejects the template and any record that lacks a
 strict-majority diverse endpoint set, all operational drills, reproducible
 build proof, or three operator signatures.
+
+## Token provider alarm incidents
+
+The provider's management path consumes the trusted settlement monitor report.
+A stale or unreadable report refuses local offer/preflight/resume and emits a
+diagnostic, but **leaves on-chain `active` unchanged**: monitoring failure is
+not an on-chain pause. Do not describe it as fail-closed admission on chain.
+Token paid-work execution and execution-time refusal under a live alarm or stale
+monitor are separate live-lifecycle integration gates, not supplied by the
+management path. See [token provider management](../../provider/docs/token-rail.md).
+
+For a refused pause, retain its actor transaction, exit code and custody record,
+restore monitoring/custody or correct the policy, and verify finalized
+`active=false` before declaring the incident contained. An unresolved policy
+message blocks a whole-policy pause; never erase its journal or assume that
+an emitted internal message expired with its wallet external. Only finalized
+non-delivery permits an emergency resend. No alarm clearance automatically
+resumes an actor.

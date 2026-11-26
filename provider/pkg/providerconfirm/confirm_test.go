@@ -133,3 +133,13 @@ func TestTheSessionSendsOnlyWhatWasTyped(t *testing.T) {
 		t.Fatalf("closed input: %v %+v", err, agent.decided)
 	}
 }
+
+func TestTokenWarningsAppearInCustodyRender(t *testing.T) {
+	p := presentation(t, agentapi.KindToken, servicebridge.TokenActionRecord{Preview: servicebridge.TokenPreview{Warnings: []string{"payout age threshold has not yet passed", "surplus_at_read is a lower bound"}}})
+	rendered := Render(p)
+	for _, want := range []string{"Warning: payout age threshold has not yet passed", "Warning: surplus_at_read is a lower bound"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("warning missing from custody rendering: %s", rendered)
+		}
+	}
+}

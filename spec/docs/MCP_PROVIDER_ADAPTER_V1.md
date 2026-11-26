@@ -76,7 +76,7 @@ Key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 - **Publishing arbitrary images or commands.** The manifest, toolchain and
   sandbox digests are those the library builds. No tool takes an image, a
   digest, a command line, an executor path or a manifest.
-- **Changing the terms of a published actor.** The program has no
+- **Changing the terms of a published native actor.** The program has no
   `update-policy` verb (`provider/README.md`, "Custody"); a terms change is
   done by the owner with `tosctl` and is out of V1 (decision P6, section 12).
 - **Chat** or any Messenger lane: a rail configuration with a `chat` section
@@ -392,6 +392,15 @@ For them:
 - **Default auto-pause.** On a monitoring freeze, pause or destroy alarm for an
   asset, the node clears `active` on its own actors of that asset with its own
   signed `update_policy`, under the pause rules of 2.6.
+
+The token extension adds client/custody socket methods `token_preview`,
+`token_offer_describe` and `token_status`, under the same role checks as native
+previews and reads. The corresponding MCP tools use the `tos_provider_` prefix.
+Token policy updates, withdrawals, recovery and abandon use the existing
+custody-only confirmation channel; token policy updates stay within configured
+per-asset bounds. An emergency auto-pause can only clear `active`; it never
+resumes an actor. One provider may configure separate token actors and
+Capability bindings for its independently pinned assets.
 
 ## 3. Setup without OpenFox
 
@@ -1070,6 +1079,20 @@ and its test seen failing):
    agent and `serve`, on one state directory: the second refuses to start.
 8. **Clients.** The tool list and schemas load in the Claude Code and Codex
    versions of the run, and a schema test asserts the keyword subset of 4.1.
+
+9. **Token actors.** Repeat the role, direct-socket input, confirmation,
+   redaction and interruption checks for token tools. Verify atomic offer
+   bounds and the exact published asset binding at one finalized checkpoint;
+   test token-only, TOS-only and combined revenue withdrawals. Follow a token
+   payout through `paying` to a bound delivery or refusal; a settled retry is
+   observation only. Exercise surplus recovery, payout recheck and abandon
+   through the shared protocol prechecks. Each TOS floor holds admission
+   independently; recovery never removes an explicit operator pause. A monitor
+   hook for one asset signs `update_policy(active=false)` only on owned actors
+   of that asset; repeated polls do not sign again while pending. Stale,
+   missing and malformed monitoring input refuses resume. Extend the local run
+   below with token buyer/provider lifecycles before claiming token release
+   acceptance; unit fixtures alone are not that evidence.
 
 `provider/` keeps its import boundary (it imports `protocol/` and
 `execution/` only, `make boundary-lint`), and the MCP server links no

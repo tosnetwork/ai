@@ -13,7 +13,7 @@ change a purchase.
 | `pkg/provideragent` | The provider agent of the MCP provider adapter ([`MCP_PROVIDER_ADAPTER_V1.md`](../spec/docs/MCP_PROVIDER_ADAPTER_V1.md)): runs the node, serves the agent socket, keeps the action store and the pause-origin record, and applies an action only after a human confirmed it. |
 | `pkg/provideragent/agentapi` | The agent socket's API and client; it links no custody code. |
 | `pkg/providerconfirm` | The adapter's confirmer, on a custody-account terminal. |
-| `pkg/mcpprovider`, `cmd/tos-service-provider-mcp` | The adapter's stdio MCP server, which an MCP client starts in the developer account: the twelve `tos_provider_*` tools, each one agent method over the socket. Its binary links only `agentapi`, `protocol/pkg/agentsocket` and the MCP SDK. |
+| `pkg/mcpprovider`, `cmd/tos-service-provider-mcp` | The adapter's stdio MCP server, which an MCP client starts in the developer account: the `tos_provider_*` tools, each one agent method over the socket. Its binary links only `agentapi`, `protocol/pkg/agentsocket` and the MCP SDK. |
 
 `provider/` imports `protocol/` and `execution/` only, and nothing imports
 `provider/` (`make boundary-lint`).
@@ -252,3 +252,9 @@ buying is `protocol/cmd/tos-service-buyer` and the MCP buyer server.
   paid call on a public test network; the recorded paid-work runs used the
   same library inside another program.
 - **A rewrite of the provider guide** around this program's commands.
+
+## Token actors
+
+See [token provider management](docs/token-rail.md) for asset pins, atomic offer
+bounds, both revenue withdrawals, recovery, the settlement-monitor auto-pause
+hook and the token MCP tools. The guide states the remaining integration gates.
