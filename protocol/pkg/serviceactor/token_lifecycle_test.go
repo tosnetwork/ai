@@ -272,3 +272,97 @@ func TestTokenReplayRecipientMismatchSkipsOnlyThatReport(t *testing.T) {
 		}
 	})
 }
+
+// TestTokenReplayExpiredRequestLapsesAtTheRefundDeadline matches the native
+// rail and the contract: claim_refund is refused from the refund-claim
+// deadline on, so a refundable (and a pending) request is then lapsed and its
+// next action is the sweep.
+func TestTokenReplayExpiredRequestLapsesAtTheRefundDeadline(t *testing.T) {
+	const deadline = 130
+	for _, tc := range []struct {
+		now     int64
+		expired bool
+		want    Status
+	}{
+		{deadline - 1, true, StatusRefundable},
+		{deadline, true, StatusLapsed},
+		{deadline + 1, true, StatusLapsed},
+		{deadline - 1, false, StatusOverdue},
+		{deadline, false, StatusLapsed},
+		{deadline + 1, false, StatusLapsed},
+	} {
+		t.Run(fmt.Sprintf("expired=%t/%+d", tc.expired, tc.now-deadline), func(t *testing.T) {
+			f := newTokenReplayFixture(t)
+			if tc.expired {
+				f.expire(t)
+			}
+			f.replay(t, tc.now, tc.want)
+		})
+	}
+	if TokenRequestAction(StatusLapsed) != "sweep_expired_request" {
+		t.Fatal("a lapsed request does not point to the sweep")
+	}
+}
+
+// tokenReturnedPaying drives request 1 to a returned entry 7 and then to its
+// kind 5 claim or kind 7 sweep, payout 8, in flight.
+func tokenReturnedPaying(t *testing.T, kind uint8) *tokenReplayFixture {
+	t.Helper()
+	f := newTokenReplayFixture(t)
+	f.expire(t)
+	if kind == 5 {
+		f.claim(t, false)
+		f.report(t, 0x52544631, 7, f.account.OwnWallet)
+		delete(f.account.Data.Payouts, 7)
+		f.account.Data.Returned[7] = nativecore.ServiceActorTokenReturnedV1{Caller: f.caller, Amount: big.NewInt(1000)}
+		f.claim(t, true)
+		return f
+	}
+	transfer := func(id uint64) *cell.Cell {
+		return cell.BeginCell().MustStoreUInt(0x52545231, 32).MustStoreUInt(id, 64).MustStoreBigCoins(big.NewInt(1000)).MustStoreSlice(f.caller.Bits, f.caller.BitLen).MustStoreSlice(f.caller.Bits, f.caller.BitLen).MustStoreBigCoins(big.NewInt(20)).MustStoreBigCoins(big.NewInt(0)).MustStoreBoolBit(false).EndCell()
+	}
+	sweep, err := nativecore.BuildServiceActorTokenIDBody(nativecore.ServiceActorTokenSweepOpcode, 3, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.add(toschain.TokenActorTransaction{Now: 131, Opcode: nativecore.ServiceActorTokenSweepOpcode, RequestID: 1, Sender: f.caller.Text(), BodyBOC: tokenReplayBOC(sweep), Outputs: []toschain.TokenActorOutput{{Destination: f.account.OwnWallet, Bounce: true, BodyBOC: tokenReplayBOC(transfer(7))}}})
+	delete(f.account.Data.Refunds, 1)
+	f.report(t, 0x52544631, 7, f.account.OwnWallet)
+	f.account.Data.Returned[7] = nativecore.ServiceActorTokenReturnedV1{Caller: f.caller, Amount: big.NewInt(1000)}
+	again, err := nativecore.BuildServiceActorTokenIDBody(nativecore.ServiceActorTokenSweepReturnedOpcode, 4, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.add(toschain.TokenActorTransaction{Now: 134, Opcode: nativecore.ServiceActorTokenSweepReturnedOpcode, RequestID: 7, Sender: f.caller.Text(), BodyBOC: tokenReplayBOC(again), Outputs: []toschain.TokenActorOutput{{Destination: f.account.OwnWallet, Bounce: true, BodyBOC: tokenReplayBOC(transfer(8))}}})
+	delete(f.account.Data.Returned, 7)
+	f.account.Data.Payouts[8] = nativecore.ServiceActorTokenPayoutV1{Kind: 7, RequestID: 7, Amount: big.NewInt(1000), Recipient: f.caller}
+	return f
+}
+
+// TestTokenReplayRecheckedReturnedPayoutWithoutItsLog covers a returned
+// claim (kind 5) or sweep (kind 7) resolved by recheck whose best-effort SAO1
+// was dropped. The contract's apply_outcome restores the original returned
+// entry under its own id (the payout's request_id), not under the payout id.
+func TestTokenReplayRecheckedReturnedPayoutWithoutItsLog(t *testing.T) {
+	for _, kind := range []uint8{5, 7} {
+		t.Run(fmt.Sprintf("kind-%d", kind), func(t *testing.T) {
+			f := tokenReturnedPaying(t, kind)
+			f.replay(t, 140, StatusPaying)
+			delete(f.account.Data.Payouts, 8)
+			f.account.Data.Returned[7] = nativecore.ServiceActorTokenReturnedV1{Caller: f.caller, Amount: big.NewInt(1000), ReturnDeadline: 200}
+			requests, err := ReplayTokenRequests(f.account, f.history, time.Unix(140, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := requests[1]; r == nil || r.Status != StatusReturned || r.ReturnedID != 7 {
+				t.Fatalf("rechecked returned payout: %+v", r)
+			}
+			// An entry under the payout id is not what the contract writes.
+			delete(f.account.Data.Returned, 7)
+			f.account.Data.Returned[8] = nativecore.ServiceActorTokenReturnedV1{Caller: f.caller, Amount: big.NewInt(1000)}
+			if _, err = ReplayTokenRequests(f.account, f.history, time.Unix(140, 0)); err == nil {
+				t.Fatal("a returned entry under the payout id was accepted")
+			}
+		})
+	}
+}

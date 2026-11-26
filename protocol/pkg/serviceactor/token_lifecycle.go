@@ -394,11 +394,21 @@ func ReplayTokenRequests(account *toschain.TokenActorAccount, history *toschain.
 		}
 		if r.Status == StatusPaying {
 			p, ok := d.Payouts[r.PayoutID]
-			if !ok { // A finalized returned cell can prove a recheck conversion whose log was dropped.
-				entry, found := d.Returned[r.PayoutID]
+			if !ok {
+				// A finalized returned cell can prove a recheck conversion whose
+				// log was dropped. The contract's apply_outcome keys it by the
+				// refused payout's id for a refund or sweep (kinds 1, 2), and
+				// restores the original entry, keyed by its own id, for a
+				// returned claim or sweep (kinds 5, 7). Only those set ReturnedID
+				// while paying.
+				returnedID := r.PayoutID
+				if r.ReturnedID != 0 {
+					returnedID = r.ReturnedID
+				}
+				entry, found := d.Returned[returnedID]
 				if found && entry.Paying == 0 && entry.Caller.Equal(r.Snapshot.Caller) && entry.Amount.Cmp(r.Snapshot.Terms.PricePerCall) == 0 {
 					r.Status = StatusReturned
-					r.ReturnedID = r.PayoutID
+					r.ReturnedID = returnedID
 					continue
 				}
 				return nil, errors.New("token in-flight payout is missing from finalized data")
@@ -413,10 +423,13 @@ func ReplayTokenRequests(account *toschain.TokenActorAccount, history *toschain.
 				return nil, errors.New("token returned cell differs from history")
 			}
 		}
-		if r.Status == StatusPending {
+		// As the native rail's StatusAt: at the refund-claim deadline a pending
+		// or an expired (refundable) request is lapsed. claim_refund is refused
+		// from then on (1916), and sweep_expired_request accepts either.
+		if r.Status == StatusPending || r.Status == StatusRefundable {
 			if uint64(chainTime.Unix()) >= r.Snapshot.RefundClaimDeadline {
 				r.Status = StatusLapsed
-			} else if uint64(chainTime.Unix()) >= r.Snapshot.ResponseDeadline {
+			} else if r.Status == StatusPending && uint64(chainTime.Unix()) >= r.Snapshot.ResponseDeadline {
 				r.Status = StatusOverdue
 			}
 		}
