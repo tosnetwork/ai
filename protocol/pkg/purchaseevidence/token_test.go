@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -34,6 +35,10 @@ type tokenEvidenceFixture struct {
 	pins    []toschain.TokenAssetPin
 	now     time.Time
 	reads   []string
+	// walletBound is the anchored walk's bound (0: the production 10,000);
+	// walletVisited counts wallet transactions the walks passed or returned.
+	walletBound   int
+	walletVisited int
 }
 
 func (s *tokenEvidenceFixture) Checkpoint() uint64   { return 42 }
@@ -69,13 +74,34 @@ func (s *tokenEvidenceFixture) ReadTokenWallet(_ context.Context, owner string, 
 	_, ok := s.wallets[wallet]
 	return &toschain.TokenWalletAccount{Address: wallet, Owner: owner, Master: route.Master.Text(), CodeHash: "tvm-cell-sha256:" + hex.EncodeToString(route.WalletCodeHash[:])}, ok, nil
 }
-func (s *tokenEvidenceFixture) TokenWalletHistory(_ context.Context, a string, _ *toschain.ActorTxID) (*toschain.TokenWalletHistory, error) {
-	s.reads = append(s.reads, "wallet-history@42")
+
+// TokenWalletTransaction emulates the session's anchored walk: wallet
+// transactions are newest first, and at most walletBound newer transactions
+// may be passed before the named one. Older history is never visited.
+func (s *tokenEvidenceFixture) TokenWalletTransaction(_ context.Context, a string, id toschain.ActorTxID) (*toschain.TokenActorTransaction, error) {
+	s.reads = append(s.reads, "wallet-anchored@42")
 	v, ok := s.wallets[a]
 	if !ok {
 		return nil, errors.New("missing wallet history")
 	}
-	return v, nil
+	bound := s.walletBound
+	if bound == 0 {
+		bound = 10_000
+	}
+	for passed, tx := range v.Transactions {
+		s.walletVisited++
+		if tx.LT == id.LT && tx.Hash == id.Hash {
+			found := tx
+			return &found, nil
+		}
+		if tx.LT <= id.LT {
+			return nil, toschain.ErrHistoryAnchorMissing
+		}
+		if passed+1 > bound {
+			return nil, toschain.ErrHistoryBoundExceeded
+		}
+	}
+	return nil, toschain.ErrHistoryAnchorMissing
 }
 func tokenTestAddress(t *testing.T, value string) nativecore.MsgAddressV1 {
 	t.Helper()
@@ -241,8 +267,17 @@ func TestTokenEvidenceRefusesEachBrokenLinkAndAsset(t *testing.T) {
 		"aborted-wallet": func(s *tokenEvidenceFixture) {
 			s.wallets[s.bundle.Funding[1].Account].Transactions[0].TookEffect = false
 		},
-		"wallet-history-bound": func(s *tokenEvidenceFixture) {
-			s.wallets[s.bundle.Funding[1].Account].Result = toschain.HistoryAnchorReached
+		"wallet-anchor-beyond-bound": func(s *tokenEvidenceFixture) {
+			w := s.wallets[s.bundle.Funding[1].Account]
+			newer := []toschain.TokenActorTransaction{{LT: 101, Hash: strings.Repeat("65", 32), TookEffect: true}, {LT: 100, Hash: strings.Repeat("64", 32), TookEffect: true}}
+			w.Transactions = append(newer, w.Transactions...)
+			s.walletBound = 1
+		},
+		"wallet-anchor-missing": func(s *tokenEvidenceFixture) {
+			s.bundle.Funding[1].Transaction.Hash = strings.Repeat("66", 32)
+		},
+		"wallet-anchor-lt-missing": func(s *tokenEvidenceFixture) {
+			s.bundle.Funding[1].Transaction.LT = 7
 		},
 		"master-pin": func(s *tokenEvidenceFixture) { s.pins[0].Master = s.bundle.BuyerWallet },
 		"wallet-pin": func(s *tokenEvidenceFixture) {
@@ -413,5 +448,82 @@ func TestTokenEvidenceReceiptRejectsAlternativeBOCAndMultipleRoots(t *testing.T)
 		if v := VerifyToken(context.Background(), s, in); v.Result != ResultFail {
 			t.Fatal("noncanonical Receipt file accepted")
 		}
+	}
+}
+
+// TestTokenEvidenceProvesHopsOfLongHistoryWallets gives each funding wallet
+// more than the history bound of older transactions and a few newer ones.
+// The anchored walks prove each named hop without reading the older history.
+func TestTokenEvidenceProvesHopsOfLongHistoryWallets(t *testing.T) {
+	s := newTokenEvidenceFixture(t)
+	const older, newer = 10_001, 5
+	shift := uint64(older + newer*10)
+	for i := range s.bundle.Funding {
+		hop := &s.bundle.Funding[i]
+		w := s.wallets[hop.Account]
+		hopTx := w.Transactions[0]
+		hopTx.LT += shift
+		hop.Transaction.LT = hopTx.LT
+		var history []toschain.TokenActorTransaction
+		for j := newer; j > 0; j-- {
+			lt := hopTx.LT + uint64(j)*4
+			history = append(history, toschain.TokenActorTransaction{LT: lt, Hash: fmt.Sprintf("%064x", lt), TookEffect: true})
+		}
+		history = append(history, hopTx)
+		for j := 1; j <= older; j++ {
+			lt := hopTx.LT - uint64(j)*4
+			history = append(history, toschain.TokenActorTransaction{LT: lt, Hash: fmt.Sprintf("%064x", lt), TookEffect: true})
+		}
+		w.Transactions = history
+		if len(w.Transactions) <= 10_000 {
+			t.Fatal("the wallet history must exceed the history bound")
+		}
+	}
+	call := &s.history.Transactions[0]
+	call.LT += shift + 4
+	s.account.LastTransaction = toschain.ActorTxID{LT: call.LT, Hash: call.Hash}
+	s.history.Head = s.account.LastTransaction
+	s.bundle.Call = s.account.LastTransaction
+	v := VerifyToken(context.Background(), s, s.input())
+	if v.Result != ResultPass {
+		t.Fatalf("long-history wallets broke the evidence: %+v", v.Checks)
+	}
+	if limit := len(s.bundle.Funding) * (newer + 1); s.walletVisited > limit {
+		t.Fatalf("anchored walks visited %d wallet transactions, want at most %d", s.walletVisited, limit)
+	}
+}
+
+// TestTokenEvidenceActorWithUnreturnedRefusalsStillVerifies puts legal SAF1
+// refusals that name payout id 0 into the actor's history: a zero-amount
+// transfer refused with 1902, and a refusal at the funding-return cap. Anyone
+// with a token wallet can cause either; neither may make the actor's evidence
+// fail.
+func TestTokenEvidenceActorWithUnreturnedRefusalsStillVerifies(t *testing.T) {
+	s := newTokenEvidenceFixture(t)
+	call := s.history.Transactions[0]
+	buyer, err := nativecore.StandardAddress(s.bundle.BuyerWallet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger := tokenTestAddress(t, "5a")
+	capHash := sha256.Sum256([]byte("refused at the funding-return cap"))
+	refusal := func(lt uint64, from nativecore.MsgAddressV1, amount int64, reason uint16, payload *nativecore.TokenCallPayloadV1) toschain.TokenActorTransaction {
+		value := big.NewInt(amount)
+		return toschain.TokenActorTransaction{LT: lt, Hash: fmt.Sprintf("%064x", lt), Now: call.Now - 1, Kind: "funding_refused", TookEffect: true, Sender: s.account.OwnWallet, QueryID: lt, Notification: &toschain.TokenActorNotification{QueryID: lt, From: from.Text(), AmountAtomic: value.String(), Payload: payload}, Logs: []nativecore.ServiceActorTokenLogV1{{Funding: &nativecore.ServiceActorTokenFundingLogV1{QueryID: lt, From: from, Amount: value, Reason: reason, PayoutID: 0}}}}
+	}
+	s.history.Transactions = []toschain.TokenActorTransaction{
+		refusal(2, stranger, 0, 1902, nil),
+		refusal(3, buyer, 1000, 1907, &nativecore.TokenCallPayloadV1{RequestHash: capHash}),
+		call,
+	}
+	if v := VerifyToken(context.Background(), s, s.input()); v.Result != ResultPass || len(v.Requests) != 1 || v.Requests[0].State != serviceactor.StatusPending {
+		t.Fatalf("legal refusals broke the actor's evidence: %+v", v.Checks)
+	}
+	in := s.input()
+	in.Bundle = nil
+	in.RequestHashes = []string{hex.EncodeToString(capHash[:])}
+	v := VerifyToken(context.Background(), s, in)
+	if v.Result != ResultPass || len(v.FundingRefusals) != 1 || v.FundingRefusals[0].State != "surplus" || v.FundingRefusals[0].PayoutID != 0 || v.FundingRefusals[0].Reason != 1907 {
+		t.Fatalf("refusal at the cap was not reported as surplus: %+v %+v", v.Checks, v.FundingRefusals)
 	}
 }

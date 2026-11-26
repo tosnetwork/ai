@@ -58,7 +58,16 @@ recipient's derived wallet; refusal by the actor's own wallet; a bounce also
 requires the transaction's bounced flag and matching original body. A dropped
 best-effort outcome log does not override an authenticated report. Funding
 refusals remain separate from admitted requests and can be inspected through
-`ResolveTokenFundingRefusals`.
+`ResolveTokenFundingRefusals`. A refusal whose `SAF1` names payout id 0 made no
+funding return, and its tokens are `surplus`. The contract does this for any
+admission reason when the amount is zero, at the funding-return cap, with
+payout ids exhausted, for a sender off workchain 0, or when the return would not
+fit in Coins; and always for an underfunded notification (1929). Such
+refusals are legal history, and anyone with a token wallet can cause one, so
+they never make an actor's history unverifiable. The resolver still refuses
+what the contract cannot emit: a reason outside the admission set, and a payout
+id on an underfunded refusal, on reason 1934, on a zero amount or to a sender
+off workchain 0.
 
 Existing-request verification uses the immutable SAT1 emitted by the pinned
 actor and the client's asset pins. That executed admission proves the
@@ -94,6 +103,19 @@ Its actual decoder, like the contract specification, reads reserve third and
 gas fourth and returns them as gas/reserve. The Go reader follows those actual
 bytes. This documentation discrepancy does not change the wire format.
 
+`ReadTokenWalletTerms` follows the contract's three steps (section 11): the
+route's bridge parameter; if it does not parse, absence included, its negative
+slot; if neither parses, a 0.3 TOS reserve and zero wallet gas. A configuration
+read that cannot be finalized at the session's checkpoint is an error, not a
+slot that "does not parse".
+
+Recovery, recheck and abandon are refused with 1943 while a balance query
+younger than `RECHECK_QUERY_TTL` is pending. A recovery's `surplus_at_read` is
+the actor's own computation at the read. While payouts are in flight it is a
+lower bound, because a payout in transit is already debited at the actor's
+wallet and still counted in `in_flight`; the builder then adds a warning. The
+document value itself stays byte-equal to the pinned CLI's.
+
 ## Public evidence and verifier
 
 `purchaseevidence.TokenBundle` has schema
@@ -102,7 +124,12 @@ the exact schema-3 Accepted Quote, NSR1 request, source digest, buyer wallet,
 three funding transaction identities and actor call identity. These are claims,
 not authority. `VerifyToken` validates them against one finalized session,
 including the three exact message-hash links: payer to sender token wallet,
-sender wallet to actor wallet, actor wallet to actor notification. It also
+sender wallet to actor wallet, actor wallet to actor notification. Each named
+hop is proven by `TokenWalletTransaction`, an anchored walk from that wallet's
+finalized last transaction down to the exact named transaction, with hash and
+logical-time continuity. Only the transactions after a hop count toward the
+history bound, so a wallet with a long earlier history still verifies; a hop
+not on that chain, or further back than the bound, fails. It also
 checks both token wallets' deployed identities. A supplied schema-2 Receipt
 must be the exact finalized response and bind the asset, amount, execution,
 source, provider, toolchain and sandbox. Supplied artifacts are checked against

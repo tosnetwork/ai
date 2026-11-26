@@ -346,7 +346,9 @@ func TestServiceActorTokenNegativeCorpus(t *testing.T) {
 			t.Fatalf("wrong typed refusal for %d: %v", code, err)
 		}
 		path := row["path"].(string)
-		if strings.Contains(path, "reason") && !failure.Reason || strings.Contains(path, "throw") && !failure.Throw || strings.Contains(path, "result") && !failure.Result {
+		// Both directions: every path the record names is set, and no flag is
+		// set that the record does not name.
+		if strings.Contains(path, "reason") != failure.Reason || strings.Contains(path, "throw") != failure.Throw || strings.Contains(path, "result") != failure.Result {
 			t.Fatalf("wrong refusal paths for %d: %s %+v", code, path, failure)
 		}
 	}

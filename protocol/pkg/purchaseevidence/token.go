@@ -65,8 +65,14 @@ type TokenSession interface {
 	serviceactor.TransitionSession
 	BlockHashes() (string, string)
 	ReadTokenWallet(context.Context, string, nativecore.ServiceActorTokenAssetRouteV1) (*toschain.TokenWalletAccount, bool, error)
-	TokenWalletHistory(context.Context, string, *toschain.ActorTxID) (*toschain.TokenWalletHistory, error)
+	// TokenWalletTransaction proves one named wallet transaction at the
+	// session's checkpoint by an anchored walk from the wallet's finalized head.
+	TokenWalletTransaction(context.Context, string, toschain.ActorTxID) (*toschain.TokenActorTransaction, error)
 }
+
+// The verifier's chain reader is asserted to be a token session at run time;
+// keep that a compile-time fact.
+var _ TokenSession = (*toschain.ServiceActorSession)(nil)
 
 type TokenInput struct {
 	Network              *nativev1.NetworkDomain

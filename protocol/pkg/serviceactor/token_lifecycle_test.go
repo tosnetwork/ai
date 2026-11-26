@@ -241,3 +241,34 @@ func TestTokenReplayRespondedAndSweptAreDistinctTerminalStates(t *testing.T) {
 		})
 	}
 }
+
+// TestTokenReplayRecipientMismatchSkipsOnlyThatReport checks that a delivery
+// report naming another recipient is skipped locally: the rest of the same
+// transaction, here its actor-authenticated outcome logs, is still replayed.
+func TestTokenReplayRecipientMismatchSkipsOnlyThatReport(t *testing.T) {
+	setup := func(t *testing.T, log nativecore.ServiceActorTokenOutcomeLogV1) *tokenReplayFixture {
+		t.Helper()
+		f := newTokenReplayFixture(t)
+		f.expire(t)
+		f.claim(t, false)
+		wallet, err := nativecore.DeriveServiceActorTokenWallet(f.caller.Text(), f.account.Data.Route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		other := tokenReplayAddress(t, 9)
+		body := cell.BeginCell().MustStoreUInt(0x52544431, 32).MustStoreUInt(7, 64).MustStoreBigCoins(big.NewInt(1000)).MustStoreSlice(other.Bits, other.BitLen).EndCell()
+		f.add(toschain.TokenActorTransaction{Now: 113, Sender: wallet, BodyBOC: tokenReplayBOC(body), Logs: []nativecore.ServiceActorTokenLogV1{{Outcome: &log}}})
+		return f
+	}
+	t.Run("a consistent log in the same transaction still applies", func(t *testing.T) {
+		f := setup(t, nativecore.ServiceActorTokenOutcomeLogV1{PayoutID: 7, Kind: 1, RequestID: 1, Recipient: tokenReplayAddress(t, 1), Amount: big.NewInt(1000), Outcome: 0})
+		delete(f.account.Data.Payouts, 7)
+		f.replay(t, 115, StatusRefunded)
+	})
+	t.Run("an inconsistent log in the same transaction is still refused", func(t *testing.T) {
+		f := setup(t, nativecore.ServiceActorTokenOutcomeLogV1{PayoutID: 7, Kind: 1, RequestID: 1, Recipient: tokenReplayAddress(t, 9), Amount: big.NewInt(1000), Outcome: 0})
+		if _, err := ReplayTokenRequests(f.account, f.history, time.Unix(115, 0)); err == nil {
+			t.Fatal("an outcome log differing from its payout was skipped with the report")
+		}
+	})
+}

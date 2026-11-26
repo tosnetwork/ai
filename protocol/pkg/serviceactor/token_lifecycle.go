@@ -216,6 +216,11 @@ func ReplayTokenRequests(account *toschain.TokenActorAccount, history *toschain.
 				if p := payouts[report.QueryID]; p != nil && report.Amount.Cmp(p.Amount) == 0 {
 					expected := account.OwnWallet
 					outcome := uint8(1)
+					// A delivery report naming another recipient is not this
+					// payout's outcome. It is skipped locally: the rest of the
+					// transaction (request opcodes, created payouts, logs) is still
+					// replayed.
+					recipientMatches := true
 					if report.Opcode == 0x52544431 {
 						route := account.Data.Route
 						wallet, e := nativecore.DeriveServiceActorTokenWallet(p.Recipient, route)
@@ -224,11 +229,9 @@ func ReplayTokenRequests(account *toschain.TokenActorAccount, history *toschain.
 						}
 						expected = wallet
 						outcome = 0
-						if report.Recipient.Text() != p.Recipient {
-							continue
-						}
+						recipientMatches = report.Recipient.Text() == p.Recipient
 					}
-					if report.Opcode != 0x52544232 && tx.Sender == expected {
+					if recipientMatches && report.Opcode != 0x52544232 && tx.Sender == expected {
 						if err = finishTokenPayout(p, outcome, tx, returned); err != nil {
 							return nil, err
 						}
