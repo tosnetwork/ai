@@ -66,10 +66,12 @@ type SoftwareWorkLimitsV1 struct {
 	WallClockMillis uint64 `json:"wall_clock_millis" cbor:"5,keyasint"`
 }
 
-// SoftwareWorkAssetV1 is one key 20 entry; the only admitted value is the
-// native TOS entry {0: "native-tos"}.
+// SoftwareWorkAssetV1 is the single key 20 identity, bound to the selected rail.
 type SoftwareWorkAssetV1 struct {
-	Kind string `json:"kind" cbor:"0,keyasint"`
+	Kind            string `json:"kind" cbor:"0,keyasint"`
+	MasterAccountID []byte `json:"master_account_id,omitempty" cbor:"1,keyasint,omitempty"`
+	WalletCodeHash  []byte `json:"wallet_code_hash,omitempty" cbor:"2,keyasint,omitempty"`
+	Decimals        *uint8 `json:"decimals,omitempty" cbor:"3,keyasint,omitempty"`
 }
 
 // SoftwareWorkSettlementV1 is manifest key 21: the Service Actor that settles
@@ -97,7 +99,7 @@ func SettlementAttestorAuthorization(attestorKeyText string) string {
 
 func validateSettlement(manifest SoftwareWorkManifestV1) error {
 	settlement := manifest.Settlement
-	if settlement.Rail != ServiceActorRail || settlement.ActorWorkchain != 0 {
+	if (settlement.Rail != ServiceActorRail && settlement.Rail != ServiceActorTokenRail) || settlement.ActorWorkchain != 0 {
 		return errors.New("manifest settlement must name a workchain 0 Service Actor")
 	}
 	for name, value := range map[string][]byte{"actor account": settlement.ActorAccountID, "actor code hash": settlement.ActorCodeHash} {
@@ -216,8 +218,8 @@ func ValidateSoftwareWorkManifest(manifest SoftwareWorkManifestV1) error {
 	if manifest.RetentionSeconds < 3600 || manifest.RetentionSeconds > 30*24*3600 {
 		return errors.New("retention_seconds is out of bounds")
 	}
-	if len(manifest.SupportedAssets) != 1 || manifest.SupportedAssets[0].Kind != NativeTOSAsset {
-		return errors.New("supported_assets must be exactly the native TOS entry")
+	if err := validateSoftwareWorkAsset(manifest); err != nil {
+		return err
 	}
 	return validateSettlement(manifest)
 }

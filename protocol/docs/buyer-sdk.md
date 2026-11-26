@@ -1,5 +1,10 @@
 # Service Actor buyer SDK
 
+This guide describes the native purchase runtime. Token-rail protocol builders,
+finalized reads and public evidence verification are described in
+[the token-rail guide](service-actor-token.md); runtime integration and deployment
+remain separate gates.
+
 `pkg/buyersdk` buys one call from a Service Actor: discover the offer, verify
 it against quorum-finalized state, call with the quoted terms, and read the
 result back from the finalized call transaction. Settlement is native TOS on

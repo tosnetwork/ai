@@ -71,6 +71,30 @@ type Session interface {
 // refused by the step that needs it.
 func Gather(ctx context.Context, session Session, network *nativev1.NetworkDomain, sources ManifestSource,
 	capabilityID, version string) (*Evidence, error) {
+	evidence, err := gatherRegistryEvidence(ctx, session, network, sources, capabilityID, version)
+	if err != nil {
+		return evidence, err
+	}
+	manifest := evidence.Manifest
+	actor := "0:" + hex.EncodeToString(manifest.Settlement.ActorAccountID)
+	account, found, err := session.ReadActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		evidence.Actor = account
+	}
+	return evidence, nil
+}
+
+// registrySession supplies the common authority reads for both settlement rails.
+type registrySession interface {
+	Checkpoint() uint64
+	ChainTime() time.Time
+	ResolveRegistry(context.Context, string) (*nativev1.NativeStateV1, bool, error)
+}
+
+func gatherRegistryEvidence(ctx context.Context, session registrySession, network *nativev1.NetworkDomain, sources ManifestSource, capabilityID, version string) (*Evidence, error) {
 	if session == nil || sources == nil || network == nil {
 		return nil, errors.New("incomplete Service Actor evidence request")
 	}
@@ -112,14 +136,6 @@ func Gather(ctx context.Context, session Session, network *nativev1.NetworkDomai
 	}
 	if found {
 		evidence.Agent = agent
-	}
-	actor := "0:" + hex.EncodeToString(manifest.Settlement.ActorAccountID)
-	account, found, err := session.ReadActor(ctx, actor)
-	if err != nil {
-		return nil, err
-	}
-	if found {
-		evidence.Actor = account
 	}
 	return evidence, nil
 }
@@ -211,6 +227,58 @@ type Binding struct {
 func VerifyBinding(evidence *Evidence, pinnedCodeHash [32]byte, rail *nativecore.ServiceActorQuoteRailV1,
 	proposal *nativev1.QuoteProposalV1, destination string, acceptance *Acceptance) (*Binding, error) {
 	const procedure = "binding"
+	capability, err := verifyRegistryBinding(evidence, proposal, acceptance)
+	if err != nil {
+		return nil, err
+	}
+
+	settlement := evidence.Manifest.Settlement
+	if settlement.Rail != nativecore.ServiceActorRail || settlement.ActorWorkchain != 0 || len(settlement.ActorAccountID) != 32 {
+		return nil, stepError(procedure, 2, "manifest key 21 does not name a workchain 0 Service Actor")
+	}
+	actor := "0:" + hex.EncodeToString(settlement.ActorAccountID)
+	if rail != nil && rail.Actor != actor {
+		return nil, stepError(procedure, 2, "the Quote actor %s is not manifest key 21 actor %s", rail.Actor, actor)
+	}
+	if destination != actor {
+		return nil, stepError(procedure, 2, "the call destination %s is not manifest key 21 actor %s", destination, actor)
+	}
+	if evidence.Actor == nil || evidence.Actor.Address != actor {
+		return nil, stepError(procedure, 3, "the actor account is not active at the checkpoint")
+	}
+
+	codeHash, err := digestBytes(evidence.Actor.CodeHash, "tvm-cell-sha256:")
+	if err != nil || codeHash != pinnedCodeHash || !bytes.Equal(settlement.ActorCodeHash, pinnedCodeHash[:]) ||
+		(rail != nil && rail.ActorCodeHash != pinnedCodeHash) {
+		return nil, stepError(procedure, 3, "the account, manifest key 21, Quote and pinned release code hashes differ")
+	}
+	if evidence.Actor.Data == nil {
+		return nil, stepError(procedure, 3, "the actor data was not decoded")
+	}
+
+	keyID, err := mldsa44.ParseKeyIDText(settlement.AttestorKey)
+	if err != nil {
+		return nil, stepError(procedure, 4, "manifest key 21 attestor is not mldsa44:<key id>")
+	}
+	if rail != nil && rail.AttestorKeyID != keyID {
+		return nil, stepError(procedure, 4, "the Quote attestor differs from manifest key 21")
+	}
+	if evidence.Manifest.ExecutionSignerAuthorization != nativecore.SettlementAttestorAuthorization(settlement.AttestorKey) {
+		return nil, stepError(procedure, 4, "manifest key 18 does not commit to the key 21 attestor text")
+	}
+	metadata, err := nativecore.ServiceActorMetadataHash(nativecore.ServiceActorMetadataInputV1{Network: evidence.Network,
+		CapabilityID: capability.CapabilityId, ProviderAgentID: capability.OwnerAgentId, CapabilityVersion: evidence.Version,
+		ManifestDigest: evidence.ManifestDigest})
+	if err != nil {
+		return nil, stepError(procedure, 1, "the NSM1 metadata cannot be built: %v", err)
+	}
+	return &Binding{Actor: actor, ActorCodeHash: codeHash, AttestorKeyID: keyID, AttestorText: settlement.AttestorKey,
+		MetadataHash: metadata, Owner: evidence.Actor.Data.Owner}, nil
+}
+
+// verifyRegistryBinding preserves the same authority and liveness checks on both rails.
+func verifyRegistryBinding(evidence *Evidence, proposal *nativev1.QuoteProposalV1, acceptance *Acceptance) (*nativev1.CapabilityStateV1, error) {
+	const procedure = "binding"
 	if evidence == nil || evidence.Capability == nil || evidence.Capability.GetCapability() == nil {
 		return nil, stepError(procedure, 1, "the Capability is not in finalized state")
 	}
@@ -271,48 +339,7 @@ func VerifyBinding(evidence *Evidence, pinnedCodeHash [32]byte, rail *nativecore
 		return nil, stepError(procedure, 1, "the Quote names another Capability, version, provider or manifest")
 	}
 
-	settlement := evidence.Manifest.Settlement
-	if settlement.Rail != nativecore.ServiceActorRail || settlement.ActorWorkchain != 0 || len(settlement.ActorAccountID) != 32 {
-		return nil, stepError(procedure, 2, "manifest key 21 does not name a workchain 0 Service Actor")
-	}
-	actor := "0:" + hex.EncodeToString(settlement.ActorAccountID)
-	if rail != nil && rail.Actor != actor {
-		return nil, stepError(procedure, 2, "the Quote actor %s is not manifest key 21 actor %s", rail.Actor, actor)
-	}
-	if destination != actor {
-		return nil, stepError(procedure, 2, "the call destination %s is not manifest key 21 actor %s", destination, actor)
-	}
-	if evidence.Actor == nil || evidence.Actor.Address != actor {
-		return nil, stepError(procedure, 3, "the actor account is not active at the checkpoint")
-	}
-
-	codeHash, err := digestBytes(evidence.Actor.CodeHash, "tvm-cell-sha256:")
-	if err != nil || codeHash != pinnedCodeHash || !bytes.Equal(settlement.ActorCodeHash, pinnedCodeHash[:]) ||
-		(rail != nil && rail.ActorCodeHash != pinnedCodeHash) {
-		return nil, stepError(procedure, 3, "the account, manifest key 21, Quote and pinned release code hashes differ")
-	}
-	if evidence.Actor.Data == nil {
-		return nil, stepError(procedure, 3, "the actor data was not decoded")
-	}
-
-	keyID, err := mldsa44.ParseKeyIDText(settlement.AttestorKey)
-	if err != nil {
-		return nil, stepError(procedure, 4, "manifest key 21 attestor is not mldsa44:<key id>")
-	}
-	if rail != nil && rail.AttestorKeyID != keyID {
-		return nil, stepError(procedure, 4, "the Quote attestor differs from manifest key 21")
-	}
-	if evidence.Manifest.ExecutionSignerAuthorization != nativecore.SettlementAttestorAuthorization(settlement.AttestorKey) {
-		return nil, stepError(procedure, 4, "manifest key 18 does not commit to the key 21 attestor text")
-	}
-	metadata, err := nativecore.ServiceActorMetadataHash(nativecore.ServiceActorMetadataInputV1{Network: evidence.Network,
-		CapabilityID: capability.CapabilityId, ProviderAgentID: capability.OwnerAgentId, CapabilityVersion: evidence.Version,
-		ManifestDigest: evidence.ManifestDigest})
-	if err != nil {
-		return nil, stepError(procedure, 1, "the NSM1 metadata cannot be built: %v", err)
-	}
-	return &Binding{Actor: actor, ActorCodeHash: codeHash, AttestorKeyID: keyID, AttestorText: settlement.AttestorKey,
-		MetadataHash: metadata, Owner: evidence.Actor.Data.Owner}, nil
+	return capability, nil
 }
 
 func digestBytes(value, prefix string) ([32]byte, error) {

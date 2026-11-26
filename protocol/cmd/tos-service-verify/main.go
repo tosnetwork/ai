@@ -43,7 +43,7 @@ import (
 
 const usage = "usage: tos-service-verify (--global-config FILE --network-id ID | --network-domain FILE) " +
 	"--rpc URL,URL,URL [--quorum N] --registry-code-boc FILE --registry-code-hash H --actor-code-hash H " +
-	"[--actor ADDR] (--request-id N | --request-hash H)... [--evidence FILE] [--receipt FILE] [--artifact FILE]"
+	"[--asset-pins FILE] [--actor ADDR] (--request-id N | --request-hash H)... [--evidence FILE] [--receipt FILE] [--artifact FILE]"
 
 // Exit statuses.
 const (
@@ -79,6 +79,7 @@ type options struct {
 	actorCodeHash, actor                    string
 	requestIDs, requestHashes               listFlag
 	evidencePath, receiptPath, artifactPath string
+	assetPinsPath                           string
 	timeout                                 time.Duration
 }
 
@@ -118,6 +119,9 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "tos-service-verify:", err)
 		return exitUsage
+	}
+	if opts.assetPinsPath != "" {
+		return runTokenVerify(opts, network, inputs, stdout, stderr)
 	}
 	input, config, err := buildInput(opts, network, &inputs)
 	if err != nil {
@@ -170,6 +174,7 @@ func parse(arguments []string, stderr io.Writer) (*options, error) {
 	set.StringVar(&opts.evidencePath, "evidence", "", "the buyer's evidence bundle (evidence.json), checked, not trusted")
 	set.StringVar(&opts.receiptPath, "receipt", "", "the Receipt BOC file (receipt.boc) of the one selected request")
 	set.StringVar(&opts.artifactPath, "artifact", "", "the artifact tar (artifact.tar), checked against the Receipt")
+	set.StringVar(&opts.assetPinsPath, "asset-pins", "", "JSON array of independently pinned token releases; selects the token verifier")
 	set.DurationVar(&opts.timeout, "timeout", 2*time.Minute, "overall timeout")
 	if err := set.Parse(arguments); err != nil {
 		return nil, err
