@@ -95,13 +95,16 @@ A lifecycle retry is allowed after a finalized checkpoint is strictly past the
 recorded explicit expiry with the wallet seqno unchanged, proving the attempt
 never executed. An old default-derived bound alone is insufficient: legacy
 attempts without an explicit expiry stay fail-closed unless execution is proven.
-New token records use v2; v1 records remain readable and retain their reservations,
-and a legacy prepared record upgrades atomically when its explicit send expiry
-is recorded. Native journal bytes and the native lifecycle fallback are unchanged.
+Token records use v2 only. Pre-launch v1 records are refused with an explicit
+unsupported-version message; they are never upgraded or discarded automatically.
+Preserve an old record and reconcile any pending transfer before creating a new
+journal. Native journal bytes and the native lifecycle fallback are unchanged.
 
-The helper must implement `wallet send --valid-until`. As of the source check at
-`4e0954507629f1b98d0bc6562882f86350076f41`, that option is absent from current
-main and the installed validation helper. Companion CLI support is a deployment
-prerequisite; these local sender tests check the exact argument and durable bound
-with a recording transport, not a live submission using that missing option.
-The adapter never retries without the option or falls back to a default lifetime.
+The helper must implement `wallet send --valid-until` and return
+`tosctl.wallet-prepared-send.v2` from `--build-only`, with a numeric `valid_until`
+equal to the requested expiry. Missing, null, mismatched or out-of-range values,
+v1 output and unknown fields are refused before `sending`. This confirms the
+effective expiry reported by the helper, rather than trusting flag acceptance.
+Companion CLI support is a deployment prerequisite; local tests exercise the
+concrete sender with a recording runner, not a live submission. The adapter
+never retries without the option or falls back to a default lifetime.

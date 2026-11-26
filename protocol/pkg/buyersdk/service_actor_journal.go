@@ -44,11 +44,10 @@ const (
 )
 
 const callRecordSchema = "tos.service.service-actor-call.v1"
-const legacyTokenCallRecordSchema = "tos.service.service-actor-token-call.v1"
 const tokenCallRecordSchema = "tos.service.service-actor-token-call.v2"
 
 func isTokenCallRecord(r CallRecord) bool {
-	return r.Schema == tokenCallRecordSchema || r.Schema == legacyTokenCallRecordSchema
+	return r.Schema == tokenCallRecordSchema
 }
 
 // CallRecord is the durable record of one Service Actor purchase. It holds
@@ -438,7 +437,6 @@ func (j *ServiceActorJournal) beginSend(requestHash string, limits ServiceActorL
 			if !isTokenCallRecord(record) {
 				return errors.New("token expiry on a native call")
 			}
-			record.Schema = tokenCallRecordSchema
 			record.TokenValidUntilUnix = tokenValidUntil
 		}
 		record.Phase, record.UpdatedUnix, record.SentUnix = PhaseSending, now.Unix(), now.Unix()
@@ -536,6 +534,9 @@ func (j *ServiceActorJournal) readUnlocked(requestHash string) (CallRecord, erro
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return record, errors.New("journal record has trailing data")
+	}
+	if record.Schema == "tos.service.service-actor-token-call.v1" {
+		return record, errors.New("token journal v1 is unsupported; no automatic upgrade is available: preserve the record and reconcile any pending transfer before creating a new journal")
 	}
 	if !validRecordRail(record) || record.RequestHash != requestHash {
 		return record, errors.New("journal record names another call")
@@ -684,7 +685,6 @@ func (j *ServiceActorJournal) beginTokenLifecycle(before CallRecord, send Lifecy
 		if !isTokenCallRecord(current) {
 			return errors.New("token lifecycle on a native call")
 		}
-		current.Schema = tokenCallRecordSchema
 		current.Lifecycle = append(current.Lifecycle, send)
 		current.UpdatedUnix = now.Unix()
 		if err = j.writeUnlocked(current); err != nil {

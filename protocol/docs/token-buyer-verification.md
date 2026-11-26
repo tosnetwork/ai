@@ -157,9 +157,10 @@ SDK call and a lifecycle attempt through the concrete sender with a recording
 custody runner. At the broadcast boundary it reads the journal and compares its
 expiry with the actual command-line argument. The preflight advances the test
 clock, so recomputing the bound from an earlier timestamp is detectable. Other
-cases reject zero/unrepresentable expiries, retain v1 reservations while upgrading
-a prepared record to v2, and refuse automatic expiry reconciliation for legacy
-attempts carrying only a default-derived bound. The same concrete-path test
+cases reject zero/unrepresentable expiries and refuse automatic expiry
+reconciliation for attempts carrying only a default-derived bound. This run
+originally retained v1 records; the coordinated pre-launch v2-only change below
+supersedes that compatibility rule. The same concrete-path test
 caught a raw/prefixed body-hash comparison mismatch; the sender now checks the
 builder's raw hex hash separately from the CLI's prefixed output hash.
 
@@ -180,3 +181,36 @@ they do not claim an end-to-end run of that missing CLI option.
 `LifecycleValidUntilBound` and assume `FallbackWalletMessageLifetime`. That
 fallback remains dependent on the helper's default lifetime; announced native
 submissions use their reported expiry. Native behavior is unchanged here.
+
+## Coordinated prepared-send v2 contract (2026-11-26)
+
+Token preflight requires `tosctl.wallet-prepared-send.v2` and the numeric
+`valid_until` to equal the explicit argument. The strict decoder still refuses
+unknown fields. Missing, null, mismatched and v1 answers abort before the call
+moves to `sending` or a lifecycle funding reservation is written. A helper that
+merely accepts but ignores the flag cannot pass this preflight.
+
+`TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody` now exercises equal,
+different, v1, missing, unknown-field and null answers for both calls and lifecycle
+sends through the concrete sender. Refusals check the specific binding error and
+read the on-disk journal to prove no send/reservation occurred. The positive cases
+retain the slow-preflight clock and exact persisted-bound-versus-CLI checks.
+
+There is no pre-launch journal migration: only token record v2 is accepted.
+`TestLegacyTokenRecordIsRefusedWithoutChangingIt` checks reads, inventory, calls
+and lifecycle sends refuse v1 with a clear error and leave its bytes unchanged.
+Preserve an old journal and reconcile any pending transfer before creating a new
+one; the software does not discard old records or silently reset budgets.
+
+The native fallback remains unchanged. In addition to its inferred expiry
+follow-up, native build-only preflight still expects prepared-send v1; adopting
+the companion CLI's v2-only output on that rail needs its own coordinated change.
+The local token preflight checks use a recording runner, not a live companion CLI.
+
+Guarded verification passed fifteen Go packages: 668 top-level passes, 1,152
+including subtests, and the same two existing skips. Vet, spec-check,
+schema-check, boundary-lint, gofmt and whitespace checks passed. All 39 red
+controls were killed, followed by the green full suite. The five additional
+controls remove schema validation, exact-expiry validation (wrong and missing
+values tested separately), unknown-field refusal, or the v1 journal refusal.
+No Rust build ran.

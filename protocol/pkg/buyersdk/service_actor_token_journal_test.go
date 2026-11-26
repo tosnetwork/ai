@@ -94,7 +94,7 @@ func TestTokenJournalIdentityNeverSharesABudgetByMasterAlone(t *testing.T) {
 func TestTokenCustodyCarriesTheExactMessageAndChecksBindings(t *testing.T) {
 	body := cell.BeginCell().MustStoreUInt(7, 32).EndCell()
 	p := &TokenPreparedMessage{Version: TokenPreparedMessageVersion, Operation: "call", Sender: saBuyer, Destination: saOwner, ValueNanotos: "100", Bounce: true, BodyBOC: base64.StdEncoding.EncodeToString(body.ToBOCWithOptions(cell.BOCSerializeOptions{})), BodyHash: hex.EncodeToString(body.Hash())}
-	output, _ := json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": "buyer", "payer": saBuyer, "destination": saOwner, "amount_nanotos": 100, "body_hash": cellHash(body), "state_init_hash": "", "message_boc_base64": "te6c"})
+	output, _ := json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v2", "valid_until": 2000000120, "wallet": "buyer", "payer": saBuyer, "destination": saOwner, "amount_nanotos": 100, "body_hash": cellHash(body), "state_init_hash": "", "message_boc_base64": "te6c"})
 	endpoints := vetter{endpoints: []string{"https://a.example/jsonRPC", "https://b.example/jsonRPC", "https://c.example/jsonRPC"}}
 	sender, calls := testSender(t, validConfig, endpoints, output)
 	if err := sender.PreflightToken(context.Background(), p, 2000000120); err != nil {

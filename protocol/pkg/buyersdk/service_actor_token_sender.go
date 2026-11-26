@@ -55,6 +55,7 @@ func (s *TOSCTLServiceActorSender) PreflightToken(ctx context.Context, p *TokenP
 	}
 	var result struct {
 		Version     string `json:"version"`
+		ValidUntil  uint32 `json:"valid_until"`
 		Wallet      string `json:"wallet"`
 		Payer       string `json:"payer"`
 		Destination string `json:"destination"`
@@ -65,7 +66,7 @@ func (s *TOSCTLServiceActorSender) PreflightToken(ctx context.Context, p *TokenP
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&result) != nil || result.Version != "tosctl.wallet-prepared-send.v1" || result.Wallet != s.wallet || !sameAddress(result.Payer, p.Sender) || !sameAddress(result.Destination, p.Destination) || result.Amount != amount || result.BodyHash != cellHash(body) || result.StateInit != "" || result.Message == "" {
+	if d.Decode(&result) != nil || result.Version != "tosctl.wallet-prepared-send.v2" || result.ValidUntil != validUntil || result.Wallet != s.wallet || !sameAddress(result.Payer, p.Sender) || !sameAddress(result.Destination, p.Destination) || result.Amount != amount || result.BodyHash != cellHash(body) || result.StateInit != "" || result.Message == "" {
 		return errors.New("tosctl prepared a message other than the confirmed token transfer")
 	}
 	var extra any

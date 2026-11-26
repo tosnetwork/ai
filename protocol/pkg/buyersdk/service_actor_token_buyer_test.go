@@ -1,6 +1,7 @@
 package buyersdk
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -549,6 +551,14 @@ func TestTokenBuyerRefusesDecimalsThatDoNotFitInAByte(t *testing.T) {
 }
 
 func TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody(t *testing.T) {
+	for _, stage := range []string{"call", "lifecycle"} {
+		for _, shape := range []string{"equal", "different", "v1", "missing", "unknown", "null"} {
+			t.Run(stage+"/"+shape, func(t *testing.T) { testTokenPreflightExpiry(t, stage, shape) })
+		}
+	}
+}
+
+func testTokenPreflightExpiry(t *testing.T, stage, shape string) {
 	f, reader, _ := newTokenBuyerFixture(t)
 	clock := saNow
 	f.buyer.config.Now = func() time.Time { return clock }
@@ -565,6 +575,7 @@ func TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody(t *testing.T) {
 		}
 		return ""
 	}
+	preflightStage := "call"
 	sender.run = func(_ context.Context, args ...string) ([]byte, error) {
 		if arg(args, "--valid-until") != fmt.Sprint(f.buyer.config.Now().Add(TokenMessageLifetime).Unix()) {
 			return nil, errors.New("preflight omitted explicit expiry")
@@ -581,7 +592,22 @@ func TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody(t *testing.T) {
 		if e != nil {
 			return nil, e
 		}
-		raw, e = json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": "buyer", "payer": f.buyer.config.BuyerWallet, "destination": arg(args, "--to"), "amount_nanotos": amount, "body_hash": cellHash(body), "state_init_hash": "", "message_boc_base64": "te6c"})
+		answer := map[string]any{"version": "tosctl.wallet-prepared-send.v2", "valid_until": json.Number(arg(args, "--valid-until")), "wallet": "buyer", "payer": f.buyer.config.BuyerWallet, "destination": arg(args, "--to"), "amount_nanotos": amount, "body_hash": cellHash(body), "state_init_hash": "", "message_boc_base64": "te6c"}
+		if preflightStage == stage {
+			switch shape {
+			case "different":
+				answer["valid_until"] = 1
+			case "v1":
+				answer["version"] = "tosctl.wallet-prepared-send.v1"
+			case "missing":
+				delete(answer, "valid_until")
+			case "unknown":
+				answer["unexpected"] = true
+			case "null":
+				answer["valid_until"] = nil
+			}
+		}
+		raw, e = json.Marshal(answer)
 		if e != nil {
 			return nil, e
 		}
@@ -616,7 +642,15 @@ func TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody(t *testing.T) {
 		return []byte("OK Transfer sent"), nil
 	}
 	f.buyer.config.TokenSender = sender
-	if _, err = f.buyer.Call(context.Background(), r.RequestHash); err != nil {
+	_, err = f.buyer.Call(context.Background(), r.RequestHash)
+	if stage == "call" && shape != "equal" {
+		stored, readErr := f.buyer.Journal().Read(r.RequestHash)
+		if err == nil || !strings.Contains(err.Error(), "other than the confirmed token transfer") || readErr != nil || stored.Phase != PhasePrepared || stored.TokenValidUntilUnix != 0 || broadcasts != 0 {
+			t.Fatalf("invalid preflight reached sending: %+v %v %v broadcasts=%d", stored, err, readErr, broadcasts)
+		}
+		return
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	landTokenBuyerCall(t, f, reader, r)
@@ -628,7 +662,16 @@ func TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody(t *testing.T) {
 	reader.s.wallet.chainTime = now
 	reader.s.builder.snapshot.ReadAt.GenUtime = uint32(now.Unix())
 	clock = now
-	if _, err = f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire); err != nil {
+	preflightStage = "lifecycle"
+	_, err = f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire)
+	if stage == "lifecycle" && shape != "equal" {
+		stored, readErr := f.buyer.Journal().Read(r.RequestHash)
+		if err == nil || !strings.Contains(err.Error(), "other than the confirmed token transfer") || readErr != nil || len(stored.Lifecycle) != 0 || broadcasts != 1 {
+			t.Fatalf("invalid preflight reserved lifecycle: %+v %v %v broadcasts=%d", stored, err, readErr, broadcasts)
+		}
+		return
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	if broadcasts != 2 {
@@ -647,17 +690,35 @@ func TestTokenExpiryRefusesAnUnrepresentableClock(t *testing.T) {
 	}
 }
 
-func TestLegacyPreparedTokenRecordUpgradesWithoutLosingItsReservation(t *testing.T) {
+func TestLegacyTokenRecordIsRefusedWithoutChangingIt(t *testing.T) {
 	f, _, _ := newTokenBuyerFixture(t)
 	r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.buyer.Journal().Transition(r.RequestHash, []CallPhase{PhasePrepared}, func(record *CallRecord) error { record.Schema = legacyTokenCallRecordSchema; return nil }); err != nil {
+	if _, err = f.buyer.Journal().Transition(r.RequestHash, []CallPhase{PhasePrepared}, func(record *CallRecord) error { record.Schema = "tos.service.service-actor-token-call.v1"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	sent, err := f.buyer.Call(context.Background(), r.RequestHash)
-	if err != nil || sent.Phase != PhaseSubmitted || sent.Schema != tokenCallRecordSchema || sent.TokenValidUntilUnix == 0 {
-		t.Fatalf("legacy upgrade: %+v %v", sent, err)
+	path := f.buyer.Journal().path(r.RequestHash)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []func() error{
+		func() error { _, e := f.buyer.Journal().Read(r.RequestHash); return e },
+		func() error { _, e := f.buyer.Journal().Records(); return e },
+		func() error { _, e := f.buyer.Call(context.Background(), r.RequestHash); return e },
+		func() error {
+			_, e := f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire)
+			return e
+		},
+	} {
+		if err = operation(); err == nil || !strings.Contains(err.Error(), "token journal v1 is unsupported") {
+			t.Fatalf("legacy refusal: %v", err)
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("legacy record changed: %v", err)
 	}
 }
