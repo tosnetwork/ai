@@ -122,30 +122,27 @@ func expectSent(t *testing.T, f *buyerFixture, lifecycle *deadlineLifecycle, rec
 func TestALifecycleSendRecordsTheWalletStateAndCustodysReport(t *testing.T) {
 	_, lifecycle, _, sent := ambiguousExpire(t)
 	if sent.WalletSeqno != 5 || sent.SentUnix != saNow.Unix() || sent.Announced ||
-		sent.ValidUntilBoundUnix != saNow.Add(10*time.Minute).Unix() ||
+		sent.ValidUntilBoundUnix != 0 ||
 		sent.WalletAnchorLT != saWalletAnchor.LT || sent.WalletAnchorHash != saWalletAnchor.Hash {
 		t.Fatalf("journaled %+v", sent)
 	}
-	if LifecycleValidUntilBound(saNow) != saNow.Unix()+600 {
-		t.Fatal("the fallback bound is the custody timeout plus the wallet message lifetime plus clock skew")
-	}
-	// Custody can sign only until the deadline the bound counts from.
+
+	// Custody execution remains bounded even when no expiry was reported.
 	if len(lifecycle.deadlines) != 1 || !lifecycle.deadlines[0].Equal(saNow.Add(LifecycleSendTimeout)) {
 		t.Fatalf("custody deadline %v", lifecycle.deadlines)
 	}
 	_, _, _, announced := announcedExpire(t)
 	if !announced.Announced || announced.SignedSeqno != 5 || announced.ValidUntilUnix != announcedValidUntil.Unix() ||
-		announced.MessageHash != announcedHash {
+		announced.MessageHash != announcedHash || announced.ValidUntilBoundUnix != announcedValidUntil.Unix() {
 		t.Fatalf("custody's report was not journaled: %+v", announced)
 	}
 }
 
-// Rule 2 for a send whose report was lost: an unchanged seqno past the
-// fallback bound proves the message never executes. A moved seqno, however
-// late, proves nothing about a message whose hash is unknown.
-func TestAnUnannouncedSendSettlesOnlyByItsFallbackBound(t *testing.T) {
+// Without a signed expiry report, neither an unchanged seqno nor an old
+// inferred bound proves the message can no longer execute.
+func TestAnUnannouncedSendCannotSettleByAnAssumedLifetime(t *testing.T) {
 	f, lifecycle, record, sent := ambiguousExpire(t)
-	bound := time.Unix(sent.ValidUntilBoundUnix, 0)
+	bound := saNow.Add(10 * time.Minute)
 	// A transaction of another sender with the send's query_id is not the
 	// send.
 	f.lifecycleTx(toschain.ActorTransaction{Kind: toschain.ActorTxExpire, Sender: saOwner, QueryID: sent.QueryID})
@@ -156,15 +153,29 @@ func TestAnUnannouncedSendSettlesOnlyByItsFallbackBound(t *testing.T) {
 	f.at(bound.Add(24*time.Hour), 6)
 	expectUnsettled(t, f, lifecycle, record, "a day past the bound with the seqno moved")
 	f.at(bound.Add(time.Second), 5)
-	expectSent(t, f, lifecycle, record, "past the bound with the seqno unchanged")
+	expectUnsettled(t, f, lifecycle, record, "no reported expiry even with unchanged seqno")
+	record, err := f.buyer.Journal().Transition(record.RequestHash, []CallPhase{PhaseAdmitted}, func(r *CallRecord) error {
+		r.Lifecycle[0].ValidUntilBoundUnix = bound.Unix()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectUnsettled(t, f, lifecycle, record, "an old inferred bound is not a signed expiry")
 }
 
-// Rule 2 for a reported send uses the signed valid_until and seqno, not the
-// fallback bound.
+// Rule 2 for a reported send uses its signed expiry and seqno.
 func TestAReportedSendExpiresAtItsSignedValidUntil(t *testing.T) {
 	f, lifecycle, record, sent := announcedExpire(t)
-	if announcedValidUntil.Unix() >= sent.ValidUntilBoundUnix {
-		t.Fatal("the fixture's valid_until must precede the fallback bound")
+	if announcedValidUntil.Unix() != sent.ValidUntilBoundUnix {
+		t.Fatal("the recorded bound must equal the signed expiry")
+	}
+	record, err := f.buyer.Journal().Transition(record.RequestHash, []CallPhase{PhaseAdmitted}, func(r *CallRecord) error {
+		r.Lifecycle[0].ValidUntilBoundUnix = announcedValidUntil.Add(time.Hour).Unix()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	f.at(announcedValidUntil, 5)
 	expectUnsettled(t, f, lifecycle, record, "at the signed valid_until")

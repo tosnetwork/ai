@@ -18,6 +18,8 @@ import (
 // from finalized state and the Quote, never from the counterparty
 // (SOFTWARE_WORK_RECEIPT_TVM_V1; section 7).
 type ReceiptBinding struct {
+	// AssetMaster selects the strict schema-2 token receipt; nil selects schema 1.
+	AssetMaster     *[32]byte
 	QuoteCommitment string
 	ExecutionID     [32]byte
 	InputDigest     [32]byte
@@ -54,7 +56,7 @@ func BuildReceipt(binding ReceiptBinding, outcome Outcome) (*cell.Cell, [32]byte
 	if outcome.ExitCode != 0 || outcome.CompletedAtUnix == 0 {
 		return nil, responseHash, fmt.Errorf("%w: only a successful completed execution is attested", ErrInvalidInput)
 	}
-	root, _, err := nativecore.BuildSoftwareWorkReceiptCellV1(nativecore.SoftwareWorkReceiptV1{
+	value := nativecore.SoftwareWorkReceiptV1{
 		QuoteCommitment:     binding.QuoteCommitment,
 		ExecutionID:         sha256Text(binding.ExecutionID),
 		InputDigest:         sha256Text(binding.InputDigest),
@@ -68,7 +70,14 @@ func BuildReceipt(binding ReceiptBinding, outcome Outcome) (*cell.Cell, [32]byte
 		ProviderAgentID:     binding.ProviderAgentID,
 		CompletedAt:         outcome.CompletedAtUnix,
 		ExitCode:            0,
-	})
+	}
+	var root *cell.Cell
+	var err error
+	if binding.AssetMaster == nil {
+		root, _, err = nativecore.BuildSoftwareWorkReceiptCellV1(value)
+	} else {
+		root, _, err = nativecore.BuildSoftwareWorkTokenReceiptCellV1(nativecore.SoftwareWorkTokenReceiptV1{SoftwareWorkReceiptV1: value, AssetMaster: *binding.AssetMaster})
+	}
 	if err != nil {
 		return nil, responseHash, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
@@ -110,7 +119,8 @@ func DecodeReceipt(boc []byte) (nativecore.SoftwareWorkReceiptV1, [32]byte, erro
 
 // CheckReceiptBinding requires a Receipt to bind exactly the request, the
 // charge, the provider, the toolchain and the sandbox, and to describe a
-// successful completed execution (section 7.2 item 2).
+// successful completed execution (section 7.2 item 2). Schema and token asset
+// checks precede this common-field check in DecodeReceiptForAsset.
 func CheckReceiptBinding(receipt nativecore.SoftwareWorkReceiptV1, binding ReceiptBinding) error {
 	switch {
 	case binding.Price == nil || binding.Price.Sign() <= 0:
@@ -139,7 +149,7 @@ func CheckReceiptBinding(receipt nativecore.SoftwareWorkReceiptV1, binding Recei
 // attestor: the Receipt is canonical, binds the verified request exactly,
 // and describes the runner's actual outcome. It returns the response hash.
 func CheckAttestable(boc []byte, binding ReceiptBinding, outcome Outcome) ([32]byte, error) {
-	receipt, hash, err := DecodeReceipt(boc)
+	receipt, hash, err := DecodeReceiptForAsset(boc, binding.AssetMaster)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -179,7 +189,7 @@ func ValidateResult(result Result, binding ReceiptBinding, finalizedResponseHash
 	if finalizedResponseHash == ([32]byte{}) {
 		return fmt.Errorf("%w: no finalized response hash", ErrInvalidInput)
 	}
-	receipt, hash, err := DecodeReceipt(result.Receipt)
+	receipt, hash, err := DecodeReceiptForAsset(result.Receipt, binding.AssetMaster)
 	if err != nil {
 		return err
 	}

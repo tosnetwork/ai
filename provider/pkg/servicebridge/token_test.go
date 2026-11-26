@@ -22,6 +22,7 @@ import (
 )
 
 type tokenWorld struct {
+	preparedShape     string
 	now               int64
 	walletSeq         uint32
 	walletTxs         []toschain.WalletTransaction
@@ -192,7 +193,22 @@ func (w *tokenWorld) Run(_ context.Context, call TOSCTLCall) ([]byte, error) {
 		w.builtBody = body
 		w.builtBOC = base64.StdEncoding.EncodeToString(external.ToBOC())
 		w.builds++
-		return json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": w.c.WalletName, "payer": w.c.WalletAddress, "destination": dest, "amount_nanotos": value, "body_hash": "tvm-cell-sha256:" + hex.EncodeToString(root.Hash()), "state_init_hash": "", "message_boc_base64": w.builtBOC})
+		answer := map[string]any{"version": "tosctl.wallet-prepared-send.v2", "valid_until": uint32(w.ChainTime().Unix() + 120), "wallet": w.c.WalletName, "payer": w.c.WalletAddress, "destination": dest, "amount_nanotos": value, "body_hash": "tvm-cell-sha256:" + hex.EncodeToString(root.Hash()), "state_init_hash": "", "message_boc_base64": w.builtBOC}
+		switch w.preparedShape {
+		case "v1":
+			answer["version"] = "tosctl.wallet-prepared-send.v1"
+		case "different":
+			answer["valid_until"] = uint32(w.ChainTime().Unix() + 121)
+		case "missing":
+			delete(answer, "valid_until")
+		case "unknown":
+			answer["extra"] = true
+		case "null":
+			answer["valid_until"] = nil
+		case "overflow":
+			answer["valid_until"] = uint64(1) << 32
+		}
+		return json.Marshal(answer)
 	}
 	if call.Label != "wallet broadcast token" {
 		return nil, errors.New("unexpected custody command")
@@ -759,5 +775,25 @@ func TestTokenProviderCustodyExplicitlyRequestsBounce(t *testing.T) {
 	preview := w.preview(t, in)
 	if _, err := RunTokenAction(context.Background(), w.c, in, true, preview.Preview.Digest, w.env()); err != nil || w.sends != 1 {
 		t.Fatalf("reference CLI defaults must not change the confirmed bounce: err=%v sends=%d", err, w.sends)
+	}
+}
+
+func TestTokenCustodyRequiresV2AndTheSignedExpiry(t *testing.T) {
+	for _, shape := range []string{"v2", "v1", "different", "missing", "unknown", "null", "overflow"} {
+		t.Run(shape, func(t *testing.T) {
+			w := newTokenWorld(t)
+			in := w.action("withdraw-revenue")
+			in.TokenAmount = "100"
+			p := w.preview(t, in)
+			w.preparedShape = shape
+			r, err := RunTokenAction(context.Background(), w.c, in, true, p.Preview.Digest, w.env())
+			if shape == "v2" {
+				if err != nil || r == nil || r.Delivery == nil || r.Delivery.ValidUntil != uint32(w.ChainTime().Unix()+120) || w.sends != 1 {
+					t.Fatalf("v2 delivery: %+v %v sends=%d", r, err, w.sends)
+				}
+			} else if err == nil || w.sends != 0 {
+				t.Fatalf("invalid custody answer sent: %+v %v sends=%d", r, err, w.sends)
+			}
+		})
 	}
 }

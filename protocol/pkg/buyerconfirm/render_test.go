@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
+	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 )
 
 func presentation() buyeragent.Presentation {
@@ -201,5 +202,22 @@ func TestTOSRendersExactAmounts(t *testing.T) {
 	}
 	if !strings.Contains(TOS("-1"), "not a valid amount") || !strings.Contains(TOS("\x1b"), `\u{001B}`) {
 		t.Fatal("an invalid amount was rendered as one")
+	}
+}
+
+func TestTokenPresentationShowsExactTransferAndSeparateBudgets(t *testing.T) {
+	p := presentation()
+	p.Purchase.TokenFunding = &buyeragent.TokenFundingView{AssetMaster: "0:" + strings.Repeat("12", 32), WalletCodeHash: "tvm-cell-sha256:" + strings.Repeat("34", 32), Decimals: 6, AmountAtomic: "1234567", ReceivedAtomic: "1234567", ForwardNanoTOS: "90000000", MinimumForwardNanoTOS: "45000000", WalletValueNanoTOS: "100000000", TokenWallet: "0:" + strings.Repeat("56", 32)}
+	p.Purchase.PriceNanoTOS = ""
+	p.Purchase.PaymentNanoTOS = "100000000"
+	p.Budget.TokenAssets = []buyeragent.TokenBudgetView{{AssetKey: buyersdk.TokenAssetBudgetKey(p.Purchase.TokenFunding.AssetMaster, p.Purchase.TokenFunding.WalletCodeHash, 6), MaxPerCallAtomic: "2000000", MaxWindowAtomic: "5000000", ReservedAtomic: "1234567"}}
+	out := Render(p, nil)
+	for _, want := range []string{p.Purchase.TokenFunding.AssetMaster, p.Purchase.TokenFunding.TokenWallet, p.Purchase.Actor, "1234567 atomic (1.234567)", "received 1234567 atomic", "minimum forward", "45000000 nanoTOS", "Token budget:", "2000000", "5000000", "provider surplus", "returned entries"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %s", want, out)
+		}
+	}
+	if strings.Contains(out, "window reserved before:") || strings.Contains(out, "not a valid amount") || strings.Contains(out, "Price:            ") {
+		t.Fatalf("native price shown for token: %s", out)
 	}
 }

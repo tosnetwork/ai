@@ -55,11 +55,19 @@ func receiptBinding(record buyersdk.CallRecord, purchase PurchaseRecord) (railwo
 	if err != nil {
 		return railwork.ReceiptBinding{}, errors.New("the journaled input digest is not 64 hex")
 	}
-	price, ok := new(big.Int).SetString(record.PriceNanoTOS, 10)
+	priceText := record.PriceNanoTOS
+	if record.PreparedTokenMessage != nil {
+		priceText = record.PriceAtomic
+	}
+	price, ok := new(big.Int).SetString(priceText, 10)
 	if !ok || price.Sign() <= 0 {
 		return railwork.ReceiptBinding{}, errors.New("the journaled price is not a positive integer")
 	}
-	return railwork.ReceiptBinding{QuoteCommitment: record.QuoteCommitment, ExecutionID: executionID,
+	asset, err := recordAssetMaster(record)
+	if err != nil {
+		return railwork.ReceiptBinding{}, err
+	}
+	return railwork.ReceiptBinding{AssetMaster: asset, QuoteCommitment: record.QuoteCommitment, ExecutionID: executionID,
 		InputDigest: inputDigest, SourceDigest: purchase.SourceDigest, Price: price,
 		ProviderAgentID: purchase.ProviderAgentID, ToolchainDigest: purchase.ToolchainDigest,
 		SandboxDigest: purchase.ManifestDigest}, nil

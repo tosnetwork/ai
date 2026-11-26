@@ -318,8 +318,12 @@ func (t *Tools) renderResult(out Result) (*mcp.CallToolResult, error) {
 	for _, check := range out.Checked {
 		b.WriteString("- " + check + "\n")
 	}
-	fmt.Fprintf(&b, "Receipt: provider %s, toolchain %s, manifest %s, source %s, price %s nanoTOS, exit code %d.\n",
-		view.ProviderAgentID, view.ToolchainDigest, view.ManifestDigest, view.SourceDigest, view.PriceNanoTOS, view.ExitCode)
+	if f := view.TokenFunding; f != nil {
+		fmt.Fprintf(&b, "Receipt: provider %s, toolchain %s, manifest %s, source %s, asset %s wallet code %s, price %s atomic (%s), exit code %d.\n", view.ProviderAgentID, view.ToolchainDigest, view.ManifestDigest, view.SourceDigest, f.AssetMaster, f.WalletCodeHash, f.AmountAtomic, buyeragent.AtomicAmount(f.AmountAtomic, f.Decimals), view.ExitCode)
+	} else {
+		fmt.Fprintf(&b, "Receipt: provider %s, toolchain %s, manifest %s, source %s, price %s nanoTOS, exit code %d.\n",
+			view.ProviderAgentID, view.ToolchainDigest, view.ManifestDigest, view.SourceDigest, view.PriceNanoTOS, view.ExitCode)
+	}
 	b.WriteString(out.Proves + "\n" + out.DoesNotProve + "\n")
 	fmt.Fprintf(&b, "Files: %s, %s, %s (%d bytes), %s (%d bytes).\n", out.Files.Receipt, out.Files.Artifact,
 		out.Files.Output, out.OutputBytes, out.Files.Report, out.ReportBytes)

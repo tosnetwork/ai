@@ -99,7 +99,7 @@ func fixtureRead(t *testing.T, repo, path string) []byte {
 	t.Helper()
 	b, err := exec.Command("git", "-C", repo, "show", tokenCLIFixtureSHA+":"+path).CombinedOutput()
 	if err != nil {
-		t.Fatalf("pinned fixture unavailable: %v: %s", err, b)
+		t.Fatalf("pinned fixture unavailable; set TOS_SERVICE_TOKEN_CLI_REPO to a checkout holding the fixture commit: %v: %s", err, b)
 	}
 	return b
 }

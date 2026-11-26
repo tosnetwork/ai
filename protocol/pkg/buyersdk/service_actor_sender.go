@@ -126,35 +126,43 @@ func u64Amount(value *big.Int) (uint64, error) {
 
 // Preflight runs the amount, network and wallet bindings.
 func (s *TOSCTLServiceActorSender) Preflight(ctx context.Context, intent ServiceActorCallIntent) error {
+	_, err := s.PreflightExpiry(ctx, intent)
+	return err
+}
+
+// PreflightExpiry reports the expiry of the build-only message. It is diagnostic
+// metadata, not a bound on a separately signed broadcast.
+func (s *TOSCTLServiceActorSender) PreflightExpiry(ctx context.Context, intent ServiceActorCallIntent) (uint32, error) {
 	if s == nil || ctx == nil || !isRawAddress(intent.Actor) || !isRawAddress(intent.BuyerWallet) || intent.QueryID == 0 {
-		return errors.New("invalid Service Actor call intent")
+		return 0, errors.New("invalid Service Actor call intent")
 	}
 	if _, err := u64Amount(intent.Price); err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := u64Amount(intent.StorageFee); err != nil {
-		return err
+		return 0, err
 	}
 	payment, err := intent.Payment()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	paymentNano, err := u64Amount(payment)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := s.checkSubmissionEndpoints(ctx); err != nil {
-		return err
+		return 0, err
 	}
 	body := nativecore.BuildServiceActorCallBody(intent.QueryID, intent.RequestHash, intent.ExpectedTermsHash)
 	bodyBOC := base64.StdEncoding.EncodeToString(body.ToBOCWithOptions(cell.BOCSerializeOptions{}))
 	raw, err := s.run(ctx, "wallet", "send", "--from", s.wallet, "--to", intent.Actor,
 		"--amount-nanotos", fmt.Sprint(paymentNano), "--body-boc", bodyBOC, "--build-only")
 	if err != nil {
-		return errors.New("tosctl could not prepare the wallet binding check")
+		return 0, errors.New("tosctl could not prepare the wallet binding check")
 	}
 	var prepared struct {
 		Version       string `json:"version"`
+		ValidUntil    uint32 `json:"valid_until"`
 		Wallet        string `json:"wallet"`
 		Payer         string `json:"payer"`
 		Destination   string `json:"destination"`
@@ -165,21 +173,21 @@ func (s *TOSCTLServiceActorSender) Preflight(ctx context.Context, intent Service
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&prepared) != nil || prepared.Version != "tosctl.wallet-prepared-send.v1" || prepared.Wallet != s.wallet ||
+	if decoder.Decode(&prepared) != nil || prepared.Version != "tosctl.wallet-prepared-send.v2" || prepared.ValidUntil == 0 || prepared.Wallet != s.wallet ||
 		prepared.StateInitHash != "" || prepared.MessageBOC == "" {
-		return errors.New("tosctl returned an unexpected wallet binding result")
+		return 0, errors.New("tosctl returned an unexpected wallet binding result")
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return errors.New("tosctl wallet binding output has trailing data")
+		return 0, errors.New("tosctl wallet binding output has trailing data")
 	}
 	if !sameAddress(prepared.Payer, intent.BuyerWallet) {
-		return fmt.Errorf("tosctl wallet %s signs as %s, not the buyer wallet %s", s.wallet, prepared.Payer, intent.BuyerWallet)
+		return 0, fmt.Errorf("tosctl wallet %s signs as %s, not the buyer wallet %s", s.wallet, prepared.Payer, intent.BuyerWallet)
 	}
 	if !sameAddress(prepared.Destination, intent.Actor) || prepared.AmountNanoTOS != paymentNano || prepared.BodyHash != cellHash(body) {
-		return errors.New("tosctl prepared a message other than the verified call")
+		return 0, errors.New("tosctl prepared a message other than the verified call")
 	}
-	return nil
+	return prepared.ValidUntil, nil
 }
 
 // SendCall runs `tosctl agent service send --operation call`. tosctl

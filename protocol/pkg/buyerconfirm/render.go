@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
+	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -253,9 +254,25 @@ func Render(p buyeragent.Presentation, sensitive []string) string {
 	line("Attestor key:     %s", field(purchase.AttestorKeyID))
 	line("Manifest digest:  %s", field(p.ManifestDigest))
 	line("")
-	line("Price:            %s", TOS(purchase.PriceNanoTOS))
+	if f := purchase.TokenFunding; f != nil {
+		line("Token asset:      %s; wallet code %s; decimals %d", field(f.AssetMaster), field(f.WalletCodeHash), f.Decimals)
+		line("Token transfer:   %s atomic (%s); received %s atomic", field(f.AmountAtomic), buyeragent.AtomicAmount(f.AmountAtomic, f.Decimals), field(f.ReceivedAtomic))
+		line("Funding wallet:   %s -> actor %s", field(f.TokenWallet), field(purchase.Actor))
+		line("Forward amount:   %s; minimum forward %s", TOS(f.ForwardNanoTOS), TOS(f.MinimumForwardNanoTOS))
+		line("WARNING: underfunded transfers or transfers without a forward amount can become provider surplus. Fund only while accepting tokens.")
+		line("Refused payouts leave returned entries to claim; the provider must fund its token wallet for storage.")
+		for _, limit := range p.Budget.TokenAssets {
+			if limit.AssetKey == buyersdk.TokenAssetBudgetKey(f.AssetMaster, f.WalletCodeHash, f.Decimals) {
+				line("Token budget:     this %s atomic; per-call %s; window reserved %s; window cap %s", field(f.AmountAtomic), field(limit.MaxPerCallAtomic), field(limit.ReservedAtomic), field(limit.MaxWindowAtomic))
+			}
+		}
+	} else {
+		line("Price:            %s", TOS(purchase.PriceNanoTOS))
+	}
 	line("Storage fee:      %s", TOS(purchase.StorageFeeNanoTOS))
-	line("Allowance:        %s (its unused part returns)", TOS(p.AllowanceNanoTOS))
+	if purchase.TokenFunding == nil {
+		line("Allowance:        %s (its unused part returns)", TOS(p.AllowanceNanoTOS))
+	}
 	line("Total attached:   %s", TOS(purchase.PaymentNanoTOS))
 	line("")
 	responseBy := p.NowUnix + int64(p.ResponseSLASeconds)
@@ -264,9 +281,17 @@ func Render(p buyeragent.Presentation, sensitive []string) string {
 	line("  - The provider is paid the price and the storage fee only for an attested result before %s.", utc(responseBy))
 	line("    A Receipt proves what the provider's attestor signed, not that the work is correct.")
 	line("  - Without one, the buyer agent runs expire and claim_refund between %s and %s:", utc(responseBy), utc(refundBy))
-	line("    you get the price back; the storage fee %s is not refunded.", TOS(purchase.StorageFeeNanoTOS))
+	if purchase.TokenFunding == nil {
+		line("    you get the price back; the storage fee %s is not refunded.", TOS(purchase.StorageFeeNanoTOS))
+	} else {
+		line("    the token payout is asynchronous; refusal leaves a returned entry to claim. Storage fee %s is not refunded.", TOS(purchase.StorageFeeNanoTOS))
+	}
 	line("  - If nobody claims by %s, the refund right lapses and a sweep returns the price;", utc(refundBy))
-	line("    the sweeper takes the cleanup bounty %s, which is you when your agent sweeps.", TOS(p.CleanupBountyNanoTOS))
+	if purchase.TokenFunding == nil {
+		line("    the sweeper takes the cleanup bounty %s, which is you when your agent sweeps.", TOS(p.CleanupBountyNanoTOS))
+	} else {
+		line("    a delivered or refused refund payout pays the cleanup bounty %s to the claimant.", TOS(p.CleanupBountyNanoTOS))
+	}
 	line("  - The result is kept until %s.", utc(responseBy+int64(p.RetentionSeconds)))
 	line("Response SLA %s, refund window %s, result retention %s.", duration(uint64(p.ResponseSLASeconds)),
 		duration(uint64(p.RefundClaimWindowSeconds)), duration(p.RetentionSeconds))
@@ -296,9 +321,13 @@ func Render(p buyeragent.Presentation, sensitive []string) string {
 	line("")
 	budgetView := p.Budget
 	line("Budget: this payment %s against a per-call limit of %s.", TOS(purchase.PaymentNanoTOS), TOS(budgetView.MaxPerCallNanoTOS))
-	line("        window reserved before: %s in %d calls; after: %s in %d calls; limit %s in %d calls.",
-		TOS(budgetView.ReservedNanoTOS), budgetView.ReservedCalls, TOS(add(budgetView.ReservedNanoTOS, purchase.PaymentNanoTOS)),
-		budgetView.ReservedCalls+1, TOS(budgetView.MaxWindowNanoTOS), budgetView.MaxCalls)
+	if purchase.TokenFunding != nil {
+		line("        window reserved (includes this prepared purchase): %s in %d calls; limit %s in %d calls.", TOS(budgetView.ReservedNanoTOS), budgetView.ReservedCalls, TOS(budgetView.MaxWindowNanoTOS), budgetView.MaxCalls)
+	} else {
+		line("        window reserved before: %s in %d calls; after: %s in %d calls; limit %s in %d calls.",
+			TOS(budgetView.ReservedNanoTOS), budgetView.ReservedCalls, TOS(add(budgetView.ReservedNanoTOS, purchase.PaymentNanoTOS)),
+			budgetView.ReservedCalls+1, TOS(budgetView.MaxWindowNanoTOS), budgetView.MaxCalls)
+	}
 	line("")
 	line("Network:          %s", field(p.NetworkID))
 	line("Buyer wallet:     %s (pays the call; every refund is paid back to it)", field(p.BuyerWallet))

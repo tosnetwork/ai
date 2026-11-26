@@ -15,6 +15,7 @@ import (
 // AcceptedResult is a result the carrier accepted under frames 7.2: the
 // Receipt BOC, the decoded Receipt and the artifact.
 type AcceptedResult struct {
+	AssetMaster  *[32]byte
 	ResponseHash string
 	ReceiptBOC   []byte
 	Receipt      nativecore.SoftwareWorkReceiptV1
@@ -64,7 +65,7 @@ func acceptedResultAt(stateDir, requestHash string) (AcceptedResult, bool, error
 	if err != nil {
 		return AcceptedResult{}, false, errors.New("the stored Receipt is not Base64")
 	}
-	receipt, hash, err := railwork.DecodeReceipt(boc)
+	receipt, asset, hash, err := railwork.DecodeStoredReceipt(boc)
 	if err != nil || hex.EncodeToString(hash[:]) != state.AcceptedResponseHash {
 		return AcceptedResult{}, false, errors.New("the stored Receipt does not hash to the accepted response hash")
 	}
@@ -76,7 +77,7 @@ func acceptedResultAt(stateDir, requestHash string) (AcceptedResult, bool, error
 	if receipt.ArtifactDigest != "sha256:"+hex.EncodeToString(sum[:]) {
 		return AcceptedResult{}, false, errors.New("the stored artifact does not match its Receipt")
 	}
-	return AcceptedResult{ResponseHash: state.AcceptedResponseHash, ReceiptBOC: boc, Receipt: receipt,
+	return AcceptedResult{AssetMaster: asset, ResponseHash: state.AcceptedResponseHash, ReceiptBOC: boc, Receipt: receipt,
 		Artifact: artifact, AcceptedUnix: state.AcceptedUnix}, true, nil
 }
 
@@ -84,10 +85,11 @@ func acceptedResultAt(stateDir, requestHash string) (AcceptedResult, bool, error
 // fields and digests, every one checked against the purchase, and the
 // Receipt and artifact bytes.
 type AcceptedView struct {
-	RequestHash  string `json:"request_hash"`
-	Reference    string `json:"purchase_reference"`
-	ResponseHash string `json:"response_hash"`
-	AcceptedUnix int64  `json:"accepted_unix"`
+	TokenFunding *TokenFundingView `json:"token_funding,omitempty"`
+	RequestHash  string            `json:"request_hash"`
+	Reference    string            `json:"purchase_reference"`
+	ResponseHash string            `json:"response_hash"`
+	AcceptedUnix int64             `json:"accepted_unix"`
 	// The Receipt's fields (SOFTWARE_WORK_RECEIPT_TVM_V1); the agent
 	// checked each against the purchase before accepting the result.
 	QuoteCommitment string `json:"quote_commitment"`
@@ -131,9 +133,16 @@ func (a *Agent) Result(requestHash string) (any, error) {
 	// The accepted Receipt binds this purchase; checked again here so a
 	// result of another purchase never reaches the client.
 	receipt := accepted.Receipt
+	asset, err := recordAssetMaster(record)
+	if err != nil {
+		return nil, err
+	}
+	if (asset == nil) != (accepted.AssetMaster == nil) || (asset != nil && *asset != *accepted.AssetMaster) {
+		return nil, errors.New("the accepted Receipt binds another asset")
+	}
 	if receipt.QuoteCommitment != record.QuoteCommitment || receipt.ProviderAgentID != purchase.ProviderAgentID ||
 		receipt.SourceDigest != purchase.SourceDigest || receipt.SandboxDigest != purchase.ManifestDigest ||
-		receipt.ChargedAtomicAmount != record.PriceNanoTOS || receipt.ExitCode != 0 {
+		receipt.ChargedAtomicAmount != priceOfRecord(record) || receipt.ExitCode != 0 {
 		return nil, errors.New("the accepted Receipt does not bind this purchase")
 	}
 	output, report, err := railwork.ArtifactMembers(accepted.Artifact)
@@ -143,11 +152,11 @@ func (a *Agent) Result(requestHash string) (any, error) {
 	if !bytes.Equal(digestOf(output), []byte(receipt.ResultDigest)) || !bytes.Equal(digestOf(report), []byte(receipt.ReportDigest)) {
 		return nil, errors.New("the accepted artifact does not match its Receipt")
 	}
-	return AcceptedView{RequestHash: requestHash, Reference: PurchaseReference(requestHash),
+	return AcceptedView{TokenFunding: tokenFunding(record), RequestHash: requestHash, Reference: PurchaseReference(requestHash),
 		ResponseHash: accepted.ResponseHash, AcceptedUnix: accepted.AcceptedUnix,
 		QuoteCommitment: receipt.QuoteCommitment, ExecutionID: receipt.ExecutionID, InputDigest: receipt.InputDigest,
 		SourceDigest: receipt.SourceDigest, ToolchainDigest: receipt.ToolchainDigest, ManifestDigest: receipt.SandboxDigest,
-		ProviderAgentID: receipt.ProviderAgentID, PriceNanoTOS: receipt.ChargedAtomicAmount,
+		ProviderAgentID: receipt.ProviderAgentID, PriceNanoTOS: record.PriceNanoTOS,
 		ResultDigest: receipt.ResultDigest, ArtifactDigest: receipt.ArtifactDigest, ReportDigest: receipt.ReportDigest,
 		CompletedAtUnix: receipt.CompletedAt, ExitCode: receipt.ExitCode,
 		ReceiptBase64:  base64.StdEncoding.EncodeToString(accepted.ReceiptBOC),

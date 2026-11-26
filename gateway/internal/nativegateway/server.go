@@ -226,17 +226,17 @@ func (s *Server) RequestQuoteProposal(ctx context.Context, request *connect.Requ
 		return nil, discoveryError(quoteprovider.PublicError(err), publicerrors.DependencyUnavailable)
 	}
 	now := s.now()
-	validated, err := quoteexchange.Validate(s.Network, request.Msg, proposal, now)
+	transport, err := quoteTransport(s.Network, request.Msg, proposal, now)
 	if err != nil {
 		return nil, publicerrors.New(publicerrors.Conflict, errors.New("Quote Proposal source returned conflicting preimages"), 0)
 	}
 	// Over Agent Packets the package travels inside the rail task; a Quote
 	// that no task can carry is never proposed.
-	if err = railwork.CheckCarriableQuote(proposal, validated.TransportBinding); err != nil {
+	if err = railwork.CheckCarriableQuote(proposal, transport); err != nil {
 		return nil, publicerrors.New(publicerrors.Conflict, errors.New("Quote Proposal package is too large to be carried"), 0)
 	}
 	return connect.NewResponse(&nativev1.RequestQuoteProposalResponse{Package: proposal,
-		ProviderKeyCardPacketJson: s.providerCard(validated.Proposal.ProviderAgentId, now)}), nil
+		ProviderKeyCardPacketJson: s.providerCard(proposal.Proposal.ProviderAgentId, now)}), nil
 }
 
 func (s *Server) now() time.Time {

@@ -278,7 +278,7 @@ func TestACodeFromAnotherNonceConfirmsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guessed := ConfirmationCode([ConfirmationNonceBytes]byte{}, fieldsOf(record, purchase))
+	guessed := ConfirmationCode([ConfirmationNonceBytes]byte{}, checkedFields(t, record, purchase))
 	first, err := f.agent.Present(view.RequestHash)
 	if err != nil {
 		t.Fatal(err)

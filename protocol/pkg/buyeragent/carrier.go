@@ -23,7 +23,6 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
-	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"google.golang.org/protobuf/proto"
 )
@@ -536,7 +535,7 @@ func (c *Carrier) checkCarriage(ctx context.Context, record buyersdk.CallRecord,
 	if err := proto.Unmarshal(packageBytes, value); err != nil {
 		return errors.New("the journaled Quote package does not decode")
 	}
-	validated, err := quoteexchange.ValidatePortable(c.config.Network, &nativev1.RequestQuoteProposalRequest{
+	validated, err := validatePortableQuote(c.config.Network, &nativev1.RequestQuoteProposalRequest{
 		CapabilityId: record.CapabilityID, CapabilityVersion: record.CapabilityVersion, BuyerAddress: record.BuyerAddressInReq}, value)
 	if err != nil {
 		return err

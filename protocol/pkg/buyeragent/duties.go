@@ -38,6 +38,17 @@ func lifecycleFor(status serviceactor.Status) string {
 	return ""
 }
 
+func tokenLifecycleFor(status serviceactor.Status) string {
+	switch status {
+	case serviceactor.StatusReturned:
+		return "claim-returned"
+	case serviceactor.StatusPaying:
+		return "recheck-payout"
+	default:
+		return lifecycleFor(status)
+	}
+}
+
 // DutyView is the outcome of one duty check.
 type DutyView struct {
 	RequestHash string `json:"request_hash"`
@@ -189,6 +200,9 @@ func (a *Agent) duty(ctx context.Context, requestHash string) (DutyView, error) 
 		return a.receive(ctx, view, requestHash, purchase, report)
 	}
 	view.Operation = lifecycleFor(report.Status)
+	if record.PreparedTokenMessage != nil {
+		view.Operation = tokenLifecycleFor(report.Status)
+	}
 	if view.Operation == "" {
 		return view, nil
 	}
