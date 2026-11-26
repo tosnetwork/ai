@@ -178,3 +178,48 @@ func TestTransactionBindsTheRealReceiptIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestDeploymentUsesOnlySupportedBridgeSlots(t *testing.T) {
+	var original string
+	for _, slot := range []uint32{79, 81, 82, 83} {
+		p := fixtureInput(t)
+		p.BridgeParam = slot
+		raw, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := run(bytes.NewReader(raw), &out); err != nil {
+			t.Fatal(err)
+		}
+		var result output
+		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		data, err := decodeCell(result.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := nativecore.DecodeServiceActorTokenData(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Route.BridgeConfigParam != slot {
+			t.Fatalf("bridge slot lost: %d", slot)
+		}
+		if slot == 79 {
+			original = result.Address
+		} else if original == result.Address {
+			t.Fatal("bridge slot not bound to identity")
+		}
+	}
+	p := fixtureInput(t)
+	p.BridgeParam = 84
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(bytes.NewReader(raw), &bytes.Buffer{}); err == nil {
+		t.Fatal("invalid bridge slot accepted")
+	}
+}

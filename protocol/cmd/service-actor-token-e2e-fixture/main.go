@@ -18,6 +18,7 @@ import (
 )
 
 type input struct {
+	BridgeParam  uint32 `json:"bridge_config_param,omitempty"`
 	Owner        string `json:"owner"`
 	Master       string `json:"master"`
 	WalletCode   string `json:"wallet_code_boc"`
@@ -104,7 +105,10 @@ func run(in io.Reader, out io.Writer) error {
 		PricePerCall: price, StorageFee: big.NewInt(200000000), CleanupBounty: big.NewInt(100000000), ResponseSLA: 600, RefundClaimWindow: 600, OpenAccess: true, RateLimitPerDay: 100,
 		ProofSchemeHash: nativecore.ServiceActorSoftwareWorkProofScheme}, MaxTokenLiability: cap}
 	copy(policy.MetadataHash[:], metadata)
-	route := nativecore.ServiceActorTokenAssetRouteV1{Master: master, WalletCode: wallet, BridgeConfigParam: 79}
+	if p.BridgeParam == 0 {
+		p.BridgeParam = 79
+	}
+	route := nativecore.ServiceActorTokenAssetRouteV1{Master: master, WalletCode: wallet, BridgeConfigParam: p.BridgeParam}
 	copy(route.WalletCodeHash[:], wallet.Hash())
 	data, e := nativecore.BuildServiceActorTokenInitialData(p.Owner, policy, route)
 	if e != nil {

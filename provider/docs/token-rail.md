@@ -198,3 +198,15 @@ token inspection path for the published binding.
 
 These adapters have no upstream counterpart; inherited node and VM code is
 unchanged.
+
+
+### Local refusal evidence
+
+Receiver refusal integration uses a separate, independently pinned local test
+namespace, admitted by normal ConfigParam 84 governance. It never replaces an
+account's code or bypasses recognition. The unsigned fixture helper accepts the
+four supported bridge slots so a test namespace does not replace an existing
+asset's bridge configuration. No provider or buyer production path accepts a
+new asset merely because it appears in ConfigParam 84: independent pins are
+still mandatory. The operations runbook records the R abort, S refusal, returned
+entry and claim. The 30-day returned-entry sweep deadline stays unchanged.
