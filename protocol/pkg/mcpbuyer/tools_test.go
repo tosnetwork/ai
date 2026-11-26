@@ -364,3 +364,26 @@ func TestRefundRunsTheAgentsDueStep(t *testing.T) {
 		t.Fatalf("refund result %+v: %s", out, text(result))
 	}
 }
+
+func TestTokenPurchaseKeepsExactAssetUnitsInMCPPreview(t *testing.T) {
+	view := buyeragent.PurchaseView{Actor: "actor", TokenFunding: &buyeragent.TokenFundingView{AssetMaster: "master", WalletCodeHash: "wallet-code", Decimals: 6, AmountAtomic: "1234567", ReceivedAtomic: "1234567", ForwardNanoTOS: "90000000", MinimumForwardNanoTOS: "45000000", WalletValueNanoTOS: "100000000", TokenWallet: "funding-wallet"}}
+	tools := &Tools{random: func(b []byte) error {
+		for i := range b {
+			b[i] = 1
+		}
+		return nil
+	}}
+	result, out, err := tools.single(view, "Preview")
+	if err != nil || out.Purchase.TokenFunding == nil || out.Purchase.TokenFunding.AmountAtomic != "1234567" {
+		t.Fatalf("preview: %+v %v", out, err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	for _, want := range []string{"asset master", "1234567 atomic (1.234567)", "received 1234567 atomic", "actor actor", "funding-wallet", "funding budget 45000000", "provider surplus"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %s", want, text)
+		}
+	}
+	if strings.Contains(text, "Attached payment") {
+		t.Fatal("token principal described as native payment")
+	}
+}

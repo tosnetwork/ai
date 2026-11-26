@@ -19,7 +19,6 @@ import (
 	"github.com/tosnetwork/ai/protocol/internal/osguard"
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
-	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"google.golang.org/protobuf/proto"
 )
@@ -156,7 +155,7 @@ func (a *Agent) StoreQuote(request *nativev1.RequestQuoteProposalRequest, value 
 	if request == nil || value == nil {
 		return "", refusal(CodeBadInput, "no Quote was given", nil)
 	}
-	if _, err := quoteexchange.ValidatePortable(a.config.Network, request, value); err != nil {
+	if _, err := validatePortableQuote(a.config.Network, request, value); err != nil {
 		return "", refusal(CodeOfferInvalid, "the Quote does not validate", err)
 	}
 	raw, err := proto.MarshalOptions{Deterministic: true}.Marshal(value)
@@ -238,7 +237,7 @@ func (a *Agent) Prepare(ctx context.Context, params PrepareParams) (PurchaseView
 		return PurchaseView{}, err
 	}
 	now := a.now()
-	validated, err := quoteexchange.Validate(a.config.Network, request, value, now)
+	validated, err := validateQuote(a.config.Network, request, value, now)
 	if err != nil {
 		if value.GetProposal().GetExpiresAtUnixSeconds() <= uint64(now.Unix()) {
 			return PurchaseView{}, refusal(CodeQuoteExpired, "the Quote has expired", err)
@@ -406,24 +405,25 @@ const (
 // PurchaseView is what a client may see of a purchase. It never carries the
 // confirmation code or its nonce.
 type PurchaseView struct {
-	RequestHash       string   `json:"request_hash"`
-	Reference         string   `json:"purchase_reference"`
-	State             string   `json:"state"`
-	Phase             string   `json:"journal_phase"`
-	CapabilityID      string   `json:"capability_id"`
-	CapabilityVersion string   `json:"capability_version"`
-	Actor             string   `json:"actor"`
-	AttestorKeyID     string   `json:"attestor_key_id"`
-	PriceNanoTOS      string   `json:"price_nanotos"`
-	StorageFeeNanoTOS string   `json:"storage_fee_nanotos"`
-	PaymentNanoTOS    string   `json:"payment_nanotos"`
-	TermsHash         string   `json:"terms_hash"`
-	QuoteCommitment   string   `json:"quote_commitment"`
-	QuoteExpiresUnix  uint64   `json:"quote_expires_at_unix"`
-	SourceDigest      string   `json:"source_digest"`
-	ArchiveBytes      int      `json:"archive_bytes"`
-	Members           []Member `json:"members"`
-	Requested         bool     `json:"payment_requested"`
+	TokenFunding      *TokenFundingView `json:"token_funding,omitempty"`
+	RequestHash       string            `json:"request_hash"`
+	Reference         string            `json:"purchase_reference"`
+	State             string            `json:"state"`
+	Phase             string            `json:"journal_phase"`
+	CapabilityID      string            `json:"capability_id"`
+	CapabilityVersion string            `json:"capability_version"`
+	Actor             string            `json:"actor"`
+	AttestorKeyID     string            `json:"attestor_key_id"`
+	PriceNanoTOS      string            `json:"price_nanotos"`
+	StorageFeeNanoTOS string            `json:"storage_fee_nanotos"`
+	PaymentNanoTOS    string            `json:"payment_nanotos"`
+	TermsHash         string            `json:"terms_hash"`
+	QuoteCommitment   string            `json:"quote_commitment"`
+	QuoteExpiresUnix  uint64            `json:"quote_expires_at_unix"`
+	SourceDigest      string            `json:"source_digest"`
+	ArchiveBytes      int               `json:"archive_bytes"`
+	Members           []Member          `json:"members"`
+	Requested         bool              `json:"payment_requested"`
 	// The preview of section 4.5: the provider, the manifest and its text,
 	// and the terms the deadlines and refunds follow. The text is the
 	// provider's own and untrusted.
@@ -462,7 +462,7 @@ func stateOf(record buyersdk.CallRecord, purchase PurchaseRecord, now time.Time)
 }
 
 func (a *Agent) viewOf(record buyersdk.CallRecord, purchase PurchaseRecord) PurchaseView {
-	return PurchaseView{RequestHash: record.RequestHash, Reference: PurchaseReference(record.RequestHash),
+	return PurchaseView{TokenFunding: tokenFunding(record), RequestHash: record.RequestHash, Reference: PurchaseReference(record.RequestHash),
 		State: stateOf(record, purchase, a.now()), Phase: string(record.Phase), CapabilityID: record.CapabilityID,
 		CapabilityVersion: record.CapabilityVersion, Actor: record.Actor, AttestorKeyID: record.AttestorKeyID,
 		PriceNanoTOS: record.PriceNanoTOS, StorageFeeNanoTOS: record.StorageFeeNanoTOS,
@@ -601,13 +601,14 @@ func (a *Agent) RequestPayment(ctx context.Context, params RequestPaymentParams)
 
 // BudgetView is the budget in use.
 type BudgetView struct {
-	WindowSeconds     int64  `json:"window_seconds"`
-	MaxCalls          int    `json:"max_calls"`
-	MaxPrepared       int    `json:"max_prepared"`
-	MaxPerCallNanoTOS string `json:"max_per_call_nanotos"`
-	MaxWindowNanoTOS  string `json:"max_window_nanotos"`
-	ReservedNanoTOS   string `json:"reserved_nanotos"`
-	ReservedCalls     int    `json:"reserved_calls"`
+	TokenAssets       []TokenBudgetView `json:"token_assets,omitempty"`
+	WindowSeconds     int64             `json:"window_seconds"`
+	MaxCalls          int               `json:"max_calls"`
+	MaxPrepared       int               `json:"max_prepared"`
+	MaxPerCallNanoTOS string            `json:"max_per_call_nanotos"`
+	MaxWindowNanoTOS  string            `json:"max_window_nanotos"`
+	ReservedNanoTOS   string            `json:"reserved_nanotos"`
+	ReservedCalls     int               `json:"reserved_calls"`
 }
 
 func (a *Agent) budget() (BudgetView, error) {
@@ -616,7 +617,11 @@ func (a *Agent) budget() (BudgetView, error) {
 	if err != nil {
 		return BudgetView{}, err
 	}
-	return BudgetView{WindowSeconds: int64(limits.Window / time.Second), MaxCalls: limits.MaxCalls,
+	tokens, err := a.tokenBudgets(limits)
+	if err != nil {
+		return BudgetView{}, err
+	}
+	return BudgetView{TokenAssets: tokens, WindowSeconds: int64(limits.Window / time.Second), MaxCalls: limits.MaxCalls,
 		MaxPrepared: limits.MaxPrepared, MaxPerCallNanoTOS: limits.MaxPerCallNanoTOS.String(),
 		MaxWindowNanoTOS: limits.MaxWindowNanoTOS.String(), ReservedNanoTOS: total.String(), ReservedCalls: calls}, nil
 }
@@ -760,7 +765,7 @@ func (a *Agent) Present(requestHash string) (Presentation, error) {
 	if err != nil {
 		return Presentation{}, err
 	}
-	validated, err := quoteexchange.ValidatePortable(a.config.Network, request, value)
+	validated, err := validatePortableQuote(a.config.Network, request, value)
 	if err != nil {
 		return Presentation{}, refusal(CodeOfferInvalid, "the stored Quote no longer validates", err)
 	}

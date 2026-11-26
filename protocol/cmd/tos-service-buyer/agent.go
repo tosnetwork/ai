@@ -40,11 +40,12 @@ const maxAgentConfigBytes = 64 << 10
 // sections 3.2 and 6). It is decoded strictly: an unknown field, a
 // missing required field or trailing data refuses the file.
 type agentConfig struct {
-	Schema    string `json:"schema"`
-	StateDir  string `json:"state_dir"`
-	SocketDir string `json:"socket_dir"`
-	ClientUID uint32 `json:"client_uid"`
-	Network   struct {
+	TokenAssets []tokenAssetConfig `json:"token_assets,omitempty"`
+	Schema      string             `json:"schema"`
+	StateDir    string             `json:"state_dir"`
+	SocketDir   string             `json:"socket_dir"`
+	ClientUID   uint32             `json:"client_uid"`
+	Network     struct {
 		NetworkID       string `json:"network_id"`
 		GenesisRootHash string `json:"genesis_root_hash"`
 		GenesisFileHash string `json:"genesis_file_hash"`
@@ -148,6 +149,9 @@ func readAgentConfig(path string) (agentConfig, error) {
 		if strings.HasPrefix(relay, "https://") && config.RelayCAFile == "" {
 			return config, errors.New("an https relay is configured but relay_ca_file pins no CA")
 		}
+	}
+	if _, _, err := tokenPolicy(config.TokenAssets); err != nil {
+		return config, err
 	}
 	if err := checkGatewayConfig(config); err != nil {
 		return config, err
@@ -331,11 +335,15 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
+	tokenPins, tokenLimits, err := tokenPolicy(config.TokenAssets)
+	if err != nil {
+		return nil, err
+	}
 	buyer, err := buyersdk.NewServiceActorBuyer(buyersdk.ServiceActorBuyerConfig{Reader: buyersdk.BuyerReaderFromChain(reader),
 		Manifests: manifestSources{manifestDirectory(config.ManifestDir), quoted}, Network: network, ActorCodeHash: config.ActorCodeHash,
-		BuyerWallet: config.BuyerWallet, Sender: sender, Lifecycle: sender, Journal: journal,
+		BuyerWallet: config.BuyerWallet, Sender: sender, TokenSender: sender, TokenPins: tokenPins, Lifecycle: sender, Journal: journal,
 		Limits: buyersdk.ServiceActorLimits{Window: time.Duration(config.Budget.WindowSeconds) * time.Second,
-			MaxCalls: config.Budget.MaxCalls, MaxPerCallNanoTOS: perCall, MaxWindowNanoTOS: window, MaxPrepared: unconfirmed}})
+			TokenAssets: tokenLimits, MaxCalls: config.Budget.MaxCalls, MaxPerCallNanoTOS: perCall, MaxWindowNanoTOS: window, MaxPrepared: unconfirmed}})
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +376,7 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 	// add search hints, and the gateway serves gateway Quotes.
 	sessions := serviceactorindex.FromChain(reader)
 	offersConfig := buyeragent.OffersConfig{Network: network, RegistryCodeHash: config.RegistryCodeHash,
-		ActorCodeHash: config.ActorCodeHash, BuyerWallet: config.BuyerWallet, Sessions: sessions,
+		ActorCodeHash: config.ActorCodeHash, BuyerWallet: config.BuyerWallet, Sessions: sessions, TokenPins: tokenPins, TokenAssets: tokenLimits,
 		Manifests: quoted, Cards: carrier}
 	if config.GatewayURL != "" {
 		gateway, err := newGatewayClient(config.GatewayURL, config.GatewayCAFile, config.GatewayTokenFile)

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"encoding/hex"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
 )
 
@@ -56,30 +58,32 @@ func (t *Tools) registerMarket(server *mcp.Server) {
 
 // Offer is an offer as a tool result shows it.
 type Offer struct {
-	Checkpoint               uint64        `json:"checkpoint"`
-	CapabilityID             string        `json:"capability_id"`
-	CapabilityVersion        string        `json:"capability_version"`
-	ProviderAgentID          string        `json:"provider_agent_id"`
-	ManifestDigest           string        `json:"manifest_digest"`
-	Actor                    string        `json:"actor"`
-	AttestorKeyID            string        `json:"attestor_key_id"`
-	TermsHash                string        `json:"terms_hash"`
-	PriceNanoTOS             string        `json:"price_nanotos"`
-	StorageFeeNanoTOS        string        `json:"storage_fee_nanotos"`
-	PaymentNanoTOS           string        `json:"payment_nanotos"`
-	AllowanceNanoTOS         string        `json:"execution_allowance_nanotos"`
-	CleanupBountyNanoTOS     string        `json:"cleanup_bounty_nanotos"`
-	ResponseSLASeconds       uint32        `json:"response_sla_seconds"`
-	RefundClaimWindowSeconds uint32        `json:"refund_claim_window_seconds"`
-	RetentionSeconds         uint64        `json:"retention_seconds"`
-	OpenAccess               bool          `json:"open_access"`
-	ProviderCardHeld         bool          `json:"provider_card_held"`
-	ProviderName             UntrustedText `json:"untrusted_provider_name"`
-	ProviderDescription      UntrustedText `json:"untrusted_provider_description"`
+	Asset                    *nativev1.TOSAssetIdentityV1 `json:"asset,omitempty"`
+	PriceAtomic              string                       `json:"price_atomic,omitempty"`
+	Checkpoint               uint64                       `json:"checkpoint"`
+	CapabilityID             string                       `json:"capability_id"`
+	CapabilityVersion        string                       `json:"capability_version"`
+	ProviderAgentID          string                       `json:"provider_agent_id"`
+	ManifestDigest           string                       `json:"manifest_digest"`
+	Actor                    string                       `json:"actor"`
+	AttestorKeyID            string                       `json:"attestor_key_id"`
+	TermsHash                string                       `json:"terms_hash"`
+	PriceNanoTOS             string                       `json:"price_nanotos"`
+	StorageFeeNanoTOS        string                       `json:"storage_fee_nanotos"`
+	PaymentNanoTOS           string                       `json:"payment_nanotos"`
+	AllowanceNanoTOS         string                       `json:"execution_allowance_nanotos"`
+	CleanupBountyNanoTOS     string                       `json:"cleanup_bounty_nanotos"`
+	ResponseSLASeconds       uint32                       `json:"response_sla_seconds"`
+	RefundClaimWindowSeconds uint32                       `json:"refund_claim_window_seconds"`
+	RetentionSeconds         uint64                       `json:"retention_seconds"`
+	OpenAccess               bool                         `json:"open_access"`
+	ProviderCardHeld         bool                         `json:"provider_card_held"`
+	ProviderName             UntrustedText                `json:"untrusted_provider_name"`
+	ProviderDescription      UntrustedText                `json:"untrusted_provider_description"`
 }
 
 func offerOf(view buyeragent.OfferView) Offer {
-	return Offer{Checkpoint: view.Checkpoint, CapabilityID: view.CapabilityID, CapabilityVersion: view.CapabilityVersion,
+	return Offer{Asset: view.Asset, PriceAtomic: view.PriceAtomic, Checkpoint: view.Checkpoint, CapabilityID: view.CapabilityID, CapabilityVersion: view.CapabilityVersion,
 		ProviderAgentID: view.ProviderAgentID, ManifestDigest: view.ManifestDigest, Actor: view.Actor,
 		AttestorKeyID: view.AttestorKeyID, TermsHash: view.TermsHash, PriceNanoTOS: view.PriceNanoTOS,
 		StorageFeeNanoTOS: view.StorageFeeNanoTOS, PaymentNanoTOS: view.PaymentNanoTOS, AllowanceNanoTOS: view.AllowanceNanoTOS,
@@ -94,10 +98,14 @@ func offerOf(view buyeragent.OfferView) Offer {
 func renderOffer(b *strings.Builder, d delimiter, o Offer) {
 	fmt.Fprintf(b, "Capability %s %s from provider %s, read at finalized checkpoint %d.\n", o.CapabilityID,
 		o.CapabilityVersion, o.ProviderAgentID, o.Checkpoint)
-	fmt.Fprintf(b, "Attached payment %s nanoTOS: price %s, storage fee %s (not refunded), and an allowance of %s whose "+
-		"unused part returns. Response SLA %d s, refund window %d s, cleanup bounty %s nanoTOS, result kept %d s. "+
-		"Provider key card held: %t.\n", o.PaymentNanoTOS, o.PriceNanoTOS, o.StorageFeeNanoTOS, o.AllowanceNanoTOS,
-		o.ResponseSLASeconds, o.RefundClaimWindowSeconds, o.CleanupBountyNanoTOS, o.RetentionSeconds, o.ProviderCardHeld)
+	if o.Asset != nil {
+		fmt.Fprintf(b, "Token asset %s, wallet code %s (%d decimals): price %s atomic (%s); storage fee %s nanoTOS, funding fees quoted separately at prepare. Actor %s.\n", "0:"+hex.EncodeToString(o.Asset.Master.AccountId), o.Asset.WalletCodeHash, o.Asset.Decimals, o.PriceAtomic, buyeragent.AtomicAmount(o.PriceAtomic, uint8(o.Asset.Decimals)), o.StorageFeeNanoTOS, o.Actor)
+	} else {
+		fmt.Fprintf(b, "Attached payment %s nanoTOS: price %s, storage fee %s (not refunded), and an allowance of %s whose "+
+			"unused part returns. Response SLA %d s, refund window %d s, cleanup bounty %s nanoTOS, result kept %d s. "+
+			"Provider key card held: %t.\n", o.PaymentNanoTOS, o.PriceNanoTOS, o.StorageFeeNanoTOS, o.AllowanceNanoTOS,
+			o.ResponseSLASeconds, o.RefundClaimWindowSeconds, o.CleanupBountyNanoTOS, o.RetentionSeconds, o.ProviderCardHeld)
+	}
 	b.WriteString(d.span("Provider name", o.ProviderName))
 	b.WriteString(d.span("Provider description", o.ProviderDescription))
 }
