@@ -37,7 +37,7 @@ type TokenActorConfig struct {
 }
 
 var capabilityIDPattern = regexp.MustCompile(`^cap_[0-9a-f]{64}$`)
-var tokenLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var tokenLabel = regexp.MustCompile(`^[a-zA-Z0-9_.:/-]{1,160}$`)
 
 func tokenUnits(text string, positive bool) (*big.Int, error) {
 	if len(text) == 0 || len(text) > 37 || len(text) > 1 && text[0] == '0' {

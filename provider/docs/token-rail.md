@@ -87,7 +87,7 @@ operator command; monitoring pauses are automatic authority reductions.
 ## Recovery and safeguards
 
 A token action is journaled under the same setup lock as other custody changes,
-before signing. Keep the same input and idempotency key after interruption:
+before broadcast. Preparation records also precede signing and cannot broadcast. Keep the same input and idempotency key after interruption:
 repeating the command observes the original finalized transaction and payout;
 it never blindly signs or sends again. Agent `actions` refreshes unresolved
 token records. The payout is `paying` until a matching outcome, `returned`,
@@ -126,3 +126,41 @@ buyer/provider lifecycle and recorded release acceptance remain separate
 integration gates; the existing native paid-work loop is not relabelled as a
 token executor. Do not advertise this management path as a production token
 service before those gates pass.
+
+## Alarm delivery and stale monitoring
+
+A stale or unreadable monitor **does not clear on-chain `active`**. It refuses
+local offer inspection, preflight and resume and raises a runtime diagnostic;
+an already-active actor remains active until a signed pause is included. This
+management implementation is not an execution-time alarm/staleness gate. Token
+paid-work execution and its refusal while an alarm is active or monitoring is
+stale are integration requirements of the live-lifecycle work item.
+
+Emergency pause needs only the owned actor's release, master and current
+policy; a missing token wallet cannot prevent it. Policy updates replace the
+whole policy. A pause therefore waits for an in-flight owner policy update to
+finalize or expire and then copies the latest finalized fields, changing only
+`active`. If a wallet has already emitted an internal policy message that is
+still unresolved past its external-message TTL, the runtime raises an alarm
+and holds the pause; it cannot safely declare that internal message dead.
+
+Custody checks run before fencing. Preparation cannot broadcast; its interrupted
+journal resolves as `never_sent`. Before exact broadcast the owner-private
+journal stores the message hash, finalized wallet seqno and anchor, and the
+signed `valid_until`. Expiry with unchanged finalized seqno, or an anchored
+wallet history proving no matching send, permits a new emergency-pause attempt.
+A still-valid unknown send is never retried. The low-level exact-BOC transport
+is used only after this application's network, envelope and journal checks;
+it is not exposed as an unpinned client tool. Actor refusals are reported as
+refusals with their exit code and raise an alarm. Repeated refused pauses do not
+silently become successful or retry indefinitely.
+
+Balance queries use the id from the actor's `provide_balance` output, distinct
+from the owner's inbound query id. A bounced query or a proven replacement
+after its TTL is terminal. Settlement reads only the anchored action suffix;
+it does not require the actor's lifetime history. Custody confirmation displays
+and commits to the shared builder's age and surplus-lower-bound warnings.
+
+The custody envelope reader supports the expiring wallet formats used by the
+native adapter (`V3R2`, `V4R2`, `V5R1`). Other or unreported wallet formats refuse
+before signing; there is no fallback to another identity or a non-expiring send.

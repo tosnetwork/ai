@@ -22,14 +22,44 @@ type TokenSession interface {
 	buyersdk.TokenBuildSession
 	serviceactor.TokenSession
 	TokenHistory(context.Context, string, *toschain.ActorTxID) (*toschain.TokenActorHistory, error)
+	WalletSeqno(context.Context, string) (uint32, error)
+	WalletLastTransaction(context.Context, string) (toschain.ActorTxID, error)
+	WalletHistory(context.Context, string, toschain.ActorTxID) (*toschain.WalletHistory, error)
 }
+
+type tokenVerifiedSession struct {
+	*toschain.ServiceActorSession
+	source *toschain.ServiceActorReader
+}
+
+func (s *tokenVerifiedSession) Endpoints() []string { return s.source.Endpoints() }
+func (s *tokenVerifiedSession) CheckEndpointGenesis(ctx context.Context, endpoint string) error {
+	return s.source.CheckEndpointGenesis(ctx, endpoint)
+}
+
 type TokenEnv struct {
 	SetupEnv
-	Begin func(context.Context, NodeConfig, TokenActorConfig) (TokenSession, error)
+	Begin        func(context.Context, NodeConfig, TokenActorConfig) (TokenSession, error)
+	CheckCustody func(context.Context, NodeConfig, TokenSession) error
 }
 
 func (e *TokenEnv) fill() {
 	e.SetupEnv.fill()
+	if e.CheckCustody == nil {
+		e.CheckCustody = func(ctx context.Context, c NodeConfig, session TokenSession) error {
+			raw, err := readPrivateFile(c.TOSCTL.ConfigPath, 1<<20)
+			if err != nil {
+				return err
+			}
+
+			vetter, ok := session.(buyersdk.EndpointVetter)
+			if !ok {
+				return errors.New("missing custody endpoint verifier")
+			}
+			return buyersdk.CheckSubmissionEndpoints(ctx, raw, vetter)
+		}
+	}
+
 	if e.Begin == nil {
 		e.Begin = func(ctx context.Context, c NodeConfig, a TokenActorConfig) (TokenSession, error) {
 			c.ActorCodeHash = a.CodeHash
@@ -41,7 +71,11 @@ func (e *TokenEnv) fill() {
 			if err != nil {
 				return nil, err
 			}
-			return reader.Begin(ctx)
+			session, err := reader.Begin(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return &tokenVerifiedSession{ServiceActorSession: session, source: reader}, nil
 		}
 	}
 }
@@ -65,7 +99,15 @@ type TokenActionInput struct {
 	Policy         *TokenPolicyInput `json:"policy,omitempty"`
 	IdempotencyKey string            `json:"idempotency_key"`
 }
+type TokenPayoutTarget struct {
+	Kind       uint8  `json:"kind"`
+	ReturnedID uint64 `json:"returned_id"`
+	Recipient  string `json:"recipient"`
+	Amount     string `json:"amount"`
+}
 type TokenPreview struct {
+	Warnings       []string                       `json:"warnings,omitempty"`
+	Recheck        *TokenPayoutTarget             `json:"recheck,omitempty"`
 	Network        NetworkConfig                  `json:"network"`
 	Actor          string                         `json:"actor"`
 	AssetID        string                         `json:"asset_id"`
@@ -84,17 +126,21 @@ type TokenPreview struct {
 // TokenActionRecord is durable before custody can sign. An unknown operation
 // is only observed, never automatically signed or submitted for a second time.
 type TokenActionRecord struct {
-	Network     NetworkConfig       `json:"network"`
-	Schema      string              `json:"schema"`
-	Input       TokenActionInput    `json:"input"`
-	InputHash   string              `json:"input_hash"`
-	Preview     TokenPreview        `json:"preview"`
-	Anchor      toschain.ActorTxID  `json:"anchor"`
-	QueryID     uint64              `json:"query_id"`
-	BodyHash    string              `json:"body_hash"`
-	State       string              `json:"state"`
-	PayoutID    uint64              `json:"payout_id,omitempty"`
-	Transaction *toschain.ActorTxID `json:"transaction,omitempty"`
+	Call               *toschain.TokenActorTransaction `json:"call,omitempty"`
+	Delivery           *TokenDelivery                  `json:"delivery,omitempty"`
+	PreviousDeliveries []TokenDelivery                 `json:"previous_deliveries,omitempty"`
+	Failure            string                          `json:"failure,omitempty"`
+	Network            NetworkConfig                   `json:"network"`
+	Schema             string                          `json:"schema"`
+	Input              TokenActionInput                `json:"input"`
+	InputHash          string                          `json:"input_hash"`
+	Preview            TokenPreview                    `json:"preview"`
+	Anchor             toschain.ActorTxID              `json:"anchor"`
+	QueryID            uint64                          `json:"query_id"`
+	BodyHash           string                          `json:"body_hash"`
+	State              string                          `json:"state"`
+	PayoutID           uint64                          `json:"payout_id,omitempty"`
+	Transaction        *toschain.ActorTxID             `json:"transaction,omitempty"`
 }
 
 func tokenInputHash(in TokenActionInput) (string, error) {
@@ -110,7 +156,7 @@ func tokenRecordPath(c NodeConfig, key string) string {
 	return filepath.Join(c.StateDir, "token-actions", hex.EncodeToString(hash[:])+".json")
 }
 func tokenTerminal(state string) bool {
-	return state == "delivered" || state == "finalized" || state == "failed" || state == "abandoned" || state == "returned"
+	return state == "never_sent" || state == "expired" || state == "refused" || state == "superseded" || state == "delivered" || state == "finalized" || state == "failed" || state == "abandoned" || state == "returned"
 }
 func checkTokenInput(in TokenActionInput) error {
 	canonical, err := toschain.CanonicalAddress(in.Actor)
@@ -213,12 +259,17 @@ func prepareToken(ctx context.Context, c NodeConfig, a TokenActorConfig, s Token
 	if pin == nil {
 		return nil, nil, errors.New("token asset is not pinned")
 	}
-	if _, err = toschain.MatchTokenAssetPin(d.Route, pin.Decimals, c.Token.Pins); err != nil {
-		return nil, nil, err
+	if in.Operation != "pause" {
+		if _, err = toschain.MatchTokenAssetPin(d.Route, pin.Decimals, c.Token.Pins); err != nil {
+			return nil, nil, err
+		}
 	}
-	actorFloor, walletFloor, err := tokenFloors(ctx, c, a, s)
-	if err != nil {
-		return nil, nil, err
+	var actorFloor, walletFloor bool
+	if in.Operation != "pause" {
+		actorFloor, walletFloor, err = tokenFloors(ctx, c, a, s)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	floor := new(big.Int).Add(d.Accounting.LockedStorageFees, d.Accounting.LockedOutcomeFees)
 	floor.Add(floor, big.NewInt(nativecore.ServiceActorMinimumOperatingReserve))
@@ -283,7 +334,16 @@ func prepareToken(ctx context.Context, c NodeConfig, a TokenActorConfig, s Token
 			return nil, nil, errors.New("withdrawal would breach actor TOS floor")
 		}
 	}
-	p := &TokenPreview{Network: c.Network, Actor: a.Address, AssetID: a.AssetID, Master: a.Master, Decimals: pin.Decimals, Checkpoint: s.Checkpoint(), PolicyVersion: d.Policy.PolicyVersion, ActorFloorMet: actorFloor, WalletFloorMet: walletFloor, TokenRevenue: d.Accounting.Ledger.WithdrawableTokenRevenue.String(), TOSRevenue: d.Accounting.WithdrawableTOSRevenue.String(), Message: prepared}
+	p := &TokenPreview{Warnings: append([]string(nil), prepared.Warnings...), Network: c.Network, Actor: a.Address, AssetID: a.AssetID, Master: a.Master, Decimals: pin.Decimals, Checkpoint: s.Checkpoint(), PolicyVersion: d.Policy.PolicyVersion, ActorFloorMet: actorFloor, WalletFloorMet: walletFloor, TokenRevenue: d.Accounting.Ledger.WithdrawableTokenRevenue.String(), TOSRevenue: d.Accounting.WithdrawableTOSRevenue.String(), Message: prepared}
+	if in.Operation == "recheck-payout" {
+		target := d.Payouts[in.ID]
+		returnedID := in.ID
+		if target.Kind == 5 || target.Kind == 7 {
+			returnedID = target.RequestID
+		}
+		p.Recheck = &TokenPayoutTarget{Kind: target.Kind, ReturnedID: returnedID, Recipient: target.Recipient.Text(), Amount: target.Amount.String()}
+	}
+
 	// Checkpoints may advance; the human confirms semantics, balances and policy,
 	// not a block label. A changed amount, envelope, policy or floor still expires.
 	clone := *p
@@ -329,29 +389,54 @@ func RunTokenAction(ctx context.Context, c NodeConfig, in TokenActionInput, yes 
 	}
 	var prior TokenActionRecord
 	err = readJSON(path, 1<<20, &prior)
-	if err == nil {
+	existing := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if existing {
 		storedHash, hashErr := tokenInputHash(prior.Input)
 		if hashErr != nil || storedHash != inputHash || prior.Schema != "tos.service.provider-token-action.v1" || prior.InputHash != inputHash || prior.Network != c.Network || prior.Preview.Message == nil {
 			return nil, errors.New("idempotency key belongs to another token action")
 		}
-		session, err := env.Begin(ctx, c, a)
-		if err != nil {
-			return &prior, err
+		if prior.State == "building" || prior.State == "signed" || prior.State == "never_sent" {
+			prior.State = "never_sent"
+			if err = writeJSON(path, prior, false); err != nil {
+				return &prior, err
+			}
+			if in.Operation != "pause" || !yes {
+				return &prior, nil
+			}
 		}
-		if err = resolveTokenAction(ctx, session, c, &prior); err != nil {
-			return &prior, err
-		}
-		return &prior, writeJSON(path, prior, false)
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
 	}
 	session, err := env.Begin(ctx, c, a)
 	if err != nil {
+		if existing {
+			return &prior, err
+		}
 		return nil, err
+	}
+	if existing {
+		if err = resolveTokenAction(ctx, session, c, &prior); err != nil {
+			return &prior, err
+		}
+		if err = writeJSON(path, prior, false); err != nil {
+			return &prior, err
+		}
+		if in.Operation != "pause" || !yes || (prior.State != "never_sent" && prior.State != "expired") {
+			return &prior, nil
+		}
+	}
+
+	if in.Operation == "pause" {
+		if err = tokenPolicyBarrier(ctx, c, in, session); err != nil {
+			return nil, err
+		}
 	}
 	preview, account, err := prepareToken(ctx, c, a, session, in)
 	if err != nil {
+		if existing {
+			return &prior, err
+		}
 		return nil, err
 	}
 	record := &TokenActionRecord{Network: c.Network, Schema: "tos.service.provider-token-action.v1", Input: in, InputHash: inputHash, Preview: *preview, State: "preview", Anchor: account.LastTransaction}
@@ -376,36 +461,100 @@ func RunTokenAction(ctx context.Context, c NodeConfig, in TokenActionInput, yes 
 		return record, err
 	}
 	record.QueryID = parsed.QueryID
-	record.State = "submitted"
-	if err = writeJSON(path, record, true); err != nil {
-		return record, err
+	if existing {
+		record.PreviousDeliveries = append(record.PreviousDeliveries, prior.PreviousDeliveries...)
+		if prior.Delivery != nil {
+			record.PreviousDeliveries = append(record.PreviousDeliveries, *prior.Delivery)
+		}
+		if len(record.PreviousDeliveries) > 32 {
+			return &prior, errors.New("pause retry journal needs operator archival")
+		}
 	}
 	runner, err := env.Runner(c.TOSCTL, env.vaultURL(c.TOSCTL))
 	if err != nil {
+		record.State = "never_sent"
 		return record, err
 	}
 	defer closeRunner(runner)
-	ops := tosctlOps{runner: runner}
-	wallet, err := ops.wallet(ctx, c.WalletName)
+	wallet, err := (tosctlOps{runner: runner}).wallet(ctx, c.WalletName)
 	if err != nil {
+		record.State = "never_sent"
 		return record, err
 	}
 	if wallet.Address != c.WalletAddress {
+		record.State = "never_sent"
 		return record, errors.New("custody wallet identity changed")
 	}
-	value, err := tokenUnits(preview.Message.ValueNanotos, false)
-	if err != nil || !value.IsUint64() {
-		return record, errors.New("token envelope value out of range")
+	// A building record cannot have reached the broadcaster. A crash or a
+	// preparation error is therefore provably not sent, even if signing began.
+	record.State = "building"
+	if err = writeJSON(path, record, !existing); err != nil {
+		return record, err
 	}
-	if !preview.Message.Bounce {
-		return record, errors.New("provider token operation must bounce")
+	delivery, err := prepareTokenDelivery(ctx, c, session, record, runner, env)
+	if err != nil {
+		record.State = "never_sent"
+		if saveErr := writeJSON(path, record, false); saveErr != nil {
+			return record, errors.Join(err, saveErr)
+		}
+		return record, err
 	}
-	message := SignedRegistryMessage{Destination: preview.Message.Destination, FinalTarget: preview.Message.Destination, ActionHash: record.BodyHash, BodyBOC: preview.Message.BodyBOC}
-	if err = ops.walletSend(ctx, c.WalletName, value.Uint64(), message); err != nil {
+	record.Delivery = delivery
+	record.State = "submitted"
+	if err = writeJSON(path, record, false); err != nil {
+		return record, err
+	}
+	if err = broadcastTokenDelivery(ctx, runner, delivery); err != nil {
 		return record, err
 	}
 	return record, nil
 }
+
+// The contract replaces the entire policy. A pause must wait for an earlier
+// policy send to resolve or expire, then use the post-update finalized policy.
+func tokenPolicyBarrier(ctx context.Context, c NodeConfig, in TokenActionInput, s TokenSession) error {
+	entries, err := os.ReadDir(filepath.Join(c.StateDir, "token-actions"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(entries) > 4096 {
+		return errors.New("token action journal needs archival")
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), stateUpdatePrefix) {
+			continue
+		}
+		var r TokenActionRecord
+		if err = readJSON(filepath.Join(c.StateDir, "token-actions", entry.Name()), 1<<20, &r); err != nil {
+			return err
+		}
+		if r.Input.Actor != in.Actor || r.Input.IdempotencyKey == in.IdempotencyKey || tokenTerminal(r.State) {
+			continue
+		}
+		switch r.Input.Operation {
+		case "update-policy", "resume", "pause":
+		default:
+			continue
+		}
+		if err = resolveTokenAction(ctx, s, c, &r); err != nil {
+			return err
+		}
+		if err = writeJSON(filepath.Join(c.StateDir, "token-actions", entry.Name()), r, false); err != nil {
+			return err
+		}
+		if !tokenTerminal(r.State) {
+			if r.Delivery != nil && s.ChainTime().Unix() > int64(r.Delivery.ValidUntil) {
+				return errors.New("alarm: policy delivery unresolved past wallet TTL; pause held for operator, no stale policy may be signed")
+			}
+			return errors.New("alarm: pause waits for an in-flight policy update; no stale policy may be signed")
+		}
+	}
+	return nil
+}
+
 func tokenNoOpenAction(ctx context.Context, c NodeConfig, actor string, session TokenSession) error {
 	dir := filepath.Join(c.StateDir, "token-actions")
 	entries, err := os.ReadDir(dir)

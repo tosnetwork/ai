@@ -16,10 +16,26 @@ import (
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
+	"github.com/tosnetwork/tosutils-go/address"
+	"github.com/tosnetwork/tosutils-go/tlb"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
 type tokenWorld struct {
+	now               int64
+	walletSeq         uint32
+	walletTxs         []toschain.WalletTransaction
+	builtBody         string
+	builtBOC          string
+	builds            int
+	runnerUnavailable bool
+	walletMismatch    bool
+	walletUnavailable bool
+	deferActor        bool
+	refusedCode       int32
+	accounts          map[string]*toschain.TokenActorAccount
+	anchors           []toschain.ActorTxID
+
 	states       map[string]*nativev1.NativeStateV1
 	c            NodeConfig
 	account      *toschain.TokenActorAccount
@@ -32,20 +48,36 @@ type tokenWorld struct {
 	change       bool
 }
 
-func (w *tokenWorld) Checkpoint() uint64   { return 100 }
-func (w *tokenWorld) ChainTime() time.Time { return time.Unix(1800000000, 0) }
+func (w *tokenWorld) Checkpoint() uint64 { return 100 }
+func (w *tokenWorld) ChainTime() time.Time {
+	if w.now != 0 {
+		return time.Unix(w.now, 0)
+	}
+	return time.Unix(1800000000, 0)
+}
 func (w *tokenWorld) BlockHashes() (string, string) {
 	return "sha256:" + strings.Repeat("a", 64), "sha256:" + strings.Repeat("b", 64)
 }
-func (w *tokenWorld) ReadTokenActor(context.Context, string) (*toschain.TokenActorAccount, bool, error) {
-	return w.account, true, nil
+func (w *tokenWorld) accountAt(actor string) *toschain.TokenActorAccount {
+	if w.accounts != nil {
+		return w.accounts[actor]
+	}
+	return w.account
 }
-func (w *tokenWorld) ResolveTokenActor(context.Context, string, []toschain.TokenAssetPin, bool) (*toschain.ResolvedTokenActor, error) {
+func (w *tokenWorld) ReadTokenActor(_ context.Context, actor string) (*toschain.TokenActorAccount, bool, error) {
+	a := w.accountAt(actor)
+	return a, a != nil, nil
+}
+func (w *tokenWorld) ResolveTokenActor(_ context.Context, actor string, _ []toschain.TokenAssetPin, _ bool) (*toschain.ResolvedTokenActor, error) {
 	r, f := w.BlockHashes()
-	return &toschain.ResolvedTokenActor{Account: w.account, Checkpoint: 100, BlockRoot: r, BlockFile: f}, nil
+	return &toschain.ResolvedTokenActor{Account: w.accountAt(actor), Checkpoint: 100, BlockRoot: r, BlockFile: f}, nil
 }
-func (w *tokenWorld) ReadTokenWallet(context.Context, string, nativecore.ServiceActorTokenAssetRouteV1) (*toschain.TokenWalletAccount, bool, error) {
-	return &toschain.TokenWalletAccount{Address: w.account.OwnWallet, Owner: w.account.Address, Master: w.account.Data.Route.Master.Text(), CodeHash: "tvm-cell-sha256:" + hex.EncodeToString(w.account.Data.Route.WalletCodeHash[:]), BalanceNano: w.walletNano, BalanceAtomic: big.NewInt(w.walletAtomic)}, true, nil
+func (w *tokenWorld) ReadTokenWallet(_ context.Context, actor string, _ nativecore.ServiceActorTokenAssetRouteV1) (*toschain.TokenWalletAccount, bool, error) {
+	if w.walletUnavailable {
+		return nil, false, errors.New("own token wallet unavailable")
+	}
+	a := w.accountAt(actor)
+	return &toschain.TokenWalletAccount{Address: a.OwnWallet, Owner: a.Address, Master: a.Data.Route.Master.Text(), CodeHash: "tvm-cell-sha256:" + hex.EncodeToString(a.Data.Route.WalletCodeHash[:]), BalanceNano: w.walletNano, BalanceAtomic: big.NewInt(w.walletAtomic)}, true, nil
 }
 func (w *tokenWorld) ReadTokenAsset(context.Context, string, []toschain.TokenAssetPin) (*toschain.TokenAssetRecognition, error) {
 	var minter [32]byte
@@ -68,25 +100,101 @@ func (w *tokenWorld) ReadTokenForwardPrices(context.Context) (toschain.TokenForw
 	return toschain.TokenForwardPrices{}, nil
 }
 func (w *tokenWorld) ReadTokenGlobalID(context.Context) (int32, error) { return 3, nil }
-func (w *tokenWorld) TokenHistory(context.Context, string, *toschain.ActorTxID) (*toschain.TokenActorHistory, error) {
-	return w.history, nil
-}
-func (w *tokenWorld) env() TokenEnv {
-	return TokenEnv{Begin: func(context.Context, NodeConfig, TokenActorConfig) (TokenSession, error) { w.begins++; return w, nil }, SetupEnv: SetupEnv{Runner: func(TOSCTLConfig, string) (TOSCTLRunner, error) { return w, nil }}}
-}
-func (w *tokenWorld) Run(_ context.Context, call TOSCTLCall) ([]byte, error) {
-	if call.Label == "wallet ls" {
-		return json.Marshal([]map[string]any{{"name": w.c.WalletName, "address": w.c.WalletAddress, "state": "active", "balance": "10.0000"}})
-	}
-	if call.Label != "wallet send" {
-		return nil, errors.New("unexpected custody command")
-	}
-	var body string
-	for i, arg := range call.Args {
-		if arg == "--body-boc" {
-			body = call.Args[i+1]
+func (w *tokenWorld) TokenHistory(_ context.Context, _ string, anchor *toschain.ActorTxID) (*toschain.TokenActorHistory, error) {
+	h := *w.history
+	if anchor != nil {
+		w.anchors = append(w.anchors, *anchor)
+		h.Result = toschain.HistoryAnchorReached
+		h.Transactions = nil
+		for _, tx := range w.history.Transactions {
+			if tx.LT > anchor.LT {
+				h.Transactions = append(h.Transactions, tx)
+			}
 		}
 	}
+	return &h, nil
+}
+func (w *tokenWorld) WalletSeqno(context.Context, string) (uint32, error) { return w.walletSeq, nil }
+func (w *tokenWorld) WalletLastTransaction(context.Context, string) (toschain.ActorTxID, error) {
+	return toschain.ActorTxID{LT: 1, Hash: strings.Repeat("e", 64)}, nil
+}
+func (w *tokenWorld) WalletHistory(context.Context, string, toschain.ActorTxID) (*toschain.WalletHistory, error) {
+	return &toschain.WalletHistory{Transactions: w.walletTxs}, nil
+}
+func (w *tokenWorld) env() TokenEnv {
+	return TokenEnv{CheckCustody: func(context.Context, NodeConfig, TokenSession) error { return nil }, Begin: func(context.Context, NodeConfig, TokenActorConfig) (TokenSession, error) { w.begins++; return w, nil }, SetupEnv: SetupEnv{Now: w.ChainTime, Runner: func(TOSCTLConfig, string) (TOSCTLRunner, error) {
+		if w.runnerUnavailable {
+			return nil, errors.New("runner unavailable")
+		}
+		return w, nil
+	}}}
+}
+
+func (w *tokenWorld) Run(_ context.Context, call TOSCTLCall) ([]byte, error) {
+	if call.Label == "wallet ls" {
+		payer := w.c.WalletAddress
+		if w.walletMismatch {
+			payer = "0:" + strings.Repeat("99", 32)
+		}
+		return json.Marshal([]map[string]any{{"name": w.c.WalletName, "address": payer, "state": "active", "balance": "10.0000", "wallet_type": "V3R2"}})
+	}
+	var body string
+	if call.Label == "wallet build token" {
+		var dest string
+		var value uint64
+		for i, arg := range call.Args {
+			switch arg {
+			case "--body-boc":
+				body = call.Args[i+1]
+			case "--to":
+				dest = call.Args[i+1]
+			case "--amount-nanotos":
+				n, ok := new(big.Int).SetString(call.Args[i+1], 10)
+				if !ok {
+					return nil, errors.New("amount")
+				}
+				value = n.Uint64()
+			}
+		}
+		root, e := decodeCellBOCText(body)
+		if e != nil {
+			return nil, e
+		}
+		key := w.currentKey(hex.EncodeToString(root.Hash()))
+		var r TokenActionRecord
+		if readJSON(tokenRecordPath(w.c, key), 1<<20, &r) != nil || r.State != "building" {
+			return nil, errors.New("signing preceded durable preparation")
+		}
+		to, e := address.ParseRawAddr(dest)
+		if e != nil {
+			return nil, e
+		}
+		amount, e := tlb.FromNano(new(big.Int).SetUint64(value), 9)
+		if e != nil {
+			return nil, e
+		}
+		internal, e := tlb.ToCell(&tlb.InternalMessage{IHRDisabled: true, Bounce: true, DstAddr: to, Amount: amount, Body: root})
+		if e != nil {
+			return nil, e
+		}
+		signed := cell.BeginCell().MustStoreSlice(make([]byte, 64), 512).MustStoreInt(3, 32).MustStoreUInt(0, 32).MustStoreUInt(uint64(w.ChainTime().Unix()+120), 32).MustStoreUInt(uint64(w.walletSeq), 32).MustStoreUInt(3, 8).MustStoreRef(internal).EndCell()
+		payer, e := address.ParseRawAddr(w.c.WalletAddress)
+		if e != nil {
+			return nil, e
+		}
+		external, e := tlb.ToCell(&tlb.ExternalMessage{DstAddr: payer, Body: signed})
+		if e != nil {
+			return nil, e
+		}
+		w.builtBody = body
+		w.builtBOC = base64.StdEncoding.EncodeToString(external.ToBOC())
+		w.builds++
+		return json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": w.c.WalletName, "payer": w.c.WalletAddress, "destination": dest, "amount_nanotos": value, "body_hash": "tvm-cell-sha256:" + hex.EncodeToString(root.Hash()), "state_init_hash": "", "message_boc_base64": w.builtBOC})
+	}
+	if call.Label != "wallet broadcast token" {
+		return nil, errors.New("unexpected custody command")
+	}
+	body = w.builtBody
 	root, err := decodeCellBOCText(body)
 	if err != nil {
 		return nil, err
@@ -103,11 +211,32 @@ func (w *tokenWorld) Run(_ context.Context, call TOSCTLCall) ([]byte, error) {
 	if record.State != "submitted" {
 		return nil, errors.New("journal did not fence signing")
 	}
+	if record.Delivery == nil || record.Delivery.ValidUntil != uint32(w.ChainTime().Unix()+120) {
+		return nil, errors.New("broadcast without signed fence")
+	}
 	w.sends++
 	if w.failSend {
 		return nil, errors.New("broadcast outcome unknown")
 	}
-	tx := toschain.TokenActorTransaction{LT: uint64(10 + w.sends), Hash: strings.Repeat("c", 64), Now: 1800000000, Sender: w.c.WalletAddress, QueryID: in.QueryID, Opcode: in.Opcode, TookEffect: true, BodyBOC: body}
+	w.walletTxs = append(w.walletTxs, toschain.WalletTransaction{LT: uint64(2 + w.sends), ExternalMessageHash: record.Delivery.MessageHash, Out: []toschain.WalletOutMessage{{Destination: record.Input.Actor, QueryID: in.QueryID, Known: true}}})
+	w.walletSeq++
+	savedAccount := w.account
+	w.account = w.accountAt(record.Input.Actor)
+	defer func() { w.account = savedAccount }()
+	if w.deferActor {
+		return []byte(`{}`), nil
+	}
+	tx := toschain.TokenActorTransaction{LT: uint64(10 + w.sends), Hash: strings.Repeat("c", 64), Now: uint32(w.ChainTime().Unix()), Sender: w.c.WalletAddress, QueryID: in.QueryID, Opcode: in.Opcode, TookEffect: true, BodyBOC: body}
+	if w.refusedCode != 0 {
+		tx.TookEffect = false
+		tx.ExitCode = w.refusedCode
+	}
+	if in.Opcode == nativecore.ServiceActorTokenRecoverOpcode || in.Opcode == nativecore.ServiceActorTokenRecheckOpcode {
+		q := w.account.Data.NextPayoutID
+		w.account.Data.NextPayoutID++
+		provided := cell.BeginCell().MustStoreUInt(0x52544231, 32).MustStoreUInt(q, 64).EndCell()
+		tx.Outputs = []toschain.TokenActorOutput{{Destination: w.account.OwnWallet, Bounce: true, BodyBOC: base64.StdEncoding.EncodeToString(provided.ToBOC())}}
+	}
 	if in.Opcode == nativecore.ServiceActorTokenWithdrawOpcode && in.TokenAmount != nil && in.TokenAmount.Sign() > 0 {
 		owner := w.account.Data.Owner
 		reported := cell.BeginCell().MustStoreUInt(0x52545231, 32).MustStoreUInt(7, 64).MustStoreBigCoins(in.TokenAmount).MustStoreSlice(owner.Bits, owner.BitLen).MustStoreSlice(owner.Bits, owner.BitLen).MustStoreBigCoins(big.NewInt(20000000)).MustStoreBigCoins(big.NewInt(0)).MustStoreBoolBit(false).EndCell()
@@ -117,9 +246,14 @@ func (w *tokenWorld) Run(_ context.Context, call TOSCTLCall) ([]byte, error) {
 	w.history.Transactions = append(w.history.Transactions, tx)
 	w.account.LastTransaction = toschain.ActorTxID{LT: tx.LT, Hash: tx.Hash}
 	w.history.Head = w.account.LastTransaction
-	if in.Policy != nil {
+	if in.Policy != nil && tx.TookEffect {
+		version := w.account.Data.Policy.PolicyVersion + 1
+		hasAttestor, key, keyBytes := w.account.Data.Policy.HasAttestor, w.account.Data.Policy.AttestorKeyID, w.account.Data.Policy.AttestorKey
+		w.account.Data.Policy = *in.Policy
+		w.account.Data.Policy.HasAttestor, w.account.Data.Policy.AttestorKeyID = hasAttestor, key
+		w.account.Data.Policy.AttestorKey = keyBytes
+		w.account.Data.Policy.PolicyVersion = version
 		w.account.Data.Active = in.Active
-		w.account.Data.Policy.PolicyVersion++
 	}
 	return []byte(`{}`), nil
 }
@@ -571,7 +705,7 @@ func TestTokenProviderSurplusRecoveryUsesWalletBalanceAndBalanceOutcome(t *testi
 	}
 	// The wallet's finalized balance response can refuse a recovery after the
 	// initial call executed. Execution of the owner call alone is not success.
-	tx := toschain.TokenActorTransaction{LT: 20, Hash: strings.Repeat("d", 64), TookEffect: true, Logs: []nativecore.ServiceActorTokenLogV1{{Balance: &nativecore.ServiceActorTokenBalanceLogV1{QueryID: mustTokenQuery(t, w, in), Purpose: 0, Result: 1936}}}}
+	tx := toschain.TokenActorTransaction{LT: 20, Hash: strings.Repeat("d", 64), TookEffect: true, Logs: []nativecore.ServiceActorTokenLogV1{{Balance: &nativecore.ServiceActorTokenBalanceLogV1{QueryID: mustTokenBalanceQuery(t, w), Purpose: 0, Result: 1936}}}}
 	w.history.Transactions = append(w.history.Transactions, tx)
 	w.account.LastTransaction = toschain.ActorTxID{LT: tx.LT, Hash: tx.Hash}
 	w.history.Head = w.account.LastTransaction
@@ -602,4 +736,15 @@ func TestTokenProviderConfirmedResumeReconcilesItsAutomaticPause(t *testing.T) {
 	if _, err := RunTokenAction(context.Background(), w.c, in, true, p.Preview.Digest, w.env()); err != nil || !w.account.Data.Active || w.sends != 2 {
 		t.Fatalf("resume blocked by finalized automatic pause: %v", err)
 	}
+}
+
+func mustTokenBalanceQuery(t *testing.T, w *tokenWorld) uint64 {
+	t.Helper()
+	for i := len(w.history.Transactions) - 1; i >= 0; i-- {
+		if id, e := tokenQueryID(w.history.Transactions[i], w.account.OwnWallet); e == nil {
+			return id
+		}
+	}
+	t.Fatal("missing provide_balance")
+	return 0
 }

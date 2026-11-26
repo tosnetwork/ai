@@ -120,7 +120,7 @@ func (a *Agent) applyToken(ctx context.Context, record actionRecord) outcome {
 		if result.State == "finalized" || result.State == "delivered" || result.State == "returned" || result.State == "abandoned" {
 			state = agentapi.StateApplied
 		}
-		if result.State == "failed" {
+		if tokenFailedState(result.State) {
 			state = agentapi.StateFailed
 		}
 		if state == agentapi.StateApplied {
@@ -156,7 +156,7 @@ func (a *Agent) resolveToken(record actionRecord) outcome {
 	switch result.State {
 	case "finalized", "delivered", "returned", "abandoned":
 		state = agentapi.StateApplied
-	case "failed":
+	case "failed", "refused", "never_sent", "expired", "superseded":
 		state = agentapi.StateFailed
 	}
 	return outcome{state: state, result: result}
@@ -213,7 +213,7 @@ func (a *Agent) refreshTokenActions(ctx context.Context) {
 		switch result.State {
 		case "finalized", "delivered", "returned", "abandoned":
 			state = agentapi.StateApplied
-		case "failed":
+		case "failed", "refused", "never_sent", "expired", "superseded":
 			state = agentapi.StateFailed
 		}
 		if state == "" {
@@ -238,4 +238,12 @@ func (a *Agent) refreshTokenActions(ctx context.Context) {
 			a.notifyLocked()
 		})
 	}
+}
+
+func tokenFailedState(s string) bool {
+	switch s {
+	case "failed", "refused", "never_sent", "expired", "superseded":
+		return true
+	}
+	return false
 }

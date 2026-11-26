@@ -112,6 +112,18 @@ func Render(p agentapi.Presentation) string {
 		renderWithdraw(line, action.Preview)
 	case agentapi.KindToken:
 		line("Token provider action: confirm the exact actor, asset, atomic token amount and nanoTOS value below.")
+		raw, _ := json.Marshal(action.Preview)
+		var token struct {
+			Preview struct {
+				Warnings []string `json:"warnings"`
+			} `json:"preview"`
+		}
+		if json.Unmarshal(raw, &token) == nil {
+			for _, warning := range token.Preview.Warnings {
+				line("Warning: %s", field(warning))
+			}
+		}
+
 		if raw, err := json.Marshal(action.Preview); err == nil {
 			line("%s", field(string(raw)))
 		}

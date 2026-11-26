@@ -7,9 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentsocket"
 )
+
+var ErrTokenPauseRefused = errors.New("alarm: token auto-pause refused")
 
 type TokenMonitorReport struct {
 	Schema     string `json:"schema"`
@@ -51,15 +56,19 @@ func readTokenMonitor(c NodeConfig, point uint64, now int64) (map[string]bool, e
 	if age == 0 {
 		age = 300
 	}
-	if report.Schema != "tos-settlement-report/1" || report.Checkpoint.Height > point || report.Checkpoint.Utime > uint64(now) || now < 0 || uint64(now)-report.Checkpoint.Utime > uint64(age) || !hex64Pattern.MatchString(report.Checkpoint.Hash) || len(report.PauseAssets) > 64 {
+	if report.Schema != "tos-settlement-report/1" || report.Checkpoint.Height > point || report.Checkpoint.Utime > uint64(now) || now < 0 || uint64(now)-report.Checkpoint.Utime > uint64(age) || !hex64Pattern.MatchString(report.Checkpoint.Hash) || report.PauseAssets == nil || len(report.PauseAssets) > 64 {
 		return nil, errors.New("monitor report is stale, future or malformed")
 	}
 	result := map[string]bool{}
 	for _, label := range report.PauseAssets {
-		if !tokenLabel.MatchString(label) || result[label] {
-			return nil, errors.New("invalid duplicate monitor asset label")
+		if !tokenLabel.MatchString(label) {
+			continue
 		}
-		result[label] = true
+		for _, actor := range c.Token.Actors {
+			if actor.AssetID == label {
+				result[label] = true
+			}
+		}
 	}
 	return result, nil
 }
@@ -87,6 +96,10 @@ func CheckTokenSafety(ctx context.Context, c NodeConfig, env TokenEnv) error {
 			failures = append(failures, err)
 			continue
 		}
+		if err := reconcileTokenPauses(ctx, c, a.Address, s); err != nil {
+			failures = append(failures, err)
+			continue
+		}
 		if !alerts[a.AssetID] {
 			continue
 		}
@@ -105,13 +118,19 @@ func CheckTokenSafety(ctx context.Context, c NodeConfig, env TokenEnv) error {
 		// refuses a changed body. A monitor can only reduce configured authority.
 		p, _, err := prepareToken(ctx, c, a, s, in)
 		if err != nil {
-			failures = append(failures, err)
+			failures = append(failures, fmt.Errorf("%w: %s: %v", ErrTokenPauseRefused, a.AssetID, err))
 			continue
 		}
 		record, sendErr := RunTokenAction(ctx, c, in, true, p.Digest, env)
 		err = sendErr
-		if err == nil && record != nil && record.State != "finalized" && record.State != "delivered" {
-			err = ErrOutcomeUnknown
+		if err == nil && record != nil {
+			switch record.State {
+			case "finalized", "delivered":
+			case "refused", "failed":
+				err = fmt.Errorf("%w: %s", ErrTokenPauseRefused, record.Failure)
+			default:
+				err = ErrOutcomeUnknown
+			}
 		}
 		if err != nil {
 			failures = append(failures, fmt.Errorf("pause %s: %w", a.AssetID, err))
@@ -133,6 +152,47 @@ func tokenAlarmClear(c NodeConfig, s TokenSession, assetID string) error {
 	}
 	if alerts[assetID] {
 		return errors.New("asset alarm holds token admission")
+	}
+	return nil
+}
+
+// Observe successful pauses even after active became false or the hook cleared.
+// Their exact call anchor is retained before a busy actor's history grows.
+func reconcileTokenPauses(ctx context.Context, c NodeConfig, actor string, s TokenSession) error {
+	release, err := lockSetup(c.StateDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+	dir := filepath.Join(c.StateDir, "token-actions")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(entries) > 4096 {
+		return errors.New("token action journal needs archival")
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), stateUpdatePrefix) {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		var r TokenActionRecord
+		if err = readJSON(path, 1<<20, &r); err != nil {
+			return err
+		}
+		if r.Input.Actor != actor || r.Input.Operation != "pause" || tokenTerminal(r.State) {
+			continue
+		}
+		if err = resolveTokenAction(ctx, s, c, &r); err != nil {
+			return err
+		}
+		if err = writeJSON(path, r, false); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -87,32 +87,42 @@ func (w *tokenWorld) addTokenTx(tx toschain.TokenActorTransaction) {
 }
 func TestTokenProviderRecheckUsesOriginalReturnedID(t *testing.T) {
 	for _, kind := range []uint8{5, 7} {
-		t.Run(fmt.Sprintf("kind-%d", kind), func(t *testing.T) {
-			w := tokenRecheckedWorld(t, kind)
-			in := w.action("recheck-payout")
-			in.ID = 8
-			p := w.preview(t, in)
-			if _, err := RunTokenAction(context.Background(), w.c, in, true, p.Preview.Digest, w.env()); err != nil {
-				t.Fatal(err)
-			}
-			delete(w.account.Data.Payouts, 8)
-			w.account.Data.Returned[7] = nativecore.ServiceActorTokenReturnedV1{Caller: w.account.Data.Owner, Amount: big.NewInt(1000), ReturnDeadline: 1800000100}
-			w.addTokenTx(toschain.TokenActorTransaction{Now: 1800000000, Logs: []nativecore.ServiceActorTokenLogV1{{Balance: &nativecore.ServiceActorTokenBalanceLogV1{QueryID: mustTokenQuery(t, w, in), Purpose: 1, Target: 8}}}})
+		for _, noLog := range []bool{false, true} {
+			t.Run(fmt.Sprintf("kind-%d/noLog-%t", kind, noLog), func(t *testing.T) {
+				w := tokenRecheckedWorld(t, kind)
+				in := w.action("recheck-payout")
+				in.ID = 8
+				p := w.preview(t, in)
+				if _, err := RunTokenAction(context.Background(), w.c, in, true, p.Preview.Digest, w.env()); err != nil {
+					t.Fatal(err)
+				}
+				delete(w.account.Data.Payouts, 8)
+				w.account.Data.Returned[7] = nativecore.ServiceActorTokenReturnedV1{Caller: w.account.Data.Owner, Amount: big.NewInt(1000), ReturnDeadline: 1800000100}
+				w.addTokenTx(toschain.TokenActorTransaction{Now: 1800000000, Logs: []nativecore.ServiceActorTokenLogV1{{Balance: &nativecore.ServiceActorTokenBalanceLogV1{QueryID: mustTokenBalanceQuery(t, w), Purpose: 1, Target: 8, PayoutID: 8}}}})
 
-			r, err := RunTokenAction(context.Background(), w.c, in, false, "", w.env())
-			if err != nil || r.State != "returned" || w.sends != 1 {
-				t.Fatalf("%+v %v sends=%d", r, err, w.sends)
-			}
-			status, err := ReadTokenStatus(context.Background(), w.c, w.account.Address, w.env())
-			if err != nil || status.Requests[1] != "returned" {
-				t.Fatalf("%+v %v", status, err)
-			}
-			delete(w.account.Data.Returned, 7)
-			w.account.Data.Returned[8] = nativecore.ServiceActorTokenReturnedV1{Caller: w.account.Data.Owner, Amount: big.NewInt(1000)}
-			if _, err := RunTokenAction(context.Background(), w.c, in, false, "", w.env()); err == nil {
-				t.Fatal("wrong returned id accepted")
-			}
-		})
+				if noLog {
+					tx := &w.history.Transactions[len(w.history.Transactions)-1]
+					query := mustTokenBalanceQuery(t, w)
+					body := cell.BeginCell().MustStoreUInt(0x52544232, 32).MustStoreUInt(query, 64).MustStoreBigCoins(big.NewInt(10000)).EndCell()
+					tx.Logs = nil
+					tx.Sender = w.account.OwnWallet
+					tx.BodyBOC = base64.StdEncoding.EncodeToString(body.ToBOC())
+				}
+				r, err := RunTokenAction(context.Background(), w.c, in, false, "", w.env())
+				if err != nil || r.State != "returned" || w.sends != 1 {
+					t.Fatalf("%+v %v sends=%d", r, err, w.sends)
+				}
+				status, err := ReadTokenStatus(context.Background(), w.c, w.account.Address, w.env())
+				if err != nil || status.Requests[1] != "returned" {
+					t.Fatalf("%+v %v", status, err)
+				}
+				delete(w.account.Data.Returned, 7)
+				w.account.Data.Returned[8] = nativecore.ServiceActorTokenReturnedV1{Caller: w.account.Data.Owner, Amount: big.NewInt(1000)}
+				if _, err := RunTokenAction(context.Background(), w.c, in, false, "", w.env()); err == nil {
+					t.Fatal("wrong returned id accepted")
+				}
+			})
+		}
 	}
 }
 
