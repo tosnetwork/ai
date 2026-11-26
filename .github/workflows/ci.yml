@@ -14,7 +14,7 @@ env:
   # rather than skip, without it. Repin when the helper lands on the tos main
   # branch.
   TOS_HELPER_REPOSITORY: tosnetwork/tos
-  TOS_HELPER_COMMIT: 578c629f52428cb74ff78bb87034da9334c7a885
+  TOS_HELPER_COMMIT: 58015fcdfe3d3ea23ff23c1bfc6aec377361b38e
   TOS_TOKEN_CLI_FIXTURE_COMMIT: bb388496634a6901d03c8db01ae92de70c831bd8
 
 jobs:

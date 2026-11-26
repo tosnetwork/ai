@@ -291,3 +291,14 @@ spec-check, schema-check, boundary-lint, gofmt and whitespace checks passed.
 All twelve selected repository controls were caught across the runs, including
 the repaired schema-check anchor and the new signed-expiry comparison. No Rust
 build ran; the frozen wallet-message fixtures were unchanged.
+
+## Merged helper source pin
+
+The final helper source pin in `.github/workflows/ci.yml` is now
+`58015fcdfe3d3ea23ff23c1bfc6aec377361b38e`, the merged source containing the
+coordinated v2 helper changes. The workflow has no static binary checksum or
+matching artifact pins file: it builds that exact source, then runs `sha256sum`
+on the resulting helper and exports `TOS_SERVICE_TOSCTL_SHA256` for the tests.
+That computation remains unchanged; no checksum was guessed and no local Rust
+build was run for this source-only repin. The chain publisher's echo-versus-signed
+expiry check and its regression/control remain unchanged.
