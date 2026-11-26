@@ -103,3 +103,10 @@ JSON. `call` reads the tosctl vault URL, which carries the vault master key,
 from the `VAULT_URL` environment variable and hands it to tosctl only as its
 sole environment variable; there is no command-line flag for it, so it never
 appears in the process table.
+
+## Token buyer adapter
+
+The custody-side MCP adapter also supports the separately pinned token rail.
+See [configuration and funding previews](token-buyer-adapter.md) and
+[local verification](token-buyer-verification.md). Atomic principal budgets are
+per asset; native funding is bounded independently.
