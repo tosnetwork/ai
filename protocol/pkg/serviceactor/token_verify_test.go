@@ -111,19 +111,75 @@ func TestTokenExistingUsesSnapshotDespiteCurrentSuspensionAndPolicy(t *testing.T
 	e.Actor.Data.Active = false
 	e.Actor.Data.Policy.PricePerCall = big.NewInt(99)
 	e.Actor.Data.Policy.MetadataHash = [32]byte{}
-	if _, err := VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest); err != nil {
+	if _, err := VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest, tokenAcceptanceFor(call)); err != nil {
 		t.Fatal(err)
 	}
 	// A changed snapshot or unauthenticated notification cannot inherit that rule.
 	call.Logs[0].Snapshot.Terms.AssetWalletCodeHash[0] ^= 1
-	if _, err := VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest); err == nil {
+	if _, err := VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest, tokenAcceptanceFor(call)); err == nil {
 		t.Fatal("forged immutable terms accepted")
 	}
 }
 func TestTokenExistingRefusesMalformedPublicRailWithoutPanic(t *testing.T) {
 	e, p, r, call := tokenBindingFixture(t)
 	r.PriceAtomic = nil
-	if _, err := VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest); err == nil {
+	if _, err := VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest, tokenAcceptanceFor(call)); err == nil {
 		t.Fatal("nil amount accepted")
+	}
+}
+
+func tokenAcceptanceFor(call toschain.TokenActorTransaction) *Acceptance {
+	return &Acceptance{Call: toschain.ActorTxID{LT: call.LT, Hash: call.Hash}}
+}
+
+// TestTokenExistingBindsTheAcceptanceProofToTheCall requires, as the native
+// rail does, a liveness proof for exactly this call. A proof for an earlier
+// call would let a revocation between the two calls pass.
+func TestTokenExistingBindsTheAcceptanceProofToTheCall(t *testing.T) {
+	verify := func(e *TokenEvidence, p *nativev1.QuoteProposalV1, r nativecore.ServiceActorTokenQuoteRailV1, call toschain.TokenActorTransaction, acceptance ...*Acceptance) error {
+		_, err := VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest, acceptance...)
+		return err
+	}
+	e, p, r, call := tokenBindingFixture(t)
+	earlier := &Acceptance{Call: toschain.ActorTxID{LT: call.LT - 50, Hash: strings.Repeat("bb", 32)}}
+	for name, acceptance := range map[string][]*Acceptance{
+		"absent":       nil,
+		"nil":          {nil},
+		"two":          {tokenAcceptanceFor(call), tokenAcceptanceFor(call)},
+		"earlier call": {earlier},
+		"same LT":      {{Call: toschain.ActorTxID{LT: call.LT, Hash: strings.Repeat("bb", 32)}}},
+		"same hash":    {{Call: toschain.ActorTxID{LT: call.LT + 1, Hash: call.Hash}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := verify(e, p, r, call, acceptance...); err == nil {
+				t.Fatal("a liveness proof for another call was accepted")
+			}
+		})
+	}
+	// The version is revoked between the earlier call and this one.
+	var version *nativev1.CapabilityVersionV1
+	for _, v := range e.Capability.GetCapability().Versions {
+		if v.Version == e.Version {
+			version = v
+		}
+	}
+	if version == nil {
+		t.Fatal("fixture version missing")
+	}
+	version.Revoked = true
+	revocation := &toschain.RegistryTransitionTx{LT: call.LT - 20, Hash: strings.Repeat("cc", 32)}
+	earlier.VersionRevocation = revocation
+	if err := verify(e, p, r, call, earlier); err == nil {
+		t.Fatal("a proof for an earlier call admitted a call after the revocation")
+	}
+	before := tokenAcceptanceFor(call)
+	before.VersionRevocation = revocation
+	if err := verify(e, p, r, call, before); err == nil {
+		t.Fatal("a call after the revocation was admitted")
+	}
+	after := tokenAcceptanceFor(call)
+	after.VersionRevocation = &toschain.RegistryTransitionTx{LT: call.LT + 20, Hash: strings.Repeat("cc", 32)}
+	if err := verify(e, p, r, call, after); err != nil {
+		t.Fatalf("a revocation after the call refused the existing request: %v", err)
 	}
 }
