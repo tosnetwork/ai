@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -13,8 +15,24 @@ import (
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
-func TestTokenPricingUsesOneCheckpointAndFallbackOnlyForAbsence(t *testing.T) {
-	for _, mode := range []string{"present", "absent", "malformed", "unavailable"} {
+// TestTokenPricingFollowsTheContractsThreeSteps covers section 11: the
+// positive slot; if it does not parse, the negative slot; if neither parses,
+// the 0.3 TOS reserve allowance and zero wallet gas. A read that cannot be
+// finalized stays an error and never selects a fallback.
+func TestTokenPricingFollowsTheContractsThreeSteps(t *testing.T) {
+	type slot struct{ positive, negative string }
+	modes := map[string]slot{
+		"present":                    {"good", "good"},
+		"absent":                     {"absent", "good"},
+		"malformed":                  {"empty", "good"},
+		"truncated-prices":           {"short-prices", "good"},
+		"neither-parses":             {"empty", "short-prices"},
+		"both-absent":                {"absent", "absent"},
+		"unavailable":                {"unavailable", "good"},
+		"negative-unavailable":       {"empty", "unavailable"},
+		"trailing-data-still-parses": {"trailing", "good"},
+	}
+	for mode, slots := range modes {
 		t.Run(mode, func(t *testing.T) {
 			_, _, _, _, param, _ := tokenBridgeFixture(t)
 			var negativeReads atomic.Int32
@@ -52,25 +70,35 @@ func TestTokenPricingUsesOneCheckpointAndFallbackOnlyForAbsence(t *testing.T) {
 						if !call.Params.WithProof {
 							t.Error("configuration lacks block binding")
 						}
-						if call.Params.Param == 79 && (mode == "absent" || mode == "unavailable") {
+						var value *cell.Cell
+						kind := ""
+						switch call.Params.Param {
+						case -79:
+							negativeReads.Add(1)
+							kind = slots.negative
+						case 79:
+							kind = slots.positive
+						}
+						if kind == "absent" || kind == "unavailable" {
 							reason, code := "CONFIG_PARAM_ABSENT", -32004
-							if mode == "unavailable" {
+							if kind == "unavailable" {
 								reason = "BLOCK_UNAVAILABLE"
 								code = -32001
 							}
 							_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": call.ID, "error": map[string]any{"code": code, "message": "unavailable", "data": map[string]any{"reason": reason, "retryable": false}}})
 							return
 						}
-						var value *cell.Cell
+						switch kind {
+						case "good":
+							value = param
+						case "empty":
+							value = cell.BeginCell().EndCell()
+						case "short-prices":
+							value = tokenBridgeParamWithPrices(t, param, cell.BeginCell().MustStoreBigCoins(big.NewInt(1)).MustStoreBigCoins(big.NewInt(2)).MustStoreBigCoins(big.NewInt(3)).EndCell())
+						case "trailing":
+							value = tokenBridgeParamWithPrices(t, param, cell.BeginCell().MustStoreBigCoins(big.NewInt(1)).MustStoreBigCoins(big.NewInt(2)).MustStoreBigCoins(big.NewInt(77)).MustStoreBigCoins(big.NewInt(88)).MustStoreUInt(5, 9).EndCell())
+						}
 						switch call.Params.Param {
-						case -79:
-							negativeReads.Add(1)
-							value = param
-						case 79:
-							value = param
-							if mode == "malformed" {
-								value = cell.BeginCell().EndCell()
-							}
 						case 19:
 							value = cell.BeginCell().MustStoreInt(42, 32).EndCell()
 						case 25:
@@ -85,17 +113,36 @@ func TestTokenPricingUsesOneCheckpointAndFallbackOnlyForAbsence(t *testing.T) {
 			}
 			session := testSession(t, serve(), serve(), serve())
 			terms, err := session.ReadTokenWalletTerms(context.Background(), 79)
-			if mode == "malformed" || mode == "unavailable" {
+			switch mode {
+			case "unavailable":
 				if err == nil || negativeReads.Load() != 0 {
-					t.Fatalf("invalid primary fell back: %v %d", err, negativeReads.Load())
+					t.Fatalf("an unfinalized primary read fell back: %v %d", err, negativeReads.Load())
+				}
+				return
+			case "negative-unavailable":
+				if err == nil {
+					t.Fatal("an unfinalized fallback read selected the allowance")
 				}
 				return
 			}
 			if err != nil || terms.MinimumStorage == nil || terms.GasConsumption == nil {
 				t.Fatalf("terms: %+v %v", terms, err)
 			}
-			if (mode == "absent") != (negativeReads.Load() > 0) {
-				t.Fatal("wrong fallback decision")
+			if (slots.positive == "good" || slots.positive == "trailing") != (negativeReads.Load() == 0) {
+				t.Fatalf("wrong fallback decision: %d negative reads", negativeReads.Load())
+			}
+			want, err := parseTokenBridgeTermsForTest(param)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "neither-parses", "both-absent":
+				want = TokenWalletTerms{GasConsumption: big.NewInt(0), MinimumStorage: big.NewInt(300_000_000)}
+			case "trailing-data-still-parses":
+				want = TokenWalletTerms{GasConsumption: big.NewInt(88), MinimumStorage: big.NewInt(77)}
+			}
+			if terms.MinimumStorage.Cmp(want.MinimumStorage) != 0 || terms.GasConsumption.Cmp(want.GasConsumption) != 0 {
+				t.Fatalf("terms %v/%v, want %v/%v", terms.MinimumStorage, terms.GasConsumption, want.MinimumStorage, want.GasConsumption)
 			}
 			prices, err := session.GetTokenFundingPrices(context.Background(), testActor)
 			if err != nil || prices[0].Int64() != 1 || prices[5].Int64() != 6 {
@@ -149,3 +196,68 @@ func TestTokenExistingRoutePinsDoNotDependOnRecognitionStatus(t *testing.T) {
 	}
 }
 func toHash(value []byte) (out [32]byte) { copy(out[:], value); return }
+
+// tokenBridgeParamWithPrices keeps the bridge parameter's header and oracles
+// and replaces its prices reference.
+func tokenBridgeParamWithPrices(t *testing.T, param *cell.Cell, prices *cell.Cell) *cell.Cell {
+	t.Helper()
+	s, err := param.BeginParse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := s.LoadSlice(8 + 256 + 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oracles, err := s.LoadMaybeRef()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid, err := s.LoadUInt(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := cell.BeginCell().MustStoreSlice(head, 8+256+256)
+	if oracles == nil {
+		b.MustStoreBoolBit(false)
+	} else {
+		root, err := oracles.ToCell()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.MustStoreMaybeRef(root)
+	}
+	return b.MustStoreUInt(mid, 8).MustStoreRef(prices).EndCell()
+}
+
+// parseTokenBridgeTermsForTest reads the fixture's own third and fourth price
+// Coins independently of the production parser.
+func parseTokenBridgeTermsForTest(param *cell.Cell) (TokenWalletTerms, error) {
+	s, err := param.BeginParse()
+	if err != nil {
+		return TokenWalletTerms{}, err
+	}
+	if err := s.SkipBits(8 + 256 + 256); err != nil {
+		return TokenWalletTerms{}, err
+	}
+	if _, err := s.LoadMaybeRef(); err != nil {
+		return TokenWalletTerms{}, err
+	}
+	if err := s.SkipBits(8); err != nil {
+		return TokenWalletTerms{}, err
+	}
+	prices, err := s.LoadRef()
+	if err != nil {
+		return TokenWalletTerms{}, err
+	}
+	var values [4]*big.Int
+	for i := range values {
+		if values[i], err = prices.LoadBigCoins(); err != nil {
+			return TokenWalletTerms{}, err
+		}
+	}
+	if values[2] == nil || values[3] == nil {
+		return TokenWalletTerms{}, errors.New("fixture prices are missing")
+	}
+	return TokenWalletTerms{MinimumStorage: values[2], GasConsumption: values[3]}, nil
+}
