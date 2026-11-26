@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -323,5 +324,78 @@ func TestTokenBuyerLifecycleReservesFundingBeforeCustodyAndDoesNotRepeat(t *test
 	}
 	if _, err = f.buyer.SendLifecycle(context.Background(), r.RequestHash, "expire"); !errors.Is(err, ErrLifecycleUnsettled) || sender.sent != 2 {
 		t.Fatal("unsettled lifecycle sent twice", err, sender.sent)
+	}
+}
+
+func TestTokenBuyerUsesTheLapsedActionAtTheRefundDeadline(t *testing.T) {
+	f, reader, sender := newTokenBuyerFixture(t)
+	r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.buyer.Call(context.Background(), r.RequestHash); err != nil {
+		t.Fatal(err)
+	}
+	landTokenBuyerCall(t, f, reader, r)
+	report, err := f.buyer.Resolve(context.Background(), r.RequestHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(int64(report.RefundClaimDeadline), 0)
+	reader.s.wallet.chainTime = now
+	reader.s.builder.snapshot.ReadAt.GenUtime = uint32(now.Unix())
+	f.buyer.config.Now = func() time.Time { return now }
+	report, err = f.buyer.Resolve(context.Background(), r.RequestHash)
+	if err != nil || report.Status != "lapsed" || report.RequiredAction != "sweep_expired_request" {
+		t.Fatalf("deadline outcome: %+v %v", report, err)
+	}
+	updated, err := f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleSweep)
+	if err != nil || len(updated.Lifecycle) != 1 || updated.Lifecycle[0].PreparedTokenMessage.Operation != LifecycleSweep || sender.sent != 2 {
+		t.Fatalf("sweep outcome: %+v %v", updated, err)
+	}
+}
+
+func TestTokenBuyerSurplusIsTerminalAndCountsAsSpentWithinTheWindow(t *testing.T) {
+	for _, reason := range []uint16{1929, 1935} {
+		t.Run(fmt.Sprint(reason), func(t *testing.T) {
+			f, reader, sender := newTokenBuyerFixture(t)
+			r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.buyer.Call(context.Background(), r.RequestHash); err != nil {
+				t.Fatal(err)
+			}
+			landTokenBuyerCall(t, f, reader, r)
+			call := reader.s.history.Transactions[0]
+			caller, err := nativecore.StandardAddress(r.BuyerWallet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			amount, ok := new(big.Int).SetString(r.PriceAtomic, 10)
+			if !ok {
+				t.Fatal("invalid price")
+			}
+			call.Logs = []nativecore.ServiceActorTokenLogV1{{Funding: &nativecore.ServiceActorTokenFundingLogV1{QueryID: r.QueryID, From: caller, Amount: amount, Reason: reason, PayoutID: 0}}}
+			reader.s.history.Transactions = []toschain.TokenActorTransaction{call}
+			delete(reader.s.token.Data.Pending, 1)
+			report, err := f.buyer.Resolve(context.Background(), r.RequestHash)
+			if err != nil || report.Phase != PhaseFundingSurplus || report.Status != "surplus" || report.RequiredAction != "" || report.RequestID != nil || report.PayoutID != nil || report.ReturnedID != nil {
+				t.Fatalf("surplus outcome: %+v %v", report, err)
+			}
+			key := TokenAssetBudgetKey(r.AssetMaster, r.AssetWalletCodeHash, r.AssetDecimals)
+			reserved, err := f.buyer.Journal().ReservedToken(f.buyer.Limits(), saNow)
+			if err != nil || reserved[key] == nil || reserved[key].String() != r.PriceAtomic {
+				t.Fatalf("spent principal disappeared: %v %v", reserved, err)
+			}
+			later := saNow.Add(f.buyer.Limits().Window + time.Second)
+			reserved, err = f.buyer.Journal().ReservedToken(f.buyer.Limits(), later)
+			if err != nil || len(reserved) != 0 {
+				t.Fatalf("terminal surplus held budget forever: %v %v", reserved, err)
+			}
+			if _, err = f.buyer.Call(context.Background(), r.RequestHash); err == nil || sender.sent != 1 {
+				t.Fatal("surplus call was resent")
+			}
+		})
 	}
 }

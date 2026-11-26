@@ -24,6 +24,19 @@ import (
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
+// tokenFundingDiscovery is only a source of candidate transaction identities.
+// Acceptance is established separately by the verifier's exact-hop reads.
+type tokenFundingDiscovery interface {
+	TokenWalletHistory(context.Context, string, *toschain.ActorTxID) (*toschain.TokenWalletHistory, error)
+}
+
+type tokenExportSession interface {
+	purchaseevidence.TokenSession
+	tokenFundingDiscovery
+}
+
+var _ tokenExportSession = (*toschain.ServiceActorSession)(nil)
+
 // exportTokenEvidence verifies the complete funding path in the same finalized
 // session used to select it. No custody material or private read configuration is exported.
 func exportTokenEvidence(config agentConfig, record buyersdk.CallRecord, purchase buyeragent.PurchaseRecord, accepted buyeragent.AcceptedResult, found bool, outDir string, timeout time.Duration, out io.Writer) error {
@@ -40,7 +53,7 @@ func exportTokenEvidence(config agentConfig, record buyersdk.CallRecord, purchas
 	if err != nil {
 		return err
 	}
-	session, ok := opened.(purchaseevidence.TokenSession)
+	session, ok := opened.(tokenExportSession)
 	if !ok {
 		return errors.New("finalized reader does not support token evidence")
 	}
@@ -71,11 +84,7 @@ func exportTokenEvidence(config agentConfig, record buyersdk.CallRecord, purchas
 	next := admitted.Call
 	hops := make([]purchaseevidence.TokenFundingHop, 3)
 	for i := 2; i >= 0; i-- {
-		history, err := session.TokenWalletHistory(ctx, accounts[i], nil)
-		if err != nil {
-			return err
-		}
-		tx, err := fundingPredecessor(history, accounts[i], next)
+		tx, err := provenFundingPredecessor(ctx, session, accounts[i], next)
 		if err != nil {
 			return fmt.Errorf("funding hop %d: %w", i, err)
 		}
@@ -222,4 +231,28 @@ func serviceRequestFromTokenRecord(record buyersdk.CallRecord) (*cell.Cell, erro
 		return nil, errors.New("token request does not reproduce the journal request hash")
 	}
 	return request, nil
+}
+
+// provenFundingPredecessor treats discovery as a hint, then requires the exact
+// transaction reached from this session's finalized wallet head. Neither the
+// candidate's execution flags nor its outputs substitute for that proof.
+func provenFundingPredecessor(ctx context.Context, session tokenExportSession, account string, next toschain.TokenActorTransaction) (toschain.TokenActorTransaction, error) {
+	history, err := session.TokenWalletHistory(ctx, account, nil)
+	if err != nil {
+		return toschain.TokenActorTransaction{}, err
+	}
+	candidate, err := fundingPredecessor(history, account, next)
+	if err != nil {
+		return toschain.TokenActorTransaction{}, err
+	}
+	id := toschain.ActorTxID{LT: candidate.LT, Hash: candidate.Hash}
+	proven, err := session.TokenWalletTransaction(ctx, account, id)
+	if err != nil {
+		return toschain.TokenActorTransaction{}, err
+	}
+	if proven == nil || proven.LT != id.LT || proven.Hash != id.Hash {
+		return toschain.TokenActorTransaction{}, errors.New("funding proof returned another transaction")
+	}
+	exact := &toschain.TokenWalletHistory{Result: toschain.HistoryComplete, Transactions: []toschain.TokenActorTransaction{*proven}}
+	return fundingPredecessor(exact, account, next)
 }

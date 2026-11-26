@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/purchaseevidence"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 	"strings"
@@ -69,6 +72,56 @@ func TestTokenEvidenceReproducesThePrefixedQuoteAndRequest(t *testing.T) {
 			}
 			if _, err := serviceRequestFromTokenRecord(bad); err == nil {
 				t.Fatal("mismatched commitment accepted")
+			}
+		})
+	}
+}
+
+// The embedded interface supplies unrelated getters; the tested path must use
+// this source's exact-hop proof rather than assuming discovery is sufficient.
+type tokenExportProofFixture struct {
+	purchaseevidence.TokenSession
+	history   *toschain.TokenWalletHistory
+	proven    *toschain.TokenActorTransaction
+	err       error
+	account   string
+	requested toschain.ActorTxID
+}
+
+func (f *tokenExportProofFixture) TokenWalletHistory(context.Context, string, *toschain.ActorTxID) (*toschain.TokenWalletHistory, error) {
+	return f.history, nil
+}
+func (f *tokenExportProofFixture) TokenWalletTransaction(_ context.Context, account string, id toschain.ActorTxID) (*toschain.TokenActorTransaction, error) {
+	f.account = account
+	f.requested = id
+	return f.proven, f.err
+}
+
+func TestTokenExporterRequiresTheExactNamedFundingProof(t *testing.T) {
+	next := toschain.TokenActorTransaction{Sender: "payer", InboundMessageHash: "message"}
+	tx := toschain.TokenActorTransaction{LT: 1, Hash: strings.Repeat("ab", 32), TookEffect: true, Outputs: []toschain.TokenActorOutput{{Hash: "message"}}}
+	fresh := func() *tokenExportProofFixture {
+		copyTx := tx
+		return &tokenExportProofFixture{history: &toschain.TokenWalletHistory{Result: toschain.HistoryComplete, Transactions: []toschain.TokenActorTransaction{tx}}, proven: &copyTx}
+	}
+	f := fresh()
+	if got, err := provenFundingPredecessor(context.Background(), f, "payer", next); err != nil || got.Hash != tx.Hash || f.account != "payer" || f.requested.LT != tx.LT || f.requested.Hash != tx.Hash {
+		t.Fatalf("exact hop not proven: %+v %v", f, err)
+	}
+	for name, change := range map[string]func(*tokenExportProofFixture){
+		"absent":        func(f *tokenExportProofFixture) { f.proven = nil },
+		"error":         func(f *tokenExportProofFixture) { f.err = errors.New("proof unavailable") },
+		"lt":            func(f *tokenExportProofFixture) { f.proven.LT++ },
+		"hash":          func(f *tokenExportProofFixture) { f.proven.Hash = strings.Repeat("cd", 32) },
+		"not executed":  func(f *tokenExportProofFixture) { f.proven.TookEffect = false },
+		"bounced":       func(f *tokenExportProofFixture) { f.proven.Bounced = true },
+		"other message": func(f *tokenExportProofFixture) { f.proven.Outputs = []toschain.TokenActorOutput{{Hash: "another"}} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := fresh()
+			change(f)
+			if _, err := provenFundingPredecessor(context.Background(), f, "payer", next); err == nil {
+				t.Fatal("invalid funding proof accepted")
 			}
 		})
 	}
