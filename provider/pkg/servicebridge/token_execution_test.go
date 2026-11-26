@@ -173,7 +173,7 @@ func TestTokenExecutionIgnoresNonEmergencyMonitorAlarms(t *testing.T) {
 	if err := json.Unmarshal(raw, &report); err != nil {
 		t.Fatal(err)
 	}
-	report["alarms"] = []any{map[string]any{"asset": "asset-a", "kind": "reserve_low"}}
+	report["alarms"] = []any{map[string]any{"asset": "asset-a", "code": "redemption_blocked"}}
 	raw, err = json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)

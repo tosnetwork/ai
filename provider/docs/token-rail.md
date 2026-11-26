@@ -215,6 +215,7 @@ still mandatory. The operations runbook records the R abort, S refusal, returned
 entry and claim. The 30-day returned-entry sweep deadline stays unchanged.
 
 A safety refusal between admission and execution leaves the slot admitted and
-retryable. The runtime retries until the response deadline; only a finalized
-not-pending request or an exhausted response window abandons it. Nothing is
+retryable. The runtime retries while the execution and response budgets still
+fit before the response deadline; only a finalized not-pending request or an
+exhausted response window abandons it. Nothing is
 executed during the hold.

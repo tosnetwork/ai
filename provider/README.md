@@ -264,6 +264,7 @@ stale, or when its `provider_pause_assets` contains this actor's asset. That
 field carries the latched emergency alarms: `bridge_frozen`, `token_paused`,
 `destroyed_funds`, `unexplained_decrease` and `backing_shortfall`. Non-emergency
 monitor alarms do not stop execution. A transient pre-execution safety refusal
-keeps the funded slot admitted and retryable until its response deadline; it
-neither starts work nor abandons the request. Refund remains available under the
+keeps the funded slot admitted and retryable while its execution and response
+budgets still fit before the response deadline; it neither starts work nor
+abandons the request. Refund remains available under the
 contract's normal deadlines.
