@@ -252,6 +252,13 @@ func VerifyTokenExistingRequest(e *TokenEvidence, code [32]byte, rail *nativecor
 		return nil, errors.New("token rail does not describe its Quote")
 	}
 	rail = &parsed
+	// As the native rail: liveness transitions are judged against
+	// Acceptance.Call, so the proof must be for this exact call transaction. A
+	// proof for an earlier call could otherwise admit a call made after a
+	// revocation or tombstone.
+	if len(acceptance) != 1 || acceptance[0] == nil || acceptance[0].Call != (toschain.ActorTxID{LT: call.LT, Hash: call.Hash}) {
+		return nil, stepError("binding", 1, "the liveness proof is not for this token call transaction")
+	}
 	binding, err := VerifyTokenBinding(e, code, rail, proposal, rail.Actor, acceptance...)
 	if err != nil {
 		return nil, err

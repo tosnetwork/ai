@@ -181,6 +181,24 @@ func tokenFunded(minimum, explicit *big.Int) (*big.Int, error) {
 func tokenRefusal(code uint32, text string) error {
 	return fmt.Errorf("%s (refused with %d)", text, code)
 }
+
+// tokenRecheckQueryTTL is the contract's RECHECK_QUERY_TTL in seconds.
+const tokenRecheckQueryTTL = 3600
+
+// tokenBalanceQueryIdle mirrors the supersede rule of section 8.5:
+// recover_surplus, recheck_payout and abandon_payout throw 1943 while a
+// balance query younger than RECHECK_QUERY_TTL is pending; an older one is
+// replaced or cleared.
+func tokenBalanceQueryIdle(q nativecore.ServiceActorTokenBalanceQueryV1, now uint64) error {
+	if !q.Active {
+		return nil
+	}
+	free := uint64(q.CreatedAt) + tokenRecheckQueryTTL
+	if now < free {
+		return tokenRefusal(1943, fmt.Sprintf("balance query %d is pending until %d", q.QueryID, free))
+	}
+	return nil
+}
 func tokenFreeBacking(s TokenBuildSnapshot, code uint32) (*big.Int, error) {
 	locks, err := tokenSum(s.Data.Accounting.LockedStorageFees, s.Data.Accounting.LockedOutcomeFees, big.NewInt(nativecore.ServiceActorMinimumOperatingReserve))
 	if err != nil {
@@ -521,6 +539,9 @@ func PrepareTokenMessage(s TokenBuildSnapshot, r TokenBuildRequest) (*TokenPrepa
 		if _, e := tokenRaw(owner, true); e != nil {
 			return nil, tokenRefusal(1934, "owner must be canonical on workchain 0")
 		}
+		if err = tokenBalanceQueryIdle(a.BalanceQuery, now); err != nil {
+			return nil, err
+		}
 		if err = tokenNextPayout(s, 2); err != nil {
 			return nil, err
 		}
@@ -531,9 +552,17 @@ func PrepareTokenMessage(s TokenBuildSnapshot, r TokenBuildRequest) (*TokenPrepa
 		if !tokenCoins(s.OwnWalletBalance) {
 			return nil, errors.New("own token wallet balance was not read")
 		}
+		// surplus_at_read is the actor's own computation at the read: the
+		// wallet balance less everything attributed, in_flight included. While
+		// a payout is in transit S has already debited it, so the true
+		// unattributed balance can be larger (section 4.3); the value is then a
+		// lower bound, as the actor's own answer will be.
 		surplus := new(big.Int).Sub(s.OwnWalletBalance, attributed)
 		if surplus.Sign() < 0 {
 			surplus.SetInt64(0)
+		}
+		if l.InFlight.Sign() > 0 || len(s.Data.Payouts) > 0 {
+			warnings = append(warnings, "payouts are in flight: surplus_at_read is a lower bound, since a payout in transit is already debited at the actor's wallet and still counted in in_flight")
 		}
 		if amount.Cmp(surplus) > 0 {
 			return nil, tokenRefusal(1936, "recovery exceeds surplus")
@@ -558,6 +587,10 @@ func PrepareTokenMessage(s TokenBuildSnapshot, r TokenBuildRequest) (*TokenPrepa
 		}
 		if now < uint64(q.CreatedAt)+2_592_000 {
 			warnings = append(warnings, "payout age threshold has not yet passed")
+		}
+		// recheck_payout and abandon_payout both refuse a younger pending query.
+		if err = tokenBalanceQueryIdle(a.BalanceQuery, now); err != nil {
+			return nil, err
 		}
 		op := nativecore.ServiceActorTokenAbandonOpcode
 		if r.Operation == "recheck-payout" {

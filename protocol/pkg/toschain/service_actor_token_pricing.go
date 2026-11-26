@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
 type TokenWalletTerms struct{ GasConsumption, MinimumStorage *big.Int }
@@ -70,49 +71,59 @@ func (s *ServiceActorSession) ReadTokenWalletTerms(ctx context.Context, param ui
 	if param != 79 && param != 81 && param != 82 && param != 83 {
 		return out, errors.New("unsupported bridge config slot")
 	}
-	root, found, err := s.tokenOptionalConfigAt(ctx, int(param))
-	if err != nil {
-		return out, err
-	}
-	if !found {
-		root, found, err = s.tokenOptionalConfigAt(ctx, -int(param))
+	// The contract's bridge_wallet_terms: the positive slot; if it does not
+	// parse (absent included), the negative slot; if neither parses, the
+	// 0.3 TOS reserve allowance and zero wallet gas. A read that cannot be
+	// finalized is an error, never a value that "does not parse".
+	for _, slot := range []int{int(param), -int(param)} {
+		root, found, err := s.tokenOptionalConfigAt(ctx, slot)
 		if err != nil {
 			return out, err
 		}
+		if !found {
+			continue
+		}
+		if terms, ok := parseTokenBridgeWalletTerms(root); ok {
+			return terms, nil
+		}
 	}
-	if !found {
-		return out, errors.New("bridge configuration is absent")
-	}
+	return TokenWalletTerms{GasConsumption: new(big.Int), MinimumStorage: big.NewInt(TokenWalletAllowance)}, nil
+}
+
+// TokenWalletAllowance is the contract's TOKEN_WALLET_ALLOWANCE: the reserve
+// it prices when neither bridge parameter slot parses.
+const TokenWalletAllowance = 300_000_000
+
+// parseTokenBridgeWalletTerms is the contract's bridge_wallet_terms_of: 8 +
+// 256 + 256 bits skipped, the oracles dictionary, 8 bits, then the prices
+// reference, whose third and fourth Coins are the storage reserve and the
+// wallet gas. Like the contract it does not require the cells to end there.
+func parseTokenBridgeWalletTerms(root *cell.Cell) (TokenWalletTerms, bool) {
+	var out TokenWalletTerms
 	slice, err := tokenOrdinary(root)
 	if err != nil {
-		return out, err
+		return out, false
 	}
 	if err = slice.SkipBits(8 + 256 + 256); err != nil {
-		return out, err
+		return out, false
 	}
-	if _, err = slice.LoadDict(256); err != nil {
-		return out, err
+	if _, err = slice.LoadMaybeRef(); err != nil {
+		return out, false
 	}
 	if err = slice.SkipBits(8); err != nil {
-		return out, err
+		return out, false
 	}
 	prices, err := slice.LoadRef()
 	if err != nil {
-		return out, err
+		return out, false
 	}
-	for i := 0; i < 4; i++ {
-		v, e := prices.LoadBigCoins()
-		if e != nil {
-			return out, e
-		}
-		if i == 2 {
-			out.MinimumStorage = v
-		}
-		if i == 3 {
-			out.GasConsumption = v
+	values := make([]*big.Int, 4)
+	for i := range values {
+		if values[i], err = prices.LoadBigCoins(); err != nil {
+			return out, false
 		}
 	}
-	return out, nil
+	return TokenWalletTerms{MinimumStorage: values[2], GasConsumption: values[3]}, true
 }
 func (s *ServiceActorSession) ReadTokenForwardPrices(ctx context.Context) (TokenForwardPrices, error) {
 	var out TokenForwardPrices

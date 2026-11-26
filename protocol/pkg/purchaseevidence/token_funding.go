@@ -37,24 +37,18 @@ func verifyTokenFunding(ctx context.Context, s TokenSession, a *toschain.TokenAc
 		if _, err := hex32(hop.Transaction.Hash); err != nil {
 			return err
 		}
-		history, err := s.TokenWalletHistory(ctx, hop.Account, nil)
+		// Each hop is proven where it is named: the session walks the wallet's
+		// hash-linked chain from its finalized last transaction down to this
+		// exact transaction, never the wallet's whole history from genesis.
+		tx, err := s.TokenWalletTransaction(ctx, hop.Account, hop.Transaction)
 		if err != nil {
 			return err
 		}
-		if history == nil || history.Result != toschain.HistoryComplete {
-			return errors.New("funding history does not prove its anchor")
+		if tx == nil || tx.LT != hop.Transaction.LT || tx.Hash != hop.Transaction.Hash {
+			return errors.New("funding hop is not the named finalized transaction")
 		}
-		found := false
-		for _, tx := range history.Transactions {
-			if tx.LT == hop.Transaction.LT && tx.Hash == hop.Transaction.Hash {
-				if found {
-					return errors.New("duplicate funding transaction")
-				}
-				chain[i] = tx
-				found = true
-			}
-		}
-		if !found || !chain[i].TookEffect || chain[i].Bounced {
+		chain[i] = *tx
+		if !chain[i].TookEffect || chain[i].Bounced {
 			return errors.New("funding hop did not execute")
 		}
 	}

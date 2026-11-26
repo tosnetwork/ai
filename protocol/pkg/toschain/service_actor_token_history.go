@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -561,6 +562,124 @@ func (s *ServiceActorSession) TokenWalletHistory(ctx context.Context, wallet str
 		return nil, ErrHistoryBoundExceeded
 	}
 	return &history, nil
+}
+
+// tokenWalletAnchoredRead is one node's answer for a named wallet transaction.
+type tokenWalletAnchoredRead struct {
+	Result      HistoryResult         `json:"result"`
+	Transaction TokenActorTransaction `json:"transaction"`
+	BlockRoot   string                `json:"block_root"`
+	BlockFile   string                `json:"block_file"`
+}
+
+// TokenWalletTransaction reads one named wallet transaction at this session's
+// finalized checkpoint. It walks the hash- and logical-time-linked chain from
+// the wallet's finalized last transaction down to the named one, so only the
+// transactions after it count toward the history bound; the wallet's earlier
+// history is never read. A named transaction that is not on that chain, or
+// one further back than the bound, is an error.
+func (s *ServiceActorSession) TokenWalletTransaction(ctx context.Context, wallet string, id ActorTxID) (*TokenActorTransaction, error) {
+	if s == nil || s.reader == nil {
+		return nil, errors.New("token session is required")
+	}
+	canonical, err := CanonicalAddress(wallet)
+	if err != nil || canonical != wallet || !strings.HasPrefix(wallet, "0:") {
+		return nil, errors.New("invalid token wallet address")
+	}
+	if id.LT == 0 {
+		return nil, errors.New("named wallet transaction needs a logical time")
+	}
+	if raw, err := hex.DecodeString(id.Hash); err != nil || len(raw) != 32 || hex.EncodeToString(raw) != id.Hash {
+		return nil, errors.New("named wallet transaction needs a lowercase 32-byte hash")
+	}
+	account, err := hex.DecodeString(strings.TrimPrefix(wallet, "0:"))
+	if err != nil {
+		return nil, err
+	}
+	read, _, err := quorumRead(ctx, s.nodes, s.reader.chain.quorum, func(ctx context.Context, node *rpcNode) (tokenWalletAnchoredRead, error) {
+		if err := s.tokenVerifyEndpointNetwork(ctx, node); err != nil {
+			return tokenWalletAnchoredRead{}, err
+		}
+		last, root, file, err := finalizedActorLastTransaction(ctx, node, wallet, s.seqno)
+		if err != nil {
+			return tokenWalletAnchoredRead{}, err
+		}
+		entry, err := walkToHistoryEntry(ctx, node, wallet, last, id, s.reader.maxHistory)
+		switch {
+		case errors.Is(err, ErrHistoryAnchorMissing):
+			return tokenWalletAnchoredRead{Result: historyAnchorMissing, BlockRoot: root, BlockFile: file}, nil
+		case errors.Is(err, ErrHistoryBoundExceeded):
+			return tokenWalletAnchoredRead{Result: historyBoundExceeded, BlockRoot: root, BlockFile: file}, nil
+		case err != nil:
+			return tokenWalletAnchoredRead{}, err
+		}
+		if !bytes.Equal(entry.transaction.AccountAddr, account) {
+			return tokenWalletAnchoredRead{}, errors.New("wallet history contains another account's transaction")
+		}
+		if !s.chainTime.IsZero() && int64(entry.transaction.Now) > s.chainTime.Unix() {
+			return tokenWalletAnchoredRead{}, errors.New("wallet transaction is newer than its checkpoint")
+		}
+		tx, err := reduceTokenWalletTransaction(entry.transaction, entry.root)
+		if err != nil {
+			return tokenWalletAnchoredRead{}, err
+		}
+		return tokenWalletAnchoredRead{Result: HistoryAnchorReached, Transaction: tx, BlockRoot: root, BlockFile: file}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err = s.pinHashes(read.BlockRoot, read.BlockFile); err != nil {
+		return nil, err
+	}
+	switch read.Result {
+	case historyAnchorMissing:
+		return nil, ErrHistoryAnchorMissing
+	case historyBoundExceeded:
+		return nil, ErrHistoryBoundExceeded
+	case HistoryAnchorReached:
+	default:
+		return nil, errors.New("invalid anchored wallet read")
+	}
+	if read.Transaction.LT != id.LT || read.Transaction.Hash != id.Hash {
+		return nil, errors.New("anchored wallet read returned another transaction")
+	}
+	return &read.Transaction, nil
+}
+
+// walkToHistoryEntry pages backwards from last with the same hash and
+// logical-time continuity as walkHistoryEntries and returns the named entry
+// itself. At most bound newer transactions are passed on the way.
+func walkToHistoryEntry(ctx context.Context, node *rpcNode, address string, last transactionID, target ActorTxID, bound int) (historyEntry, error) {
+	next := last
+	passed := 0
+	for {
+		if next.LT == "0" || next.LT == "" {
+			return historyEntry{}, ErrHistoryAnchorMissing
+		}
+		page, err := historyEntriesAt(ctx, node, address, next, actorHistoryPage)
+		if err != nil {
+			return historyEntry{}, err
+		}
+		for _, entry := range page {
+			transaction := entry.transaction
+			if transaction.LT == target.LT && hex.EncodeToString(transaction.Hash) == target.Hash {
+				return entry, nil
+			}
+			if transaction.LT <= target.LT {
+				return historyEntry{}, ErrHistoryAnchorMissing
+			}
+			if passed >= bound {
+				return historyEntry{}, ErrHistoryBoundExceeded
+			}
+			passed++
+		}
+		oldest := page[len(page)-1].transaction
+		if oldest.PrevTxLT == 0 {
+			return historyEntry{}, ErrHistoryAnchorMissing
+		}
+		next = transactionID{Type: "internal.transactionId", LT: strconv.FormatUint(oldest.PrevTxLT, 10),
+			Hash: base64.StdEncoding.EncodeToString(oldest.PrevTxHash)}
+	}
 }
 func reduceTokenWalletTransaction(tx tlb.Transaction, root *cell.Cell) (TokenActorTransaction, error) {
 	result := TokenActorTransaction{LT: tx.LT, Hash: hex.EncodeToString(tx.Hash), Now: tx.Now, Kind: "wallet_message"}
