@@ -22,6 +22,35 @@ type TokenFundingRefusal struct {
 	State          string                         `json:"state"`
 }
 
+// checkTokenFundingLog refuses the SAF1 combinations the contract cannot emit.
+// A refusal names payout id 0 whenever no funding return was made: an
+// underfunded notification (1929), a zero amount, the funding-return cap, an
+// exhausted payout id, a sender off workchain 0 (1934) or a return whose
+// ledgers would not fit in Coins. Every admission reason can therefore appear
+// with payout id 0; only a return of a positive amount to a canonical
+// workchain-0 sender carries a payout id.
+func checkTokenFundingLog(f *nativecore.ServiceActorTokenFundingLogV1) error {
+	info, err := nativecore.ServiceActorTokenRefusalInfo(f.Reason)
+	if err != nil || !info.Reason {
+		return errors.New("funding refusal reason is outside the admission set")
+	}
+	if f.PayoutID == 0 {
+		return nil
+	}
+	_, standard := f.From.RawStandard()
+	switch {
+	case f.Reason == 1929:
+		return errors.New("underfunded refusal carries a payout id")
+	case f.Reason == 1934:
+		return errors.New("refusal of a sender off workchain 0 carries a payout id")
+	case f.Amount.Sign() == 0:
+		return errors.New("refusal of a zero amount carries a payout id")
+	case !standard || f.From.Workchain != 0:
+		return errors.New("funding return names a sender off workchain 0")
+	}
+	return nil
+}
+
 // ResolveTokenFundingRefusals requires the same complete history as request
 // replay. An absent best-effort log is not invented from an off-chain journal.
 func ResolveTokenFundingRefusals(account *toschain.TokenActorAccount, history *toschain.TokenActorHistory) ([]TokenFundingRefusal, error) {
@@ -44,19 +73,19 @@ func ResolveTokenFundingRefusals(account *toschain.TokenActorAccount, history *t
 			if f == nil {
 				continue
 			}
-			if tx.Sender != account.OwnWallet || tx.Notification == nil || tx.Notification.QueryID != f.QueryID || tx.Notification.From != f.From.Text() || f.Amount == nil || f.Amount.Sign() <= 0 || tx.Notification.AmountAtomic != f.Amount.String() {
+			if tx.Sender != account.OwnWallet || tx.Notification == nil || tx.Notification.QueryID != f.QueryID || tx.Notification.From != f.From.Text() || f.Amount == nil || f.Amount.Sign() < 0 || tx.Notification.AmountAtomic != f.Amount.String() {
 				return nil, errors.New("funding refusal differs from authenticated notification")
 			}
+			if err := checkTokenFundingLog(f); err != nil {
+				return nil, err
+			}
 			item := TokenFundingRefusal{Call: tx, Reason: f.Reason, PayoutID: f.PayoutID, ActivePayoutID: f.PayoutID, Caller: f.From.Text(), Amount: new(big.Int).Set(f.Amount), AmountAtomic: f.Amount.String(), State: "paying"}
-			if f.Reason == 1929 {
-				if f.PayoutID != 0 {
-					return nil, errors.New("surplus refusal has payout")
-				}
+			if f.PayoutID == 0 {
+				// No funding return was made: the tokens are surplus, recoverable
+				// only by the owner's recover_surplus. Nothing is owed to the
+				// sender and no payout or returned cell tracks them.
 				item.State = "surplus"
 			} else {
-				if f.PayoutID == 0 {
-					return nil, errors.New("funding refusal has no payout")
-				}
 				if _, exists := byID[f.PayoutID]; exists {
 					return nil, errors.New("funding payout id reused")
 				}
