@@ -14,7 +14,7 @@ import (
 
 func TestTheRoleTableIsTheSpecs(t *testing.T) {
 	custodyOnly := map[string]bool{agentapi.MethodPending: true, agentapi.MethodPresent: true, agentapi.MethodDecide: true}
-	if len(agentapi.Methods) != 15 {
+	if len(agentapi.Methods) != 18 {
 		t.Fatalf("%d methods", len(agentapi.Methods))
 	}
 	for method := range agentapi.Methods {

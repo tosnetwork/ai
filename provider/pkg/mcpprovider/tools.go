@@ -105,6 +105,9 @@ func (t *Tools) Register(server *mcp.Server) {
 		mcp.AddTool(server, &mcp.Tool{Name: name, Title: title, Description: description + untrustedNote,
 			InputSchema: input, OutputSchema: output, Annotations: annotations}, handler)
 	}
+	add(ToolTokenStatus, "Read token actor state", "Show finalized paying, returned and request states and both TOS floors.", object(map[string]any{"actor": map[string]any{"type": "string", "minLength": 66, "maxLength": 66, "description": "configured canonical actor"}}, "actor"), readOnly, t.tokenStatus)
+	add(ToolTokenPreview, "Preview a token provider action", "Preview token/TOS withdrawal, policy or recovery for a configured actor. "+confirmerNote, tokenPreviewInput, idempotent, t.tokenPreview)
+	add(ToolTokenOffer, "Describe a token offer", "Verify the operator-pinned asset and actor offer at one finalized checkpoint.", object(map[string]any{"actor": map[string]any{"type": "string", "minLength": 66, "maxLength": 66, "description": "configured canonical actor"}}, "actor"), readOnly, t.tokenOffer)
 	add(ToolStatus, "Show the TOS provider node's status",
 		"Shows the provider node as its agent reports it: admission (paused or not, and by whom), the actor's "+
 			"finalized accounting at its checkpoint, withdrawals, relay delivery, the autonomous bounds with today's "+

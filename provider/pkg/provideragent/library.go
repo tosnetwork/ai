@@ -99,6 +99,9 @@ func (r Rail) Status(ctx context.Context, now time.Time) (*servicebridge.Provide
 
 // Preflight implements Library.
 func (r Rail) Preflight(ctx context.Context) *servicebridge.PreflightReport {
+	if c, err := r.Config(); err == nil && c.Token != nil && c.Provider == nil {
+		return servicebridge.TokenPreflight(ctx, c, servicebridge.TokenEnv{SetupEnv: r.env()})
+	}
 	return servicebridge.RunPreflight(ctx, r.Path, servicebridge.PreflightEnv{})
 }
 

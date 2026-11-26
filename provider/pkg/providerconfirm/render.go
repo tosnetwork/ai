@@ -110,6 +110,11 @@ func Render(p agentapi.Presentation) string {
 		renderOffer(line, action.Preview)
 	case agentapi.KindWithdraw:
 		renderWithdraw(line, action.Preview)
+	case agentapi.KindToken:
+		line("Token provider action: confirm the exact actor, asset, atomic token amount and nanoTOS value below.")
+		if raw, err := json.Marshal(action.Preview); err == nil {
+			line("%s", field(string(raw)))
+		}
 	case agentapi.KindResume:
 		renderResume(line, action.Preview)
 	default:

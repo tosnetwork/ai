@@ -504,6 +504,9 @@ func (a *Agent) RequestConfirmation(ctx context.Context, role agentsocket.Role,
 
 // Actions is the actions method (section 4.13).
 func (a *Agent) Actions(role agentsocket.Role, params agentapi.ActionsParams) (any, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, chainReadTimeout)
+	defer cancel()
+	a.refreshTokenActions(ctx)
 	if params.PageSize == 0 {
 		params.PageSize = 20
 	}
@@ -819,6 +822,8 @@ func (a *Agent) apply(record actionRecord, release func()) {
 	defer release()
 	var result outcome
 	switch record.Kind {
+	case agentapi.KindToken:
+		result = a.applyToken(a.ctx, record)
 	case agentapi.KindOffer:
 		result = a.applyOffer(a.ctx, record)
 	case agentapi.KindWithdraw:
@@ -1070,6 +1075,8 @@ func (a *Agent) recoverApplying() error {
 
 func (a *Agent) resolve(record actionRecord) outcome {
 	switch record.Kind {
+	case agentapi.KindToken:
+		return a.resolveToken(record)
 	case agentapi.KindOffer:
 		rail, err := a.lib.Config()
 		if err == nil && rail.Provider != nil {

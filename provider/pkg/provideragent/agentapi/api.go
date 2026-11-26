@@ -45,6 +45,7 @@ var (
 // Methods maps each method to the roles that may call it (section 2.3).
 // Only the custody account lists, presents or decides what awaits the human.
 var Methods = map[string]map[agentsocket.Role]bool{
+	MethodTokenPreview: both, MethodTokenOffer: both, MethodTokenStatus: both,
 	MethodStatus: both, MethodRecords: both, MethodPreflight: both, MethodOfferDescribe: both,
 	MethodExportOffer: both, MethodPause: both, MethodResume: both, MethodOfferPreview: both,
 	MethodWithdrawPreview: both, MethodRequestConfirmation: both, MethodActions: both, MethodCancel: both,
@@ -314,3 +315,32 @@ type Presentation struct {
 	Code                 string `json:"confirmation_code"`
 	ValidUntilUnix       int64  `json:"code_valid_until_unix"`
 }
+
+const MethodTokenPreview = "token_preview"
+const MethodTokenOffer = "token_offer_describe"
+const KindToken = "token"
+
+type TokenActorParams struct {
+	Actor string `json:"actor"`
+}
+type TokenPolicyParams struct {
+	PriceAtomic          string `json:"price_atomic"`
+	StorageFeeNanoTOS    string `json:"storage_fee_nanotos"`
+	CleanupBountyNanoTOS string `json:"cleanup_bounty_nanotos"`
+	MaxLiabilityAtomic   string `json:"max_liability_atomic"`
+	ResponseSLA          uint32 `json:"response_sla_seconds"`
+	RefundClaimWindow    uint32 `json:"refund_claim_window_seconds"`
+}
+type TokenPreviewParams struct {
+	Actor          string             `json:"actor"`
+	Operation      string             `json:"operation"`
+	TokenAmount    string             `json:"token_amount,omitempty"`
+	TOSAmount      string             `json:"tos_amount_nanotos,omitempty"`
+	AllTokens      bool               `json:"all_tokens,omitempty"`
+	AllTOS         bool               `json:"all_tos,omitempty"`
+	ID             string             `json:"id,omitempty"`
+	Policy         *TokenPolicyParams `json:"policy,omitempty"`
+	IdempotencyKey string             `json:"idempotency_key"`
+}
+
+const MethodTokenStatus = "token_status"
