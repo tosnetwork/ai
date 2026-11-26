@@ -136,7 +136,7 @@ func (p *Provider) advanceExecuting(ctx context.Context, path string, record Pro
 	default:
 		return runErr
 	}
-	binding := ReceiptBinding{
+	binding := ReceiptBinding{AssetMaster: expected.AssetMaster,
 		QuoteCommitment: record.QuoteCommitment, ExecutionID: claim.ExecutionID, InputDigest: claim.InputDigest,
 		SourceDigest: record.SourceDigest, Price: expected.Price, ProviderAgentID: p.config.AgentID,
 		ToolchainDigest: record.ToolchainDigest, SandboxDigest: record.SandboxDigest,

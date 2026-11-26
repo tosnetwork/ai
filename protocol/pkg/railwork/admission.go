@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/quoteexchange"
 	"google.golang.org/protobuf/proto"
 )
@@ -11,6 +12,8 @@ import (
 // Provider names the provider a task must be admitted by: its network, its
 // own Agent and the Capability version it offers.
 type Provider struct {
+	Token bool
+
 	Network      *nativev1.NetworkDomain
 	AgentID      string
 	CapabilityID string
@@ -22,10 +25,11 @@ type Provider struct {
 // (item 5) and the frame binding check (item 6) use. Every value is derived
 // from the task and its Quote package, never taken from the buyer's word.
 type Admission struct {
-	Message Message
-	Task    Task
-	Package *nativev1.QuoteProposalPackageV1
-	Quote   *quoteexchange.Validated
+	Message    Message
+	Task       Task
+	Package    *nativev1.QuoteProposalPackageV1
+	Quote      *quoteexchange.Validated
+	TokenQuote *quoteexchange.ValidatedToken
 	// QuoteHash and QuoteCommitment are the Accepted Quote's cell hash and
 	// its tvm-cell-sha256 text.
 	QuoteHash       [32]byte
@@ -103,17 +107,32 @@ func (p Provider) CheckTask(message Message) (*Admission, error) {
 		proposal.GetProviderAgentId() != p.AgentID {
 		return nil, notAdmitted("the Quote names another provider, Capability or version")
 	}
-	validated, err := quoteexchange.ValidatePortable(p.Network, &nativev1.RequestQuoteProposalRequest{
-		CapabilityId: header.CapabilityID, CapabilityVersion: header.CapabilityVersion, BuyerAddress: header.BuyerWallet,
-	}, pkg)
+	request := &nativev1.RequestQuoteProposalRequest{CapabilityId: header.CapabilityID, CapabilityVersion: header.CapabilityVersion, BuyerAddress: header.BuyerWallet}
+	var validated *quoteexchange.Validated
+	var token *quoteexchange.ValidatedToken
+	var transport nativecore.TransportBindingV1
+	var actor string
+	if p.Token {
+		token, err = quoteexchange.ValidateTokenPortable(p.Network, request, pkg)
+		if err == nil {
+			transport = token.TransportBinding
+			actor = token.Rail.Actor
+		}
+	} else {
+		validated, err = quoteexchange.ValidatePortable(p.Network, request, pkg)
+		if err == nil {
+			transport = validated.TransportBinding
+			actor = validated.Rail.Actor
+		}
+	}
 	if err != nil {
 		return nil, refuseWith(RefusalTaskNotAdmitted, "the Quote package does not validate", err)
 	}
-	recipient, err := validated.TransportBinding.AgentPacketRecipient()
+	recipient, err := transport.AgentPacketRecipient()
 	if err != nil || recipient != p.AgentID {
 		return nil, notAdmitted("the Quote does not deliver work to this provider as Agent Packets")
 	}
-	if uint64(len(task.Archive)) > uint64(validated.TransportBinding.MaxRequestBytes) ||
+	if uint64(len(task.Archive)) > uint64(transport.MaxRequestBytes) ||
 		len(task.Archive) > MaxInlineInputBytes {
 		return nil, notAdmitted("the source archive exceeds the quoted request bound")
 	}
@@ -129,7 +148,7 @@ func (p Provider) CheckTask(message Message) (*Admission, error) {
 	if err != nil || committed != executionID {
 		return nil, notAdmitted("the execution ID does not commit to the task's buyer Agent")
 	}
-	quoteHash, commitment, err := QuoteCommitment(p.Network, validated.Proposal)
+	quoteHash, commitment, err := QuoteCommitment(p.Network, proposal)
 	if err != nil {
 		return nil, refuseWith(RefusalTaskNotAdmitted, "the Accepted Quote does not build", err)
 	}
@@ -140,10 +159,10 @@ func (p Provider) CheckTask(message Message) (*Admission, error) {
 		return nil, refuseWith(RefusalTaskNotAdmitted, "the request hash does not build", err)
 	}
 	return &Admission{
-		Message: message, Task: task, Package: pkg, Quote: validated,
+		Message: message, Task: task, Package: pkg, Quote: validated, TokenQuote: token,
 		QuoteHash: quoteHash, QuoteCommitment: commitment, ExecutionID: executionID,
 		SourceDigest: sourceDigest, InputDigest: inputDigest, RequestHash: requestHash,
-		Actor: validated.Rail.Actor,
+		Actor: actor,
 	}, nil
 }
 

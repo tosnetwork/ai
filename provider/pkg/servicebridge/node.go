@@ -3,6 +3,7 @@ package servicebridge
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -443,7 +444,14 @@ func OpenNode(ctx context.Context, config NodeConfig, options NodeOptions) (*Nod
 	if err != nil {
 		return fail(err)
 	}
-	lifecycle, err := NewTOSCTLLifecycle(TOSCTLLifecycleConfig{
+	tokenProfile := ""
+	if config.ActorCodeHash == "tvm-cell-sha256:"+hex.EncodeToString(nativecore.ServiceActorTokenTestProfileCodeHash[:]) {
+		tokenProfile = "test"
+	}
+	if config.ActorCodeHash == "tvm-cell-sha256:"+hex.EncodeToString(nativecore.ServiceActorTokenReleaseCodeHash[:]) {
+		tokenProfile = "release"
+	}
+	lifecycle, err := NewTOSCTLLifecycle(TOSCTLLifecycleConfig{TokenCodeProfile: tokenProfile,
 		BinaryPath: config.TOSCTL.Binary, BinarySHA256: config.TOSCTL.SHA256,
 		ConfigPath: config.TOSCTL.ConfigPath, VaultURL: vaultURL, WalletName: config.WalletName,
 	})
@@ -606,8 +614,29 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 	}
 	n.Manifests.Put(digest, manifestCBOR)
 	respond := time.Duration(config.RespondBudgetSecond) * time.Second
+	isToken := manifest.Settlement.Rail == nativecore.ServiceActorTokenRail
+	var tokenPins []toschain.TokenAssetPin
+	var executionGuard func(context.Context, railgate.Session) error
+	if isToken {
+		if n.Config.Token == nil {
+			return errors.New("servicebridge: token execution needs configured asset pins")
+		}
+		actor := "0:" + hex.EncodeToString(manifest.Settlement.ActorAccountID)
+		a, err := n.Config.Token.Actor(actor)
+		if err != nil {
+			return err
+		}
+		if a.CodeHash != n.Config.ActorCodeHash || len(manifest.SupportedAssets) != 1 || a.Master != "0:"+hex.EncodeToString(manifest.SupportedAssets[0].MasterAccountID) {
+			return errors.New("servicebridge: token execution code pin differs")
+		}
+		tokenPins = n.Config.Token.Pins
+		executionGuard = func(_ context.Context, s railgate.Session) error {
+			return tokenWorkSafety(n.Config, a.AssetID, s, options.Now())
+		}
+	}
 	verifier, err := railgate.NewVerifier(railgate.VerifierConfig{
-		Reader:          railReader{reader: n.Reader},
+		Reader:    railReader{reader: n.Reader},
+		TokenPins: tokenPins, CheckExecution: executionGuard,
 		Manifests:       n.Manifests,
 		Network:         n.Network,
 		ActorCodeHash:   n.Config.ActorCodeHash,
@@ -674,7 +703,7 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 	if (runner == nil && service == nil) || store == nil {
 		return errors.New("servicebridge: the provider has no executor")
 	}
-	n.Provider, err = NewProvider(ProviderConfig{
+	n.Provider, err = NewProvider(ProviderConfig{Token: isToken,
 		AgentID:            n.Config.AgentID,
 		CapabilityID:       config.CapabilityID,
 		Version:            config.Version,
