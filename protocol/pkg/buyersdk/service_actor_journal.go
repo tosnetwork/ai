@@ -44,11 +44,17 @@ const (
 )
 
 const callRecordSchema = "tos.service.service-actor-call.v1"
-const tokenCallRecordSchema = "tos.service.service-actor-token-call.v1"
+const legacyTokenCallRecordSchema = "tos.service.service-actor-token-call.v1"
+const tokenCallRecordSchema = "tos.service.service-actor-token-call.v2"
+
+func isTokenCallRecord(r CallRecord) bool {
+	return r.Schema == tokenCallRecordSchema || r.Schema == legacyTokenCallRecordSchema
+}
 
 // CallRecord is the durable record of one Service Actor purchase. It holds
 // every input the call and its later resolution need.
 type CallRecord struct {
+	TokenValidUntilUnix  uint32                `json:"token_valid_until_unix,omitempty"`
 	Rail                 string                `json:"rail,omitempty"`
 	AssetMaster          string                `json:"asset_master,omitempty"`
 	AssetWalletCodeHash  string                `json:"asset_wallet_code_hash,omitempty"`
@@ -271,7 +277,7 @@ func fitsBudget(records []CallRecord, candidate CallRecord, limits ServiceActorL
 	if calls > limits.MaxCalls || total.Cmp(limits.MaxWindowNanoTOS) > 0 {
 		return budgetError("the call exceeds the buyer's window budget")
 	}
-	if candidate.Schema == tokenCallRecordSchema {
+	if isTokenCallRecord(candidate) {
 		key := TokenAssetBudgetKey(candidate.AssetMaster, candidate.AssetWalletCodeHash, candidate.AssetDecimals)
 		limit, exists := limits.TokenAssets[key]
 		principal, valid := new(big.Int).SetString(candidate.PriceAtomic, 10)
@@ -280,7 +286,7 @@ func fitsBudget(records []CallRecord, candidate CallRecord, limits ServiceActorL
 		}
 		sum := new(big.Int).Set(principal)
 		for _, existing := range records {
-			if existing.RequestHash == candidate.RequestHash || existing.Schema != tokenCallRecordSchema || !existing.reservation(now, limits.Window) || TokenAssetBudgetKey(existing.AssetMaster, existing.AssetWalletCodeHash, existing.AssetDecimals) != key {
+			if existing.RequestHash == candidate.RequestHash || !isTokenCallRecord(existing) || !existing.reservation(now, limits.Window) || TokenAssetBudgetKey(existing.AssetMaster, existing.AssetWalletCodeHash, existing.AssetDecimals) != key {
 				continue
 			}
 			amount, ok := new(big.Int).SetString(existing.PriceAtomic, 10)
@@ -402,6 +408,10 @@ func (j *ServiceActorJournal) Reserved(limits ServiceActorLimits, now time.Time)
 // rechecking at that instant that its Quote is unexpired and that its
 // reservation still fits the limits.
 func (j *ServiceActorJournal) BeginSend(requestHash string, limits ServiceActorLimits, now time.Time) (CallRecord, error) {
+	return j.beginSend(requestHash, limits, now, 0)
+}
+
+func (j *ServiceActorJournal) beginSend(requestHash string, limits ServiceActorLimits, now time.Time, tokenValidUntil uint32) (CallRecord, error) {
 	var result CallRecord
 	if !limits.valid() {
 		return result, errors.New("invalid buyer limits")
@@ -423,6 +433,13 @@ func (j *ServiceActorJournal) BeginSend(requestHash string, limits ServiceActorL
 		}
 		if err := fitsBudget(records, record, limits, now); err != nil {
 			return err
+		}
+		if tokenValidUntil != 0 {
+			if !isTokenCallRecord(record) {
+				return errors.New("token expiry on a native call")
+			}
+			record.Schema = tokenCallRecordSchema
+			record.TokenValidUntilUnix = tokenValidUntil
 		}
 		record.Phase, record.UpdatedUnix, record.SentUnix = PhaseSending, now.Unix(), now.Unix()
 		if err := j.writeUnlocked(record); err != nil {
@@ -574,9 +591,9 @@ func (j *ServiceActorJournal) writeUnlocked(record CallRecord) error {
 
 func validRecordRail(r CallRecord) bool {
 	if r.Schema == callRecordSchema {
-		return r.Rail == "" && r.PreparedTokenMessage == nil && r.PriceAtomic == "" && r.AssetMaster == "" && r.AssetWalletCodeHash == ""
+		return r.TokenValidUntilUnix == 0 && r.Rail == "" && r.PreparedTokenMessage == nil && r.PriceAtomic == "" && r.AssetMaster == "" && r.AssetWalletCodeHash == ""
 	}
-	return r.Schema == tokenCallRecordSchema && r.Rail != "" && r.PreparedTokenMessage != nil && r.AssetMaster != "" && r.AssetWalletCodeHash != "" && r.PriceAtomic != ""
+	return isTokenCallRecord(r) && r.Rail != "" && r.PreparedTokenMessage != nil && r.AssetMaster != "" && r.AssetWalletCodeHash != "" && r.PriceAtomic != ""
 }
 
 // ReservedToken returns held principal separately for each complete asset identity.
@@ -591,7 +608,7 @@ func (j *ServiceActorJournal) ReservedToken(limits ServiceActorLimits, now time.
 			return err
 		}
 		for _, r := range records {
-			if r.Schema != tokenCallRecordSchema || !r.reservation(now, limits.Window) {
+			if !isTokenCallRecord(r) || !r.reservation(now, limits.Window) {
 				continue
 			}
 			amount, ok := new(big.Int).SetString(r.PriceAtomic, 10)
@@ -664,6 +681,10 @@ func (j *ServiceActorJournal) beginTokenLifecycle(before CallRecord, send Lifecy
 		if total.Cmp(limits.MaxWindowNanoTOS) > 0 {
 			return budgetError("token lifecycle funding exceeds the window limit")
 		}
+		if !isTokenCallRecord(current) {
+			return errors.New("token lifecycle on a native call")
+		}
+		current.Schema = tokenCallRecordSchema
 		current.Lifecycle = append(current.Lifecycle, send)
 		current.UpdatedUnix = now.Unix()
 		if err = j.writeUnlocked(current); err != nil {

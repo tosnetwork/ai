@@ -166,7 +166,9 @@ type LifecycleSend struct {
 	WalletAnchorLT   uint64 `json:"wallet_anchor_lt"`
 	WalletAnchorHash string `json:"wallet_anchor_hash"`
 	// Announced, SignedSeqno, ValidUntilUnix and MessageHash are custody's
-	// report of the wallet message it signed (LifecycleSubmission).
+	// report of the wallet message it signed (LifecycleSubmission). Token sends
+	// also store their explicit command-line expiry in ValidUntilUnix, without
+	// claiming a signed seqno or message hash that custody did not report.
 	Announced      bool   `json:"announced,omitempty"`
 	SignedSeqno    uint32 `json:"signed_seqno,omitempty"`
 	ValidUntilUnix int64  `json:"valid_until_unix,omitempty"`
@@ -213,7 +215,7 @@ var (
 func (b *ServiceActorBuyer) SendLifecycle(ctx context.Context, requestHash, operation string) (CallRecord, error) {
 	if record, err := b.config.Journal.Read(requestHash); err != nil {
 		return CallRecord{}, err
-	} else if record.Schema == tokenCallRecordSchema {
+	} else if isTokenCallRecord(record) {
 		return b.sendTokenLifecycle(ctx, record, operation)
 	}
 	if b.config.Lifecycle == nil {

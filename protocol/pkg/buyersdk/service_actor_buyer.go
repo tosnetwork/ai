@@ -327,7 +327,7 @@ func (b *ServiceActorBuyer) Call(ctx context.Context, requestHash string) (CallR
 	if record.Phase != PhasePrepared {
 		return record, fmt.Errorf("call %s is %s and is never sent again", requestHash, record.Phase)
 	}
-	if record.Schema == tokenCallRecordSchema {
+	if isTokenCallRecord(record) {
 		return b.callToken(ctx, record)
 	}
 	if b.config.Sender == nil {
@@ -423,7 +423,7 @@ func (b *ServiceActorBuyer) Resolve(ctx context.Context, requestHash string) (*R
 	if record.Phase == PhasePrepared || record.Phase == PhaseSending || record.Phase == PhaseWithdrawn {
 		return &RequestReport{Phase: record.Phase}, nil
 	}
-	if record.Schema == tokenCallRecordSchema {
+	if isTokenCallRecord(record) {
 		return b.resolveToken(ctx, record)
 	}
 	validated, intent, err := b.reconstruct(record)

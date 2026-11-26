@@ -29,11 +29,24 @@ func tokenAssetDecimals(value uint32) (uint8, error) {
 	return uint8(value), nil
 }
 
+// TokenMessageLifetime is explicit policy, never a custody-helper default.
+const TokenMessageLifetime = 2 * time.Minute
+
+func tokenMessageValidUntil(now time.Time) (uint32, error) {
+	seconds := int64(TokenMessageLifetime / time.Second)
+	unix := now.Unix()
+	if unix <= 0 || unix > math.MaxUint32-seconds {
+		return 0, errors.New("token message expiry is outside uint32")
+	}
+	return uint32(unix + seconds), nil
+}
+
 // TokenMessageSender submits the exact prepared token wallet body. It must not
-// rebuild the transfer or change the confirmed funding amounts.
+// rebuild the transfer or change the confirmed funding amounts. Both methods
+// must honor the supplied absolute expiry; preflight must never broadcast.
 type TokenMessageSender interface {
-	PreflightToken(context.Context, *TokenPreparedMessage) error
-	SendToken(context.Context, *TokenPreparedMessage) error
+	PreflightToken(context.Context, *TokenPreparedMessage, uint32) error
+	SendToken(context.Context, *TokenPreparedMessage, uint32) error
 }
 
 type tokenBuyerSession interface {
@@ -122,7 +135,7 @@ func (b *ServiceActorBuyer) prepareToken(ctx context.Context, request *nativev1.
 
 func (b *ServiceActorBuyer) reconstructToken(r CallRecord) (*quoteexchange.ValidatedToken, [32]byte, error) {
 	var rh [32]byte
-	if r.NetworkID != b.config.Network.NetworkId || r.GenesisRootHash != b.config.Network.GenesisRootHash || r.GenesisFileHash != b.config.Network.GenesisFileHash || r.BuyerWallet != b.config.BuyerWallet || r.ActorCodeHash != b.config.ActorCodeHash || r.Schema != tokenCallRecordSchema || r.Rail != nativecore.ServiceActorTokenRail || r.PreparedTokenMessage == nil {
+	if r.NetworkID != b.config.Network.NetworkId || r.GenesisRootHash != b.config.Network.GenesisRootHash || r.GenesisFileHash != b.config.Network.GenesisFileHash || r.BuyerWallet != b.config.BuyerWallet || r.ActorCodeHash != b.config.ActorCodeHash || !isTokenCallRecord(r) || r.Rail != nativecore.ServiceActorTokenRail || r.PreparedTokenMessage == nil {
 		return nil, rh, errors.New("token journal belongs to another network, buyer or release")
 	}
 	raw, err := base64.StdEncoding.DecodeString(r.PackageBase64)
@@ -204,14 +217,23 @@ func (b *ServiceActorBuyer) callToken(ctx context.Context, r CallRecord) (CallRe
 	if !sameTokenMessage(r.PreparedTokenMessage, fresh) {
 		return r, errors.New("token funding changed; withdraw this preparation and prepare again")
 	}
-	if err = b.config.TokenSender.PreflightToken(ctx, fresh); err != nil {
-		return r, err
-	}
-	r, err = b.config.Journal.BeginSend(r.RequestHash, b.config.Limits, b.config.Now())
+	preflightExpiry, err := tokenMessageValidUntil(b.config.Now())
 	if err != nil {
 		return r, err
 	}
-	sendCtx, cancel := context.WithDeadline(ctx, time.Unix(int64(r.ExpiresAtUnix), 0))
+	if err = b.config.TokenSender.PreflightToken(ctx, fresh, preflightExpiry); err != nil {
+		return r, err
+	}
+	now := b.config.Now()
+	validUntil, err := tokenMessageValidUntil(now)
+	if err != nil {
+		return r, err
+	}
+	r, err = b.config.Journal.beginSend(r.RequestHash, b.config.Limits, now, validUntil)
+	if err != nil {
+		return r, err
+	}
+	sendCtx, cancel := context.WithDeadline(ctx, time.Unix(int64(min(uint64(validUntil), r.ExpiresAtUnix)), 0))
 	defer cancel()
 	defer func() {
 		if v := recover(); v != nil {
@@ -219,7 +241,7 @@ func (b *ServiceActorBuyer) callToken(ctx context.Context, r CallRecord) (CallRe
 			panic(v)
 		}
 	}()
-	err = b.config.TokenSender.SendToken(sendCtx, fresh)
+	err = b.config.TokenSender.SendToken(sendCtx, fresh, validUntil)
 	next := PhaseSubmitted
 	if errors.Is(err, ErrCallNotStarted) {
 		next = PhasePrepared
@@ -442,7 +464,7 @@ func (b *ServiceActorBuyer) sendTokenLifecycle(ctx context.Context, r CallRecord
 		if old.Operation != operation || old.Phase == PhasePrepared || old.Phase == PhaseRefused {
 			continue
 		}
-		if old.ValidUntilBoundUnix > 0 && session.ChainTime().Unix() > old.ValidUntilBoundUnix && seqno == old.WalletSeqno {
+		if old.ValidUntilUnix > 0 && old.ValidUntilUnix == old.ValidUntilBoundUnix && session.ChainTime().Unix() > old.ValidUntilBoundUnix && seqno == old.WalletSeqno {
 			beforeCount := len(r.Lifecycle)
 			settled, err := b.config.Journal.Transition(r.RequestHash, []CallPhase{r.Phase}, func(record *CallRecord) error {
 				if len(record.Lifecycle) != beforeCount {
@@ -494,11 +516,19 @@ func (b *ServiceActorBuyer) sendTokenLifecycle(ctx context.Context, r CallRecord
 	if len(prepared.Warnings) != 0 {
 		return r, ErrLifecycleUnsettled
 	}
-	if err = b.config.TokenSender.PreflightToken(ctx, prepared); err != nil {
+	preflightExpiry, err := tokenMessageValidUntil(b.config.Now())
+	if err != nil {
+		return r, err
+	}
+	if err = b.config.TokenSender.PreflightToken(ctx, prepared, preflightExpiry); err != nil {
 		return r, err
 	}
 	now := b.config.Now()
-	record, err := b.config.Journal.beginTokenLifecycle(r, LifecycleSend{Operation: operation, QueryID: query, Phase: PhaseSending, SentUnix: now.Unix(), WalletSeqno: seqno, ValidUntilBoundUnix: LifecycleValidUntilBound(now), PreparedTokenMessage: prepared}, b.config.Limits, now)
+	validUntil, err := tokenMessageValidUntil(now)
+	if err != nil {
+		return r, err
+	}
+	record, err := b.config.Journal.beginTokenLifecycle(r, LifecycleSend{Operation: operation, QueryID: query, Phase: PhaseSending, SentUnix: now.Unix(), WalletSeqno: seqno, ValidUntilBoundUnix: int64(validUntil), ValidUntilUnix: int64(validUntil), PreparedTokenMessage: prepared}, b.config.Limits, now)
 	if err != nil {
 		return r, err
 	}
@@ -519,9 +549,9 @@ func (b *ServiceActorBuyer) sendTokenLifecycle(ctx context.Context, r CallRecord
 			panic(value)
 		}
 	}()
-	sendCtx, cancel := context.WithDeadline(ctx, now.Add(LifecycleSendTimeout))
+	sendCtx, cancel := context.WithDeadline(ctx, time.Unix(int64(validUntil), 0))
 	defer cancel()
-	sendErr := b.config.TokenSender.SendToken(sendCtx, prepared)
+	sendErr := b.config.TokenSender.SendToken(sendCtx, prepared, validUntil)
 	phase := PhaseSubmitted
 	if errors.Is(sendErr, ErrCallNotStarted) {
 		phase = PhasePrepared

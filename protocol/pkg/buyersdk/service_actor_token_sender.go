@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,15 +31,15 @@ func tokenSenderBody(p *TokenPreparedMessage) (*cell.Cell, uint64, error) {
 		return nil, 0, err
 	}
 	body, err := cell.FromBOC(raw)
-	if err != nil || cellHash(body) != p.BodyHash {
+	if err != nil || hex.EncodeToString(body.Hash()) != p.BodyHash {
 		return nil, 0, errors.New("token body hash differs")
 	}
 	return body, amount, nil
 }
 
 // PreflightToken verifies the exact wallet transfer without broadcasting it.
-func (s *TOSCTLServiceActorSender) PreflightToken(ctx context.Context, p *TokenPreparedMessage) error {
-	if s == nil || ctx == nil {
+func (s *TOSCTLServiceActorSender) PreflightToken(ctx context.Context, p *TokenPreparedMessage, validUntil uint32) error {
+	if s == nil || ctx == nil || validUntil == 0 {
 		return errors.New("missing token custody")
 	}
 	body, amount, err := tokenSenderBody(p)
@@ -48,7 +49,7 @@ func (s *TOSCTLServiceActorSender) PreflightToken(ctx context.Context, p *TokenP
 	if err = s.checkSubmissionEndpoints(ctx); err != nil {
 		return err
 	}
-	raw, err := s.run(ctx, "wallet", "send", "--from", s.wallet, "--to", p.Destination, "--amount-nanotos", fmt.Sprint(amount), "--body-boc", p.BodyBOC, "--bounce", "--build-only")
+	raw, err := s.run(ctx, "wallet", "send", "--from", s.wallet, "--to", p.Destination, "--amount-nanotos", fmt.Sprint(amount), "--body-boc", p.BodyBOC, "--bounce", "--valid-until", fmt.Sprint(validUntil), "--build-only")
 	if err != nil {
 		return errors.New("tosctl could not prepare the token wallet binding check")
 	}
@@ -76,15 +77,15 @@ func (s *TOSCTLServiceActorSender) PreflightToken(ctx context.Context, p *TokenP
 
 // SendToken carries the persisted body and amount unchanged. Any uncertain
 // subprocess result remains ambiguous and must be resolved from finalized state.
-func (s *TOSCTLServiceActorSender) SendToken(ctx context.Context, p *TokenPreparedMessage) error {
-	if s == nil || ctx == nil {
+func (s *TOSCTLServiceActorSender) SendToken(ctx context.Context, p *TokenPreparedMessage, validUntil uint32) error {
+	if s == nil || ctx == nil || validUntil == 0 {
 		return ErrCallNotStarted
 	}
 	_, amount, err := tokenSenderBody(p)
 	if err != nil {
 		return fmt.Errorf("%w: invalid token message", ErrCallNotStarted)
 	}
-	out, err := s.runWithPath(ctx, "wallet", "send", "--from", s.wallet, "--to", p.Destination, "--amount-nanotos", fmt.Sprint(amount), "--body-boc", p.BodyBOC, "--bounce", "--yes")
+	out, err := s.runWithPath(ctx, "wallet", "send", "--from", s.wallet, "--to", p.Destination, "--amount-nanotos", fmt.Sprint(amount), "--body-boc", p.BodyBOC, "--bounce", "--valid-until", fmt.Sprint(validUntil), "--yes")
 	if errors.Is(err, ErrCallNotStarted) {
 		return err
 	}

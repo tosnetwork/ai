@@ -142,3 +142,41 @@ The new controls target both preflight orders, expiry, unchanged seqno, the
 strict expiry boundary, native/token manifest separation and decimal narrowing.
 A separate expected-failure check with the fixture override unset confirmed
 that the prerequisite error names that override. No Rust build ran.
+
+## Explicit token expiry (2026-11-26)
+
+Token sends no longer use the native fallback lifetime. The SDK computes the
+absolute expiry once from the post-preflight send time plus the fixed two-minute
+`TokenMessageLifetime`, persists it and passes that exact value to custody as
+`--valid-until`. Build-only preflight also supplies an explicit expiry, so a helper
+without that option refuses before a broadcast reservation. A slow preflight
+cannot reuse an older budget/send timestamp.
+
+`TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody` drives both a real
+SDK call and a lifecycle attempt through the concrete sender with a recording
+custody runner. At the broadcast boundary it reads the journal and compares its
+expiry with the actual command-line argument. The preflight advances the test
+clock, so recomputing the bound from an earlier timestamp is detectable. Other
+cases reject zero/unrepresentable expiries, retain v1 reservations while upgrading
+a prepared record to v2, and refuse automatic expiry reconciliation for legacy
+attempts carrying only a default-derived bound. The same concrete-path test
+caught a raw/prefixed body-hash comparison mismatch; the sender now checks the
+builder's raw hex hash separately from the CLI's prefixed output hash.
+
+All fifteen packages passed: 668 top-level passes, 1,140 including subtests, with
+the same two existing skips. Vet, spec-check, schema-check, boundary-lint, gofmt
+and whitespace checks passed under the thermal guard. Thirty-four controls were
+killed, followed by a green full run. The six new controls remove/change the
+expiry flag, remove call/lifecycle expiry persistence, trust an inferred legacy
+bound, or restore the incorrect builder body-hash comparison. No Rust build ran.
+
+**Integration prerequisite:** the source at tos main
+`4e0954507629f1b98d0bc6562882f86350076f41` and the installed helper have no
+`wallet send --valid-until` option. Companion CLI support is required before live
+use. The recording-runner tests prove the adapter's argument/persistence contract;
+they do not claim an end-to-end run of that missing CLI option.
+
+**Native follow-up:** native unannounced lifecycle submissions still use
+`LifecycleValidUntilBound` and assume `FallbackWalletMessageLifetime`. That
+fallback remains dependent on the helper's default lifetime; announced native
+submissions use their reported expiry. Native behavior is unchanged here.

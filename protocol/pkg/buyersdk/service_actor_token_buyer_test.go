@@ -2,10 +2,14 @@ package buyersdk
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +17,7 @@ import (
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
+	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
 type tokenBuyerTestSession struct {
@@ -87,7 +92,7 @@ type tokenBuyerTestSender struct {
 	preflights       int
 }
 
-func (s *tokenBuyerTestSender) PreflightToken(_ context.Context, p *TokenPreparedMessage) error {
+func (s *tokenBuyerTestSender) PreflightToken(_ context.Context, p *TokenPreparedMessage, validUntil uint32) error {
 	s.preflights++
 	if s.preflightFailure != nil {
 		return s.preflightFailure
@@ -108,7 +113,7 @@ func (s *tokenBuyerTestSender) PreflightToken(_ context.Context, p *TokenPrepare
 	}
 	return s.preflightFailure
 }
-func (s *tokenBuyerTestSender) SendToken(_ context.Context, p *TokenPreparedMessage) error {
+func (s *tokenBuyerTestSender) SendToken(_ context.Context, p *TokenPreparedMessage, validUntil uint32) error {
 	records, err := s.buyer.config.Journal.Records()
 	if err != nil {
 		return err
@@ -116,11 +121,11 @@ func (s *tokenBuyerTestSender) SendToken(_ context.Context, p *TokenPreparedMess
 	found := false
 	for _, r := range records {
 		if r.PreparedTokenMessage != nil && sameTokenMessage(r.PreparedTokenMessage, p) {
-			found = r.Phase == PhaseSending
+			found = r.Phase == PhaseSending && r.TokenValidUntilUnix == validUntil
 		}
 		for _, send := range r.Lifecycle {
 			if sameTokenMessage(send.PreparedTokenMessage, p) {
-				found = send.Phase == PhaseSending
+				found = send.Phase == PhaseSending && send.ValidUntilUnix == int64(validUntil) && send.ValidUntilBoundUnix == int64(validUntil)
 			}
 		}
 
@@ -468,7 +473,7 @@ func TestTokenLifecycleRetriesAfterAPreflightFailure(t *testing.T) {
 }
 
 func TestTokenLifecycleRetriesOnlyAfterFinalizedExpiryWithoutAConsumedSeqno(t *testing.T) {
-	for _, scenario := range []string{"before", "at bound", "after", "seqno changed", "missing bound", "wallet read failed"} {
+	for _, scenario := range []string{"before", "at bound", "after", "seqno changed", "missing bound", "legacy inferred bound", "wallet read failed"} {
 		t.Run(scenario, func(t *testing.T) {
 			f, reader, sender := newTokenBuyerFixture(t)
 			r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
@@ -494,7 +499,7 @@ func TestTokenLifecycleRetriesOnlyAfterFinalizedExpiryWithoutAConsumedSeqno(t *t
 				t.Fatalf("not ambiguous: %+v %v", ambiguous, err)
 			}
 			first := ambiguous.Lifecycle[0]
-			if first.WalletSeqno != 5 || first.ValidUntilBoundUnix != LifecycleValidUntilBound(now) {
+			if first.WalletSeqno != 5 || first.ValidUntilBoundUnix != now.Add(TokenMessageLifetime).Unix() || first.ValidUntilUnix != first.ValidUntilBoundUnix {
 				t.Fatalf("missing signing bounds: %+v", first)
 			}
 			sender.failure = nil
@@ -508,6 +513,10 @@ func TestTokenLifecycleRetriesOnlyAfterFinalizedExpiryWithoutAConsumedSeqno(t *t
 				reader.s.wallet.seqno = 6
 			case "missing bound":
 				if _, err = f.buyer.Journal().Transition(r.RequestHash, []CallPhase{PhaseAdmitted}, func(record *CallRecord) error { record.Lifecycle[0].ValidUntilBoundUnix = 0; return nil }); err != nil {
+					t.Fatal(err)
+				}
+			case "legacy inferred bound":
+				if _, err = f.buyer.Journal().Transition(r.RequestHash, []CallPhase{PhaseAdmitted}, func(record *CallRecord) error { record.Lifecycle[0].ValidUntilUnix = 0; return nil }); err != nil {
 					t.Fatal(err)
 				}
 			case "wallet read failed":
@@ -536,5 +545,119 @@ func TestTokenBuyerRefusesDecimalsThatDoNotFitInAByte(t *testing.T) {
 		if _, err := tokenAssetDecimals(d); err == nil {
 			t.Fatalf("decimals %d silently narrowed", d)
 		}
+	}
+}
+
+func TestTokenSendsRecordExactlyTheExplicitExpiryPassedToCustody(t *testing.T) {
+	f, reader, _ := newTokenBuyerFixture(t)
+	clock := saNow
+	f.buyer.config.Now = func() time.Time { return clock }
+	r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, _ := testSender(t, validConfig, vetter{endpoints: []string{"https://a.example/jsonRPC", "https://b.example/jsonRPC", "https://c.example/jsonRPC"}}, nil)
+	arg := func(args []string, key string) string {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == key {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+	sender.run = func(_ context.Context, args ...string) ([]byte, error) {
+		if arg(args, "--valid-until") != fmt.Sprint(f.buyer.config.Now().Add(TokenMessageLifetime).Unix()) {
+			return nil, errors.New("preflight omitted explicit expiry")
+		}
+		raw, e := base64.StdEncoding.DecodeString(arg(args, "--body-boc"))
+		if e != nil {
+			return nil, e
+		}
+		body, e := cell.FromBOC(raw)
+		if e != nil {
+			return nil, e
+		}
+		amount, e := strconv.ParseUint(arg(args, "--amount-nanotos"), 10, 64)
+		if e != nil {
+			return nil, e
+		}
+		raw, e = json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": "buyer", "payer": f.buyer.config.BuyerWallet, "destination": arg(args, "--to"), "amount_nanotos": amount, "body_hash": cellHash(body), "state_init_hash": "", "message_boc_base64": "te6c"})
+		if e != nil {
+			return nil, e
+		}
+		// Budget time and the broadcast expiry must be captured after a slow
+		// preflight, rather than reusing its older timestamp.
+		clock = clock.Add(30 * time.Second)
+		return raw, nil
+	}
+	broadcasts := 0
+	sender.runWithPath = func(_ context.Context, args ...string) ([]byte, error) {
+		expiry, e := strconv.ParseUint(arg(args, "--valid-until"), 10, 32)
+		if e != nil || expiry == 0 {
+			return nil, errors.New("broadcast omitted explicit expiry")
+		}
+		stored, e := f.buyer.Journal().Read(r.RequestHash)
+		if e != nil {
+			return nil, e
+		}
+		if broadcasts == 0 {
+			if stored.Phase != PhaseSending || stored.TokenValidUntilUnix != uint32(expiry) || stored.Schema != tokenCallRecordSchema {
+				return nil, errors.New("call expiry was not recorded before broadcast")
+			}
+		} else {
+			if len(stored.Lifecycle) != 1 || stored.Lifecycle[0].Phase != PhaseSending || stored.Lifecycle[0].ValidUntilBoundUnix != int64(expiry) || stored.Lifecycle[0].ValidUntilUnix != int64(expiry) {
+				return nil, errors.New("lifecycle expiry differs from command-line expiry")
+			}
+		}
+		if int64(expiry) != f.buyer.config.Now().Add(TokenMessageLifetime).Unix() {
+			return nil, errors.New("expiry was recomputed from another clock")
+		}
+		broadcasts++
+		return []byte("OK Transfer sent"), nil
+	}
+	f.buyer.config.TokenSender = sender
+	if _, err = f.buyer.Call(context.Background(), r.RequestHash); err != nil {
+		t.Fatal(err)
+	}
+	landTokenBuyerCall(t, f, reader, r)
+	report, err := f.buyer.Resolve(context.Background(), r.RequestHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(int64(report.ResponseDeadline)+1, 0)
+	reader.s.wallet.chainTime = now
+	reader.s.builder.snapshot.ReadAt.GenUtime = uint32(now.Unix())
+	clock = now
+	if _, err = f.buyer.SendLifecycle(context.Background(), r.RequestHash, LifecycleExpire); err != nil {
+		t.Fatal(err)
+	}
+	if broadcasts != 2 {
+		t.Fatalf("broadcasts: %d", broadcasts)
+	}
+}
+
+func TestTokenExpiryRefusesAnUnrepresentableClock(t *testing.T) {
+	if expiry, err := tokenMessageValidUntil(saNow); err != nil || int64(expiry) != saNow.Add(TokenMessageLifetime).Unix() {
+		t.Fatalf("expiry: %d %v", expiry, err)
+	}
+	for _, n := range []int64{-1, 0, int64(math.MaxUint32) - int64(TokenMessageLifetime/time.Second) + 1, math.MaxInt64} {
+		if _, err := tokenMessageValidUntil(time.Unix(n, 0)); err == nil {
+			t.Fatalf("unrepresentable clock %d accepted", n)
+		}
+	}
+}
+
+func TestLegacyPreparedTokenRecordUpgradesWithoutLosingItsReservation(t *testing.T) {
+	f, _, _ := newTokenBuyerFixture(t)
+	r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.buyer.Journal().Transition(r.RequestHash, []CallPhase{PhasePrepared}, func(record *CallRecord) error { record.Schema = legacyTokenCallRecordSchema; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := f.buyer.Call(context.Background(), r.RequestHash)
+	if err != nil || sent.Phase != PhaseSubmitted || sent.Schema != tokenCallRecordSchema || sent.TokenValidUntilUnix == 0 {
+		t.Fatalf("legacy upgrade: %+v %v", sent, err)
 	}
 }

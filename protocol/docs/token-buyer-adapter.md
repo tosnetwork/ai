@@ -84,11 +84,24 @@ verifier still have to execute that acceptance run.
 See [the verification record](token-buyer-verification.md) for acceptance tests,
 commands and the remaining network acceptance gate.
 
-An uncertain token lifecycle attempt records the finalized wallet seqno and the
-same conservative `valid_until` upper bound used by the native sender. A retry
-is allowed after a finalized checkpoint passes that bound with the seqno
-unchanged, proving the attempt never executed; the old attempt is durably marked
-refused before a new one is submitted. At the bound, with a changed seqno or a
-missing legacy bound, the adapter continues to refuse a retry unless exact
-execution is established. A build-only preflight never broadcasts; signing a
-later retry with the same wallet seqno cannot make two wallet messages execute.
+Token calls and lifecycle sends use an explicit `--valid-until`, chosen once as
+the post-preflight send time plus the fixed two-minute `TokenMessageLifetime`.
+Calls persist it as `token_valid_until_unix`; lifecycle attempts store the same
+value in `valid_until_unix` and `valid_until_bound_unix`. The sender passes that
+exact value, and its process deadline cannot outlive it. Build-only preflight
+also supplies an explicit expiry, so an older helper refuses before `sending`.
+
+A lifecycle retry is allowed after a finalized checkpoint is strictly past the
+recorded explicit expiry with the wallet seqno unchanged, proving the attempt
+never executed. An old default-derived bound alone is insufficient: legacy
+attempts without an explicit expiry stay fail-closed unless execution is proven.
+New token records use v2; v1 records remain readable and retain their reservations,
+and a legacy prepared record upgrades atomically when its explicit send expiry
+is recorded. Native journal bytes and the native lifecycle fallback are unchanged.
+
+The helper must implement `wallet send --valid-until`. As of the source check at
+`4e0954507629f1b98d0bc6562882f86350076f41`, that option is absent from current
+main and the installed validation helper. Companion CLI support is a deployment
+prerequisite; these local sender tests check the exact argument and durable bound
+with a recording transport, not a live submission using that missing option.
+The adapter never retries without the option or falls back to a default lifetime.

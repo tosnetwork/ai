@@ -3,6 +3,7 @@ package buyersdk
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -92,29 +93,33 @@ func TestTokenJournalIdentityNeverSharesABudgetByMasterAlone(t *testing.T) {
 
 func TestTokenCustodyCarriesTheExactMessageAndChecksBindings(t *testing.T) {
 	body := cell.BeginCell().MustStoreUInt(7, 32).EndCell()
-	p := &TokenPreparedMessage{Version: TokenPreparedMessageVersion, Operation: "call", Sender: saBuyer, Destination: saOwner, ValueNanotos: "100", Bounce: true, BodyBOC: base64.StdEncoding.EncodeToString(body.ToBOCWithOptions(cell.BOCSerializeOptions{})), BodyHash: cellHash(body)}
-	output, _ := json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": "buyer", "payer": saBuyer, "destination": saOwner, "amount_nanotos": 100, "body_hash": p.BodyHash, "state_init_hash": "", "message_boc_base64": "te6c"})
+	p := &TokenPreparedMessage{Version: TokenPreparedMessageVersion, Operation: "call", Sender: saBuyer, Destination: saOwner, ValueNanotos: "100", Bounce: true, BodyBOC: base64.StdEncoding.EncodeToString(body.ToBOCWithOptions(cell.BOCSerializeOptions{})), BodyHash: hex.EncodeToString(body.Hash())}
+	output, _ := json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": "buyer", "payer": saBuyer, "destination": saOwner, "amount_nanotos": 100, "body_hash": cellHash(body), "state_init_hash": "", "message_boc_base64": "te6c"})
 	endpoints := vetter{endpoints: []string{"https://a.example/jsonRPC", "https://b.example/jsonRPC", "https://c.example/jsonRPC"}}
 	sender, calls := testSender(t, validConfig, endpoints, output)
-	if err := sender.PreflightToken(context.Background(), p); err != nil {
+	if err := sender.PreflightToken(context.Background(), p, 2000000120); err != nil {
 		t.Fatal(err)
 	}
 	sender.runWithPath = func(_ context.Context, args ...string) ([]byte, error) {
 		*calls = append(*calls, args)
 		return []byte("OK Transfer sent"), nil
 	}
-	if err := sender.SendToken(context.Background(), p); err != nil {
+	if err := sender.SendToken(context.Background(), p, 2000000120); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join((*calls)[0], " "), " --bounce --build-only") {
+	if !strings.Contains(strings.Join((*calls)[0], " "), " --bounce --valid-until 2000000120 --build-only") {
 		t.Fatal("preflight omitted bounce")
 	}
 	argv := strings.Join((*calls)[1], " ")
-	if !strings.Contains(argv, "--to "+p.Destination+" --amount-nanotos 100 --body-boc "+p.BodyBOC+" --bounce --yes") {
+	if !strings.Contains(argv, "--to "+p.Destination+" --amount-nanotos 100 --body-boc "+p.BodyBOC+" --bounce --valid-until 2000000120 --yes") {
 		t.Fatal("token body rebuilt", argv)
 	}
+	before := len(*calls)
+	if sender.PreflightToken(context.Background(), p, 0) == nil || !errors.Is(sender.SendToken(context.Background(), p, 0), ErrCallNotStarted) || len(*calls) != before {
+		t.Fatal("missing expiry reached custody")
+	}
 	p.BodyHash = strings.Repeat("00", 32)
-	if sender.PreflightToken(context.Background(), p) == nil || !errors.Is(sender.SendToken(context.Background(), p), ErrCallNotStarted) {
+	if sender.PreflightToken(context.Background(), p, 2000000120) == nil || !errors.Is(sender.SendToken(context.Background(), p, 2000000120), ErrCallNotStarted) {
 		t.Fatal("tampered body accepted")
 	}
 }
