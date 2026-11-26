@@ -113,11 +113,11 @@ func (v *Verifier) verifyToken(ctx context.Context, claim Claim, budget time.Dur
 	if request == nil || request.Call.LT != call.LT || request.Call.Hash != call.Hash || request.Status != serviceactor.StatusPending {
 		return nil, errors.New("railgate: token request is not pending")
 	}
-	if err = v.config.CheckExecution(ctx, session); err != nil {
-		return nil, err
-	}
 	if err = checkSlack(currentTime(session.ChainTime(), started, v.config.Now()), request.Snapshot.ResponseDeadline, budget); err != nil {
 		return nil, err
+	}
+	if err = v.config.CheckExecution(ctx, session); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrExecutionGuard, err)
 	}
 	var master [32]byte
 	if len(validated.Rail.Asset.Master.AccountId) != 32 {

@@ -334,7 +334,16 @@ func (p *Provider) HandleTask(ctx context.Context, message Message) error {
 		// The buyer resent the task: it is never executed again. A result
 		// already attested is redelivered by the delivery loop, sealed to
 		// the newest buyer card a resend brought.
-		return p.learnBuyerCard(ctx, message, task)
+		_, recorded, readErr := p.load(slot.Key())
+		if readErr != nil {
+			return readErr
+		}
+		if slot.State != railgate.SlotAdmitted || recorded {
+			return p.learnBuyerCard(ctx, message, task)
+		}
+		// Nothing started and no provider record exists: retry the same admitted
+		// claim after a transient pre-execution safety refusal.
+		err = nil
 	}
 	if err != nil {
 		return err
@@ -395,6 +404,9 @@ func (p *Provider) HandleTask(ctx context.Context, message Message) error {
 		})
 		return executeErr
 	})
+	if errors.Is(runErr, railgate.ErrExecutionGuard) {
+		return runErr
+	}
 	if errors.Is(runErr, railgate.ErrNotPendingNow) {
 		record.State = ProviderAbandoned
 		return errors.Join(runErr, p.store(key, record, true))
@@ -584,16 +596,24 @@ func (p *Provider) respondFinalized(ctx context.Context, record ProviderRecord) 
 	}
 	if record.AssetMaster != "" {
 		token, ok := session.(interface {
+			ReadTokenActor(context.Context, string) (*toschain.TokenActorAccount, bool, error)
 			TokenHistory(context.Context, string, *toschain.ActorTxID) (*toschain.TokenActorHistory, error)
 		})
 		if !ok {
 			return false, errors.New("servicebridge: token history unavailable")
 		}
+		account, found, e := token.ReadTokenActor(ctx, record.Actor)
+		if e != nil {
+			return false, e
+		}
+		if !found || account == nil {
+			return false, errors.New("servicebridge: token actor unavailable")
+		}
 		history, e := token.TokenHistory(ctx, record.Actor, nil)
 		if e != nil {
 			return false, e
 		}
-		if history == nil || history.Result != toschain.HistoryComplete {
+		if history == nil || history.Result != toschain.HistoryComplete || history.Head != account.LastTransaction {
 			return false, errors.New("servicebridge: token history incomplete")
 		}
 		for _, tx := range history.Transactions {

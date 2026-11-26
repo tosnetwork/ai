@@ -2,6 +2,13 @@ package servicebridge
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/tosnetwork/ai/execution/pkg/railgate"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -41,5 +48,140 @@ func TestTokenLifecycleUsesTheTokenDomainAndCodeProfile(t *testing.T) {
 	joined := strings.Join(captured, " ")
 	if !strings.Contains(joined, "agent service-token") || !strings.Contains(joined, "--code-profile test") || !strings.Contains(joined, "--attestor-controller attestor") {
 		t.Fatal(joined)
+	}
+}
+
+func TestTokenExecutionRefusesMissingMonitor(t *testing.T) {
+	w := newTokenWorld(t)
+	if err := os.Rename(w.c.Token.MonitorReport, w.c.Token.MonitorReport+".saved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tokenWorkSafety(w.c, "asset-a", w, w.ChainTime()); err == nil {
+		t.Fatal("missing report authorized execution")
+	}
+}
+
+func TestTokenExecutionRefusesLocalAdmissionPause(t *testing.T) {
+	w := newTokenWorld(t)
+	if _, _, err := PauseAdmission(w.c.StateDir, "operator pause", w.ChainTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tokenWorkSafety(w.c, "asset-a", w, w.ChainTime()); err == nil {
+		t.Fatal("locally paused execution admitted")
+	}
+}
+
+type tokenResponseSession struct {
+	railgate.Session
+	tokenWorld *tokenWorld
+}
+type tokenResponseReader struct{ session tokenResponseSession }
+
+func (r tokenResponseReader) BeginSession(context.Context) (railgate.Session, error) {
+	return r.session, nil
+}
+
+func TestTokenRespondFinalizedBindsHashAndHistoryHead(t *testing.T) {
+	for _, wrong := range []string{"none", "response", "head"} {
+		t.Run(wrong, func(t *testing.T) {
+			w := newTokenWorld(t)
+			response := strings.Repeat("2a", 32)
+			w.account.LastTransaction = toschain.ActorTxID{LT: 10, Hash: strings.Repeat("a", 64)}
+			w.history = &toschain.TokenActorHistory{Result: toschain.HistoryComplete, Head: w.account.LastTransaction, Transactions: []toschain.TokenActorTransaction{{TookEffect: true, Kind: toschain.ActorTxRespond, RequestID: 7, ResponseHash: response}}}
+			if wrong == "response" {
+				w.history.Transactions[0].ResponseHash = strings.Repeat("2b", 32)
+			}
+			if wrong == "head" {
+				w.history.Head.LT--
+			}
+			p := &Provider{config: ProviderConfig{History: tokenResponseReader{tokenResponseSession{tokenWorld: w}}}}
+			ok, err := p.respondFinalized(context.Background(), ProviderRecord{Actor: w.account.Address, AssetMaster: "token", RequestID: 7, ResponseHash: response})
+			if wrong == "none" {
+				if err != nil || !ok {
+					t.Fatalf("valid response refused: %v", err)
+				}
+			} else if err == nil || ok {
+				t.Fatalf("%s mismatch accepted", wrong)
+			}
+		})
+	}
+}
+
+func (s tokenResponseSession) Checkpoint() uint64   { return s.tokenWorld.Checkpoint() }
+func (s tokenResponseSession) ChainTime() time.Time { return s.tokenWorld.ChainTime() }
+
+func (s tokenResponseSession) ReadTokenActor(ctx context.Context, actor string) (*toschain.TokenActorAccount, bool, error) {
+	return s.tokenWorld.ReadTokenActor(ctx, actor)
+}
+func (s tokenResponseSession) TokenHistory(ctx context.Context, actor string, anchor *toschain.ActorTxID) (*toschain.TokenActorHistory, error) {
+	return s.tokenWorld.TokenHistory(ctx, actor, anchor)
+}
+
+// This source guard complements the behavioural safety checks above: a safety
+// helper that the node never installs must not make the wiring test pass.
+func TestNodeInstallsTokenWorkSafetyAtTheExecutionGate(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "node.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, guarded := false, false
+	ast.Inspect(file, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "openProvider" {
+			return true
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if kv, ok := n.(*ast.KeyValueExpr); ok {
+				key, k := kv.Key.(*ast.Ident)
+				value, v := kv.Value.(*ast.Ident)
+				if k && v && key.Name == "CheckExecution" && value.Name == "executionGuard" {
+					installed = true
+				}
+			}
+			if assign, ok := n.(*ast.AssignStmt); ok && len(assign.Lhs) == 1 && len(assign.Rhs) == 1 {
+				id, ok := assign.Lhs[0].(*ast.Ident)
+				closure, c := assign.Rhs[0].(*ast.FuncLit)
+				if ok && c && id.Name == "executionGuard" {
+					ast.Inspect(closure.Body, func(n ast.Node) bool {
+						call, ok := n.(*ast.CallExpr)
+						if ok {
+							name, ok := call.Fun.(*ast.Ident)
+							if ok && name.Name == "tokenWorkSafety" && len(call.Args) == 4 {
+								guarded = true
+							}
+						}
+						return true
+					})
+				}
+			}
+			return true
+		})
+		return false
+	})
+	if !installed || !guarded {
+		t.Fatal("node does not install the token safety guard")
+	}
+}
+
+func TestTokenExecutionIgnoresNonEmergencyMonitorAlarms(t *testing.T) {
+	w := newTokenWorld(t)
+	raw, err := os.ReadFile(w.c.Token.MonitorReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	report["alarms"] = []any{map[string]any{"asset": "asset-a", "kind": "reserve_low"}}
+	raw, err = json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(w.c.Token.MonitorReport, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := tokenWorkSafety(w.c, "asset-a", w, w.ChainTime()); err != nil {
+		t.Fatal(err)
 	}
 }

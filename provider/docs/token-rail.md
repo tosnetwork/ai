@@ -131,10 +131,10 @@ service before those gates pass.
 
 A stale or unreadable monitor **does not clear on-chain `active`**. It refuses
 local offer inspection, preflight and resume and raises a runtime diagnostic;
-an already-active actor remains active until a signed pause is included. This
-management implementation is not an execution-time alarm/staleness gate. Token
-paid-work execution and its refusal while an alarm is active or monitoring is
-stale are integration requirements of the live-lifecycle work item.
+an already-active actor remains active until a signed pause is included. The
+separate paid-work execution gate refuses stale or missing reports and latched
+emergency assets even while the actor is still active on chain; non-emergency
+alarms do not block execution.
 
 Emergency pause needs only the owned actor's release, master and current
 policy; a missing token wallet cannot prevent it. Policy updates replace the
@@ -184,7 +184,10 @@ inspection/export remains `token --inspect offer` or `export-offer`.
 
 `serve` carries the task through the same finalized-request and at-most-once
 execution gate as native work. Admission and the execution recheck require a
-fresh configured monitor report with no alarm for that asset. A missing or stale
+fresh configured monitor report without that asset in the latched emergency
+`provider_pause_assets` set (`bridge_frozen`, `token_paused`, `destroyed_funds`,
+`unexplained_decrease`, `backing_shortfall`). Non-emergency T14 alarms do not
+stop execution. A missing or stale
 report refuses execution even when the request is already funded. The buyer's
 refund deadlines still apply. Do not clear an alarm to force execution; reconcile
 the request and let its ordinary lifecycle finish. A native-only provider refuses
@@ -210,3 +213,8 @@ asset's bridge configuration. No provider or buyer production path accepts a
 new asset merely because it appears in ConfigParam 84: independent pins are
 still mandatory. The operations runbook records the R abort, S refusal, returned
 entry and claim. The 30-day returned-entry sweep deadline stays unchanged.
+
+A safety refusal between admission and execution leaves the slot admitted and
+retryable. The runtime retries until the response deadline; only a finalized
+not-pending request or an exhausted response window abandons it. Nothing is
+executed during the hold.

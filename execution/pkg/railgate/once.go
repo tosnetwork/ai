@@ -32,8 +32,8 @@ const (
 	// claim; no slot was created and nothing ran.
 	StatusNotAdmitted Status = "not_admitted"
 	// StatusUnavailable: no finalized checkpoint could be opened, or the
-	// local slot store failed before a slot existed. Nothing was admitted
-	// or run and the claim may be retried.
+	// local slot store failed before a slot existed, or an execution safety
+	// guard temporarily refused an admitted slot. Nothing ran; retry is safe.
 	StatusUnavailable Status = "unavailable"
 	// StatusExecutionFailed: the execution ran and did not succeed; the
 	// slot is failed and is never attested.
@@ -66,6 +66,9 @@ func (g *Gate) ExecuteOnce(ctx context.Context, claim Claim, check func(*Verifie
 		return Result{Status: StatusNotAdmitted, Err: errors.New("railgate: invalid execution")}
 	}
 	slot, verified, err := g.Admit(ctx, claim)
+	if errors.Is(err, ErrSlotTaken) && slot.State == SlotAdmitted {
+		err = nil
+	}
 	switch {
 	case errors.Is(err, ErrSlotTaken):
 		result := Result{Status: StatusAlreadyTaken, Slot: slot, Verified: verified, Err: err}
@@ -118,6 +121,8 @@ func (g *Gate) ExecuteOnce(ctx context.Context, claim Claim, check func(*Verifie
 		return nil
 	})
 	switch {
+	case !executed && errors.Is(runErr, ErrExecutionGuard):
+		result.Status, result.Err = StatusUnavailable, runErr
 	case !executed && errors.Is(runErr, ErrNotPendingNow):
 		result.Status, result.Err = StatusNotPendingNow, runErr
 	case !executed:

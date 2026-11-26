@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/big"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -160,5 +161,99 @@ func TestTokenGateRefusesUnprovenOrChangedRequests(t *testing.T) {
 				t.Fatal("unproven token request admitted")
 			}
 		})
+	}
+}
+
+func TestTokenGuardRefusalKeepsAdmittedSlotRetryable(t *testing.T) {
+	v, claim, _ := tokenFixture(t)
+	gate, err := OpenGate(v, filepath.Join(t.TempDir(), "slots"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Close()
+	slot, _, err := gate.Admit(context.Background(), claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.config.CheckExecution = func(context.Context, Session) error { return errors.New("monitor temporarily stale") }
+	ran := false
+	execute := func(context.Context, *Verified) error { ran = true; return nil }
+	if err := gate.Run(context.Background(), slot, claim, execute); err == nil || errors.Is(err, ErrNotPendingNow) {
+		t.Fatalf("transient guard classified as terminal: %v", err)
+	}
+	current, found, err := gate.Lookup(slot.Key())
+	if err != nil || !found || current.State != SlotAdmitted || ran {
+		t.Fatalf("slot lost: %+v %v", current, err)
+	}
+	v.config.CheckExecution = func(context.Context, Session) error { return nil }
+	if err := gate.Run(context.Background(), current, claim, execute); err != nil || !ran {
+		t.Fatalf("retry did not execute: %v", err)
+	}
+}
+
+func TestTokenRecheckRefusesChangedAsset(t *testing.T) {
+	v, claim, _ := tokenFixture(t)
+	expected, err := v.Verify(context.Background(), claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := *expected.AssetMaster
+	changed[0] ^= 1
+	expected.AssetMaster = &changed
+	if err := v.Recheck(context.Background(), claim, expected); err == nil {
+		t.Fatal("asset change accepted")
+	}
+}
+
+func TestTokenGuardDoesNotHideTheResponseDeadline(t *testing.T) {
+	v, claim, chain := tokenFixture(t)
+	gate, err := OpenGate(v, filepath.Join(t.TempDir(), "slots"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Close()
+	slot, verified, err := gate.Admit(context.Background(), claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain.chainTime = time.Unix(int64(verified.ResponseDeadline)-1, 0)
+	v.config.CheckExecution = func(context.Context, Session) error { return errors.New("monitor stale") }
+	err = gate.Run(context.Background(), slot, claim, func(context.Context, *Verified) error { t.Fatal("expired execution started"); return nil })
+	if !errors.Is(err, ErrNotPendingNow) {
+		t.Fatalf("deadline hidden by guard: %v", err)
+	}
+	current, _, err := gate.Lookup(slot.Key())
+	if err != nil || current.State != SlotAbandoned {
+		t.Fatalf("expired slot: %+v %v", current, err)
+	}
+}
+
+func TestTokenExecuteOnceRetriesOnlyAnAdmittedGuardRefusal(t *testing.T) {
+	v, claim, _ := tokenFixture(t)
+	gate, err := OpenGate(v, filepath.Join(t.TempDir(), "slots"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Close()
+	checks, runs := 0, 0
+	v.config.CheckExecution = func(context.Context, Session) error {
+		checks++
+		if checks == 2 {
+			return errors.New("temporary monitor failure")
+		}
+		return nil
+	}
+	execute := func(context.Context, *Verified) (string, error) { runs++; return strings.Repeat("ab", 32), nil }
+	first := gate.ExecuteOnce(context.Background(), claim, nil, execute)
+	if first.Status != StatusUnavailable || first.Slot.State != SlotAdmitted || runs != 0 {
+		t.Fatalf("first: %+v runs=%d", first, runs)
+	}
+	second := gate.ExecuteOnce(context.Background(), claim, nil, execute)
+	if second.Status != StatusCompleted || runs != 1 {
+		t.Fatalf("retry: %+v runs=%d", second, runs)
+	}
+	third := gate.ExecuteOnce(context.Background(), claim, nil, execute)
+	if third.Status != StatusAlreadyTaken || runs != 1 {
+		t.Fatalf("completed slot repeated: %+v runs=%d", third, runs)
 	}
 }
