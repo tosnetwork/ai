@@ -22,6 +22,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/internal/osguard"
 	"github.com/tosnetwork/ai/protocol/pkg/chain"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
+	"github.com/tosnetwork/tosutils-go/tlb"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
@@ -162,7 +163,7 @@ func (b *TosctlBackend) PrepareContractCell(ctx context.Context, destination str
 
 func validatePreparedContractCell(out []byte, wallet, payer, destination string, amountNanoTOS uint64, bodyHash, stateInitHash string) (string, string, error) {
 	var response preparedContractCell
-	if jsonstrict.Decode(out, &response) != nil || response.Version != PreparedContractCellVersion || response.ValidUntil == 0 ||
+	if jsonstrict.Decode(out, &response) != nil || response.Version != PreparedContractCellVersion ||
 		response.Wallet != wallet || response.Payer != payer || response.Destination != destination ||
 		response.AmountNanoTOS != amountNanoTOS || response.BodyHash != bodyHash || response.StateInitHash != stateInitHash {
 		return "", "", errors.New("tosctl returned invalid prepared contract message")
@@ -171,7 +172,59 @@ func validatePreparedContractCell(out []byte, wallet, payer, destination string,
 	if err != nil || len(raw) == 0 || len(raw) > 256<<10 || base64.StdEncoding.EncodeToString(raw) != response.MessageBOCBase64 {
 		return "", "", errors.New("tosctl returned invalid prepared contract BOC")
 	}
+	expiry, err := preparedWalletExpiry(raw, payer)
+	if err != nil || expiry != response.ValidUntil {
+		return "", "", errors.New("tosctl expiry differs from the signed contract message")
+	}
 	return response.MessageBOCBase64, sha256Text(raw), nil
+}
+
+// wallet send emits one send in V3, V4 or V5. Their signed bodies have
+// disjoint sizes; do not guess a version from arbitrary signature bytes.
+func preparedWalletExpiry(raw []byte, payer string) (uint32, error) {
+	root, err := cell.FromBOC(raw)
+	if err != nil || root == nil || root.IsSpecial() {
+		return 0, errors.New("invalid prepared external message")
+	}
+	slice, err := root.BeginParse()
+	if err != nil {
+		return 0, err
+	}
+	var message tlb.ExternalMessage
+	if err = tlb.LoadFromCell(&message, slice); err != nil {
+		return 0, err
+	}
+	if slice.BitsLeft() != 0 || slice.RefsNum() != 0 || message.DstAddr == nil || message.DstAddr.StringRaw() != payer || message.Body == nil || message.Body.IsSpecial() {
+		return 0, errors.New("prepared external wallet binding differs")
+	}
+	body, err := message.Body.BeginParse()
+	if err != nil {
+		return 0, err
+	}
+	if body.RefsNum() != 1 {
+		return 0, errors.New("unsupported prepared wallet body")
+	}
+	switch body.BitsLeft() {
+	case 648, 656: // signature, network, wallet id, expiry, seqno, mode (+ V4 op)
+		if _, err = body.LoadSlice(512); err != nil {
+			return 0, err
+		}
+	case 674: // sign prefix, network, wallet id, expiry, seqno, actions, signature
+		prefix, e := body.LoadUInt(32)
+		if e != nil || prefix != 0x7369676e {
+			return 0, errors.New("invalid signed wallet prefix")
+		}
+	default:
+		return 0, errors.New("unsupported prepared wallet body")
+	}
+	if _, err = body.LoadUInt(64); err != nil {
+		return 0, err
+	}
+	expiry, err := body.LoadUInt(32)
+	if err != nil || expiry == 0 {
+		return 0, errors.New("invalid signed wallet expiry")
+	}
+	return uint32(expiry), nil
 }
 
 func cellHash(value string) (string, error) {

@@ -260,3 +260,34 @@ and provider v2 controls. All twelve selected repository controls were caught, c
 and the signed-expiry-versus-bound distinction. Changed Python lines add no ruff
 diagnostics; the script retains its 43 pre-existing diagnostics and existing
 formatting rather than a whole-file formatting change.
+
+## Publisher echo versus signed expiry
+
+Chain publisher now decodes the inbound external message and reads its actual
+wallet-body expiry before accepting prepared-send v2. It checks the external
+wallet destination and refuses malformed, unexpiring and unsupported body shapes.
+The supported single-send V3/V4/V5 bodies have disjoint sizes, so a signature
+beginning with the V5 prefix is never mistaken for a V5 body.
+
+`TestPreparedContractCellBindsEchoToSignedWalletExpiry` checks the committed
+independent tosctl-built V4/V5 fixtures, then changes only the JSON expiry and
+requires refusal. The V3 test deliberately puts the V5 prefix into its signature;
+it also covers malformed messages, absent bodies, legacy unexpiring bodies and
+another payer. The existing strict semantic-confirmation test now uses an
+external wallet message and also refuses a mismatched echo.
+
+The new repository control `custody-v2-publisher-signed-expiry` removes the exact
+echo comparison; both real-fixture mismatch cases then fail. No fixture was
+regenerated. The helper remains pinned to the companion branch commit pending
+the coordinator's merged source commit; no premature pin change is made here.
+
+The old separate non-zero JSON guard is redundant once the non-zero signed
+expiry must equal the echo. It and its old mutation entry were replaced by this
+stronger check; missing/null/zero echoes remain refused by the exact comparison.
+
+Guarded final verification passed all 21 packages: 1,087 top-level tests and
+1,996 passes including subtests, with the same seven existing skips. Go vet,
+spec-check, schema-check, boundary-lint, gofmt and whitespace checks passed.
+All twelve selected repository controls were caught across the runs, including
+the repaired schema-check anchor and the new signed-expiry comparison. No Rust
+build ran; the frozen wallet-message fixtures were unchanged.
