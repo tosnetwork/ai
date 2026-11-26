@@ -35,7 +35,7 @@ func testIntent() ServiceActorCallIntent {
 func preparedOutput(t *testing.T, payer, destination string, amount uint64, intent ServiceActorCallIntent) []byte {
 	t.Helper()
 	body := nativecore.BuildServiceActorCallBody(intent.QueryID, intent.RequestHash, intent.ExpectedTermsHash)
-	raw, err := json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v1", "wallet": "buyer", "payer": payer,
+	raw, err := json.Marshal(map[string]any{"version": "tosctl.wallet-prepared-send.v2", "valid_until": 2000000120, "wallet": "buyer", "payer": payer,
 		"destination": destination, "amount_nanotos": amount, "body_hash": cellHash(body), "state_init_hash": "", "message_boc_base64": "te6c"})
 	if err != nil {
 		t.Fatal(err)
@@ -218,5 +218,68 @@ func TestSubmissionURLAcceptsOnlyTheCanonicalForm(t *testing.T) {
 		if got, err := submissionURL(endpoint); err == nil {
 			t.Errorf("%q was accepted as %q", endpoint, got)
 		}
+	}
+}
+
+func TestNativePreflightRequiresV2AndRecordsItsEchoedExpiry(t *testing.T) {
+	for _, shape := range []string{"v2", "v1", "missing", "unknown", "null", "overflow"} {
+		t.Run(shape, func(t *testing.T) {
+			f := newBuyerFixture(t, defaultLimits())
+			r, err := f.buyer.Prepare(context.Background(), f.request, f.pkg, digest32(1), digest32(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, intent, err := f.buyer.reconstruct(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			amount, err := intent.Payment()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var answer map[string]any
+			if err = json.Unmarshal(preparedOutput(t, saBuyer, saActor, amount.Uint64(), intent), &answer); err != nil {
+				t.Fatal(err)
+			}
+			switch shape {
+			case "v1":
+				answer["version"] = "tosctl.wallet-prepared-send.v1"
+			case "missing":
+				delete(answer, "valid_until")
+			case "unknown":
+				answer["extra"] = true
+			case "null":
+				answer["valid_until"] = nil
+			case "overflow":
+				answer["valid_until"] = uint64(1) << 32
+			}
+			raw, err := json.Marshal(answer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sender, _ := testSender(t, validConfig, lifecycleEndpoints, raw)
+			sent := 0
+			sender.runWithPath = func(context.Context, ...string) ([]byte, error) {
+				stored, e := f.buyer.Journal().Read(r.RequestHash)
+				if e != nil || stored.Phase != PhaseSending || stored.PreflightExpiryUnix != 2000000120 {
+					return nil, errors.New("native preflight expiry was not recorded before sending")
+				}
+				sent++
+				return []byte("Service Actor call message submitted to " + saActor), nil
+			}
+			f.buyer.config.Sender = sender
+			_, err = f.buyer.Call(context.Background(), r.RequestHash)
+			stored, readErr := f.buyer.Journal().Read(r.RequestHash)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if shape == "v2" {
+				if err != nil || sent != 1 || stored.PreflightExpiryUnix != 2000000120 {
+					t.Fatalf("v2 native call: %+v %v sent=%d", stored, err, sent)
+				}
+			} else if err == nil || sent != 0 || stored.Phase != PhasePrepared {
+				t.Fatalf("invalid preflight reached send: %+v %v", stored, err)
+			}
+		})
 	}
 }

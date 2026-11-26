@@ -229,7 +229,7 @@ func (b *ServiceActorBuyer) callToken(ctx context.Context, r CallRecord) (CallRe
 	if err != nil {
 		return r, err
 	}
-	r, err = b.config.Journal.beginSend(r.RequestHash, b.config.Limits, now, validUntil)
+	r, err = b.config.Journal.beginSend(r.RequestHash, b.config.Limits, now, validUntil, 0)
 	if err != nil {
 		return r, err
 	}

@@ -60,6 +60,7 @@ type CallRecord struct {
 	AssetDecimals        uint8                 `json:"asset_decimals,omitempty"`
 	PriceAtomic          string                `json:"price_atomic,omitempty"`
 	PreparedTokenMessage *TokenPreparedMessage `json:"prepared_token_message,omitempty"`
+	PreflightExpiryUnix  uint32                `json:"preflight_valid_until_unix,omitempty"`
 	Schema               string                `json:"schema"`
 	RequestHash          string                `json:"request_hash"`
 	QueryID              uint64                `json:"query_id"`
@@ -407,10 +408,10 @@ func (j *ServiceActorJournal) Reserved(limits ServiceActorLimits, now time.Time)
 // rechecking at that instant that its Quote is unexpired and that its
 // reservation still fits the limits.
 func (j *ServiceActorJournal) BeginSend(requestHash string, limits ServiceActorLimits, now time.Time) (CallRecord, error) {
-	return j.beginSend(requestHash, limits, now, 0)
+	return j.beginSend(requestHash, limits, now, 0, 0)
 }
 
-func (j *ServiceActorJournal) beginSend(requestHash string, limits ServiceActorLimits, now time.Time, tokenValidUntil uint32) (CallRecord, error) {
+func (j *ServiceActorJournal) beginSend(requestHash string, limits ServiceActorLimits, now time.Time, tokenValidUntil, preflightValidUntil uint32) (CallRecord, error) {
 	var result CallRecord
 	if !limits.valid() {
 		return result, errors.New("invalid buyer limits")
@@ -439,6 +440,7 @@ func (j *ServiceActorJournal) beginSend(requestHash string, limits ServiceActorL
 			}
 			record.TokenValidUntilUnix = tokenValidUntil
 		}
+		record.PreflightExpiryUnix = preflightValidUntil
 		record.Phase, record.UpdatedUnix, record.SentUnix = PhaseSending, now.Unix(), now.Unix()
 		if err := j.writeUnlocked(record); err != nil {
 			return err

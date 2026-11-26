@@ -58,7 +58,7 @@ func TestPreparedContractCellRequiresExactSemanticConfirmation(t *testing.T) {
 	message := cell.BeginCell().MustStoreUInt(0x22, 8).EndCell()
 	bodyHash := "tvm-cell-sha256:" + fmt.Sprintf("%x", body.Hash())
 	stateInitHash := "tvm-cell-sha256:" + fmt.Sprintf("%x", stateInit.Hash())
-	value := preparedContractCell{Version: PreparedContractCellVersion,
+	value := preparedContractCell{Version: PreparedContractCellVersion, ValidUntil: 2000000120,
 		MessageBOCBase64: base64.StdEncoding.EncodeToString(message.ToBOC()), Wallet: "relay",
 		Payer: "0:" + strings.Repeat("11", 32), Destination: "0:" + strings.Repeat("22", 32),
 		AmountNanoTOS: 200_000_000, BodyHash: bodyHash, StateInitHash: stateInitHash}
@@ -74,7 +74,32 @@ func TestPreparedContractCellRequiresExactSemanticConfirmation(t *testing.T) {
 		value.Destination, value.AmountNanoTOS, bodyHash, stateInitHash); err != nil {
 		t.Fatal(err)
 	}
+	for _, shape := range []string{"missing", "unknown", "null", "overflow"} {
+		var answer map[string]any
+		if err := json.Unmarshal(encode(t, value), &answer); err != nil {
+			t.Fatal(err)
+		}
+		switch shape {
+		case "missing":
+			delete(answer, "valid_until")
+		case "unknown":
+			answer["extra"] = true
+		case "null":
+			answer["valid_until"] = nil
+		case "overflow":
+			answer["valid_until"] = uint64(1) << 32
+		}
+		raw, err := json.Marshal(answer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err = validatePreparedContractCell(raw, value.Wallet, value.Payer, value.Destination, value.AmountNanoTOS, bodyHash, stateInitHash); err == nil {
+			t.Fatalf("accepted %s", shape)
+		}
+	}
 	mutations := []func(*preparedContractCell){
+		func(v *preparedContractCell) { v.Version = "tosctl.wallet-prepared-send.v1" },
+		func(v *preparedContractCell) { v.ValidUntil = 0 },
 		func(v *preparedContractCell) { v.Destination = "0:" + strings.Repeat("33", 32) },
 		func(v *preparedContractCell) { v.AmountNanoTOS++ },
 		func(v *preparedContractCell) { v.BodyHash = "tvm-cell-sha256:" + strings.Repeat("44", 32) },

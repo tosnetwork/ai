@@ -48,10 +48,11 @@ type TosctlBackend struct {
 	configMu                                     sync.Mutex
 }
 
-const PreparedContractCellVersion = "tosctl.wallet-prepared-send.v1"
+const PreparedContractCellVersion = "tosctl.wallet-prepared-send.v2"
 
 type preparedContractCell struct {
 	Version          string `json:"version"`
+	ValidUntil       uint32 `json:"valid_until"`
 	MessageBOCBase64 string `json:"message_boc_base64"`
 	Wallet           string `json:"wallet"`
 	Payer            string `json:"payer"`
@@ -161,7 +162,7 @@ func (b *TosctlBackend) PrepareContractCell(ctx context.Context, destination str
 
 func validatePreparedContractCell(out []byte, wallet, payer, destination string, amountNanoTOS uint64, bodyHash, stateInitHash string) (string, string, error) {
 	var response preparedContractCell
-	if jsonstrict.Decode(out, &response) != nil || response.Version != PreparedContractCellVersion ||
+	if jsonstrict.Decode(out, &response) != nil || response.Version != PreparedContractCellVersion || response.ValidUntil == 0 ||
 		response.Wallet != wallet || response.Payer != payer || response.Destination != destination ||
 		response.AmountNanoTOS != amountNanoTOS || response.BodyHash != bodyHash || response.StateInitHash != stateInitHash {
 		return "", "", errors.New("tosctl returned invalid prepared contract message")

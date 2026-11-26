@@ -164,3 +164,10 @@ and commits to the shared builder's age and surplus-lower-bound warnings.
 The custody envelope reader supports the expiring wallet formats used by the
 native adapter (`V3R2`, `V4R2`, `V5R1`). Other or unreported wallet formats refuse
 before signing; there is no fallback to another identity or a non-expiring send.
+
+Custody build-only output must be `tosctl.wallet-prepared-send.v2`, with a
+numeric u32 `valid_until` equal to the expiry decoded from the exact signed BOC.
+V1, missing/malformed expiry and unknown fields are refused before broadcast.
+The provider currently lets custody choose the expiry, then verifies the signed
+value against its local and finalized signing windows; it does not supply an
+explicit expiry flag.

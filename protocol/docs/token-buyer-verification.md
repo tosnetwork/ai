@@ -214,3 +214,49 @@ controls were killed, followed by the green full suite. The five additional
 controls remove schema validation, exact-expiry validation (wrong and missing
 values tested separately), unknown-field refusal, or the v1 journal refusal.
 No Rust build ran.
+
+## All prepared-send consumers coordinated to v2
+
+This supersedes the native follow-ups and unchanged-native statements in the
+earlier chronological run records above.
+
+The helper pin in `.github/workflows/ci.yml` (`TOS_HELPER_COMMIT`) is now
+`578c629f52428cb74ff78bb87034da9334c7a885`. CI builds that exact source and
+computes `TOS_SERVICE_TOSCTL_SHA256` from the binary before tests. The token
+fixture-source pin is independent and unchanged. Local tests do not build Rust;
+real cryptographic helper tests use the previously installed pinned binary.
+
+All four strict consumers require `tosctl.wallet-prepared-send.v2`: token buyer,
+native buyer, chain publisher and provider token custody. Every decoder retains
+unknown-field refusal and requires a positive u32 expiry. The token buyer checks
+its explicit requested value. Provider custody supplies no expiry flag and
+instead checks that the echo equals the expiry decoded independently from the
+exact signed BOC. Native and chain publisher use custody's default expiry.
+
+Native call preflight records the echo atomically before sending as
+`preflight_valid_until_unix`, explicitly diagnostic: a later separately signed
+message can have another expiry. Native lifecycle bounds now equal custody's
+actual signed-message expiry when reported. A missing signed-message report has
+no inferred lifetime bound and cannot settle by time alone. The existing exact
+transaction/history reconciliation remains available. This closes the native
+assumed-lifetime follow-up; legacy inferred bounds are ignored for native sends.
+
+Tests cover v1 refusal, v2 acceptance, missing/null/overflow/unknown fields on
+native, chain publisher and provider, token exact-expiry mismatch, provider echo
+versus signed-BOC mismatch, native preflight recording before broadcast, and
+native signed-expiry versus lost-report retry behavior.
+
+Final guarded verification covers 21 packages: the previous fifteen, chain
+publisher, and the five affected provider packages/command. All 1,085 top-level
+tests passed (1,992 including subtests). Seven existing skips are child-process
+helpers (six) or the opt-in live read-only test (one); the parent tests drive the
+helpers separately. Go vet on the same packages, spec-check, schema-check,
+boundary-lint, gofmt and whitespace checks passed. No Rust build ran.
+
+All 48 targeted overlay controls were killed, followed by the green full suite.
+The repository mutation runner now replaces its obsolete inferred-lifetime
+controls with signed-report checks and includes the nine new native, publisher
+and provider v2 controls. All twelve selected repository controls were caught, covering these changes
+and the signed-expiry-versus-bound distinction. Changed Python lines add no ruff
+diagnostics; the script retains its 43 pre-existing diagnostics and existing
+formatting rather than a whole-file formatting change.

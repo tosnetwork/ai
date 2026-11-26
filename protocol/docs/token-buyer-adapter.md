@@ -98,7 +98,11 @@ attempts without an explicit expiry stay fail-closed unless execution is proven.
 Token records use v2 only. Pre-launch v1 records are refused with an explicit
 unsupported-version message; they are never upgraded or discarded automatically.
 Preserve an old record and reconcile any pending transfer before creating a new
-journal. Native journal bytes and the native lifecycle fallback are unchanged.
+journal. Native preflight also consumes v2 and records its echoed expiry as
+`preflight_valid_until_unix`. That is build-only metadata, never the expiry of a
+separately signed broadcast. Native lifecycle sends record the actual signed
+expiry from custody and use it for finalized expiry reconciliation. If that
+report is lost, no assumed default lifetime authorizes a retry.
 
 The helper must implement `wallet send --valid-until` and return
 `tosctl.wallet-prepared-send.v2` from `--build-only`, with a numeric `valid_until`

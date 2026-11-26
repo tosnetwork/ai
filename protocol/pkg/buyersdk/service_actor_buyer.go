@@ -343,10 +343,18 @@ func (b *ServiceActorBuyer) Call(ctx context.Context, requestHash string) (CallR
 	if _, err := b.admit(ctx, validated); err != nil {
 		return record, err
 	}
-	if err := b.config.Sender.Preflight(ctx, intent); err != nil {
+	var preflightExpiry uint32
+	if sender, ok := b.config.Sender.(interface {
+		PreflightExpiry(context.Context, ServiceActorCallIntent) (uint32, error)
+	}); ok {
+		preflightExpiry, err = sender.PreflightExpiry(ctx, intent)
+	} else {
+		err = b.config.Sender.Preflight(ctx, intent)
+	}
+	if err != nil {
 		return record, err
 	}
-	sending, err := b.config.Journal.BeginSend(requestHash, b.config.Limits, b.config.Now())
+	sending, err := b.config.Journal.beginSend(requestHash, b.config.Limits, b.config.Now(), 0, preflightExpiry)
 	if err != nil {
 		return record, err
 	}
