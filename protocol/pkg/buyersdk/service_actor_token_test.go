@@ -490,3 +490,65 @@ func TestTokenWalletTopUpDerivesItsDestination(t *testing.T) {
 		t.Fatal("accepted a wallet outside the stored route")
 	}
 }
+
+// TestTokenOwnerOpsPrecheckBalanceQueryBusy mirrors the contract: recover,
+// recheck and abandon refuse with 1943 while a balance query younger than
+// RECHECK_QUERY_TTL is pending, and supersede an older one.
+func TestTokenOwnerOpsPrecheckBalanceQueryBusy(t *testing.T) {
+	for _, name := range []string{"recover-surplus", "recheck-payout", "abandon-payout"} {
+		t.Run(name, func(t *testing.T) {
+			s, r := loadTokenFixture(t, name)
+			if _, err := PrepareTokenMessage(s, r); err != nil {
+				t.Fatalf("positive control: %v", err)
+			}
+			now := uint32(s.ReadAt.GenUtime)
+			for age, busy := range map[uint32]bool{0: true, 3599: true, 3600: false, 7200: false} {
+				s.Data.Accounting.BalanceQuery = nativecore.ServiceActorTokenBalanceQueryV1{Active: true, QueryID: 9, CreatedAt: now - age}
+				_, err := PrepareTokenMessage(s, r)
+				if busy && (err == nil || !strings.Contains(err.Error(), "1943")) {
+					t.Fatalf("a query %d s old was not refused with 1943: %v", age, err)
+				}
+				if !busy && err != nil {
+					t.Fatalf("a query %d s old was not superseded: %v", age, err)
+				}
+			}
+			s.Data.Accounting.BalanceQuery = nativecore.ServiceActorTokenBalanceQueryV1{CreatedAt: now}
+			if _, err := PrepareTokenMessage(s, r); err != nil {
+				t.Fatalf("an inactive query refused the operation: %v", err)
+			}
+		})
+	}
+}
+
+// TestTokenRecoverSurplusWarnsItIsALowerBoundWhilePayoutsAreInFlight keeps
+// the document's surplus_at_read equal to the actor's own computation and
+// says, when payouts are in flight, that it under-counts.
+func TestTokenRecoverSurplusWarnsItIsALowerBoundWhilePayoutsAreInFlight(t *testing.T) {
+	s, r := loadTokenFixture(t, "recover-surplus")
+	if s.Data.Accounting.Ledger.InFlight.Sign() == 0 {
+		t.Fatal("the fixture is expected to carry a payout in flight")
+	}
+	lowerBound := func(p *TokenPreparedMessage) bool {
+		for _, w := range p.Warnings {
+			if strings.Contains(w, "lower bound") {
+				return true
+			}
+		}
+		return false
+	}
+	got, err := PrepareTokenMessage(s, r)
+	if err != nil || !lowerBound(got) {
+		t.Fatalf("in-flight payouts gave no lower-bound warning: %+v %v", got, err)
+	}
+	if got.Details["surplus_at_read"] != "3500000" {
+		t.Fatalf("surplus_at_read changed: %s", got.Details["surplus_at_read"])
+	}
+	inFlight := s.Data.Accounting.Ledger.InFlight
+	s.Data.Accounting.Ledger.InFlight = new(big.Int)
+	s.Data.Payouts = map[uint64]nativecore.ServiceActorTokenPayoutV1{}
+	s.OwnWalletBalance = new(big.Int).Sub(s.OwnWalletBalance, inFlight)
+	got, err = PrepareTokenMessage(s, r)
+	if err != nil || lowerBound(got) || got.Details["surplus_at_read"] != "3500000" {
+		t.Fatalf("no payout in flight still warned or changed the surplus: %+v %v", got, err)
+	}
+}
