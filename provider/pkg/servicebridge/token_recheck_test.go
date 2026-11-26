@@ -71,7 +71,7 @@ func tokenRecheckedWorld(t *testing.T, kind uint8) *tokenWorld {
 	}
 	w.addTokenTx(toschain.TokenActorTransaction{Now: 1799999834, Opcode: op, RequestID: 7, Sender: caller.Text(), Destination: caller.Text(), BodyBOC: boc(b), Outputs: transfer(8)})
 	d.NextPayoutID = 9
-	d.Payouts[8] = nativecore.ServiceActorTokenPayoutV1{Kind: kind, RequestID: 7, Recipient: caller, Amount: big.NewInt(1000), OutcomeFeeLock: big.NewInt(0)}
+	d.Payouts[8] = nativecore.ServiceActorTokenPayoutV1{Kind: kind, RequestID: 7, Recipient: caller, Requester: caller, Amount: big.NewInt(1000), OutcomeFeeLock: big.NewInt(0)}
 	return w
 }
 func (w *tokenWorld) addTokenTx(tx toschain.TokenActorTransaction) {
@@ -182,5 +182,84 @@ func TestTokenProviderStatusLapsesPendingAndRefundableAfterDeadline(t *testing.T
 				t.Fatalf("%+v %v", status, err)
 			}
 		})
+	}
+}
+
+func TestTokenProviderRecheckUsesReturnedCallerByKind(t *testing.T) {
+	for _, kind := range []uint8{1, 2, 4, 5, 7} {
+		for _, noLog := range []bool{false, true} {
+			t.Run(fmt.Sprintf("kind-%d/noLog-%t", kind, noLog), func(t *testing.T) {
+				w := newTokenWorld(t)
+				caller, e := nativecore.StandardAddress("0:" + strings.Repeat("71", 32))
+				if e != nil {
+					t.Fatal(e)
+				}
+				destination, e := nativecore.StandardAddress("0:" + strings.Repeat("72", 32))
+				if e != nil {
+					t.Fatal(e)
+				}
+				cleaner, e := nativecore.StandardAddress("0:" + strings.Repeat("73", 32))
+				if e != nil {
+					t.Fatal(e)
+				}
+				recipient, requester := caller, cleaner
+				switch kind {
+				case 1, 5:
+					recipient, requester = destination, caller
+				case 4:
+					requester = caller
+				}
+				returnedID, requestID := uint64(8), uint64(1)
+				switch kind {
+				case 5, 7:
+					returnedID, requestID = 7, 7
+				case 4:
+					requestID = 0
+				}
+				w.account.Data.Payouts = map[uint64]nativecore.ServiceActorTokenPayoutV1{8: {Kind: kind, RequestID: requestID, Recipient: recipient, Requester: requester, Amount: big.NewInt(1000), CreatedAt: 1797408000, OutcomeFeeLock: big.NewInt(20)}}
+				w.account.Data.NextPayoutID = 9
+				in := w.action("recheck-payout")
+				in.ID = 8
+				p := w.preview(t, in)
+				if _, e = RunTokenAction(context.Background(), w.c, in, true, p.Preview.Digest, w.env()); e != nil {
+					t.Fatal(e)
+				}
+				query := mustTokenBalanceQuery(t, w)
+				reply := cell.BeginCell().MustStoreUInt(0x52544232, 32).MustStoreUInt(query, 64).MustStoreBigCoins(big.NewInt(10000)).EndCell()
+				logs := []nativecore.ServiceActorTokenLogV1{{Balance: &nativecore.ServiceActorTokenBalanceLogV1{QueryID: query, Purpose: 1, Target: 8, PayoutID: 8}}}
+				if noLog {
+					logs = nil
+				}
+				delete(w.account.Data.Payouts, 8)
+				w.account.Data.Returned[returnedID] = nativecore.ServiceActorTokenReturnedV1{Caller: caller, Amount: big.NewInt(1000), ReturnDeadline: 1800000100}
+				w.addTokenTx(toschain.TokenActorTransaction{Now: 1800000000, Sender: w.account.OwnWallet, BodyBOC: base64.StdEncoding.EncodeToString(reply.ToBOC()), Logs: logs})
+				r, e := RunTokenAction(context.Background(), w.c, in, false, "", w.env())
+				if e != nil || r.State != "returned" {
+					t.Fatalf("kind %d recipient=%s requester=%s: %+v %v", kind, recipient.Text(), requester.Text(), r, e)
+				}
+				// A wrong owner is still refused, even when its amount and id match.
+				entry := w.account.Data.Returned[returnedID]
+				entry.Caller = destination
+				if kind == 1 || kind == 5 {
+					entry.Caller = recipient
+				}
+				if kind == 2 || kind == 7 {
+					entry.Caller = requester
+				}
+				w.account.Data.Returned[returnedID] = entry
+				if _, e = RunTokenAction(context.Background(), w.c, in, false, "", w.env()); e == nil {
+					t.Fatal("unrelated returned caller accepted")
+				}
+				entry.Caller = caller
+				w.account.Data.Returned[returnedID] = entry
+				// The resolved recheck must release subsequent owner operations.
+				next := w.action("resume")
+				next.IdempotencyKey = "after-recheck-resume-0002"
+				preview := w.preview(t, next)
+				if _, e = RunTokenAction(context.Background(), w.c, next, true, preview.Preview.Digest, w.env()); e != nil || w.sends != 2 {
+					t.Fatalf("resolved recheck blocked owner: %v", e)
+				}
+			})
+		}
 	}
 }

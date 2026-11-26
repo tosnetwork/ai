@@ -103,6 +103,7 @@ type TokenPayoutTarget struct {
 	Kind       uint8  `json:"kind"`
 	ReturnedID uint64 `json:"returned_id"`
 	Recipient  string `json:"recipient"`
+	Requester  string `json:"requester"`
 	Amount     string `json:"amount"`
 }
 type TokenPreview struct {
@@ -341,7 +342,7 @@ func prepareToken(ctx context.Context, c NodeConfig, a TokenActorConfig, s Token
 		if target.Kind == 5 || target.Kind == 7 {
 			returnedID = target.RequestID
 		}
-		p.Recheck = &TokenPayoutTarget{Kind: target.Kind, ReturnedID: returnedID, Recipient: target.Recipient.Text(), Amount: target.Amount.String()}
+		p.Recheck = &TokenPayoutTarget{Kind: target.Kind, ReturnedID: returnedID, Recipient: target.Recipient.Text(), Requester: target.Requester.Text(), Amount: target.Amount.String()}
 	}
 
 	// Checkpoints may advance; the human confirms semantics, balances and policy,

@@ -354,8 +354,22 @@ func finishTokenRecheck(a *toschain.TokenActorAccount, r *TokenActionRecord, rep
 	if target == nil {
 		return errors.New("missing recheck target snapshot")
 	}
+	// apply_outcome preserves the original caller, not a chosen destination:
+	// 1 (refund), 5 (returned claim) -> requester, the authenticated claimer;
+	// 2 (sweep), 4 (funding return), 7 (returned sweep) -> recipient.
+	// The sweep requester may be a third party; a funding return uses the
+	// original funder for both fields. Only claims can choose another recipient.
+	var caller string
+	switch target.Kind {
+	case 1, 5:
+		caller = target.Requester
+	case 2, 4, 7:
+		caller = target.Recipient
+	default:
+		return errors.New("unsupported rechecked payout kind")
+	}
 	if entry, ok := a.Data.Returned[target.ReturnedID]; ok && entry.Paying == 0 {
-		if entry.Caller.Text() != target.Recipient || entry.Amount == nil || entry.Amount.String() != target.Amount {
+		if entry.Caller.Text() != caller || entry.Amount == nil || entry.Amount.String() != target.Amount {
 			return errors.New("returned entry differs from rechecked payout")
 		}
 		r.State = "returned"
