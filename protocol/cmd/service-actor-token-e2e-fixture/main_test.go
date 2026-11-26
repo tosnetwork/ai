@@ -117,3 +117,64 @@ func TestFundingKeepsEqualHashesAndRejectsTrailingInput(t *testing.T) {
 		t.Fatal("trailing input accepted")
 	}
 }
+
+func TestTransactionBindsTheRealReceiptIdentity(t *testing.T) {
+	raw, e := os.ReadFile("testdata/recover-surplus-transaction.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var fixture struct {
+		Input   map[string]any `json:"input"`
+		Kind    uint8          `json:"expected_kind"`
+		Amount  int64          `json:"expected_amount"`
+		Outcome uint8          `json:"expected_outcome"`
+	}
+	if e = json.Unmarshal(raw, &fixture); e != nil {
+		t.Fatal(e)
+	}
+	input, e := json.Marshal(fixture.Input)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var out bytes.Buffer
+	if e = transaction(bytes.NewReader(input), &out); e != nil {
+		t.Fatal(e)
+	}
+	var decoded struct {
+		Logs []nativecore.ServiceActorTokenLogV1 `json:"logs"`
+	}
+	if e = json.Unmarshal(out.Bytes(), &decoded); e != nil {
+		t.Fatal(e)
+	}
+	matches := 0
+	for _, log := range decoded.Logs {
+		if log.Outcome != nil && log.Outcome.Kind == fixture.Kind && log.Outcome.Amount.Int64() == fixture.Amount && log.Outcome.Outcome == fixture.Outcome {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatal("authenticated surplus recovery receipt lost")
+	}
+	for _, field := range []string{"actor", "lt", "hash"} {
+		t.Run(field, func(t *testing.T) {
+			changed := map[string]any{}
+			for k, v := range fixture.Input {
+				changed[k] = v
+			}
+			if field == "lt" {
+				changed[field] = 1
+			} else if field == "actor" {
+				changed[field] = "0:" + strings.Repeat("11", 32)
+			} else {
+				changed[field] = strings.Repeat("11", 32)
+			}
+			data, e := json.Marshal(changed)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if transaction(bytes.NewReader(data), &bytes.Buffer{}) == nil {
+				t.Fatal("receipt identity not checked")
+			}
+		})
+	}
+}

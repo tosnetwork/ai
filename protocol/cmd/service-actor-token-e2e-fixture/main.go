@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
@@ -38,8 +39,10 @@ func main() {
 	action := run
 	if len(os.Args) == 2 && os.Args[1] == "funding" {
 		action = funding
+	} else if len(os.Args) == 2 && os.Args[1] == "transaction" {
+		action = transaction
 	} else if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: service-actor-token-e2e-fixture [funding]")
+		fmt.Fprintln(os.Stderr, "usage: service-actor-token-e2e-fixture [funding|transaction]")
 		os.Exit(1)
 	}
 	if err := action(os.Stdin, os.Stdout); err != nil {
@@ -161,4 +164,36 @@ func funding(in io.Reader, out io.Writer) error {
 		return e
 	}
 	return json.NewEncoder(out).Encode(map[string]string{"body_boc": base64.StdEncoding.EncodeToString(body.ToBOC()), "body_hash": hex.EncodeToString(body.Hash())})
+}
+
+// transaction exposes the finalized-reader decoder for independently fetched
+// public receipt cells. The caller must still anchor the cell to its checkpoint.
+func transaction(in io.Reader, out io.Writer) error {
+	var p struct {
+		Actor string `json:"actor"`
+		LT    uint64 `json:"lt"`
+		Hash  string `json:"hash"`
+		BOC   string `json:"boc"`
+	}
+	d := json.NewDecoder(io.LimitReader(in, 1<<20))
+	d.DisallowUnknownFields()
+	if e := d.Decode(&p); e != nil {
+		return e
+	}
+	var extra any
+	if e := d.Decode(&extra); e != io.EOF {
+		return errors.New("one JSON input required")
+	}
+	raw, e := base64.StdEncoding.DecodeString(p.BOC)
+	if e != nil {
+		return e
+	}
+	tx, e := toschain.DecodeTokenActorTransaction(p.Actor, raw)
+	if e != nil {
+		return e
+	}
+	if p.LT == 0 || tx.LT != p.LT || len(p.Hash) != 64 || tx.Hash != p.Hash {
+		return errors.New("transaction differs from its named account, lt or hash")
+	}
+	return json.NewEncoder(out).Encode(tx)
 }
