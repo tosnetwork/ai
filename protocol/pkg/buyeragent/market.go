@@ -21,6 +21,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactorindex"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -105,7 +106,9 @@ type QuoteCarrier interface {
 
 // OffersConfig wires search and quote.
 type OffersConfig struct {
-	Network *nativev1.NetworkDomain
+	TokenPins   []toschain.TokenAssetPin
+	TokenAssets map[string]buyersdk.TokenAssetLimits
+	Network     *nativev1.NetworkDomain
 	// RegistryCodeHash and ActorCodeHash pin the Native Registry and the
 	// Service Actor release, as tvm-cell-sha256:<hex>.
 	RegistryCodeHash string
@@ -186,27 +189,29 @@ func (o oneQuoteSession) BeginSession(context.Context) (serviceactor.Session, er
 // OfferView is one offer verified at a finalized checkpoint (section 4.3).
 // Only the untrusted_* fields carry text a third party wrote.
 type OfferView struct {
-	Checkpoint               uint64 `json:"checkpoint"`
-	CapabilityID             string `json:"capability_id"`
-	CapabilityVersion        string `json:"capability_version"`
-	ProviderAgentID          string `json:"provider_agent_id"`
-	ManifestDigest           string `json:"manifest_digest"`
-	Actor                    string `json:"actor"`
-	AttestorKeyID            string `json:"attestor_key_id"`
-	PolicyVersion            uint32 `json:"policy_version"`
-	TermsHash                string `json:"terms_hash"`
-	PriceNanoTOS             string `json:"price_nanotos"`
-	StorageFeeNanoTOS        string `json:"storage_fee_nanotos"`
-	PaymentNanoTOS           string `json:"payment_nanotos"`
-	AllowanceNanoTOS         string `json:"execution_allowance_nanotos"`
-	CleanupBountyNanoTOS     string `json:"cleanup_bounty_nanotos"`
-	ResponseSLASeconds       uint32 `json:"response_sla_seconds"`
-	RefundClaimWindowSeconds uint32 `json:"refund_claim_window_seconds"`
-	RetentionSeconds         uint64 `json:"retention_seconds"`
-	OpenAccess               bool   `json:"open_access"`
-	ProviderCardHeld         bool   `json:"provider_card_held"`
-	ProviderName             string `json:"untrusted_provider_name"`
-	ProviderDescription      string `json:"untrusted_provider_description"`
+	Asset                    *nativev1.TOSAssetIdentityV1 `json:"asset,omitempty"`
+	PriceAtomic              string                       `json:"price_atomic,omitempty"`
+	Checkpoint               uint64                       `json:"checkpoint"`
+	CapabilityID             string                       `json:"capability_id"`
+	CapabilityVersion        string                       `json:"capability_version"`
+	ProviderAgentID          string                       `json:"provider_agent_id"`
+	ManifestDigest           string                       `json:"manifest_digest"`
+	Actor                    string                       `json:"actor"`
+	AttestorKeyID            string                       `json:"attestor_key_id"`
+	PolicyVersion            uint32                       `json:"policy_version"`
+	TermsHash                string                       `json:"terms_hash"`
+	PriceNanoTOS             string                       `json:"price_nanotos"`
+	StorageFeeNanoTOS        string                       `json:"storage_fee_nanotos"`
+	PaymentNanoTOS           string                       `json:"payment_nanotos"`
+	AllowanceNanoTOS         string                       `json:"execution_allowance_nanotos"`
+	CleanupBountyNanoTOS     string                       `json:"cleanup_bounty_nanotos"`
+	ResponseSLASeconds       uint32                       `json:"response_sla_seconds"`
+	RefundClaimWindowSeconds uint32                       `json:"refund_claim_window_seconds"`
+	RetentionSeconds         uint64                       `json:"retention_seconds"`
+	OpenAccess               bool                         `json:"open_access"`
+	ProviderCardHeld         bool                         `json:"provider_card_held"`
+	ProviderName             string                       `json:"untrusted_provider_name"`
+	ProviderDescription      string                       `json:"untrusted_provider_description"`
 }
 
 // offerView renders a verified offer with the text of the manifest bytes
@@ -215,6 +220,9 @@ func (o *Offers) offerView(ctx context.Context, offer *serviceactorindex.Offer, 
 	manifest, err := nativecore.DecodeCanonicalSoftwareWorkManifestCBOR(manifestCBOR)
 	if err != nil {
 		return OfferView{}, errors.New("a verified manifest does not decode")
+	}
+	if offer.Asset != nil {
+		return o.tokenOfferView(ctx, offer, manifest)
 	}
 	price, priceOK := new(big.Int).SetString(offer.PriceNanoTOS, 10)
 	fee, feeOK := new(big.Int).SetString(offer.StorageFeeNanoTOS, 10)
@@ -363,7 +371,7 @@ func (o *Offers) Search(ctx context.Context, params SearchParams) (SearchView, e
 	}
 	candidates = boundCandidates(candidates)
 	recorder := o.recorder(nil)
-	discovery, err := serviceactorindex.NewDiscovery(oneSession{session: session}, o.config.Network, recorder, o.config.ActorCodeHash)
+	discovery, err := serviceactorindex.NewDiscovery(oneSession{session: session}, o.config.Network, recorder, o.config.ActorCodeHash, o.config.TokenPins...)
 	if err != nil {
 		return SearchView{}, err
 	}
@@ -526,7 +534,7 @@ func (o *Offers) Quote(ctx context.Context, params QuoteParams) (*nativev1.Reque
 		return nil, nil, QuoteView{}, refusal(CodeDependencyUnavailable, "finalized state is unavailable", err)
 	}
 	recorder := o.recorder(offerManifest)
-	discovery, err := serviceactorindex.NewDiscovery(oneSession{session: session}, o.config.Network, recorder, o.config.ActorCodeHash)
+	discovery, err := serviceactorindex.NewDiscovery(oneSession{session: session}, o.config.Network, recorder, o.config.ActorCodeHash, o.config.TokenPins...)
 	if err != nil {
 		return nil, nil, QuoteView{}, err
 	}
@@ -539,13 +547,16 @@ func (o *Offers) Quote(ctx context.Context, params QuoteParams) (*nativev1.Reque
 	if !ok {
 		return nil, nil, QuoteView{}, errors.New("the verified manifest was not recorded")
 	}
+	if err := o.checkTokenBudget(offer); err != nil {
+		return nil, nil, QuoteView{}, err
+	}
 	if source == QuoteSourceLocal {
 		if value, err = o.localQuote(ctx, session, request, offer, manifestCBOR); err != nil {
 			return nil, nil, QuoteView{}, err
 		}
 	}
 	now := o.config.Now()
-	validated, err := quoteexchange.Validate(o.config.Network, request, value, now)
+	validated, err := validateQuote(o.config.Network, request, value, now)
 	if err != nil {
 		return nil, nil, QuoteView{}, refusal(CodeOfferInvalid, "the Quote does not validate", err)
 	}
@@ -609,7 +620,7 @@ func (o *Offers) localQuote(ctx context.Context, session serviceactorindex.Sessi
 	}
 	provider, err := quoteprovider.New(quoteprovider.Config{Sessions: oneQuoteSession{session: session}, Network: o.config.Network,
 		RegistryCodeHash: o.config.RegistryCodeHash, ProviderAgentID: offer.ProviderAgentID, ManifestCBOR: manifestCBOR,
-		Transport: binding, ProposalTTL: LocalQuoteTTL, CallerID: quoteCaller, Now: o.config.Now, Random: o.config.Random})
+		TokenPins: o.config.TokenPins, Transport: binding, ProposalTTL: LocalQuoteTTL, CallerID: quoteCaller, Now: o.config.Now, Random: o.config.Random})
 	if err != nil {
 		if errors.Is(err, railwork.ErrQuoteNotCarriable) {
 			return nil, refusal(CodeNotCarriable, "the offer's Quotes cannot be carried to its provider", err)
@@ -659,7 +670,7 @@ func crossCheckQuote(validated *quoteexchange.Validated, offer *serviceactorinde
 		return errors.New("the Quote names another provider than the Capability's finalized owner")
 	case proposal.ManifestDigest != offer.ManifestDigest:
 		return errors.New("the Quote names another manifest than the finalized version")
-	case validated.Rail.Actor != offer.Actor:
+	case quoteActor(validated) != offer.Actor:
 		return errors.New("the Quote names another actor than manifest key 21")
 	case proposal.ActorCodeHash != offer.ActorCodeHash:
 		return errors.New("the Quote names another actor code than the pinned release")
@@ -669,6 +680,8 @@ func crossCheckQuote(validated *quoteexchange.Validated, offer *serviceactorinde
 		return errors.New("the Quote names another policy version than the actor's")
 	case proposal.TermsHash != offer.TermsHash:
 		return errors.New("the Quote names other terms than the actor's current terms")
+	case !proto.Equal(proposal.Asset, offer.Asset) || proposal.PriceAtomic != offer.PriceAtomic:
+		return errors.New("the Quote names another asset or atomic price than the actor")
 	case proposal.PriceNanotos != offer.PriceNanoTOS:
 		return errors.New("the Quote names another price than the actor's")
 	case proposal.StorageFeeNanotos != offer.StorageFeeNanoTOS:

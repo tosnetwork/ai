@@ -25,6 +25,7 @@ const (
 // ConfirmationFields are the purchase fields a confirmation code binds,
 // each in the text form the journal and the purchase record store.
 type ConfirmationFields struct {
+	TokenFunding    string
 	NetworkID       string
 	BuyerWallet     string
 	Actor           string
@@ -37,10 +38,14 @@ type ConfirmationFields struct {
 
 // fieldsOf takes the bound fields from the agent's own records, never from
 // a request.
-func fieldsOf(record buyersdk.CallRecord, purchase PurchaseRecord) ConfirmationFields {
+func fieldsOf(record buyersdk.CallRecord, purchase PurchaseRecord) (ConfirmationFields, error) {
+	funding, err := tokenConfirmation(record)
+	if err != nil {
+		return ConfirmationFields{}, err
+	}
 	return ConfirmationFields{NetworkID: record.NetworkID, BuyerWallet: record.BuyerWallet, Actor: record.Actor,
 		RequestHash: record.RequestHash, TermsHash: record.TermsHash, QuoteCommitment: record.QuoteCommitment,
-		PaymentNanoTOS: record.PaymentNanoTOS, SourceDigest: purchase.SourceDigest}
+		PaymentNanoTOS: record.PaymentNanoTOS, SourceDigest: purchase.SourceDigest, TokenFunding: funding}, nil
 }
 
 // ConfirmationCode derives the code of one presentation:
@@ -54,7 +59,11 @@ func fieldsOf(record buyersdk.CallRecord, purchase PurchaseRecord) ConfirmationF
 // groups of four joined by "-".
 func ConfirmationCode(nonce [ConfirmationNonceBytes]byte, fields ConfirmationFields) string {
 	hash := sha256.New()
-	hash.Write([]byte(confirmationDomain))
+	domain := confirmationDomain
+	if fields.TokenFunding != "" {
+		domain = "tos.service.mcp-buyer.confirmation.token.v1"
+	}
+	hash.Write([]byte(domain))
 	hash.Write([]byte{0})
 	hash.Write(nonce[:])
 	for index, value := range []string{fields.NetworkID, fields.BuyerWallet, fields.Actor, fields.RequestHash,
@@ -63,6 +72,10 @@ func ConfirmationCode(nonce [ConfirmationNonceBytes]byte, fields ConfirmationFie
 			hash.Write([]byte{0})
 		}
 		hash.Write([]byte(value))
+	}
+	if fields.TokenFunding != "" {
+		hash.Write([]byte{0})
+		hash.Write([]byte(fields.TokenFunding))
 	}
 	return groupHex(hex.EncodeToString(hash.Sum(nil)[:8]))
 }

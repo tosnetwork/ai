@@ -93,9 +93,24 @@ code BOC, the pinned Service Actor release code hash (which must equal the
 manifest's key 21 code hash), and an owner-only `0700` state directory for the
 finalized checkpoint high-water files. The profile carries no price: every
 request reads the Capability and the Service Actor named by manifest key 21 at
-one finalized checkpoint and quotes the actor's current native-TOS price,
-storage fee and terms hash. The proposal grants no authority; the buyer
+one finalized checkpoint and quotes the actor's current price, storage fee and
+terms hash. A native manifest carries only `price_nanotos`; a token manifest
+carries `asset` and `price_atomic` (fields 18 and 19), with no native price.
+The gateway validates the rail selected by the canonical manifest and carries
+those fields unchanged. It never chooses an asset, converts an amount or repairs
+a mismatched proposal. A native manifest with either token field is refused.
+The proposal grants no authority; the buyer
 re-verifies every rail field before calling.
+
+A token-rail owner profile additionally requires `token_pins` with one or two
+`toschain.TokenAssetPin` records. Their JSON member names are `Master`, `Bridge`,
+`BridgeConfigParam`, `Decimals`, `SourceChainID`, `SourceToken`, `BridgeCodeHash`,
+`MinterCodeHash` and `WalletCodeHash`; `SourceToken` is an array of 20 byte values.
+These are owner policy passed to the finalized quote source, never identities
+learned from a proposal or from unrelated recognition entries. The quote source
+checks recognition, bridge binding and accepting-tokens at its one finalized
+checkpoint. Native profiles reject token pins. The gateway still has no payment
+execution, signing, recovery, or token-transfer authority.
 
 The profile `transport` is the binding every proposal carries, and the gateway
 re-validates it on every `RequestQuoteProposal` response. `security_mode` 1 is

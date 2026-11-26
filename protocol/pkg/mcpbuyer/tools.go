@@ -142,35 +142,36 @@ type ToolError struct {
 // Purchase is a purchase as a tool result shows it: the agent's view with
 // the provider's text as untrusted fields.
 type Purchase struct {
-	RequestHash              string              `json:"request_hash"`
-	Reference                string              `json:"purchase_reference"`
-	State                    string              `json:"state"`
-	CapabilityID             string              `json:"capability_id"`
-	CapabilityVersion        string              `json:"capability_version"`
-	ProviderAgentID          string              `json:"provider_agent_id"`
-	ManifestDigest           string              `json:"manifest_digest"`
-	Actor                    string              `json:"actor"`
-	AttestorKeyID            string              `json:"attestor_key_id"`
-	PriceNanoTOS             string              `json:"price_nanotos"`
-	StorageFeeNanoTOS        string              `json:"storage_fee_nanotos"`
-	PaymentNanoTOS           string              `json:"payment_nanotos"`
-	ResponseSLASeconds       uint32              `json:"response_sla_seconds"`
-	RefundClaimWindowSeconds uint32              `json:"refund_claim_window_seconds"`
-	CleanupBountyNanoTOS     string              `json:"cleanup_bounty_nanotos"`
-	RetentionSeconds         uint64              `json:"retention_seconds"`
-	TermsHash                string              `json:"terms_hash"`
-	QuoteCommitment          string              `json:"quote_commitment"`
-	QuoteExpiresUnix         uint64              `json:"quote_expires_at_unix"`
-	SourceDigest             string              `json:"source_digest"`
-	ArchiveBytes             int                 `json:"archive_bytes"`
-	Members                  []buyeragent.Member `json:"members"`
-	Requested                bool                `json:"payment_requested"`
-	ProviderName             UntrustedText       `json:"untrusted_provider_name"`
-	ProviderDescription      UntrustedText       `json:"untrusted_provider_description"`
+	TokenFunding             *buyeragent.TokenFundingView `json:"token_funding,omitempty"`
+	RequestHash              string                       `json:"request_hash"`
+	Reference                string                       `json:"purchase_reference"`
+	State                    string                       `json:"state"`
+	CapabilityID             string                       `json:"capability_id"`
+	CapabilityVersion        string                       `json:"capability_version"`
+	ProviderAgentID          string                       `json:"provider_agent_id"`
+	ManifestDigest           string                       `json:"manifest_digest"`
+	Actor                    string                       `json:"actor"`
+	AttestorKeyID            string                       `json:"attestor_key_id"`
+	PriceNanoTOS             string                       `json:"price_nanotos"`
+	StorageFeeNanoTOS        string                       `json:"storage_fee_nanotos"`
+	PaymentNanoTOS           string                       `json:"payment_nanotos"`
+	ResponseSLASeconds       uint32                       `json:"response_sla_seconds"`
+	RefundClaimWindowSeconds uint32                       `json:"refund_claim_window_seconds"`
+	CleanupBountyNanoTOS     string                       `json:"cleanup_bounty_nanotos"`
+	RetentionSeconds         uint64                       `json:"retention_seconds"`
+	TermsHash                string                       `json:"terms_hash"`
+	QuoteCommitment          string                       `json:"quote_commitment"`
+	QuoteExpiresUnix         uint64                       `json:"quote_expires_at_unix"`
+	SourceDigest             string                       `json:"source_digest"`
+	ArchiveBytes             int                          `json:"archive_bytes"`
+	Members                  []buyeragent.Member          `json:"members"`
+	Requested                bool                         `json:"payment_requested"`
+	ProviderName             UntrustedText                `json:"untrusted_provider_name"`
+	ProviderDescription      UntrustedText                `json:"untrusted_provider_description"`
 }
 
 func purchaseOf(view buyeragent.PurchaseView) *Purchase {
-	return &Purchase{RequestHash: view.RequestHash, Reference: view.Reference, State: view.State,
+	return &Purchase{TokenFunding: view.TokenFunding, RequestHash: view.RequestHash, Reference: view.Reference, State: view.State,
 		CapabilityID: view.CapabilityID, CapabilityVersion: view.CapabilityVersion, ProviderAgentID: view.ProviderAgentID,
 		ManifestDigest: view.ManifestDigest, Actor: view.Actor, AttestorKeyID: view.AttestorKeyID,
 		PriceNanoTOS: view.PriceNanoTOS, StorageFeeNanoTOS: view.StorageFeeNanoTOS, PaymentNanoTOS: view.PaymentNanoTOS,
@@ -238,10 +239,19 @@ func (t *Tools) render(purchases []*Purchase, header string) (*mcp.CallToolResul
 	for _, p := range purchases {
 		fmt.Fprintf(&b, "Purchase %s (request_hash %s): %s. Capability %s %s from provider %s.\n", p.Reference,
 			p.RequestHash, p.State, p.CapabilityID, p.CapabilityVersion, p.ProviderAgentID)
-		fmt.Fprintf(&b, "Attached payment %s nanoTOS: price %s, storage fee %s (not refunded), the rest an allowance "+
-			"whose unused part returns. Response SLA %d s, refund window %d s, cleanup bounty %s nanoTOS, result kept "+
-			"%d s after the response deadline.\n", p.PaymentNanoTOS, p.PriceNanoTOS, p.StorageFeeNanoTOS,
-			p.ResponseSLASeconds, p.RefundClaimWindowSeconds, p.CleanupBountyNanoTOS, p.RetentionSeconds)
+		if p.State == buyeragent.StateFundingSurplus {
+			b.WriteString("Finalized funding became provider surplus: no request was admitted and no buyer return is owed.\n")
+		}
+		if f := p.TokenFunding; f != nil {
+			fmt.Fprintf(&b, "Token funding: asset %s wallet code %s (%d decimals), amount %s atomic (%s), received %s atomic; actor %s via wallet %s. Native value %s nanoTOS, forward %s nanoTOS; minimum forward %s nanoTOS.\n", f.AssetMaster, f.WalletCodeHash, f.Decimals, f.AmountAtomic, buyeragent.AtomicAmount(f.AmountAtomic, f.Decimals), f.ReceivedAtomic, p.Actor, f.TokenWallet, f.WalletValueNanoTOS, f.ForwardNanoTOS, f.MinimumForwardNanoTOS)
+			b.WriteString("Underfunded transfers or transfers without a forward amount can become provider surplus. Fund only while accepting tokens. Refused payouts leave returned entries to claim.\n")
+		} else {
+			fmt.Fprintf(&b, "Attached payment %s nanoTOS: price %s, storage fee %s (not refunded), the rest an allowance "+
+				"whose unused part returns. Response SLA %d s, refund window %d s, cleanup bounty %s nanoTOS, result kept "+
+				"%d s after the response deadline.\n", p.PaymentNanoTOS, p.PriceNanoTOS, p.StorageFeeNanoTOS,
+				p.ResponseSLASeconds, p.RefundClaimWindowSeconds, p.CleanupBountyNanoTOS, p.RetentionSeconds)
+		}
+
 		fmt.Fprintf(&b, "The whole source archive (%d members, %d bytes) goes to the provider.\n", len(p.Members),
 			p.ArchiveBytes)
 		b.WriteString(d.span("Provider name", p.ProviderName))
@@ -373,8 +383,11 @@ func (t *Tools) purchases(ctx context.Context, _ *mcp.CallToolRequest, input Pur
 	for _, view := range page.Purchases {
 		out.Purchases = append(out.Purchases, purchaseOf(view))
 	}
-	result, err := t.render(out.Purchases, fmt.Sprintf("%d purchases; reserved %s nanoTOS in %d calls of the window.",
-		len(out.Purchases), page.Budget.ReservedNanoTOS, page.Budget.ReservedCalls))
+	header := fmt.Sprintf("%d purchases; reserved %s nanoTOS in %d calls of the window.", len(out.Purchases), page.Budget.ReservedNanoTOS, page.Budget.ReservedCalls)
+	for _, budget := range page.Budget.TokenAssets {
+		header += fmt.Sprintf("\nAsset %s: reserved %s atomic; per-call cap %s; window cap %s atomic.", budget.AssetKey, budget.ReservedAtomic, budget.MaxPerCallAtomic, budget.MaxWindowAtomic)
+	}
+	result, err := t.render(out.Purchases, header)
 	if err != nil {
 		return nil, PurchasesResult{}, err
 	}

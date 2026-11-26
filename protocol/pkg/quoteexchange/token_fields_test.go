@@ -36,3 +36,26 @@ func TestValidateRefusesTokenRailFieldsOnANativeProposal(t *testing.T) {
 		t.Fatalf("the plain native package was refused: %v", err)
 	}
 }
+
+func TestNativeQuoteValidationRefusesATokenManifest(t *testing.T) {
+	network, request, pkg, now := validPackage(t)
+	manifest, err := nativecore.DecodeCanonicalSoftwareWorkManifestCBOR(pkg.CanonicalManifestCbor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Settlement.Rail = nativecore.ServiceActorTokenRail
+	decimal := uint8(6)
+	manifest.SupportedAssets = []nativecore.SoftwareWorkAssetV1{{Kind: nativecore.TOSTokenAsset, MasterAccountID: bytes.Repeat([]byte{0x11}, 32), WalletCodeHash: bytes.Repeat([]byte{0x22}, 32), Decimals: &decimal}}
+	pkg.CanonicalManifestCbor, pkg.Proposal.ManifestDigest, err = nativecore.CanonicalSoftwareWorkManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the canonical manifest selects a different rail. Native proposal
+	// fields remain unchanged, so token-field guards cannot mask this check.
+	if _, err = Validate(network, request, pkg, now); !errors.Is(err, ErrTokenManifestOnNativeQuote) {
+		t.Fatalf("native Validate accepted token manifest: %v", err)
+	}
+	if _, err = ValidatePortable(network, request, pkg); !errors.Is(err, ErrTokenManifestOnNativeQuote) {
+		t.Fatalf("native ValidatePortable accepted token manifest: %v", err)
+	}
+}

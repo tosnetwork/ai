@@ -103,6 +103,9 @@ func runEvidence(arguments []string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("the accepted result does not read: %w", err)
 	}
+	if record.PreparedTokenMessage != nil {
+		return exportTokenEvidence(config, record, purchase, accepted, found, *outDir, *timeout, out)
+	}
 	bundle, err := buildBundle(config, record, purchase, accepted, found, time.Now())
 	if err != nil {
 		return err

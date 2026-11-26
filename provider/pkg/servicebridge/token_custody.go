@@ -67,6 +67,7 @@ func prepareTokenDelivery(ctx context.Context, c NodeConfig, s TokenSession, rec
 	}
 	var out struct {
 		Version       string `json:"version"`
+		ValidUntil    uint32 `json:"valid_until"`
 		Wallet        string `json:"wallet"`
 		Payer         string `json:"payer"`
 		Destination   string `json:"destination"`
@@ -79,7 +80,7 @@ func prepareTokenDelivery(ctx context.Context, c NodeConfig, s TokenSession, rec
 	if err != nil {
 		return nil, err
 	}
-	if out.Version != "tosctl.wallet-prepared-send.v1" || out.Wallet != c.WalletName || !sameTokenAddress(out.Payer, c.WalletAddress) || !sameTokenAddress(out.Destination, m.Destination) || out.Amount != value.Uint64() || out.BodyHash != "tvm-cell-sha256:"+record.BodyHash || out.StateInitHash != "" {
+	if out.Version != "tosctl.wallet-prepared-send.v2" || out.ValidUntil == 0 || out.Wallet != c.WalletName || !sameTokenAddress(out.Payer, c.WalletAddress) || !sameTokenAddress(out.Destination, m.Destination) || out.Amount != value.Uint64() || out.BodyHash != "tvm-cell-sha256:"+record.BodyHash || out.StateInitHash != "" {
 		return nil, errors.New("custody prepared another token envelope")
 	}
 	root, err := decodeCellBOCText(out.BOC)
@@ -89,6 +90,9 @@ func prepareTokenDelivery(ctx context.Context, c NodeConfig, s TokenSession, rec
 	expiry, err := checkTokenWalletMessage(root, wallet.Type, global, seq, c.WalletAddress, m.Destination, value.Uint64(), record.BodyHash)
 	if err != nil {
 		return nil, err
+	}
+	if out.ValidUntil != expiry {
+		return nil, errors.New("custody expiry differs from the signed token message")
 	}
 	now := env.Now().Unix()
 	if now < 0 || int64(expiry) <= now || int64(expiry) > now+600 || int64(expiry) <= s.ChainTime().Unix() {

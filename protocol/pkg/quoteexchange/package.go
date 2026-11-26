@@ -18,6 +18,8 @@ import (
 
 const MaxPackageBytes = 2 << 20
 
+var ErrTokenManifestOnNativeQuote = errors.New("token settlement manifest requires token quote validation")
+
 type Validated struct {
 	Proposal         *nativev1.QuoteProposalV1
 	Manifest         nativecore.SoftwareWorkManifestV1
@@ -69,6 +71,9 @@ func validatePortable(network *nativev1.NetworkDomain, request *nativev1.Request
 	manifest, err := nativecore.DecodeCanonicalSoftwareWorkManifestCBOR(value.CanonicalManifestCbor)
 	if err != nil {
 		return nil, errors.New("Quote Proposal carries a non-canonical manifest")
+	}
+	if manifest.Settlement.Rail == nativecore.ServiceActorTokenRail {
+		return nil, ErrTokenManifestOnNativeQuote
 	}
 	canonical, manifestDigest, err := nativecore.CanonicalSoftwareWorkManifest(manifest)
 	if err != nil || !bytes.Equal(canonical, value.CanonicalManifestCbor) || manifestDigest != value.Proposal.ManifestDigest ||

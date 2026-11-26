@@ -1024,13 +1024,14 @@ Limits change only by editing the custody-owned configuration and restarting
 the agent. No tool can read the configuration file or change a limit.
 Prepared records expire with their Quote and then stop reserving.
 
-### 6.1 Token-rail budgets (specified, not implemented)
+### 6.1 Token-rail budgets
 
 A purchase on the token-rail Service Actor
 ([`SERVICE_ACTOR_TOKEN_TVM_V1.md`](SERVICE_ACTOR_TOKEN_TVM_V1.md)) is priced in a
 recognized token and pays everything else in TOS. Its limits are per asset, on
 top of the nanoTOS limits above (`USDC_SETTLEMENT_V1.md` sections 6.3 and 6.4,
-work item T9):
+work item T9; implementation and configuration in
+[`token-buyer-adapter.md`](../../protocol/docs/token-buyer-adapter.md)):
 
 - `TokenAssetLimits`, one per pinned asset, keyed by the asset's exact identity
   (master account, wallet code hash), never by ticker: `max_per_call_atomic`
@@ -1583,6 +1584,7 @@ covers the buyer role:
 | deliver the work and check the returned objects | relay carriage and Receipt acceptance (section 7) |
 | refund duties | the agent (section 11) |
 | no private gateway dependency | gateways are optional hints; Quotes are built locally |
+| token-rail extension | the same custody, preview, confirmation, journal-before-send and result/refund cases apply with separately pinned assets, per-asset atomic caps and independent native funding limits; token code never labels principal as nanoTOS. Local quote, refusal and exact-carriage tests are listed in the token adapter implementation record; they are not a public-network Gate D pass. |
 | evidence | `tos-service-buyer evidence --config <agent config> --request-hash <request_hash> --out-dir <new dir>`, run as the custody account, exports the build's VCS revision, network tuple, Capability and version, manifest digest, Quote package and commitment, `request_hash`, the journal record, call transaction, `request_id`, respond or refund transactions, `response_hash`, Receipt BOC, artifact and member digests and budget policy, and no secret ([`PURCHASE_EVIDENCE_V1.md`](PURCHASE_EVIDENCE_V1.md) section 2). It exports only a purchase that verifies at a finalized checkpoint as a third party would verify it. |
 
 The verifier role stays independent: it reconstructs the purchase with its own

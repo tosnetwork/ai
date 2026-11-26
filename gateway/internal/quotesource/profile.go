@@ -56,6 +56,8 @@ type Profile struct {
 	// serves next to each Quote. The provider republishes the card by
 	// replacing the file; the gateway reads it for every Quote.
 	ProviderKeyCardFile string `json:"provider_key_card_file,omitempty"`
+	// TokenPins are owner policy used only by a token-rail quote source.
+	TokenPins []toschain.TokenAssetPin `json:"token_pins,omitempty"`
 }
 
 // CardFile serves the provider key card from the profile's card file.
@@ -134,6 +136,13 @@ func LoadProfile(path string) (Profile, []byte, error) {
 	if !bytes.Equal(decoded.Settlement.ActorCodeHash, codeHash) {
 		return Profile{}, nil, errors.New("provider Quote manifest names a Service Actor release other than the pinned one")
 	}
+	if decoded.Settlement.Rail == nativecore.ServiceActorTokenRail {
+		if len(profile.TokenPins) == 0 || len(profile.TokenPins) > 2 {
+			return Profile{}, nil, errors.New("token Quote profile needs one or two owner asset pins")
+		}
+	} else if len(profile.TokenPins) != 0 {
+		return Profile{}, nil, errors.New("native Quote profile must not carry token pins")
+	}
 	return profile, manifest, nil
 }
 
@@ -141,6 +150,7 @@ func LoadProfile(path string) (Profile, []byte, error) {
 func NewProvider(profile Profile, manifest []byte, sessions quoteprovider.SessionSource, network *nativev1.NetworkDomain,
 	registryCodeHash string, timeout time.Duration) (*quoteprovider.Provider, error) {
 	return quoteprovider.New(quoteprovider.Config{Sessions: sessions, Network: network,
+		TokenPins:        profile.TokenPins,
 		RegistryCodeHash: registryCodeHash, ProviderAgentID: profile.ProviderAgentID, ManifestCBOR: manifest,
 		Transport: nativecore.TransportBindingV1{SecurityMode: profile.Transport.SecurityMode,
 			MaxRequestBytes: profile.Transport.MaxRequestBytes, BaseURL: profile.Transport.BaseURL},

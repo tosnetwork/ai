@@ -69,7 +69,11 @@ func RequestHash(quoteHash, executionID, inputDigest [32]byte) ([32]byte, error)
 // QuoteCommitment is the Accepted Quote of a proposal on a network: its
 // cell hash and its tvm-cell-sha256 text.
 func QuoteCommitment(network *nativev1.NetworkDomain, proposal *nativev1.QuoteProposalV1) ([32]byte, string, error) {
-	root, text, err := nativecore.BuildAcceptedQuoteCommitment(network, proposal)
+	build := nativecore.BuildAcceptedQuoteCommitment
+	if proposal != nil && (proposal.Asset != nil || proposal.PriceAtomic != "") {
+		build = nativecore.BuildAcceptedTokenQuoteCommitment
+	}
+	root, text, err := build(network, proposal)
 	if err != nil {
 		return [32]byte{}, "", fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}

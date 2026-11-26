@@ -149,47 +149,33 @@ func (s *TOSCTLServiceActorSender) SendLifecycle(ctx context.Context, intent Lif
 // this entry, says whether the send took effect; the entry only bounds how
 // often the buyer sends.
 type LifecycleSend struct {
-	Operation string    `json:"operation"`
-	QueryID   uint64    `json:"query_id"`
-	Phase     CallPhase `json:"phase"`
-	SentUnix  int64     `json:"sent_unix"`
+	PreparedTokenMessage *TokenPreparedMessage `json:"prepared_token_message,omitempty"`
+	Operation            string                `json:"operation"`
+	QueryID              uint64                `json:"query_id"`
+	Phase                CallPhase             `json:"phase"`
+	SentUnix             int64                 `json:"sent_unix"`
 	// WalletSeqno is the buyer wallet's seqno at a finalized checkpoint read
 	// before the send.
 	WalletSeqno uint32 `json:"wallet_seqno"`
-	// ValidUntilBoundUnix bounds the valid_until of the wallet message the
-	// send signs, from the send's start; it is used only when custody's
-	// report of the message is missing.
+	// ValidUntilBoundUnix is the explicit expiry for token sends and the
+	// reported signed expiry for native sends. Zero means no bound was proven.
 	ValidUntilBoundUnix int64 `json:"valid_until_bound_unix"`
 	// WalletAnchor is the buyer wallet's last finalized transaction before
 	// the send; the wallet history read later starts after it.
 	WalletAnchorLT   uint64 `json:"wallet_anchor_lt"`
 	WalletAnchorHash string `json:"wallet_anchor_hash"`
 	// Announced, SignedSeqno, ValidUntilUnix and MessageHash are custody's
-	// report of the wallet message it signed (LifecycleSubmission).
+	// report of the wallet message it signed (LifecycleSubmission). Token sends
+	// also store their explicit command-line expiry in ValidUntilUnix, without
+	// claiming a signed seqno or message hash that custody did not report.
 	Announced      bool   `json:"announced,omitempty"`
 	SignedSeqno    uint32 `json:"signed_seqno,omitempty"`
 	ValidUntilUnix int64  `json:"valid_until_unix,omitempty"`
 	MessageHash    string `json:"message_hash,omitempty"`
 }
 
-// Lifecycle send timing. Custody is given LifecycleSendTimeout to sign and
-// broadcast. A send whose report custody gave carries the message's exact
-// valid_until. Only for a send whose report was lost (the agent stopped
-// during the send) is valid_until bounded instead: the send's start, plus
-// LifecycleSendTimeout, plus the pinned tosctl's wallet message lifetime
-// (FallbackWalletMessageLifetime), plus LifecycleClockSkew between the
-// local clock and chain time.
-const (
-	LifecycleSendTimeout          = 3 * time.Minute
-	FallbackWalletMessageLifetime = 2 * time.Minute
-	LifecycleClockSkew            = 5 * time.Minute
-)
-
-// LifecycleValidUntilBound is the fallback valid_until bound of a send
-// started at sent.
-func LifecycleValidUntilBound(sent time.Time) int64 {
-	return sent.Add(LifecycleSendTimeout + FallbackWalletMessageLifetime + LifecycleClockSkew).Unix()
-}
+// LifecycleSendTimeout bounds custody execution, never a wallet's signed expiry.
+const LifecycleSendTimeout = 3 * time.Minute
 
 var (
 	// ErrNoLifecycleSender reports a buyer configured without one.
@@ -210,6 +196,11 @@ var (
 // lifecycleSettled); otherwise SendLifecycle returns ErrLifecycleUnsettled
 // and sends nothing.
 func (b *ServiceActorBuyer) SendLifecycle(ctx context.Context, requestHash, operation string) (CallRecord, error) {
+	if record, err := b.config.Journal.Read(requestHash); err != nil {
+		return CallRecord{}, err
+	} else if isTokenCallRecord(record) {
+		return b.sendTokenLifecycle(ctx, record, operation)
+	}
 	if b.config.Lifecycle == nil {
 		return CallRecord{}, ErrNoLifecycleSender
 	}
@@ -248,7 +239,7 @@ func (b *ServiceActorBuyer) SendLifecycle(ctx context.Context, requestHash, oper
 			return ErrLifecycleUnsettled
 		}
 		r.Lifecycle = append(r.Lifecycle, LifecycleSend{Operation: operation, QueryID: queryID, Phase: PhaseSending,
-			SentUnix: now.Unix(), WalletSeqno: seqno, ValidUntilBoundUnix: LifecycleValidUntilBound(now),
+			SentUnix: now.Unix(), WalletSeqno: seqno,
 			WalletAnchorLT: anchor.LT, WalletAnchorHash: anchor.Hash})
 		r.UpdatedUnix = now.Unix()
 		return nil
@@ -265,6 +256,7 @@ func (b *ServiceActorBuyer) SendLifecycle(ctx context.Context, requestHash, oper
 						entry := &r.Lifecycle[index]
 						entry.Announced, entry.SignedSeqno = true, submission.Seqno
 						entry.ValidUntilUnix, entry.MessageHash = submission.ValidUntilUnix, submission.MessageHash
+						entry.ValidUntilBoundUnix = submission.ValidUntilUnix
 					}
 				}
 			}
@@ -278,8 +270,8 @@ func (b *ServiceActorBuyer) SendLifecycle(ctx context.Context, requestHash, oper
 			panic(recovered)
 		}
 	}()
-	// The deadline bounds when custody can sign, and so the message's
-	// valid_until that the journal entry records.
+	// The deadline bounds custody execution. Only its signed-message report
+	// can establish the expiry used for a native retry.
 	sendContext, cancel := context.WithDeadline(ctx, now.Add(LifecycleSendTimeout))
 	defer cancel()
 	submission, sendErr := b.config.Lifecycle.SendLifecycle(sendContext, LifecycleIntent{Operation: operation, Actor: record.Actor,
@@ -309,8 +301,7 @@ func (b *ServiceActorBuyer) SendLifecycle(ctx context.Context, requestHash, oper
 //  2. the checkpoint is past the message's valid_until and the wallet has
 //     not consumed its seqno: it has expired before it could execute. For a
 //     send custody reported, valid_until and the seqno are the signed ones.
-//     For a send whose report was lost, they are the fallback bound and the
-//     seqno read before the send;
+//     A send whose report was lost cannot be settled by an assumed lifetime;
 //  3. for a send custody reported, the wallet's finalized history since the
 //     send's anchor is read. It may hold the transaction of the send's exact
 //     message: if that transaction sent nothing to the actor with the send's
@@ -334,8 +325,6 @@ func (b *ServiceActorBuyer) lifecycleSettled(ctx context.Context, session Servic
 			if sent.ValidUntilUnix > 0 && chainTime > sent.ValidUntilUnix && seqno <= sent.SignedSeqno {
 				continue
 			}
-		} else if sent.ValidUntilBoundUnix > 0 && chainTime > sent.ValidUntilBoundUnix && seqno == sent.WalletSeqno {
-			continue
 		}
 		if history == nil {
 			anchor := &toschain.ActorTxID{LT: record.CallTransactionLT, Hash: record.CallTransactionHex}

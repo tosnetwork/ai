@@ -43,6 +43,7 @@ func FromChain(reader *toschain.ServiceActorReader) SessionSource {
 }
 
 type Config struct {
+	TokenPins         []toschain.TokenAssetPin
 	Sessions          SessionSource
 	Network           *nativev1.NetworkDomain
 	RegistryCodeHash  string
@@ -101,6 +102,7 @@ func New(config Config) (*Provider, error) {
 	if config.Random == nil {
 		config.Random = func(value []byte) error { _, err := rand.Read(value); return err }
 	}
+	config.TokenPins = append([]toschain.TokenAssetPin(nil), config.TokenPins...)
 	config.Network = proto.Clone(config.Network).(*nativev1.NetworkDomain)
 	config.ManifestCBOR = append([]byte(nil), config.ManifestCBOR...)
 	return &Provider{config: config, manifestDigest: digest, version: manifest.Version, settlement: manifest.Settlement}, nil
@@ -147,6 +149,9 @@ func (p *Provider) RequestQuoteProposal(ctx context.Context, request *nativev1.R
 	}
 	if !active {
 		return nil, errors.New("Quote Capability version is not active")
+	}
+	if p.settlement.Rail == nativecore.ServiceActorTokenRail {
+		return p.requestTokenQuote(call, session, request)
 	}
 	actor := "0:" + hex.EncodeToString(p.settlement.ActorAccountID)
 	account, found, err := session.ReadActor(call, actor)
