@@ -387,3 +387,19 @@ func TestTokenPurchaseKeepsExactAssetUnitsInMCPPreview(t *testing.T) {
 		t.Fatal("token principal described as native payment")
 	}
 }
+
+func TestTokenSurplusStatusDoesNotPromiseAFundingReturn(t *testing.T) {
+	tools := &Tools{random: func(b []byte) error {
+		for i := range b {
+			b[i] = 1
+		}
+		return nil
+	}}
+	result, _, err := tools.single(buyeragent.PurchaseView{State: buyeragent.StateFundingSurplus}, "Status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "no request was admitted and no buyer return is owed") {
+		t.Fatalf("misleading surplus outcome: %s", text)
+	}
+}

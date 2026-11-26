@@ -239,6 +239,9 @@ func (t *Tools) render(purchases []*Purchase, header string) (*mcp.CallToolResul
 	for _, p := range purchases {
 		fmt.Fprintf(&b, "Purchase %s (request_hash %s): %s. Capability %s %s from provider %s.\n", p.Reference,
 			p.RequestHash, p.State, p.CapabilityID, p.CapabilityVersion, p.ProviderAgentID)
+		if p.State == buyeragent.StateFundingSurplus {
+			b.WriteString("Finalized funding became provider surplus: no request was admitted and no buyer return is owed.\n")
+		}
 		if f := p.TokenFunding; f != nil {
 			fmt.Fprintf(&b, "Token funding: asset %s wallet code %s (%d decimals), amount %s atomic (%s), received %s atomic; actor %s via wallet %s. Native value %s nanoTOS, forward %s nanoTOS; minimum funding budget %s nanoTOS.\n", f.AssetMaster, f.WalletCodeHash, f.Decimals, f.AmountAtomic, buyeragent.AtomicAmount(f.AmountAtomic, f.Decimals), f.ReceivedAtomic, p.Actor, f.TokenWallet, f.WalletValueNanoTOS, f.ForwardNanoTOS, f.MinimumForwardNanoTOS)
 			b.WriteString("Underfunded transfers or transfers without a forward amount can become provider surplus. Fund only while accepting tokens. Refused payouts leave returned entries to claim.\n")

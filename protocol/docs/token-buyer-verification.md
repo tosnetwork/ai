@@ -73,3 +73,39 @@ base. Applicable review areas: resource bounds, concurrency, persistence, custod
 serialization, configuration, compatibility, API errors, value-moving tooling
 (VM-1 through VM-9), observability, tests, build boundaries and hygiene.
 A non-author review is still required before merge.
+
+## Reviewed token protocol integration (2026-11-26)
+
+Main was merged, without rebasing, through
+`30fd0f23ca031b6386d84b9275f5046afdf418ce` after the protocol review fixes.
+The exporter now separates bounded funding-hop discovery from proof: each
+candidate is read back with `TokenWalletTransaction` at the same finalized
+checkpoint, checked for exact LT/hash and execution/message linkage, and then
+independently checked by `VerifyToken`. Discovery can still refuse when its
+bounded complete history is unavailable; it never substitutes a candidate for
+an exact-hop proof.
+
+The SDK's existing-request resolver already passes the acceptance proof for
+that exact call. A production-path regression now checks the refund deadline
+selects `sweep_expired_request`. Funding retained with no return payout is shown
+as terminal `funding_surplus`, with no promise of a return and no new submission;
+its spent principal counts against the normal per-asset budget window.
+
+Verification reran the ten packages above plus `purchaseevidence`, `serviceactor`,
+`toschain` and `nativecore`, including the merged protocol refusal, anchored-hop,
+pricing fallback, payout-recheck and proof-binding tests. All fourteen packages
+passed: 649 top-level passes, 1,114 including subtests. Two existing tests skip:
+the terminal child helper (covered through its parent) and the opt-in live
+three-node read-only integration test (no live endpoints were configured).
+Vet, spec-check, schema-check, boundary-lint, gofmt and whitespace checks passed.
+No Rust build ran.
+
+All sixteen previous controls were rerun, with five new controls for the exact
+hop read, exact hop identity, terminal surplus outcome, surplus budget expiry and
+refund-deadline action. All twenty-one failed the targeted tests, followed by a
+green fourteen-package run. New regressions are
+`TestTokenExporterRequiresTheExactNamedFundingProof`,
+`TestTokenBuyerUsesTheLapsedActionAtTheRefundDeadline`,
+`TestTokenBuyerSurplusIsTerminalAndCountsAsSpentWithinTheWindow`,
+`TestTokenSurplusIsShownAsTerminalRatherThanAdmitted` and
+`TestTokenSurplusStatusDoesNotPromiseAFundingReturn`.

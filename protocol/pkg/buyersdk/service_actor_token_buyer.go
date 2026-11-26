@@ -281,6 +281,15 @@ func (b *ServiceActorBuyer) resolveToken(ctx context.Context, r CallRecord) (*Re
 				if refusal.State == "returned" {
 					report.RequiredAction = "claim-returned"
 				}
+				if refusal.State == "surplus" {
+					updated, err := b.markOutcome(r, PhaseFundingSurplus, nil, toschain.ActorTransaction{LT: call.LT, Hash: call.Hash})
+					if err != nil {
+						return nil, err
+					}
+					report.Phase = updated.Phase
+					report.PayoutID, report.ReturnedID = nil, nil
+					report.RequiredAction = ""
+				}
 				if refusal.State == "funding_returned" {
 					updated, err := b.markOutcome(r, PhaseRefused, nil, toschain.ActorTransaction{LT: call.LT, Hash: call.Hash})
 					if err != nil {

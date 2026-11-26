@@ -399,6 +399,7 @@ const (
 	StateSubmitted            = "submitted"
 	StateAdmitted             = "admitted"
 	StateRefused              = "refused"
+	StateFundingSurplus       = "funding_surplus"
 	StateAmbiguous            = "ambiguous"
 )
 
@@ -455,6 +456,8 @@ func stateOf(record buyersdk.CallRecord, purchase PurchaseRecord, now time.Time)
 		return StateAdmitted
 	case buyersdk.PhaseRefused:
 		return StateRefused
+	case buyersdk.PhaseFundingSurplus:
+		return StateFundingSurplus
 	case buyersdk.PhaseAmbiguous:
 		return StateAmbiguous
 	}

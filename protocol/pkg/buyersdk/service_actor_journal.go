@@ -35,6 +35,9 @@ const (
 	PhaseAdmitted CallPhase = "admitted"
 	// PhaseRefused: the finalized call transaction aborted.
 	PhaseRefused CallPhase = "refused"
+	// PhaseFundingSurplus: finalized token funding was retained as provider
+	// surplus without admitting a request or creating a return liability.
+	PhaseFundingSurplus CallPhase = "funding-surplus"
 	// PhaseWithdrawn: withdrawn while still prepared. It was never handed to
 	// custody, holds no reservation and is never sent.
 	PhaseWithdrawn CallPhase = "withdrawn"
@@ -230,7 +233,7 @@ func (r CallRecord) reservation(now time.Time, window time.Duration) bool {
 		return false
 	case PhasePrepared:
 		return uint64(now.Unix()) < r.ExpiresAtUnix
-	case PhaseAdmitted:
+	case PhaseAdmitted, PhaseFundingSurplus:
 		return r.SentUnix > now.Add(-window).Unix()
 	default:
 		return true

@@ -3,6 +3,7 @@ package buyeragent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
@@ -68,5 +69,11 @@ func TestTokenDutiesKeepReturnedAndPayingDistinctFromSettlement(t *testing.T) {
 		if got := tokenLifecycleFor(c.status); got != c.want {
 			t.Fatalf("%s: %s", c.status, got)
 		}
+	}
+}
+
+func TestTokenSurplusIsShownAsTerminalRatherThanAdmitted(t *testing.T) {
+	if got := stateOf(buyersdk.CallRecord{Phase: buyersdk.PhaseFundingSurplus}, PurchaseRecord{}, time.Unix(1, 0)); got != StateFundingSurplus {
+		t.Fatalf("surplus state: %s", got)
 	}
 }

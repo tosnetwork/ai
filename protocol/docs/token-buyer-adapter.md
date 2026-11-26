@@ -47,7 +47,10 @@ fee-charging token wallets. Source-side transfer fees do not change that claim.
 The confirmation code binds the exact funding document as well as the quote,
 request and archive. An ambiguous submission remains reserved and is not sent
 again. Finalized notification/admission and authenticated payout outcomes decide
-its status; a sequence number alone is not settlement. Refused payouts remain
+its status; a sequence number alone is not settlement. A finalized funding
+refusal with no payout is terminal `funding_surplus`: no request was admitted
+and no buyer return is owed. Its spent principal remains in the asset budget
+until the normal window expires. Refused payouts remain
 returned entries until claimed. Underfunded/no-forward transfers can become
 provider surplus, so the adapter refuses to build them. The provider is
 responsible for keeping its token wallet funded for storage.
