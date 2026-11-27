@@ -53,9 +53,11 @@ func TestHelloFixedWireAndRoles(t *testing.T) {
 		}
 	}
 	_, h, _, _ := directSample(t, HelloInitiator)
-	h.Role = 3
-	if _, err := h.Encode(); err == nil {
-		t.Fatal("unknown hello role accepted")
+	for _, role := range []byte{0, 3} {
+		h.Role = role
+		if _, err := h.Encode(); err == nil {
+			t.Fatal("unknown hello role accepted")
+		}
 	}
 	h.Role = HelloInitiator
 	h.ResponderNonce = [32]byte{1}

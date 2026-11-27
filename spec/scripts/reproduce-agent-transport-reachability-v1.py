@@ -183,9 +183,9 @@ def hint_input(value):
     raw += bytes([len(direct)])
     for entry in direct:
         require(
-            entry["Kind"] == 1
-            and 1 <= entry["Port"] <= 65535
-            and entry["InboundClass"] in (1, 2),
+            integer(entry["Kind"], 8) == 1
+            and 1 <= integer(entry["Port"], 16) <= 65535
+            and integer(entry["InboundClass"], 8) in (1, 2),
             "direct shape",
         )
         raw += (
@@ -199,7 +199,7 @@ def hint_input(value):
     raw += bytes([len(objects)])
     previous = 0
     for ob in objects:
-        kind, length = ob["Kind"], ob["Length"]
+        kind, length = integer(ob["Kind"], 8), integer(ob["Length"], 32)
         require(
             previous < kind <= 3 and 0 < length <= (18432 if kind == 3 else 9216),
             "object shape/order",
@@ -300,7 +300,7 @@ def decode_record(raw):
 
 def hello_input(h):
     require(octets(h["Signature"], 64) == bytes(64), "unsigned hello input")
-    require(h["Role"] in (1, 2), "role")
+    require(integer(h["Role"], 8) in (1, 2), "role")
     require(
         h["Role"] != 1 or octets(h["ResponderNonce"], 32) == bytes(32),
         "initiator nonce shape",
@@ -350,7 +350,7 @@ def decode_hello(raw):
 
 def receipt_input(receipt):
     require(octets(receipt["Signature"], 64) == bytes(64), "unsigned receipt input")
-    require(receipt["Outcome"] in (1, 2, 3), "outcome")
+    require(integer(receipt["Outcome"], 8) in (1, 2, 3), "outcome")
     return (
         TD
         + octets(receipt["RecipientAgent"], 32)
@@ -472,7 +472,28 @@ def verify_object(v, raw, now, decode_only=False):
         raise ValueError("unknown kind")
 
 
+def check_identity_r():
+    seed = hashlib.sha256(b"public-cofactorless-reference-control").digest()
+    expanded = hashlib.sha512(seed).digest()
+    secret = bytearray(expanded[:32])
+    secret[0] &= 248
+    secret[31] = (secret[31] & 63) | 64
+    key, message = (
+        DELEGATION.public_key(seed),
+        b"cofactorless receipt verification control",
+    )
+    identity = encode_point(DELEGATION.IDENTITY)
+    challenge = (
+        int.from_bytes(hashlib.sha512(identity + key + message).digest(), "little") % L
+    )
+    signature = identity + (
+        (challenge * int.from_bytes(secret, "little")) % L
+    ).to_bytes(32, "little")
+    verify(key, message, signature)
+
+
 def main():
+    check_identity_r()
     corpus = json.loads(
         (ROOT / "test-vectors/agent-transport-reachability-v1.json").read_text()
     )

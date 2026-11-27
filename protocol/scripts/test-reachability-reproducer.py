@@ -81,6 +81,10 @@ def main():
     cases.append(
         ("self-consistent-wire-with-wrong-object-digest", value, "object digest")
     )
+    value = copy.deepcopy(base)
+    maximal = next(v for v in value["positive"] if v["name"] == "maximal")
+    maximal["hint"]["Direct"][0]["Kind"] = True
+    cases.append(("boolean-instead-of-integer", value, "integer"))
     for label, value, expected in cases:
         code, output = run(value)
         if code != 1 or "ValueError:" not in output or expected not in output:

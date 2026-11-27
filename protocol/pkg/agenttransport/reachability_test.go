@@ -99,7 +99,7 @@ func TestHintLimitsAndReducedPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	wire, err := decoded.Hint.Encode()
-	if err != nil || len(wire) != 1512 || len(raw) > MaxHintRecordSize {
+	if err != nil || len(wire) != 1512 || len(raw) != 38419 || len(raw) > MaxHintRecordSize {
 		t.Fatalf("max hint/record: %d %d %v", len(wire), len(raw), err)
 	}
 	if decoded.Hint.Relays[0] != h.Relays[0] {
@@ -124,15 +124,19 @@ func TestHintStructuralRefusals(t *testing.T) {
 			h.Relays = []string{"https://a.invalid", "https://b.invalid", "https://c.invalid", "https://d.invalid", "https://e.invalid"}
 		}},
 		{"duplicate-relay", func(h *Hint) { h.Relays = append(h.Relays, h.Relays[0]) }},
+		{"empty-url", func(h *Hint) { h.Relays[0] = "" }},
 		{"bad-url", func(h *Hint) { h.Relays[0] = "https://relay.invalid/" }},
 		{"long-url", func(h *Hint) { h.Relays[0] = "https://" + strings.Repeat("x", 257) }},
 		{"many-direct", func(h *Hint) {
 			h.Direct = []DirectEntry{{Kind: 1, Port: 1, InboundClass: 1}, {Kind: 1, Port: 1, InboundClass: 1}, {Kind: 1, Port: 1, InboundClass: 1}}
 		}},
+		{"direct-kind-zero", func(h *Hint) { h.Direct = []DirectEntry{{Kind: 0, Port: 1, InboundClass: 1}} }},
 		{"direct-kind", func(h *Hint) { h.Direct = []DirectEntry{{Kind: 2, Port: 1, InboundClass: 1}} }},
 		{"direct-port", func(h *Hint) { h.Direct = []DirectEntry{{Kind: 1, InboundClass: 1}} }},
+		{"direct-class-zero", func(h *Hint) { h.Direct = []DirectEntry{{Kind: 1, Port: 1, InboundClass: 0}} }},
 		{"direct-class", func(h *Hint) { h.Direct = []DirectEntry{{Kind: 1, Port: 1, InboundClass: 3}} }},
 		{"many-objects", func(h *Hint) { h.Objects = make([]HintObjectRef, 4) }},
+		{"object-kind-zero", func(h *Hint) { h.Objects = []HintObjectRef{{Kind: 0, Length: 1}} }},
 		{"object-kind", func(h *Hint) { h.Objects = []HintObjectRef{{Kind: 4, Length: 1}} }},
 		{"object-zero", func(h *Hint) { h.Objects = []HintObjectRef{{Kind: RailCard}} }},
 		{"object-long", func(h *Hint) { h.Objects = []HintObjectRef{{Kind: RailCard, Length: 9217}} }},

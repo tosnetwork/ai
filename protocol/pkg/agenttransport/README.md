@@ -167,6 +167,8 @@ context bounded to 5 s; this PR opens no network path.
 the expected recipient Agent and exact envelope ID. All three outcomes are
 signed. The spec defines no separate receipt timestamp window; replay of a
 receipt for the same immutable envelope describes the same carrier outcome.
+`ReceivedAt` is informational: it cannot extend an envelope lifetime or a
+business deadline.
 The recipient must sign stored/duplicate **only after durable inbox write**;
 that storage ordering belongs to the future carrier, not this codec. A receipt
 never authenticates a packet or creates an execution/settlement fact.
