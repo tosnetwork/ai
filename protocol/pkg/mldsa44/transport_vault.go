@@ -33,6 +33,9 @@ func NewTransportVault(binary, pin, vaultURL string) (*TransportVault, error) {
 // EnsureKey resumes after a crash during generation by reading the same vault
 // record. Generate uses the vault's NewOnly operation, never overwrite.
 func (v *TransportVault) EnsureKey(ctx context.Context, name string) ([32]byte, error) {
+	if ctx == nil || v == nil || v.snapshot == nil {
+		return [32]byte{}, errors.New("transport vault and context required")
+	}
 	if !controllerNamePattern.MatchString(name) || len(name) > 30 {
 		return [32]byte{}, errors.New("transport key name must be 1..30 canonical characters")
 	}

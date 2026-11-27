@@ -99,3 +99,14 @@ func TestTransportVaultRealCustody(t *testing.T) {
 		t.Fatal("wrong binary pin accepted")
 	}
 }
+
+func TestTransportVaultNilInputsRefuse(t *testing.T) {
+	var vault *TransportVault
+	if _, err := vault.EnsureKey(t.Context(), "key"); err == nil {
+		t.Fatal("nil vault accepted")
+	}
+	vault = &TransportVault{}
+	if _, err := vault.EnsureKey(nil, "key"); err == nil {
+		t.Fatal("nil context accepted")
+	}
+}

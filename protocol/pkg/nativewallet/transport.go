@@ -122,8 +122,14 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		if err = jsonstrict.Decode(raw, &r); err != nil {
 			return nil, errors.New("invalid transport operation journal")
 		}
-		expected, _ := json.Marshal(request)
-		actual, _ := json.Marshal(r.Request)
+		expected, err := json.Marshal(request)
+		if err != nil {
+			return nil, err
+		}
+		actual, err := json.Marshal(r.Request)
+		if err != nil {
+			return nil, err
+		}
 		if r.Version != "tos-service-transport-operation.v1" || !bytes.Equal(expected, actual) || !proto.Equal(r.Network, w.Config.Network) || r.Mode != w.Config.Mode || !sameStrings(r.RegistryHashes, w.Config.ChainPolicy.RegistryCodeHashes) {
 			return nil, errors.New("transport journal belongs to another request or network")
 		}

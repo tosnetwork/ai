@@ -10,17 +10,23 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/gen/tos/service/v1/tosservicev1connect"
 	"github.com/tosnetwork/ai/protocol/internal/osguard"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/nativeclient"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -45,6 +51,7 @@ func (k *transportTestKeys) EnsureKey(context.Context, string) ([32]byte, error)
 }
 
 type transportHarness struct {
+	mu           sync.Mutex
 	t            *testing.T
 	snapshot     agenttransport.Snapshot
 	signer       mldsa44.Verifier
@@ -56,12 +63,16 @@ type transportHarness struct {
 }
 
 func (h *transportHarness) ResolveFinalizedAgent(ctx context.Context, _ string) (agenttransport.Snapshot, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return agenttransport.Snapshot{}, err
 	}
 	return h.snapshot, nil
 }
 func (h *transportHarness) SubmitNativeAction(ctx context.Context, r *nativev1.SubmitNativeActionRequest) (*nativev1.SubmitNativeActionResponse, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.submits++
 	if r.Context == nil || r.Context.RequestId == "" || r.Context.IdempotencyKey != r.Context.RequestId || r.Context.CallerId != r.Submission.Action.TargetObjectId || r.Context.DeadlineUnixMillis <= time.Now().UnixMilli() {
 		h.t.Fatal("missing existing Native action request context")
@@ -397,6 +408,21 @@ func TestTransportRoundTripWithRealControllerCustody(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.Keys = vault
+	mux := http.NewServeMux()
+	route, handler := tosservicev1connect.NewNativeServiceHandler(transportNativeHandler{h: h})
+	mux.Handle(route, handler)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client, err := nativeclient.New(nativeclient.Config{BaseURL: server.URL, BearerToken: "test-relay-token", Insecure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	w.Submitter = client
 	h.signer = mldsa44test.RequireTosctl(t)
 	if _, err := issueTest(t, w, h, r); err != nil {
 		t.Fatal(err)
@@ -494,4 +520,21 @@ func TestTransportSubmissionErrorDoesNotReflectCredentials(t *testing.T) {
 	if _, err := issueTest(t, w, h, r); err == nil || strings.Contains(err.Error(), "untrusted reflected relay credential") || !strings.Contains(err.Error(), "outcome unknown") {
 		t.Fatalf("unsafe submission error: %v", err)
 	}
+}
+
+type transportNativeHandler struct {
+	tosservicev1connect.UnimplementedNativeServiceHandler
+	h *transportHarness
+}
+
+func (s transportNativeHandler) SubmitNativeAction(ctx context.Context, r *connect.Request[nativev1.SubmitNativeActionRequest]) (*connect.Response[nativev1.SubmitNativeActionResponse], error) {
+	if r.Header().Get("Authorization") != "Bearer test-relay-token" {
+		s.h.t.Error("missing existing relay-token authorization")
+		return nil, errors.New("relay authorization refused")
+	}
+	result, err := s.h.SubmitNativeAction(ctx, r.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(result), nil
 }
