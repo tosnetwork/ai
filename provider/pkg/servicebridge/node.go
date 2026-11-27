@@ -223,7 +223,9 @@ type NodeOptions struct {
 	// Lane is handed to the registered relay lane when it opens, for tests.
 	Lane   any
 	Report func(stage string, err error)
-	Now    func() time.Time
+	// Now supplies one clock to finalized reads, deadline checks and monitor checks.
+	// Nil keeps the production wall clock.
+	Now func() time.Time
 	// AdmissionLimiter, when set, bounds the provider's admissions
 	// (ProviderConfig.Limiter); the provider agent sets its daily cap here.
 	AdmissionLimiter AdmissionLimiter
@@ -316,9 +318,16 @@ func effectiveQuorum(config NodeConfig) int {
 
 // newChainAdapter validates the endpoint set and quorum without contacting
 // any endpoint.
-func newChainAdapter(config NodeConfig) (*toschain.Adapter, error) {
+func newChainAdapter(config NodeConfig, clocks ...func() time.Time) (*toschain.Adapter, error) {
+	if len(clocks) > 1 {
+		return nil, errors.New("servicebridge: only one chain clock may be supplied")
+	}
+	var clock func() time.Time
+	if len(clocks) == 1 {
+		clock = clocks[0]
+	}
 	return toschain.New(toschain.Config{
-		Network: config.Network.NetworkID, Endpoints: config.RPCEndpoints, Quorum: effectiveQuorum(config),
+		Network: config.Network.NetworkID, Endpoints: config.RPCEndpoints, Quorum: effectiveQuorum(config), Now: clock,
 	})
 }
 
@@ -328,8 +337,9 @@ func openServiceActorReader(
 	config NodeConfig,
 	network *nativev1.NetworkDomain,
 	checkpointDir string,
+	clocks ...func() time.Time,
 ) (*toschain.ServiceActorReader, error) {
-	chain, err := newChainAdapter(config)
+	chain, err := newChainAdapter(config, clocks...)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +408,7 @@ func OpenNode(ctx context.Context, config NodeConfig, options NodeOptions) (*Nod
 		NetworkId: config.Network.NetworkID, GenesisRootHash: config.Network.GenesisRootHash,
 		GenesisFileHash: config.Network.GenesisFileHash,
 	}
-	node.Reader, err = openServiceActorReader(config, node.Network, config.StateDir)
+	node.Reader, err = openServiceActorReader(config, node.Network, config.StateDir, options.Now)
 	if err != nil {
 		return fail(err)
 	}
@@ -635,7 +645,7 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 		}
 	}
 	verifier, err := railgate.NewVerifier(railgate.VerifierConfig{
-		Reader:    railReader{reader: n.Reader},
+		Reader: railReader{reader: n.Reader}, Now: options.Now,
 		TokenPins: tokenPins, CheckExecution: executionGuard,
 		Manifests:       n.Manifests,
 		Network:         n.Network,

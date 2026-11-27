@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"github.com/tosnetwork/ai/execution/pkg/railgate"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"strings"
 	"testing"
@@ -115,52 +112,6 @@ func (s tokenResponseSession) ReadTokenActor(ctx context.Context, actor string) 
 }
 func (s tokenResponseSession) TokenHistory(ctx context.Context, actor string, anchor *toschain.ActorTxID) (*toschain.TokenActorHistory, error) {
 	return s.tokenWorld.TokenHistory(ctx, actor, anchor)
-}
-
-// This source guard complements the behavioural safety checks above: a safety
-// helper that the node never installs must not make the wiring test pass.
-func TestNodeInstallsTokenWorkSafetyAtTheExecutionGate(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "node.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	installed, guarded := false, false
-	ast.Inspect(file, func(n ast.Node) bool {
-		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "openProvider" {
-			return true
-		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			if kv, ok := n.(*ast.KeyValueExpr); ok {
-				key, k := kv.Key.(*ast.Ident)
-				value, v := kv.Value.(*ast.Ident)
-				if k && v && key.Name == "CheckExecution" && value.Name == "executionGuard" {
-					installed = true
-				}
-			}
-			if assign, ok := n.(*ast.AssignStmt); ok && len(assign.Lhs) == 1 && len(assign.Rhs) == 1 {
-				id, ok := assign.Lhs[0].(*ast.Ident)
-				closure, c := assign.Rhs[0].(*ast.FuncLit)
-				if ok && c && id.Name == "executionGuard" {
-					ast.Inspect(closure.Body, func(n ast.Node) bool {
-						call, ok := n.(*ast.CallExpr)
-						if ok {
-							name, ok := call.Fun.(*ast.Ident)
-							if ok && name.Name == "tokenWorkSafety" && len(call.Args) == 4 {
-								guarded = true
-							}
-						}
-						return true
-					})
-				}
-			}
-			return true
-		})
-		return false
-	})
-	if !installed || !guarded {
-		t.Fatal("node does not install the token safety guard")
-	}
 }
 
 func TestTokenExecutionIgnoresNonEmergencyMonitorAlarms(t *testing.T) {

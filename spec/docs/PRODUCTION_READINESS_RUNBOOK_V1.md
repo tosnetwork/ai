@@ -114,6 +114,9 @@ The validator intentionally rejects the template and any record that lacks a
 strict-majority diverse endpoint set, all operational drills, reproducible
 build proof, or three operator signatures.
 
+Run the provider as a dedicated unprivileged service user, not as root. Keep its
+custody files private to that user and grant only the required runtime socket access.
+
 ## Token provider alarm incidents
 
 The provider's management path consumes the trusted settlement monitor report.

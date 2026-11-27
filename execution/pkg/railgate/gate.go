@@ -154,7 +154,11 @@ func OpenGate(verifier *Verifier, directory string) (*Gate, error) {
 	if err != nil {
 		return nil, errors.New("railgate: slot directory is already owned")
 	}
-	gate := &Gate{verifier: verifier, root: directory, lock: lock, now: time.Now}
+	clock := verifier.config.Now
+	if clock == nil {
+		clock = time.Now
+	}
+	gate := &Gate{verifier: verifier, root: directory, lock: lock, now: clock}
 	if err := gate.recover(); err != nil {
 		_ = lock.Close()
 		return nil, err
