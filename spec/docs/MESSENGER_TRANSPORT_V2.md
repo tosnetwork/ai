@@ -5,12 +5,12 @@ carrier leaves OpenFox: relay-first store-and-forward with an optional direct
 upgrade, signed reachability hints, and short-lived relay credentials that
 are verified offline and revoked by finalized chain state.
 
-**Status: 🟡 Delegation boundary implemented; transport not accepted.**
+**Status: 🟡 Delegation and reachability boundaries implemented; transport not accepted.**
 `protocol/pkg/agenttransport` implements the delegation codec and finalized
-verifier of phase 1 item 2, with frozen vectors, an independent reproducer and
-synthetic epoch/cache tests. Production configuration refuses; there is no
+verifier of phase 1 item 2 and the hint/record/hello/receipt boundary of item 4,
+with frozen vectors, independent reproducers and synthetic boundary/cache tests. Production configuration refuses; there is no
 registry epoch adapter, relay deployment or live revocation evidence. The
-remaining transport surfaces are not implemented. This remains
+remaining runtime transport surfaces are not implemented. This remains
 an incubation design under [ROADMAP section 8.1](ROADMAP.md#81-incubation-designs):
 it carries no gate status and supplies no gate evidence. Section 16 lists the
 evidence each part needs; section 17 is the implementation order. Until the
@@ -1333,6 +1333,14 @@ team's).
 Production claims additionally need relays and directory relays run by an
 operator other than the core team, and a public chain, as ROADMAP Gate O
 requires.
+
+The reachability/control-object portion of A1 is frozen separately in
+`spec/test-vectors/agent-transport-reachability-v1.json`, with an independent
+stdlib reproducer `spec/scripts/reproduce-agent-transport-reachability-v1.py`
+under `make spec-check`. This covers phase 1 item 4's codecs, signatures,
+finalized delegation verification and synthetic boundary tests; it does not
+claim directory, carrier, live first-contact or direct-path acceptance. The
+167-byte delegation corpus remains unchanged.
 
 ## 17. Implementation plan
 

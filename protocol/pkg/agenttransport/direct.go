@@ -86,7 +86,8 @@ func DecodeHello(raw []byte) (Hello, error) {
 }
 
 // HelloExpectation comes from the authenticated channel and the local lane,
-// not fields copied from an unauthenticated hello. A responder checks contact
+// not fields copied from an unauthenticated hello. AdmittedContact must be a
+// nonblocking local lane-policy lookup. A responder checks contact
 // admission; an initiator additionally pins the intended Agent and challenge.
 // ExpectedAgent may be empty only when receiving an initiator's first hello.
 type HelloExpectation struct {
@@ -232,6 +233,9 @@ func (v *Verifier) VerifyReceipt(ctx context.Context, raw, peerDelegation []byte
 	preimage, err := r.preimage()
 	if err != nil || !ed25519.Verify(d.TransportKey[:], preimage, r.Signature[:]) {
 		return Receipt{}, ErrReceipt
+	}
+	if err = ctx.Err(); err != nil {
+		return Receipt{}, err
 	}
 	return r, nil
 }

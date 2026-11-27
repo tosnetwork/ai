@@ -189,7 +189,7 @@ func TestHintWireRefusals(t *testing.T) {
 		t.Fatal("hint length ignored")
 	}
 	for n := 0; n < len(raw); n++ {
-		if _, err = DecodeHintRecord(raw[:n]); err == nil {
+		if _, err = DecodeHintRecord(raw[:n:n]); err == nil {
 			t.Fatalf("accepted prefix %d", n)
 		}
 	}
@@ -371,5 +371,40 @@ func TestHintNewestIsPerDelegation(t *testing.T) {
 	a.Delegation.AgentDigest[0]++
 	if _, err = CompareHints(a, b); err == nil {
 		t.Fatal("independent delegations compared")
+	}
+}
+
+func TestHintRequiresHintsPurpose(t *testing.T) {
+	f, h, key := hintSample(t)
+	f.d.Purposes = Relay
+	f.reencode(t)
+	h.Delegation = f.d
+	if _, err := f.verifier(t).VerifyHint(context.Background(), signRecord(t, h, nil, key), HintPolicy{}); err == nil {
+		t.Fatal("hint purpose ignored")
+	}
+}
+func TestSignedObjectsRespectCancellationAndClockRollback(t *testing.T) {
+	f, h, key := hintSample(t)
+	raw := signRecord(t, h, nil, key)
+	v := f.verifier(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := v.VerifyHint(ctx, raw, HintPolicy{}); err == nil {
+		t.Fatal("cancelled hint accepted")
+	}
+	if _, err := v.VerifyHint(context.Background(), raw, HintPolicy{}); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.advance(-time.Second)
+	if _, err := v.VerifyHint(context.Background(), raw, HintPolicy{}); err == nil {
+		t.Fatal("clock rollback ignored")
+	}
+	_, hello, expect, _ := directSample(t, HelloResponder)
+	if _, err := v.VerifyHello(ctx, helloWire(t, hello, key), expect); err == nil {
+		t.Fatal("cancelled hello accepted")
+	}
+	r := Receipt{RecipientAgent: f.d.AgentDigest, Outcome: ReceiptStored}
+	if _, err := v.VerifyReceipt(ctx, receiptWire(t, r, f.d, key), f.wire, r.RecipientAgent, r.EnvelopeID); err == nil {
+		t.Fatal("cancelled receipt accepted")
 	}
 }

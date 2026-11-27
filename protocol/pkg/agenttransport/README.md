@@ -111,7 +111,89 @@ key encodings, purpose bits and lifetime limits.
 
 `make agenttransport-mutants` uses Go overlays, never mutating the checkout.
 A removed check counts red only if its named test fails; compiler errors and
-missing anchors are script failures. Run this and all Go commands under the
-workspace thermal guard with `GOFLAGS=-p=2`.
+missing anchors are script failures. Run Go and make in worktrees with `GOWORK=off`.
 
 No contract change, registry deployment or live-network acceptance is claimed.
+
+## Reachability and direct control objects
+
+Phase 1 item 4 adds `Hint`, `HintRecord`, `Hello` and `Receipt` binary codecs,
+signing helpers and verifiers. Domain prefixes include the zero byte; all
+integers are big endian. Decoders reject unknown kinds/roles/outcomes, malformed
+embedded delegations, lengths, ordering, duplicates, trailing bytes and bounds.
+The hint relay list is **priority order**, not sorted. Key cards keep their own
+canonical relay-list rule. The same existing `agentpacketseal.CheckRelayURL`
+validator is reused. No credential code or new production network mode is needed.
+
+`Verifier.VerifyHint` checks the full record/digests, finalized hints delegation,
+signature, final clock (future skew <=300 s, now strictly before expiry), IPv4
+policy, and each card packet's strict JSON and matching `sender_agent_id`. This
+is the relay boundary, **not card authentication**. `VerifyConsumerHint` additionally
+requires an `ObjectVerifier` callback for every embedded object. It must run
+`VerifyKeyCard` or `CheckPeer` as appropriate and return the authenticated Agent,
+which must equal the hint Agent. This keeps Messenger dependencies outside
+protocol/. The callback must honor its context; the result is rechecked after
+callbacks, including cancellation, time and delegation validity.
+
+`BuildHintRecord` has explicit `PublishOptions`. The default publishes relays and
+at most the supplied public rail card: chat card/evidence need `PublicContact`,
+and direct entries need `DirectEnabled`. Consent is local owner policy, not a
+wire flag an attacker can set. A consumer does not infer missing owner consent
+from a received signed hint; disclosure is controlled at publication. Direct
+session admission, contact relationships and all the other section 8.1 gates
+remain the carrier's responsibilities before probing.
+
+Direct addresses default to public unicast IPv4, excluding private, loopback,
+link-local, shared-address, documentation, benchmark and reserved ranges. The
+explicit `HintPolicy.AllowPrivateIPv4` exception admits only private ranges,
+not other reserved addresses, and is recorded in `VerifiedHint.PrivateIPv4Allowed`.
+The existing verifier constructor still admits only exact code-pinned test
+networks; production configuration refuses. No production one-relay mode is
+introduced: production verification is not available until registry epochs ship.
+
+A hello is **402 bytes**, including the 167-byte epoch-bearing delegation, and
+fits in one 8,192-byte ADNL query. `VerifyHello` requires authenticated channel
+IDs, the expected role/Agent, the responder's matching initiator challenge,
+current direct delegation, signature and ±120 s timestamp window (checked again
+after a finalized read). Contact admission is required on both sides; the
+callback must be a nonblocking local lane-policy lookup. Initiator hellos carry
+an all-zero responder nonce. Callers create fresh random challenges; this codec
+cannot prove randomness. The responder may learn the Agent from an initiator's
+hello, but it must be an admitted contact. An initiator must pin the intended
+Agent from the verified hint. The actual probe/hello exchange needs a caller
+context bounded to 5 s; this PR opens no network path.
+
+`VerifyReceipt` uses the verified peer delegation with direct purpose and pins
+the expected recipient Agent and exact envelope ID. All three outcomes are
+signed. The spec defines no separate receipt timestamp window; replay of a
+receipt for the same immutable envelope describes the same carrier outcome.
+The recipient must sign stored/duplicate **only after durable inbox write**;
+that storage ordering belongs to the future carrier, not this codec. A receipt
+never authenticates a packet or creates an execution/settlement fact.
+
+`CompareHints` is for already verified hints of **the same delegation** only:
+issued time, then greater SHA-256 of complete hint bytes. Independent lane
+processes are never merged into one timestamp race. Revoked hints are void,
+regardless of their timestamps; no directory storage or newest-record cache is
+implemented here.
+
+Generate deliberately with:
+
+```
+GOWORK=off go run ./protocol/cmd/agenttransport-reachability-vectors > spec/test-vectors/agent-transport-reachability-v1.json
+```
+
+`make spec-check` compares that output and runs the stdlib-only independent
+Python wire/signature reproducer. It derives test keys and each pure signature
+from the public fixture seed, using a cofactorless verification equation.
+The 13 positive and 51 negative objects include reduced/public-contact/maximal
+hints, a private test configuration, all hello roles and receipt outcomes,
+structural and re-signed semantic refusals. Embedded card/evidence bytes are
+relay-level structural fixtures, **not authenticated ML-DSA cards or Messenger
+bootstrap evidence**. Chain revocation and consumer callbacks are tested
+separately against the finalized verifier's synthetic pinned-network snapshots.
+
+`make agenttransport-mutants` also runs the separate reachability overlays;
+`make agenttransport-reachability-mutants` selects only this surface. Missing
+anchors, compiler errors and survivors fail the control run. Normal tests never
+regenerate frozen files. No live transport or first-contact acceptance is claimed.
