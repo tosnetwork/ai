@@ -1027,6 +1027,16 @@ func TestV2RecordMetadataRefusals(t *testing.T) {
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
 			rec := valid
+			if name == "received-zero" {
+				// Isolate the zero-time rule from the independent TTL bound.
+				rec.Received, rec.Expires = 1, 3600
+			}
+			if name == "lane-tag" {
+				rec.Contact, rec.Lane.Tag = true, v2DefaultLane
+			}
+			if err := rec.validate(); err != nil {
+				t.Fatal("positive metadata variant refused", err)
+			}
 			change(&rec)
 			raw, err := encodeV2(rec)
 			if err != nil {
