@@ -49,6 +49,9 @@ const (
 
 // ProviderRecord is the provider's durable view of one admitted request.
 type ProviderRecord struct {
+	AssetMaster string `json:"asset_master,omitempty"`
+	PriceAtomic string `json:"price_atomic,omitempty"`
+
 	Schema           string `json:"schema"`
 	State            string `json:"state"`
 	BuyerAgentID     string `json:"buyer_agent_id"`
@@ -138,6 +141,8 @@ type ArtifactSource interface {
 // ProviderConfig wires a provider worker. Exactly one of Runner and Service
 // executes the work.
 type ProviderConfig struct {
+	Token bool
+
 	AgentID      string
 	CapabilityID string
 	Version      string
@@ -254,7 +259,7 @@ func (p *Provider) store(key railgate.SlotKey, record ProviderRecord, create boo
 // against the derived request). Both happen before the gate claims a slot,
 // so a task whose packets or frames are bound wrongly never consumes one.
 func (p *Provider) claimFor(message Message) (railgate.Claim, *railwork.Admission, error) {
-	admission, err := railwork.Provider{
+	admission, err := railwork.Provider{Token: p.config.Token,
 		Network: p.config.Network, AgentID: p.config.AgentID,
 		CapabilityID: p.config.CapabilityID, Version: p.config.Version,
 	}.CheckTask(message.shared())
@@ -329,7 +334,16 @@ func (p *Provider) HandleTask(ctx context.Context, message Message) error {
 		// The buyer resent the task: it is never executed again. A result
 		// already attested is redelivered by the delivery loop, sealed to
 		// the newest buyer card a resend brought.
-		return p.learnBuyerCard(ctx, message, task)
+		_, recorded, readErr := p.load(slot.Key())
+		if readErr != nil {
+			return readErr
+		}
+		if slot.State != railgate.SlotAdmitted || recorded {
+			return p.learnBuyerCard(ctx, message, task)
+		}
+		// Nothing started and no provider record exists: retry the same admitted
+		// claim after a transient pre-execution safety refusal.
+		err = nil
 	}
 	if err != nil {
 		return err
@@ -356,10 +370,15 @@ func (p *Provider) HandleTask(ctx context.Context, message Message) error {
 		InputDigest: hex.EncodeToString(claim.InputDigest[:]), CallLT: claim.Call.LT, CallHash: claim.Call.Hash,
 		PriceNanoTOS: verified.Price.String(), AdmittedUnix: p.config.Now().Unix(),
 	}
+	if verified.AssetMaster != nil {
+		record.AssetMaster = hex.EncodeToString(verified.AssetMaster[:])
+		record.PriceAtomic = record.PriceNanoTOS
+		record.PriceNanoTOS = ""
+	}
 	if cardErr != nil {
 		record.Detail = "the buyer's encryption key card was not taken: " + cardErr.Error()
 	}
-	binding := ReceiptBinding{
+	binding := ReceiptBinding{AssetMaster: verified.AssetMaster,
 		QuoteCommitment: verified.QuoteCommitment, ExecutionID: verified.ExecutionID,
 		InputDigest: verified.InputDigest, SourceDigest: task.Header.SourceDigest, Price: verified.Price,
 		ProviderAgentID: verified.ProviderAgentID, ToolchainDigest: verified.Manifest.ToolchainDigest,
@@ -385,6 +404,9 @@ func (p *Provider) HandleTask(ctx context.Context, message Message) error {
 		})
 		return executeErr
 	})
+	if errors.Is(runErr, railgate.ErrExecutionGuard) {
+		return runErr
+	}
 	if errors.Is(runErr, railgate.ErrNotPendingNow) {
 		record.State = ProviderAbandoned
 		return errors.Join(runErr, p.store(key, record, true))
@@ -571,6 +593,38 @@ func (p *Provider) respondFinalized(ctx context.Context, record ProviderRecord) 
 	session, err := p.config.History.BeginSession(ctx)
 	if err != nil {
 		return false, err
+	}
+	if record.AssetMaster != "" {
+		token, ok := session.(interface {
+			ReadTokenActor(context.Context, string) (*toschain.TokenActorAccount, bool, error)
+			TokenHistory(context.Context, string, *toschain.ActorTxID) (*toschain.TokenActorHistory, error)
+		})
+		if !ok {
+			return false, errors.New("servicebridge: token history unavailable")
+		}
+		account, found, e := token.ReadTokenActor(ctx, record.Actor)
+		if e != nil {
+			return false, e
+		}
+		if !found || account == nil {
+			return false, errors.New("servicebridge: token actor unavailable")
+		}
+		history, e := token.TokenHistory(ctx, record.Actor, nil)
+		if e != nil {
+			return false, e
+		}
+		if history == nil || history.Result != toschain.HistoryComplete || history.Head != account.LastTransaction {
+			return false, errors.New("servicebridge: token history incomplete")
+		}
+		for _, tx := range history.Transactions {
+			if tx.TookEffect && tx.Kind == toschain.ActorTxRespond && tx.RequestID == record.RequestID {
+				if tx.ResponseHash != record.ResponseHash {
+					return false, errors.New("servicebridge: token response hash differs")
+				}
+				return true, nil
+			}
+		}
+		return false, nil
 	}
 	history, err := session.History(ctx, record.Actor, nil)
 	if err != nil {
@@ -879,7 +933,21 @@ func claimOf(record ProviderRecord) (railgate.Claim, *railgate.Verified, error) 
 	if err = decodeHex32(record.RequestHash, &expected.RequestHash); err != nil {
 		return railgate.Claim{}, nil, err
 	}
-	price, ok := new(big.Int).SetString(record.PriceNanoTOS, 10)
+	priceText := record.PriceNanoTOS
+	if record.AssetMaster != "" {
+		var asset [32]byte
+		if err = decodeHex32(record.AssetMaster, &asset); err != nil {
+			return railgate.Claim{}, nil, err
+		}
+		expected.AssetMaster = &asset
+		priceText = record.PriceAtomic
+		if record.PriceNanoTOS != "" {
+			return railgate.Claim{}, nil, errors.New("servicebridge: token record carries native price")
+		}
+	} else if record.PriceAtomic != "" {
+		return railgate.Claim{}, nil, errors.New("servicebridge: native record carries token price")
+	}
+	price, ok := new(big.Int).SetString(priceText, 10)
 	if !ok || price.Sign() <= 0 {
 		return railgate.Claim{}, nil, errors.New("servicebridge: the record holds no request price")
 	}

@@ -131,10 +131,10 @@ service before those gates pass.
 
 A stale or unreadable monitor **does not clear on-chain `active`**. It refuses
 local offer inspection, preflight and resume and raises a runtime diagnostic;
-an already-active actor remains active until a signed pause is included. This
-management implementation is not an execution-time alarm/staleness gate. Token
-paid-work execution and its refusal while an alarm is active or monitoring is
-stale are integration requirements of the live-lifecycle work item.
+an already-active actor remains active until a signed pause is included. The
+separate paid-work execution gate refuses stale or missing reports and latched
+emergency assets even while the actor is still active on chain; non-emergency
+alarms do not block execution.
 
 Emergency pause needs only the owned actor's release, master and current
 policy; a missing token wallet cannot prevent it. Policy updates replace the
@@ -171,3 +171,51 @@ V1, missing/malformed expiry and unknown fields are refused before broadcast.
 The provider currently lets custody choose the expiry, then verifies the signed
 value against its local and finalized signing windows; it does not supply an
 explicit expiry flag.
+
+## Paid software work
+
+A provider section may select a published token manifest for one of its
+configured token actors. The actor release, independently pinned asset and
+Capability must match. Build that manifest with `tos-service-provider manifest
+--token-config <provider-config>` and the usual manifest arguments, then register
+the Capability and bind its metadata through the token policy operation. Keep
+those registration and policy transactions in the setup journal. Token offer
+inspection/export remains `token --inspect offer` or `export-offer`.
+
+`serve` carries the task through the same finalized-request and at-most-once
+execution gate as native work. Admission and the execution recheck require a
+fresh configured monitor report without that asset in the latched emergency
+`provider_pause_assets` set (`bridge_frozen`, `token_paused`, `destroyed_funds`,
+`unexplained_decrease`, `backing_shortfall`). Non-emergency T14 alarms do not
+stop execution. A missing or stale
+report refuses execution even when the request is already funded. The buyer's
+refund deadlines still apply. Do not clear an alarm to force execution; reconcile
+the request and let its ordinary lifecycle finish. A native-only provider refuses
+a token task, and a token provider refuses a native task.
+
+Token records retain the asset master and atomic price. The receipt uses the
+token receipt schema and the response is signed through `service-token` with
+the actor's pinned code profile. The native `offer` deployment command and native
+preflight/status projections have not become token deployment commands; use the
+token inspection path for the published binding.
+
+These adapters have no upstream counterpart; inherited node and VM code is
+unchanged.
+
+
+### Local refusal evidence
+
+Receiver refusal integration uses a separate, independently pinned local test
+namespace, admitted by normal ConfigParam 84 governance. It never replaces an
+account's code or bypasses recognition. The unsigned fixture helper accepts the
+four supported bridge slots so a test namespace does not replace an existing
+asset's bridge configuration. No provider or buyer production path accepts a
+new asset merely because it appears in ConfigParam 84: independent pins are
+still mandatory. The operations runbook records the R abort, S refusal, returned
+entry and claim. The 30-day returned-entry sweep deadline stays unchanged.
+
+A safety refusal between admission and execution leaves the slot admitted and
+retryable. The runtime retries while the execution and response budgets still
+fit before the response deadline; only a finalized not-pending request or an
+exhausted response window abandons it. Nothing is
+executed during the hold.

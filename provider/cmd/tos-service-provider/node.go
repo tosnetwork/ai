@@ -169,7 +169,8 @@ func runResume(_ context.Context, set *flag.FlagSet, arguments []string, std str
 
 func runManifest(_ context.Context, set *flag.FlagSet, arguments []string, std streams) error {
 	var input servicebridge.ManifestInput
-	var out string
+	var out, tokenConfig string
+	set.StringVar(&tokenConfig, "token-config", "", "token provider configuration supplying independent asset pins (optional)")
 	set.StringVar(&input.ProviderAgentID, "provider-agent", "", "provider Agent id (agent_<hex>)")
 	set.StringVar(&input.Actor, "actor", "", "Service Actor address (0:<hex>)")
 	set.StringVar(&input.ActorCodeHash, "code-hash", "", "pinned Service Actor release code hash "+
@@ -185,7 +186,38 @@ func runManifest(_ context.Context, set *flag.FlagSet, arguments []string, std s
 	if !filepath.IsAbs(out) || filepath.Clean(out) != out {
 		return usagef("--out-dir must be an absolute clean path")
 	}
-	encoded, digest, _, err := servicebridge.BuildManifest(input)
+	var encoded []byte
+	var digest string
+	var err error
+	if tokenConfig == "" {
+		encoded, digest, _, err = servicebridge.BuildManifest(input)
+	} else {
+		var c servicebridge.NodeConfig
+		c, err = servicebridge.LoadNodeConfig(tokenConfig)
+		if err == nil && c.Token == nil {
+			return usagef("--token-config has no asset pins")
+		}
+		if err == nil {
+			var a servicebridge.TokenActorConfig
+			a, err = c.Token.Actor(input.Actor)
+			if err == nil && (a.CodeHash != input.ActorCodeHash || c.AgentID != input.ProviderAgentID) {
+				return usagef("token manifest differs from configured actor or Agent")
+			}
+			if err == nil {
+				found := false
+				for _, pin := range c.Token.Pins {
+					if pin.Master == a.Master {
+						found = true
+						encoded, digest, _, err = servicebridge.BuildTokenManifest(input, pin)
+						break
+					}
+				}
+				if !found {
+					return usagef("token actor has no independent asset pin")
+				}
+			}
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -194,12 +226,20 @@ func runManifest(_ context.Context, set *flag.FlagSet, arguments []string, std s
 	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		return fmt.Errorf("write the manifest: %w", err)
 	}
-	return printJSON(std.out, map[string]any{"manifest_digest": digest, "path": path, "next_steps": []string{
+	next := []string{
 		"tosctl agent service deploy ... --attestor-controller <attestor> (if the actor is not deployed yet)",
 		"tosctl agent native-registry action --kind register-capability --manifest " + hexDigest + " ...",
 		programName + " metadata --capability-id <cap_...> --manifest-digest " + digest + " ...",
 		"tosctl agent service send --operation update-policy --metadata-hash <NSM1> ...",
-	}})
+	}
+	if tokenConfig != "" {
+		next = []string{
+			"tosctl agent native-registry action --kind register-capability --manifest " + hexDigest + " ...",
+			programName + " metadata --capability-id <cap_...> --manifest-digest " + digest + " ...",
+			"tosctl agent service-token send --operation update-policy --metadata-hash <NSM1> ...",
+		}
+	}
+	return printJSON(std.out, map[string]any{"manifest_digest": digest, "path": path, "next_steps": next})
 }
 
 func runMetadata(_ context.Context, set *flag.FlagSet, arguments []string, std streams) error {

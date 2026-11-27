@@ -76,7 +76,7 @@ func prepareTokenDelivery(ctx context.Context, c NodeConfig, s TokenSession, rec
 		StateInitHash string `json:"state_init_hash"`
 		BOC           string `json:"message_boc_base64"`
 	}
-	err = runTOSCTLJSON(ctx, runner, TOSCTLCall{Label: "wallet build token", Args: []string{"wallet", "send", "--from", c.WalletName, "--to", m.Destination, "--amount-nanotos", value.String(), "--body-boc", m.BodyBOC, "--build-only"}, MaxOutput: maxTOSCTLJSONOutput}, false, &out)
+	err = runTOSCTLJSON(ctx, runner, TOSCTLCall{Label: "wallet build token", Args: []string{"wallet", "send", "--from", c.WalletName, "--to", m.Destination, "--amount-nanotos", value.String(), "--body-boc", m.BodyBOC, "--bounce", "--build-only"}, MaxOutput: maxTOSCTLJSONOutput}, false, &out)
 	if err != nil {
 		return nil, err
 	}
