@@ -10,6 +10,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
     (
+        "issuer-evidence-redaction",
+        "protocol/cmd/tos-service-buyer/token.go",
+        "result[i].Issuer = nil",
+        "result[i].Issuer = configs[i].Issuer",
+        "./protocol/cmd/tos-service-buyer",
+        "TestTokenEvidenceOmitsIssuerEndpoint",
+    ),
+    (
         "blacklist",
         "protocol/pkg/tokenissuer/issuer.go",
         "if blocked {",
@@ -44,8 +52,8 @@ CASES = [
     (
         "late-stale",
         "protocol/pkg/tokenissuer/issuer.go",
-        "if err = r.fresh(stamp); err != nil",
-        "if err = r.fresh(stamp); false && err != nil",
+        "if err = r.fresh(stamp); err != nil {\n\t\treturn result, err\n\t}\n\treturn Snapshot{",
+        "if err = r.fresh(stamp); false && err != nil {\n\t\treturn result, err\n\t}\n\treturn Snapshot{",
         "./protocol/pkg/tokenissuer",
         "TestIssuerReadRechecksTimeAfterRPC",
     ),
@@ -193,7 +201,7 @@ def main():
             "test",
             "-count=1",
             "-run",
-            "^(TestIssuer.*|TestFinalizedIssuer.*|TestTokenLock.*|TestNoIssuerFee.*)$",
+            "^(TestIssuer.*|TestFinalizedIssuer.*|TestTokenLock.*|TestNoIssuerFee.*|TestTokenEvidenceOmitsIssuerEndpoint)$",
             *packages,
         ]
     )

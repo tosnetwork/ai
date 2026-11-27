@@ -164,7 +164,7 @@ The agent authorizes every request by the peer's kernel-reported credentials
 | Peer uid | Allowed |
 |---|---|
 | the custody account | everything, including `decide` (section 5) and reading the full purchase record |
-| the configured client uid | `search`, `quote`, `prepare`, `withdraw`, `await_decision`, `status`, `result`, `refund_now`, `purchases` |
+| the configured client uid | `search`, `quote`, `token_lock_preview`, `prepare`, `withdraw`, `await_decision`, `status`, `result`, `refund_now`, `purchases` |
 | any other | refused before the request is read |
 
 The agent refuses to start when the configured client uid equals its own uid,
@@ -452,6 +452,7 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
 |---|---|---|
 | `tos_buyer_search` | read-only | candidate offers from hint sources, verified |
 | `tos_buyer_quote` | read-only | one verified offer and a locally built Quote |
+| `tos_buyer_preview_token_lock` | read-only, idempotent | finalized issuer-fee and minted-amount preview for a stored token Quote; no reservation or transaction |
 | `tos_buyer_prepare` | not read-only, idempotent per key | a prepared purchase awaiting confirmation; reserves budget |
 | `tos_buyer_request_payment` | not read-only, idempotent | asks the human to confirm; waits a bounded time for the decision |
 | `tos_buyer_withdraw` | not read-only, idempotent | withdraws an unconfirmed purchase; frees its reservation |
@@ -460,9 +461,40 @@ keeps keys in `tosctl` custody. No step needs OpenFox.
 | `tos_buyer_refund` | not read-only, idempotent | runs the refund action that is due now |
 | `tos_buyer_purchases` | read-only | lists purchases and the budget in use |
 
-No tool takes a wallet, a destination address, an amount, a key name, an
-endpoint, a relay URL or a budget value: these come only from the agent's
-configuration.
+No payment-capable tool takes a wallet, destination address, amount, key name,
+endpoint, relay URL or budget value: these come only from the stored Quote and
+agent configuration. The read-only source-lock preview is the sole amount-input
+exception: a bounded canonical atomic amount is hypothetical input only, cannot
+change a Quote or reservation, and cannot authorize any send.
+
+#### Source-lock received-amount preview
+
+`tos_buyer_preview_token_lock` takes `quote_id` and `nominal_atomic` (canonical
+positive decimal, at most 120 bits). The custody agent loads and validates the
+stored token Quote, obtains its exact asset and actor price, and selects the
+owner-pinned issuer policy for that asset. There is no endpoint, token, receiver
+or budget override in the request. Missing source policy refuses; fee zero is
+never guessed. The agent admits at most 20 previews per minute.
+
+The issuer read is at a finalized block, every state/code call pinned by its
+hash with `requireCanonical`. Chain id and runtime code must match policy;
+blacklist, pause, deprecation, failed calls, changed checkpoints and stale reads
+refuse. Maximum finalized age is 1,800 seconds, future skew 30 seconds, and the
+whole read is bounded to 45 seconds. These are trusted endpoint observations,
+not cross-domain proofs. Parameters may change after the finalized observation.
+
+The result names nominal amount, issuer fee, minted delta, per-asset budget debit,
+remaining window, per-call cap, asset, actor and exact actor price. The fee is
+`min(nominal * basisPointsRate / 10000, maximumFee)` in atomic integers. The
+preview checks the minted amount against that asset's caps, not the nominal
+source amount. It reserves nothing and sends nothing. With a fee, it warns that
+funding an actor with a different amount from its exact quoted price is refused
+and returned. Importing a nominal price does not necessarily mint that price.
+TOS token transfers remain exact; fees are not deducted a second time, and
+actual purchase journals/budgets still record the exact TOS amount spent.
+`prepare` and `call` independently recheck TOS admission and recognition; this
+source-only preview is not actor admission. RPC routing is not public purchase
+evidence and is omitted from evidence exports.
 
 ### 4.3 `tos_buyer_search`
 

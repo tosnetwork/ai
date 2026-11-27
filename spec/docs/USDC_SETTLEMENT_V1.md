@@ -2171,7 +2171,7 @@ Added by this design:
     pause state for the receiver on Ethereum before it builds the burn. It
     refuses a blacklisted receiver, and the burn preview warns about the
     finality.
-  - The check is in T10 and T12.
+  - The check is T19 and gates T12; T10 exercises it locally.
 
 ### 7.2 Relayer gap
 
@@ -2407,6 +2407,7 @@ but it gates USDC production too.
 | T16 | tos (EVM) | **The per-token EVM lock cap** (SEC:105), set per token, with USDT's set independently of USDC's. It is bridge code required for every token (7.5) | — | A lock that would exceed its token's cap is refused; the caps are changed only by oracle vote; Hardhat tests for each token. **Every SEC:105 cap is placed:**<br>• per-token and per-transaction caps in `Bridge.sol` `lock`;<br>• hourly and daily caps in `Bridge.sol` as per-token sums over fixed UTC hour and day buckets, checked in `lock` (any one-hour span admits at most 2 × `hourly`, any one-day span at most 2 × `daily`; set each rate cap to half the tolerable burst);<br>• the token total cap measured by the bridge's balance of the token, so a direct donation can only fill the room left, and an issuer burn of the bridge's balance is handled by the disable-token vote;<br>• no cap is ever read by `unlock` or `refundLock`; a token with no caps set cannot be locked;<br>• every deployment, test bridges included (T5), votes caps per token before its first lock;<br>• all of them also enforced by the oracle's own policy before it votes (T11).<br>Also: the token allowlist on the oracle side (6.3) | M |
 | T17 | ai | **A second pinned asset**: USDT release pins and the ConfigParam 84 entry in clients, budgets per asset, and asset-separated aggregation (6.3) | T7, T15 | USDC and USDT are verified and budgeted independently; a suspended USDT entry leaves USDC purchases unaffected | S |
 | T18 | providers, tos-ops | **USDT token actors**: deployment and offers of actors fixed to the USDT master, with their own `max_token_liability` | T3, T15, T17 | A USDT actor admits only USDT funding, and a USDC notification to it takes the foreign-notification path (5.2); the provider runtime auto-pauses USDT actors on a T14 freeze, pause or destroy alarm (T8), and buyer clients refuse USDT while the alarm is up | S |
+| T19 | ai, tos-ops | Redemption issuer checks and received-amount previews | T14b | Receiver blacklist, bridge sender blacklist, pause and deprecation refuse before an unsigned bridge burn is built; finalized hash-pinned issuer reads fail closed on stale/failed state; source-lock previews show the fee and minted delta, check per-asset budgets in minted units and warn about exact-amount funding. TOS purchases keep their exact already-minted-token amount. Tested on isolated issuer fixtures; hard gate for T12. | S |
 
 **T3 follow-up in tos (not changed by this design).** The wallet's TL-B
 comment block lists the reported-transfer messages but omits
