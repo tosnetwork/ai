@@ -534,6 +534,8 @@ func TestOfferRegistryStateSurvivesPrunedLastTransaction(t *testing.T) {
 			}
 			var result any
 			switch q.Method {
+			case "getConsensusBlock":
+				result = map[string]any{"@type": "ext.blocks.consensusBlock", "consensus_block": uint64(42), "timestamp": time.Now().Unix(), "last_block_utime": time.Now().Unix()}
 			case "getMasterchainInfo":
 				result = map[string]any{"@type": "blocks.masterchainInfo", "last": block, "init": map[string]any{"root_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xaa}, 32)), "file_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xbb}, 32))}}
 			case "getAddressInformation":
@@ -565,5 +567,10 @@ func TestOfferRegistryStateSurvivesPrunedLastTransaction(t *testing.T) {
 	state, found, err := session.ResolveRegistry(context.Background(), subject)
 	if err != nil || !found || state == nil || state.GetCapability().GetCapabilityId() != subject || state.GetReference().GetLogicalTime() != 400 || state.GetReference().GetFinalizedCheckpoint() != 42 {
 		t.Fatalf("finalized registry state unavailable after pruning: found=%v err=%v", found, err)
+	}
+
+	state, found, chainTime, err := resolver.ResolveFinalizedState(context.Background(), subject, "")
+	if err != nil || !found || state.GetCapability().GetCapabilityId() != subject || chainTime.IsZero() {
+		t.Fatalf("finalized registry/clock needs pruned history: found=%v err=%v", found, err)
 	}
 }
