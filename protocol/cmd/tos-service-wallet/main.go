@@ -1,4 +1,5 @@
-// Command tos-service-wallet reviews and signs tos_service_v1 action JSON.
+// Command tos-service-wallet reviews and signs tos_service_v1 action JSON,
+// and journals test-network transport-delegation issuance through the relay.
 // Controller keys are ML-DSA-44 keys held in tosctl custody; the command
 // names controllers and never sees private key material.
 package main

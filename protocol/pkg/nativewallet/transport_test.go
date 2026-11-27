@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,7 +203,7 @@ func TestTransportEpochAndNetworkRefusals(t *testing.T) {
 	}
 }
 func TestTransportPrivateJournalAndBinding(t *testing.T) {
-	for _, name := range []string{"directory", "symlink", "journal", "request", "key", "corrupt", "busy"} {
+	for _, name := range []string{"directory", "symlink", "journal", "request", "key", "corrupt", "busy", "lock-link"} {
 		t.Run(name, func(t *testing.T) {
 			w, h, k, r := transportFixture(t)
 			switch name {
@@ -213,6 +214,13 @@ func TestTransportPrivateJournalAndBinding(t *testing.T) {
 			case "symlink":
 				target := t.TempDir()
 				if err := os.Symlink(target, filepath.Join(h.directory, "transport.json")); err != nil {
+					t.Fatal(err)
+				}
+			case "lock-link":
+				if err := os.WriteFile(filepath.Join(h.directory, "lock"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Link(filepath.Join(h.directory, "lock"), filepath.Join(h.directory, "lock-alias")); err != nil {
 					t.Fatal(err)
 				}
 			case "busy":
@@ -231,7 +239,7 @@ func TestTransportPrivateJournalAndBinding(t *testing.T) {
 						t.Fatal(err)
 					}
 				case "request":
-					r.Lifetime++
+					r.Controllers = []string{"another-owner"}
 				case "key":
 					k.key[0] ^= 1
 				case "corrupt":
@@ -392,5 +400,82 @@ func TestTransportRoundTripWithRealControllerCustody(t *testing.T) {
 	h.signer = mldsa44test.RequireTosctl(t)
 	if _, err := issueTest(t, w, h, r); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type transportMutableClock struct{ at time.Time }
+
+func (c *transportMutableClock) Now() time.Time { return c.at }
+func TestTransportExpiryBeforeDispatchRefuses(t *testing.T) {
+	w, h, _, r := transportFixture(t)
+	clock := &transportMutableClock{time.Unix(1800000000, 0)}
+	w.Config.Clock = clock
+	w.Confirm = func(Review) error { clock.at = clock.at.Add(time.Duration(r.Lifetime) * time.Second); return nil }
+	if _, err := issueTest(t, w, h, r); err == nil || h.submits != 0 {
+		t.Fatal("expired delegation dispatched")
+	}
+}
+func TestTransportIssuerLimits(t *testing.T) {
+	for _, name := range []string{"zero-lifetime", "long-lifetime", "zero-credential", "long-credential", "purposes", "sequence", "poll"} {
+		t.Run(name, func(t *testing.T) {
+			w, h, _, r := transportFixture(t)
+			switch name {
+			case "zero-lifetime":
+				r.Lifetime = 0
+			case "long-lifetime":
+				r.Lifetime = agenttransport.MaxDelegationSeconds + 1
+			case "zero-credential":
+				r.CredentialLifetime = 0
+			case "long-credential":
+				r.CredentialLifetime = agenttransport.MaxCredentialSeconds + 1
+			case "purposes":
+				r.Purposes = 8
+			case "sequence":
+				h.snapshot.State.GetAgent().Sequence = math.MaxUint64
+			case "poll":
+				w.PollInterval = time.Hour
+			}
+			if _, err := issueTest(t, w, h, r); err == nil || h.submits != 0 {
+				t.Fatal("invalid limit signed/submitted")
+			}
+		})
+	}
+}
+func TestTransportReadAndWriteBounds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transport.json")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{'x'}, (1<<20)+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readTransportFile(path); err == nil {
+		t.Fatal("oversized journal read")
+	}
+	if err := saveTransport(path, transportRecord{Phase: strings.Repeat("x", (1<<20)+1)}); err == nil {
+		t.Fatal("oversized journal write")
+	}
+	if raw, err := os.ReadFile(path); err != nil || len(raw) != (1<<20)+1 {
+		t.Fatal("refused write changed prior journal")
+	}
+}
+func TestTransportUntrustedAncestorRefuses(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := privateDirectory(filepath.Join(parent, "child")); err == nil {
+		t.Fatal("group writable ancestor accepted")
+	}
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(parent, "alias")
+	if err := os.Symlink(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := privateDirectory(filepath.Join(alias, "child")); err == nil {
+		t.Fatal("symlink ancestor accepted")
 	}
 }

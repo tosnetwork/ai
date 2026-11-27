@@ -203,7 +203,7 @@ Invariants:
 | Native transport sidecar | `tos` `adnl/tos-adnl-transport` (new) | the probe's ADNL and RLDP2 core as a production program: listen, dial, query, RLDP2 query, keepalive; IPv4 only |
 | Messenger chat lane | `messenger/pkg/transport` (new), `messenger/pkg/daemon` | binds relay frames to an `agentcarrier` chat lane inside `tos-messengerd`; replaces `carrierapi` |
 | MCP server | `messenger/pkg/mcpmessenger`, `messenger/cmd/tos-messenger-mcp` (new) | stdio MCP server over the daemon's runtime socket (section 13) |
-| Wallet step | `protocol/cmd/tos-service-wallet` | creates a transport key and delegation and submits the existing `DelegateAgentV1` action |
+| Wallet step | `protocol/cmd/tos-service-wallet` (`transport-delegate`) | journals test-network issuance, creates a non-extractable transport key in controller custody, submits the existing `DelegateAgentV1` action and verifies finalized membership |
 | OpenFox | `openfox` `pkg/servicebridge` | rail lane on `agentcarrier`; chat through `tos-messengerd` only (section 14) |
 | Buyer agent | `protocol/pkg/buyeragent` | rail lane on `agentcarrier` instead of its own carrier |
 

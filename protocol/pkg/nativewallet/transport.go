@@ -76,6 +76,13 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
+	interval := w.PollInterval
+	if interval == 0 {
+		interval = time.Second
+	}
+	if interval < time.Millisecond || interval > 30*time.Second {
+		return nil, errors.New("invalid transport poll interval")
+	}
 	// Constructor enforces the code-pinned network allowlist before any key or
 	// journal operation. Runtime configuration cannot authorize another genesis.
 	verifier, err := agenttransport.NewVerifier(w.Config, w.Resolver)
@@ -127,6 +134,10 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	if r.Phase != "key" && r.Phase != "drafted" && r.Phase != "prepared" && r.Phase != "dispatching" {
 		return nil, errors.New("invalid transport journal phase")
 	}
+	if r.Phase == "key" && (len(r.Delegation) != 0 || len(r.Submission) != 0) {
+		return nil, errors.New("unexpected key-phase journal payload")
+	}
+
 	key, err := w.Keys.EnsureKey(ctx, request.KeyName)
 	if err != nil {
 		return nil, err
@@ -189,7 +200,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	if err != nil {
 		return nil, err
 	}
-	if d.TransportKey != key || d.AgentID() != request.AgentID || d.AuthorizationEpoch != request.Epoch {
+	if d.TransportKey != key || d.AgentID() != request.AgentID || d.AuthorizationEpoch != request.Epoch || d.Purposes != request.Purposes || d.NotAfter-d.NotBefore != request.Lifetime || d.MaxCredentialSeconds != request.CredentialLifetime {
 		return nil, errors.New("transport journal key or delegation mismatch")
 	}
 	var signed nativev1.SignedNativeActionV1
@@ -198,6 +209,12 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	}
 	if err = validateTransportSubmission(&signed, r.Delegation, w.Config.Network); err != nil {
 		return nil, err
+	}
+	if r.Phase != "drafted" && (len(signed.AuthoritySignatures) == 0 || len(signed.AuthoritySignatures) > nativecore.MaxSignatures) {
+		return nil, errors.New("prepared journal has no bounded authority signatures")
+	}
+	if len(signed.CounterpartySignatures) != 0 || !w.Config.ChainPolicy.AcceptsRegistry(signed.Action.TargetContractCodeHash) {
+		return nil, errors.New("unexpected transport journal authority or registry")
 	}
 	if r.Phase == "drafted" {
 		if _, err = verifier.BuildDelegation(ctx, d); err != nil {
@@ -256,13 +273,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 			return nil, errors.New("delegation outcome unknown; keep this journal and rerun to reconcile")
 		}
 	}
-	interval := w.PollInterval
-	if interval == 0 {
-		interval = time.Second
-	}
-	if interval < time.Millisecond || interval > 30*time.Second {
-		return nil, errors.New("invalid transport poll interval")
-	}
+
 	for {
 		// A fresh verifier prevents the cached-pass path from reporting success
 		// after a revocation between reruns. Never trust a relay acknowledgement.
@@ -321,6 +332,9 @@ func privateDirectory(path string) error {
 	if !osguard.OwnerPrivateStorageSupported() || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return errors.New("transport directory must be an absolute owner-private path on a supported host")
 	}
+	if err := transportAncestors(path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
@@ -338,7 +352,7 @@ func checkPrivateFile(path string, absent bool) error {
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info) {
+	if !info.Mode().IsRegular() || !singleTransportLink(info) || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info) {
 		return errors.New("transport journal must be an owner-private regular file")
 	}
 	return nil
@@ -403,4 +417,20 @@ func NativeTransportNetwork(network *nativev1.NetworkDomain) *nativev1.NetworkDo
 	result.GenesisRootHash = "sha256:" + result.GenesisRootHash
 	result.GenesisFileHash = "sha256:" + result.GenesisFileHash
 	return result
+}
+
+func transportAncestors(path string) error {
+	for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
+		info, err := os.Lstat(parent)
+		if err == nil {
+			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || (info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0) {
+				return errors.New("transport directory has an untrusted writable or symlink ancestor")
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if parent == filepath.Dir(parent) {
+			return nil
+		}
+	}
 }

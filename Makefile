@@ -176,3 +176,7 @@ token-issuer-mutants:
 
 native-read-mutants:
 	GOWORK=off python3 -I protocol/scripts/native-read-mutants.py
+
+.PHONY: transport-wallet-mutants
+transport-wallet-mutants:
+	GOWORK=off python3 protocol/scripts/transport-wallet-mutants.py
