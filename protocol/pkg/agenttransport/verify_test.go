@@ -70,7 +70,7 @@ func newFixture(t testing.TB) *fixture {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(wire)
-	network := &nativev1.NetworkDomain{NetworkId: "transport-test", GenesisRootHash: strings.Repeat("1", 64), GenesisFileHash: strings.Repeat("2", 64)}
+	network := &nativev1.NetworkDomain{NetworkId: localTestNetworkID, GenesisRootHash: localTestRoot, GenesisFileHash: localTestFile}
 	code := "tvm-cell-sha256:" + strings.Repeat("3", 64)
 	state := &nativev1.NativeStateV1{Network: proto.Clone(network).(*nativev1.NetworkDomain), TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: d.AgentID(), Policy: policy, DelegationDigests: []string{"sha256:" + hex.EncodeToString(digest[:])}}}}
 	epoch := uint64(1)

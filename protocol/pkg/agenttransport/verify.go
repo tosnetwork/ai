@@ -71,13 +71,13 @@ type Verifier struct {
 }
 
 func NewVerifier(c Config, r FinalizedResolver) (*Verifier, error) {
+	if err := validateApprovedTestNetwork(c.Network); err != nil {
+		return nil, err
+	}
 	if c.Mode != TestNetworkLegacyEpochZero && c.Mode != TestNetworkEpochAware {
 		return nil, errors.New("production transport requires a finalized registry with authorization epochs; only explicitly named test-network modes are available")
 	}
 	if err := c.ChainPolicy.Validate(); err != nil {
-		return nil, err
-	}
-	if err := validateNetwork(c.Network); err != nil {
 		return nil, err
 	}
 	if r == nil {

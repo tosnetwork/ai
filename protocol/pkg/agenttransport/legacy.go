@@ -23,11 +23,11 @@ type LegacyTestNetworkResolver struct {
 // only in an explicit test-network mode. It never fabricates epoch metadata.
 // network uses the transport's bare genesis hash representation.
 func NewLegacyTestNetworkResolver(mode NetworkMode, network *nativev1.NetworkDomain, source FinalizedStateReader) (*LegacyTestNetworkResolver, error) {
+	if err := validateApprovedTestNetwork(network); err != nil {
+		return nil, err
+	}
 	if mode != TestNetworkLegacyEpochZero || source == nil {
 		return nil, errors.New("epoch-less resolver requires explicit test-network-legacy-epoch-zero mode")
-	}
-	if err := validateNetwork(network); err != nil {
-		return nil, err
 	}
 	return &LegacyTestNetworkResolver{source: source, network: proto.Clone(network).(*nativev1.NetworkDomain)}, nil
 }

@@ -8,6 +8,28 @@ later surfaces. A delegation has no off-chain signature of its own.
 ## Authority and deployment gate
 
 `NewVerifier` refuses `Production`, the zero mode and every unknown mode.
+Every mode is first bound to a code-pinned allowlist of approved test-network
+identities. The exact tuple is the canonical `tos:global-id:N` identifier and
+both bare zero-state hashes. A mode string, a known global id with another
+genesis, or a different global id with known hashes cannot enroll a network.
+Both constructors refuse an unlisted identity with `ErrUnapprovedNetwork`
+before mode selection or any resolver read. The allowlist is constants in
+`networks.go`, never runtime configuration.
+
+The reviewed pins are:
+
+| Network | Global id | Zero-state root | Zero-state file |
+| --- | --- | --- | --- |
+| Local PQ network | 3 | `65735247a371030abe811aeac0afe357301ce90e161450d26f88b4beb5b4c366` | `c3860fe196a2a1b5e4e74a9cf9448624a353ce68a8c4c5f6413347586d688769` |
+| Public testnet epoch 8 | 2 | `7095f2295d9c0a2310e7530f3d4f7ac03970133a19d96167ac6aa87d03ff908c` | `bfc773cfbb122917353c93f72494035d4986b7e4ae0dc8b7be39347f7a546186` |
+
+The local pins were checked against the operator's `network.json` and both
+local global-config copies; the public pins against the published epoch-8
+`genesis.json` (its hexadecimal and base64 zero-state representations agree).
+These are enrollment/provenance checks, not live transport acceptance. A new
+genesis requires a reviewed source change; it is refused until then. Production
+global id 1 is not enrolled even if a test mode is selected.
+
 The deployed registry has no authorization or admission epochs. This PR does
 not add fields to registry state, infer epochs from sequence/generation, or
 claim production readiness.

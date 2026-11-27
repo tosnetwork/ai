@@ -295,7 +295,13 @@ transport runs only on test networks: delegations carry
 `authorization_epoch = 0`, verifiers check the policy hash only, and the A →
 B → A and same-bytes cases above are known gaps. A verifier configured for a
 production network refuses every delegation with epoch 0, and a production
-network configuration that lacks the epoch is refused at startup.
+network configuration that lacks the epoch is refused at startup. The
+test-network exception MUST also match a reviewed, code-pinned allowlist of
+exact `(global_id, zero_state_root_hash, zero_state_file_hash)` identities.
+Selecting a test mode is not enrollment: an unlisted identity, including a
+production identity, is refused in every mode before any delegation is
+verified. The list is never supplied by runtime configuration; a new genesis
+requires a reviewed code change.
 
 `VerifyDelegation(bytes, purpose, now)` passes only if:
 

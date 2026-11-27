@@ -16,6 +16,62 @@ PACKAGE = "./protocol/pkg/agenttransport"
 # name, source, unique old text, replacement, named test
 MUTANTS = [
     (
+        "verifier-network-allowlist",
+        "verify.go",
+        "if err := validateApprovedTestNetwork(c.Network); err != nil",
+        "if err := validateApprovedTestNetwork(c.Network); false && err != nil",
+        "TestVerifierRejectsUnapprovedNetworks",
+    ),
+    (
+        "resolver-network-allowlist",
+        "legacy.go",
+        "if err := validateApprovedTestNetwork(network); err != nil",
+        "if err := validateApprovedTestNetwork(network); false && err != nil",
+        "TestLegacyResolverRejectsUnapprovedNetworks",
+    ),
+    (
+        "local-global-id-pin",
+        "networks.go",
+        "network.NetworkId == localTestNetworkID",
+        "true",
+        "TestVerifierRejectsUnapprovedNetworks/production-identity",
+    ),
+    (
+        "local-root-pin",
+        "networks.go",
+        "network.GenesisRootHash == localTestRoot",
+        "true",
+        "TestVerifierRejectsUnapprovedNetworks/local-root",
+    ),
+    (
+        "local-file-pin",
+        "networks.go",
+        "network.GenesisFileHash == localTestFile",
+        "true",
+        "TestVerifierRejectsUnapprovedNetworks/local-file",
+    ),
+    (
+        "public-global-id-pin",
+        "networks.go",
+        "network.NetworkId == publicTestNetworkID",
+        "true",
+        "TestVerifierRejectsUnapprovedNetworks/public-global-id",
+    ),
+    (
+        "public-root-pin",
+        "networks.go",
+        "network.GenesisRootHash == publicTestRoot",
+        "true",
+        "TestVerifierRejectsUnapprovedNetworks/public-root",
+    ),
+    (
+        "public-file-pin",
+        "networks.go",
+        "network.GenesisFileHash == publicTestFile",
+        "true",
+        "TestVerifierRejectsUnapprovedNetworks/public-file",
+    ),
+    (
         "source-network",
         "legacy.go",
         '(n.GenesisRootHash != r.network.GenesisRootHash && n.GenesisRootHash != "sha256:"+r.network.GenesisRootHash)',
@@ -323,6 +379,23 @@ def main():
             raise RuntimeError(
                 "mutant did not fail its named test: " + name + "\n" + output
             )
+        if name in {"verifier-network-allowlist", "resolver-network-allowlist"}:
+            # Prove each requested identity/mode refusal went red, rather than
+            # accepting one failing sibling as evidence for the whole matrix.
+            for identity in ("production-identity", "unknown-identity"):
+                for mode in (
+                    "test-network-legacy-epoch-zero",
+                    "test-network-epoch-aware",
+                ):
+                    case = test + "/" + identity + "/" + mode
+                    if "--- FAIL: " + case not in output:
+                        raise RuntimeError(
+                            "identity/mode control stayed green: "
+                            + case
+                            + "\n"
+                            + output
+                        )
+                    print("RED identity/mode: " + case, flush=True)
         print("RED " + name + ": " + test, flush=True)
     print(f"AGENTTRANSPORT_MUTANTS_OK: {len(MUTANTS)} checks removed and caught")
 
