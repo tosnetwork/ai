@@ -66,7 +66,7 @@ CASES = (
         "if len(alerts) == 0 {",
         "provider/pkg/servicebridge",
         "TestTokenProviderPauseIsAssetScopedAndPreservesPolicy",
-        "asset-specific pause",
+        "affected USDC",
     ),
     (
         "independent-budgets",

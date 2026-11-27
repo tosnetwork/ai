@@ -186,6 +186,7 @@ inspection/export remains `token --inspect offer` or `export-offer`.
 execution gate as native work. Admission and the execution recheck require a
 fresh configured monitor report without that asset in the latched emergency
 `provider_pause_assets` set (`bridge_frozen`, `token_paused`, `destroyed_funds`,
+`token_deprecated`,
 `unexplained_decrease`, `backing_shortfall`). Non-emergency T14 alarms do not
 stop execution. A missing or stale
 report refuses execution even when the request is already funded. The buyer's
