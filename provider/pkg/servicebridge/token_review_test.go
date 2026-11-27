@@ -213,6 +213,7 @@ func TestTokenProviderPauseNeedsNoTokenWalletAndRaisesRefusal(t *testing.T) {
 }
 func TestTokenProviderPauseIsAssetScopedAndPreservesPolicy(t *testing.T) {
 	w := newTokenWorld(t)
+	w.c.Token.Actors[0].AssetID = "usdt"
 	other := *w.account
 	data := *w.account.Data
 	other.Data = &data
@@ -232,7 +233,7 @@ func TestTokenProviderPauseIsAssetScopedAndPreservesPolicy(t *testing.T) {
 	config := w.c.Token.Actors[0]
 	config.Address = other.Address
 	config.Master = master.Text()
-	config.AssetID = "asset-b:/main.token"
+	config.AssetID = "usdc"
 	w.c.Token.Actors = append(w.c.Token.Actors, config)
 	w.accounts = map[string]*toschain.TokenActorAccount{w.account.Address: w.account, other.Address: &other}
 
@@ -271,10 +272,24 @@ func TestTokenProviderPauseIsAssetScopedAndPreservesPolicy(t *testing.T) {
 	w.account.Data.Policy.HasAuthorizedCaller = true
 	w.account.Data.Policy.AuthorizedCaller = caller
 	before := w.account.Data.Policy
-	w.report(t, []string{"asset-a", "foreign.asset:/pool-1", strings.Repeat("x", 161)})
-	_ = CheckTokenSafety(context.Background(), w.c, w.env())
+	w.report(t, []string{"usdt"})
+	// A successful broadcast is pending until the next finalized observation.
+	if err := CheckTokenSafety(context.Background(), w.c, w.env()); err != nil && !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("asset-specific pause send failed: %v", err)
+	}
+	if err := CheckTokenSafety(context.Background(), w.c, w.env()); err != nil {
+		t.Fatalf("asset-specific pause reconciliation failed: %v", err)
+	}
 	if w.account.Data.Active || !other.Data.Active || w.sends != 1 {
-		t.Fatal("alarm affected another asset or a foreign label blocked pause")
+		t.Fatal("asset-specific pause affected USDC or failed to pause USDT")
+	}
+	// Unconfigured or malformed labels must not prevent another asset's work.
+	w.report(t, []string{"usdt", "foreign.asset:/pool-1", strings.Repeat("x", 161)})
+	if err := tokenWorkSafety(w.c, "usdc", w, w.ChainTime()); err != nil {
+		t.Fatalf("USDC execution stopped by USDT alarm: %v", err)
+	}
+	if err := tokenWorkSafety(w.c, "usdt", w, w.ChainTime()); err == nil {
+		t.Fatal("USDT execution ignored its alarm")
 	}
 	after := w.account.Data.Policy
 	after.PolicyVersion = before.PolicyVersion

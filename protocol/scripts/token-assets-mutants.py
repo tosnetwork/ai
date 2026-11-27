@@ -51,6 +51,24 @@ CASES = (
         "suspended asset:",
     ),
     (
+        "status-applied-to-every-entry",
+        "protocol/pkg/toschain/service_actor_token_asset.go",
+        "if record.Status != 1 {",
+        'for _, entry := range assets.Entries { if entry.Status != 1 { return nil, errors.New("pinned token is not active") } }; if record.Status != 1 {',
+        "toschain",
+        "TestSuspendedSecondAssetLeavesFirstActive",
+        "active first asset affected by second status:",
+    ),
+    (
+        "provider-pause-is-asset-local",
+        "provider/pkg/servicebridge/token_monitor.go",
+        "if !alerts[a.AssetID] {",
+        "if len(alerts) == 0 {",
+        "provider/pkg/servicebridge",
+        "TestTokenProviderPauseIsAssetScopedAndPreservesPolicy",
+        "asset-specific pause",
+    ),
+    (
         "independent-budgets",
         "protocol/pkg/buyersdk/service_actor_journal.go",
         " || TokenAssetBudgetKey(existing.AssetMaster, existing.AssetWalletCodeHash, existing.AssetDecimals) != key",
@@ -83,7 +101,7 @@ CASES = (
         "if snapshots == 1 {",
         "if snapshots <= 1 {",
         "toschain",
-        "TestForeignAssetNotificationStaysANotificationWithoutAdmission",
+        "TestTokenNotificationWithoutSAT1IsNotAnAdmission",
         "foreign notification relabelled as admission:",
     ),
     (
@@ -110,7 +128,7 @@ CASES = (
 def run_test(package, test, output):
     target = (
         "./" + package
-        if package.startswith("execution/")
+        if package.startswith(("execution/", "provider/"))
         else "./protocol/"
         + (package if package.startswith("cmd/") else "pkg/" + package)
     )
@@ -160,9 +178,9 @@ def main():
     args = parser.parse_args()
     args.log_dir.mkdir(parents=True, exist_ok=True)
     labels = [case[0] for case in CASES]
-    tests = [case[5] for case in CASES]
-    if len(set(labels)) != len(labels) or len(set(tests)) != len(tests):
-        raise RuntimeError("duplicate control or test")
+    mutations = [(case[1], case[2], case[3]) for case in CASES]
+    if len(set(labels)) != len(labels) or len(set(mutations)) != len(mutations):
+        raise RuntimeError("duplicate control or mutation")
     # Establish all positive baselines before writing any mutated source.
     for label, _, _, _, package, test, _ in CASES:
         code, failures, passed, invalid, _ = run_test(

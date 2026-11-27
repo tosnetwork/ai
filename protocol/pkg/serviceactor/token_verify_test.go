@@ -205,8 +205,8 @@ func TestOtherAssetNotificationCannotFundThePinnedActor(t *testing.T) {
 	if _, err = VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest, tokenAcceptanceFor(call)); err == nil || !strings.Contains(err.Error(), "funding notification is not authenticated") {
 		t.Fatalf("foreign notification admitted: %v", err)
 	}
-	// An ordinary foreign notification has no SAT1 and creates no request. Even
-	// attaching a forged SAT1 cannot turn it into this actor's accepted call.
+	// The refusal above retains the genuine call's SAT1 under a foreign sender.
+	// An ordinary notification without SAT1 also creates no request on replay.
 	foreign := call
 	foreign.Kind = "notification"
 	foreign.Logs = nil

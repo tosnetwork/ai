@@ -39,7 +39,7 @@ func runTokenVerify(opts *options, network *nativev1.NetworkDomain, inputs []pur
 		return exitUsage
 	}
 	var pins []toschain.TokenAssetPin
-	if err = jsonstrict.Decode(raw, &pins); err != nil || len(pins) == 0 || len(pins) > 2 {
+	if err = jsonstrict.Decode(raw, &pins); err != nil || len(pins) == 0 || len(pins) > toschain.MaxPinnedTokenAssets {
 		fmt.Fprintln(stderr, "tos-service-verify: asset-pins must contain 1 or 2 supported releases")
 		return exitUsage
 	}
