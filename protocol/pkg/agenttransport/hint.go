@@ -392,7 +392,8 @@ func (v *Verifier) BuildHintRecord(ctx context.Context, h Hint, objects []HintOb
 	return raw, nil
 }
 
-// CompareHints compares only hints of the same delegation. Positive means a is
+// CompareHints orders already verified hints only; it is not authentication.
+// It compares only hints of the same delegation. Positive means a is
 // newer. Independent lane delegations are never ordered against one another.
 func CompareHints(a, b Hint) (int, error) {
 	da, err := a.Delegation.Encode()
