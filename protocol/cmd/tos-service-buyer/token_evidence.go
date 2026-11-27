@@ -126,7 +126,7 @@ func exportTokenEvidence(config agentConfig, record buyersdk.CallRecord, purchas
 		TokenAssets  []tokenAssetConfig             `json:"token_assets"`
 		Verdict      *purchaseevidence.TokenVerdict `json:"verdict"`
 		Files        []purchaseevidence.FileDigest  `json:"files"`
-	}{Schema: "tos.service.purchase-export.token.v1", Tool: evidenceTool(), ExportedUnix: time.Now().Unix(), Budget: config.Budget, TokenAssets: config.TokenAssets, Verdict: verdict}
+	}{Schema: "tos.service.purchase-export.token.v1", Tool: evidenceTool(), ExportedUnix: time.Now().Unix(), Budget: config.Budget, TokenAssets: publicTokenAssets(config.TokenAssets), Verdict: verdict}
 	contents := map[string][]byte{purchaseevidence.BundleFile: raw}
 	if found {
 		contents[purchaseevidence.ReceiptFile] = accepted.ReceiptBOC

@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
+	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 )
 
 // fakeAgent records each call and answers with a fixed purchase.
@@ -53,6 +54,8 @@ func (f *fakeAgent) Call(_ context.Context, method string, params, result any) e
 		ProviderAgentID: view.ProviderAgentID, PriceNanoTOS: "300000000", ProviderName: "build",
 		ProviderDescription: f.provide}
 	switch method {
+	case "token_lock_preview":
+		answer = buyersdk.TokenLockPreview{AssetMaster: "0:" + strings.Repeat("12", 32), Actor: "0:" + strings.Repeat("34", 32), NominalAtomic: "100000000", IssuerFeeAtomic: "190000", MintedAtomic: "99810000", BudgetDebitAtomic: "99810000", ActorPriceAtomic: "100000000", MaxPerCallAtomic: "100000000", RemainingWindowAtomic: "200000000", Warning: "A different actor funding amount is refused and returned."}
 	case "search":
 		answer = buyeragent.SearchView{Checkpoint: 41, Offers: []buyeragent.OfferView{offer}, Dropped: 2, FailedSources: 1}
 	case "quote":
@@ -165,7 +168,7 @@ func TestTheToolSetIsFixedAndSaysWhatIsUntrusted(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{ToolPrepare: false, ToolRequestPayment: false, ToolWithdraw: false, ToolStatus: true,
-		ToolPurchases: true, ToolRefund: false, ToolResult: true, ToolSearch: true, ToolQuote: true}
+		ToolPurchases: true, ToolRefund: false, ToolResult: true, ToolSearch: true, ToolQuote: true, ToolTokenLockPreview: true}
 	if len(listed.Tools) != len(want) {
 		t.Fatalf("%d tools", len(listed.Tools))
 	}
@@ -422,5 +425,23 @@ func TestPurchasesRenderEachAssetBudgetSeparately(t *testing.T) {
 		if !strings.Contains(text(result), want) {
 			t.Fatalf("asset budget not rendered: %s", text(result))
 		}
+	}
+}
+
+func TestTokenLockPreviewIsReadOnlyAndShowsReceivedAmount(t *testing.T) {
+	agent := &fakeAgent{}
+	h := connect(t, agent)
+	result := h.call(t, ToolTokenLockPreview, map[string]any{"quote_id": strings.Repeat("cd", 32), "nominal_atomic": "100000000"})
+	if result.IsError {
+		t.Fatal(text(result))
+	}
+	var preview buyersdk.TokenLockPreview
+	structured(t, result, &preview)
+	if preview.MintedAtomic != "99810000" || preview.BudgetDebitAtomic != preview.MintedAtomic || !strings.Contains(text(result), "issuer fee 190000") || !strings.Contains(text(result), "refused and returned") {
+		t.Fatalf("wrong source preview: %s", text(result))
+	}
+	calls, _ := agent.recorded()
+	if len(calls) != 1 || calls[0] != "token_lock_preview" {
+		t.Fatal("preview used a mutation method")
 	}
 }
