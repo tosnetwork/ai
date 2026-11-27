@@ -1150,7 +1150,7 @@ Recovery:
 | A price change beyond B2 | A delivered report may be lost | 4.5, "Outside the bounds". |
 | A duplicate or stale report | The payout is not present | Ignored, plus `clear_refusal` for every authenticated `transfer_refused` or `transfer_rereported`. |
 
-### 4.7 Costs, compatibility and audit scope
+### 4.7 Costs, compatibility and review scope
 
 **Messages** per payout, excluding the request that triggers it:
 
