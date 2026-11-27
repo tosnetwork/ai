@@ -396,8 +396,8 @@ section 8 lists T1-T18). It adds a second rail beside the native one and does
 not change this gate's acceptance rule:
 
 - 🟡 T1 reported-transfer and balance-report bridge wallet — merged on tos
-  main (tosnetwork/tos#512, merge `c447cf68d`); not deployed, and its audit is
-  part of T12;
+  main (tosnetwork/tos#512, merge `c447cf68d`); not deployed. No external audit gates it (owner decision
+  2026-11-27; settlement design 4.7);
 - 🟡 T2 ConfigParam 84 — merged on tos main (tosnetwork/tos#513, merge
   `e40d28737`); no value is proposed on any network;
 - 🟡 T3 token-rail Service Actor — implemented in tosnetwork/tos#516
@@ -421,8 +421,9 @@ not change this gate's acceptance rule:
   also through `quoteexchange.Validate`). Pending: recopy at the merged release
   commit, and the production Go encoders, vectors and negatives of T7;
 - ⬜ T4 `tosctl`, T5 test USDC, T7-T9 `ai` implementation,
-  T10 live lifecycles, T11 relayer, T12 bridge production gates, T13
-  independent security review, T14 monitoring, T15-T18 USDT.
+  T10 live lifecycles, T11 relayer, T12 bridge production rollout, T14
+  monitoring, T15-T18 USDT. There is no external audit or security review
+  (owner decision 2026-11-27).
 
 Delivered earlier:
 
@@ -645,9 +646,8 @@ Deliver:
   exists; multi-operator exercise remains;
 - ⬜ load, storage, denial-of-service, and fee-budget evidence;
 - ⬜ TOS-network stablecoin accounting and operator compliance controls — for
-  the token rail, the bridge production gates (T12), the independent review
-  (T13) and the per-asset monitoring (T14) of `docs/USDC_SETTLEMENT_V1.md`
-  section 8;
+  the token rail, the bridge production rollout (T12) and the per-asset
+  monitoring (T14) of `docs/USDC_SETTLEMENT_V1.md` section 8;
 - 🟡 monitoring for code, state, quorum, finality, and economic divergence —
   required signals and stop-the-line rules are defined in the runbook;
 - 🟡 reproducible releases and signed deployment artifacts — repository-level
