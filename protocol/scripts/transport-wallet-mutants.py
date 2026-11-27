@@ -95,8 +95,8 @@ MUTANTS = [
     (
         "private-directory",
         "nativewallet/transport.go",
-        "info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info)",
-        "(info.Mode().Perm()&0o077 != 0 && false) || !osguard.CurrentUserOwns(info)",
+        "info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info)",
+        "info.Mode()&os.ModeSymlink != 0 || (info.Mode().Perm()&0o077 != 0 && false) || !osguard.CurrentUserOwns(info)",
         WALLET,
         "TestTransportPrivateJournalAndBinding/directory",
     ),
@@ -164,6 +164,14 @@ MUTANTS = [
         COMMAND,
         "TestTransportCommandNetworkGatePrecedesSideEffects/epoch",
     ),
+    (
+        "reflected-error",
+        "nativewallet/transport.go",
+        'errors.New("delegation outcome unknown; keep this journal and rerun to reconcile")',
+        'fmt.Errorf("delegation outcome unknown: %w", err)',
+        WALLET,
+        "TestTransportSubmissionErrorDoesNotReflectCredentials",
+    ),
 ]
 
 
@@ -188,14 +196,9 @@ def main():
     for name, filename, old, new, package, test in MUTANTS:
         source = (ROOT / "protocol/pkg" / filename).resolve()
         text = source.read_text()
-        # Restrict the otherwise shared directory/file mode anchor to the first
-        # occurrence: these are independent gates, tested separately.
-        if name == "private-directory":
-            replacement = text.replace(old, new, 1)
-        else:
-            if text.count(old) != 1:
-                raise RuntimeError("nonunique anchor: " + name)
-            replacement = text.replace(old, new)
+        if text.count(old) != 1:
+            raise RuntimeError("nonunique anchor: " + name)
+        replacement = text.replace(old, new)
         with tempfile.TemporaryDirectory(prefix="transport-wallet-mutant-") as tmp:
             modified = Path(tmp) / source.name
             modified.write_text(replacement)

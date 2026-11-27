@@ -479,3 +479,16 @@ func TestTransportUntrustedAncestorRefuses(t *testing.T) {
 		t.Fatal("symlink ancestor accepted")
 	}
 }
+
+type transportReflectedError struct{}
+
+func (transportReflectedError) SubmitNativeAction(context.Context, *nativev1.SubmitNativeActionRequest) (*nativev1.SubmitNativeActionResponse, error) {
+	return nil, errors.New("untrusted reflected relay credential")
+}
+func TestTransportSubmissionErrorDoesNotReflectCredentials(t *testing.T) {
+	w, h, _, r := transportFixture(t)
+	w.Submitter = transportReflectedError{}
+	if _, err := issueTest(t, w, h, r); err == nil || strings.Contains(err.Error(), "untrusted reflected relay credential") || !strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("unsafe submission error: %v", err)
+	}
+}
