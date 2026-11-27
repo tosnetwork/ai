@@ -157,7 +157,7 @@ What the M0-R work did establish, and this design relies on:
 | Network attacker | observe and drop traffic; spoof UDP sources | read anything (TLS, ADNL channel, HPKE); complete a direct hello without the peer's transport key; replay a request proof outside its window |
 | Stranger | deposit into the stranger lane up to its quota; publish its own hints; look up public hints | list or download another mailbox; take contact-lane capacity; fill a directory without a live finalized Agent per record |
 | Malicious contact | deposit up to its lane quota; hand its credential to others | widen its credential (section 6.4); deposit after revocation; hide that its lane is the one filling |
-| Compromised transport key | sign hints and credentials for its Agent until the delegation is revoked, so redirect new traffic to relays it chooses and fetch ciphertext from the real relays | read a packet (the HPKE keys are separate); sign a packet; outlive a policy update, recovery or withdrawal by more than the revocation bounds of 5.1 on a network with the authorization epoch |
+| Compromised transport key | sign hints and credentials for its Agent until the delegation is revoked, so redirect new traffic to relays it chooses and fetch ciphertext from the real relays | read a packet (the HPKE keys are separate); sign a packet; outlive a policy update, recovery completion or withdrawal by more than the revocation bounds of 5.1 on a network with the authorization epoch |
 | Compromised controller | everything the Agent can do | nothing less than total identity compromise; recovered by policy rotation, which also revokes every transport delegation (5.1) |
 | Lying chain endpoint at a relay | answer a stale or false state, if it controls a majority of that relay's configured endpoints | affect any other relay or any recipient's own verification |
 | MCP client or model | send and read through the runtime API within owner policy | choose a route, relay, key, device or session; approve a stranger; manage rooms (section 13) |
@@ -175,8 +175,8 @@ Invariants:
   spec 9.8). Stranger deposits can never take the capacity reserved for
   contact lanes, neither within one mailbox nor across the relay (6.2).
 - **I5.** Revocation is a chain fact: a policy update, a recovery
-  completion, a tombstone or a delegation withdrawal (the last two only once
-  the registry change of section 18 Q1 exists) stops every credential and hint
+  completion, a tombstone or a delegation withdrawal (the last only once the
+  registry change of section 18 Q1 exists) stops every credential and hint
   of the delegation at every honest relay and sender without waiting for
   expiry: within 300 seconds while finalized reads succeed, and within 600
   seconds while they fail (5.1). On test networks without the authorization
@@ -265,11 +265,24 @@ cannot be named in it.
 
 **The authorization epoch.** The Agent state gains a u64
 `authorization_epoch`, set to 1 at registration and incremented by exactly
-these actions: policy update (whatever bytes it installs), recovery
-completion, tombstone, and delegation withdrawal. It is never decremented or
-reused, and adding a delegation does not change it. It ships together with
-the withdraw-delegation action of section 18 Q1, as one registry change in
-`tos` and `protocol/pkg/nativecore`, outside this plan (section 17).
+the actions that change who controls the Agent: policy update (whatever
+bytes it installs), recovery completion and tombstone. Recovery initiation
+does not change it, because authority has not changed until completion.
+Adding a delegation does not change it, and neither does withdrawing one:
+withdrawal removes its digest, which check 3 below already refuses, so one
+transport key can be revoked without revoking the Agent's others. The epoch
+is never decremented or reused. It ships together with the
+withdraw-delegation action of section 18 Q1, as one registry change in
+`tos` and `protocol/pkg/nativecore`, outside this plan (section 17). That
+change MUST:
+
+- version the Agent state encoding (the Agent root has room for another
+  u64) and update every reader and projection of it in the same change;
+- increment with checked overflow, refusing the action rather than wrapping;
+- keep exact-action replay idempotent: a replayed action returns without a
+  second increment, as the registry's replay path does today;
+- require every later authority-changing action to increment it, and every
+  state migration to preserve or advance it, never reset it.
 
 **Production gating.** Until that change is finalized on a network, V2
 transport runs only on test networks: delegations carry
@@ -455,16 +468,46 @@ The relay requires `|now - issued_at_unix| <= 120` and claims the pair
   `issued_at_unix` is at or below the floor is refused. A backward step of the
   wall clock therefore cannot bring a dropped proof back into the window;
 - survives a restart without being written per request: every 10 seconds
-  the relay durably records a **high-water mark** `H = now + 140`, and it
-  admits a proof only if its `issued_at_unix` is below the last recorded
-  `H`. An honest proof always is (`issued_at_unix <= now + 120`, and the
-  recorded `H` is at least `now + 130`); if recording fails, proofs soon
-  exceed `H` and are refused, so the failure is closed. After a restart the
-  floor starts at the recorded `H`, so every proof admitted before the
-  restart is refused. A proof at or below the floor is answered
-  `503 proof_floor` with `Retry-After` up to the floor, at most 140 seconds
-  after a restart; clients re-sign then. Stranger deposits and
-  acknowledgements need no proof and are unaffected.
+  the relay durably records a **high-water mark**
+  `H = max(H_recorded, now + 140)`, so the recorded mark never decreases,
+  whatever the wall clock does. It admits a proof only if its
+  `issued_at_unix` is below the last recorded `H`. With a correct clock an
+  honest proof always is (`issued_at_unix <= now + 120`, and the recorded `H`
+  is at least `now + 130`); if recording fails, proofs soon exceed `H` and
+  are refused, so the failure is closed. After a restart the floor starts at
+  the recorded `H`, so every proof admitted before the restart, at any clock
+  setting, is refused: a proof admitted at clock 1000 with time 1100 stays
+  refused after a rollback to 900 and a restart, because the mark stayed at
+  1140 or above. A proof at or below the floor is answered
+  `503 proof_floor` with `Retry-After` up to when a fresh proof can pass;
+  clients re-sign then. Stranger deposits and acknowledgements need no proof
+  and are unaffected.
+- is written as one checksummed record, replaced atomically with file and
+  directory sync. A relay whose V2 store exists refuses to start when the
+  record is missing or fails its checksum, because it cannot know what it
+  admitted before; it never initializes a used relay's floor silently. Only
+  a relay with an empty V2 store starts with a fresh record. An operator
+  recovers a damaged record only with an explicit start option that names a
+  floor of at least `now + 140`, which the relay logs; choosing it after a
+  clock rollback is the operator's responsibility.
+
+**Restart refusal delay.** After a restart, a fresh proof passes once its
+`issued_at_unix` exceeds the floor `F` while the relay's window still admits
+it (`issued_at_unix >= relay_now - 120`). With `F` at most the restart time
+plus 140 seconds:
+
+- **aligned clocks** (client and relay agree, and the relay clock was not
+  stepped back): at most **140 seconds**;
+- **worst permitted skew** (the client clock 120 seconds behind the relay's,
+  the most the window admits): at most **260 seconds**, since the client's
+  clock must pass `F`;
+- **relay clock stepped back by d before the restart:** both bounds grow by
+  d, because the mark kept its earlier, higher value.
+
+The floor is not weakened to shorten these delays; credentialed requests at
+this relay wait, stranger deposits do not, and senders use the other relay
+(section 10).
+
 Binding the relay URL means a malicious relay cannot replay a proof it
 received at another relay; binding the body means a proof cannot carry other
 bytes. Credentials and proofs never appear in a URL.
@@ -651,6 +694,20 @@ flood spread over many arbitrary Agent IDs therefore fills at most the
 stranger share and leaves every contact lane its capacity. What remains: a
 contact lane deposit can still meet the contact share's own exhaustion, which
 takes many credentials from many owners.
+
+**Tombstones keep their charge.** The global count of relay spec 9.8 counts
+tombstones, and a stranger knows the acknowledgement secrets of its own
+envelopes, so it could deposit and withdraw repeatedly, freeing the envelope
+each time while tombstones accumulate. A tombstone therefore keeps the count
+charge of the envelope it replaced, until the tombstone expires: against the
+stranger share and the depositing address's relay-wide stranger cap for a
+stranger deposit, against the contact share for a contact deposit. The
+tombstone record stores its lane class and depositing address, so the charge
+survives a restart. A tombstone does not count against the mailbox's own
+stranger lane, so a recipient that acknowledges promptly still frees its
+lane. With the deposit rate limit (relay spec 9.8) this bounds a
+deposit-and-withdraw cycle to the stranger share, like any other stranger
+flood.
 
 A full lane or share answers `507 quota_exhausted` with the lane in the error
 (`"lane": "stranger"` or `"contact"`).
@@ -1150,7 +1207,7 @@ Rules:
 | Credential | at most 2,048 bytes; 1..4 blocks; 1..8 caveats per block |
 | Owner credential lifetime | at most 3,600 s |
 | Contact credential lifetime | at most 604,800 s (and the delegation's `max_credential_seconds`); SHOULD 259,200 |
-| Request proof | clock window ±120 s; replay table default 262,144 entries, 64 per credential, fail closed when full; floor after restart at most 140 s ahead |
+| Request proof | clock window ±120 s; replay table default 262,144 entries, 64 per credential, fail closed when full; high-water mark never decreases; restart refusal at most 140 s with aligned clocks, 260 s at the worst permitted skew, plus any backward relay clock step |
 | Revocation | at most 300 s with healthy reads, 600 s with failing reads (5.1) |
 | Owner-written objects | `issued_at_unix` at most 300 s ahead; void once their delegation fails |
 | Hint / hint record | 1,536 / 40,960 bytes; lifetime at most 86,400 s, SHOULD 21,600; 2..4 relays in production (1..4 in test); 0..2 direct entries; 0..3 objects |
@@ -1183,10 +1240,10 @@ team's).
 | A2 Narrowing | no appended block widens time, relay, operations, lane or size; splice, reorder and drop are refused | property and fuzz tests naming the generator seed; red-control mutants that merge blocks are caught |
 | A3 Chain revocation | after a policy update on a test chain, owner and contact credentials are refused (`credential_revoked`) by two relays within 300 s of the update being readable, and hints stop being served; and, combined, a revocation finalized just after a relay's successful read followed by stopping that relay's chain endpoints is refused within 600 s and not honoured after | chain transaction hashes, relay logs of the read and refusal times, both relay commits |
 | A4 Fail closed | with every chain endpoint of a relay stopped, credentialed requests get `503 chain_unavailable` once the cached pass is 600 s old; stranger deposits continue | relay log and client transcript |
-| A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step; a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
-| A6 Lane isolation | a stranger flood from 64 IPv4 addresses into one mailbox fills only its stranger lane; a stranger flood spread over 10,000 arbitrary Agent IDs stops at the relay-wide stranger share; contacts deposit throughout both; `507` names the stranger lane | live run against a test relay, per-mailbox and global quota counters before and after |
+| A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step; the combined control: proof admitted, clock rolled back, high-water mark recorded, relay restarted, clock restored, same proof refused; a relay with a used V2 store refuses to start with its record missing and with it corrupted; the restart delay measured with aligned clocks (at most 140 s) and with the client 120 s behind (at most 260 s); a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
+| A6 Lane isolation | a stranger flood from 64 IPv4 addresses into one mailbox fills only its stranger lane; a stranger flood spread over 10,000 arbitrary Agent IDs stops at the relay-wide stranger share; a stranger deposit-and-withdraw cycle stops at the stranger share by its tombstones, also across a relay restart; contacts deposit throughout all three; `507` names the stranger lane | live run against a test relay, per-mailbox and global quota counters (tombstones included) before and after |
 | A7 Contact revocation | a revoked contact's deposits are refused at every relay of the hint; its stored envelopes stay until acknowledged | live transcript |
-| A8 Multi-relay | with the minimum production configuration of two relays, one killed mid-run: no loss, exactly-once application, acknowledgement at both after restart, and every envelope deposited while one relay was down reaching its second copy after the restart through the retry of section 10 | relay store snapshots, journals, `single-copy` telemetry, runtime outcome log |
+| A8 Multi-relay | with the minimum production configuration of two relays, one killed mid-run: no loss, exactly-once application, acknowledgement at both after restart; every delivery deposited while one relay was down that is still pending and unexpired when it returns reaches its second copy through the retry of section 10; separately, a delivery the recipient acknowledged through the surviving relay during the outage gets no second copy and is not re-deposited | relay store snapshots, journals, `single-copy` telemetry, runtime outcome log |
 | A9 First contact by Agent ID | an MCP client on a host without OpenFox resolves an OpenFox Agent by Agent ID through a directory relay (no contact file), sends, the owner admits, and the conversation proceeds both ways across two hosts | deployment record with both hosts' commits, the hint records, the MCP transcript |
 | A10 OpenFox on the library | OpenFox has no chat carrier code and imports `agentcarrier`; the M-R1 and M-R2 scenarios pass again on V2 relays | `go list -deps` output, the openfox commit, rerun records |
 | A11 Direct upgrade | between a node with a verified inbound IPv4 entry and a node behind NAT: upgrade after the first envelope, later envelopes delivered direct with no deposits at relays; a firewall drop mid-run falls back to relays within 13 s with no loss and no duplicate execution | relay deposit counters, sidecar logs, the receipts |
@@ -1265,12 +1322,13 @@ The questions this design raised, each with its decision (recorded
   action that does not exist). **Decided:** a registry action that withdraws
   one delegation digest is added as the reverse of `DelegateAgentV1`,
   authorized like it, together with the Agent's authorization epoch of
-  5.1, which every policy update, recovery completion, tombstone and
-  withdrawal increments. It is a `tos` contract change, scheduled after the
+  5.1, which every policy update, recovery completion and tombstone
+  increments; withdrawal removes one digest without changing the epoch, so
+  it revokes one transport key and leaves the others. It is a `tos` contract change, scheduled after the
   USDC and USDT settlement work. Until it lands, V2 transport runs on test
   networks only, with the `policy_hash` binding as the revocation; once it
-  lands, checks 3 and 4 of 5.1 cover withdrawal and every policy change with
-  no change to this design.
+  lands, check 3 of 5.1 covers withdrawal and check 4 every policy change,
+  with no change to this design.
 - **Q2. Bind delegations to the policy hash?** It makes every policy update
   revoke every transport key, so a benign update costs a re-delegation.
   **Decided: yes, permanently.** A policy update is how an Agent responds to
