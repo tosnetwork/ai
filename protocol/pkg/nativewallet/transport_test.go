@@ -41,16 +41,19 @@ type transportTestLocator struct{}
 func (transportTestLocator) Locate(string, string) (string, error) { return "0:test", nil }
 
 type transportTestKeys struct {
+	names []string
 	calls int
 	key   [32]byte
 }
 
-func (k *transportTestKeys) EnsureKey(context.Context, string) ([32]byte, error) {
+func (k *transportTestKeys) EnsureKey(_ context.Context, name string) ([32]byte, error) {
+	k.names = append(k.names, name)
 	k.calls++
 	return k.key, nil
 }
 
 type transportHarness struct {
+	readErr      error
 	mu           sync.Mutex
 	t            *testing.T
 	snapshot     agenttransport.Snapshot
@@ -67,6 +70,9 @@ func (h *transportHarness) ResolveFinalizedAgent(ctx context.Context, _ string) 
 	defer h.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return agenttransport.Snapshot{}, err
+	}
+	if h.readErr != nil {
+		return agenttransport.Snapshot{}, h.readErr
 	}
 	return h.snapshot, nil
 }
@@ -137,7 +143,8 @@ func issueTest(t *testing.T, w *TransportIssuer, h *transportHarness, r Transpor
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	return w.IssueTransport(ctx, h.directory, r)
+	result, err := w.IssueTransport(ctx, h.directory, r)
+	return result.Delegation, err
 }
 func TestTransportRoundTripAndRerun(t *testing.T) {
 	w, h, _, r := transportFixture(t)
@@ -407,6 +414,10 @@ func TestTransportRoundTripWithRealControllerCustody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	paymentKey, err := vault.EnsureKey(t.Context(), r.KeyName)
+	if err != nil {
+		t.Fatal(err)
+	}
 	w.Keys = vault
 	mux := http.NewServeMux()
 	route, handler := tosservicev1connect.NewNativeServiceHandler(transportNativeHandler{h: h})
@@ -426,9 +437,18 @@ func TestTransportRoundTripWithRealControllerCustody(t *testing.T) {
 	h.signer = mldsa44test.RequireTosctl(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	if _, err := w.IssueTransport(ctx, h.directory, r); err != nil {
+	result, err := w.IssueTransport(ctx, h.directory, r)
+	if err != nil {
 		t.Fatal(err)
 	}
+	delegation, err := agenttransport.DecodeDelegation(result.Delegation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.TransportKey == paymentKey || result.VaultKeyName == r.KeyName || !strings.HasPrefix(result.VaultKeyName, "mtv2-") {
+		t.Fatal("transport reused an existing payment key")
+	}
+
 }
 
 type transportMutableClock struct{ at time.Time }
@@ -539,4 +559,22 @@ func (s transportNativeHandler) SubmitNativeAction(ctx context.Context, r *conne
 		return nil, err
 	}
 	return connect.NewResponse(result), nil
+}
+
+func TestTransportVaultIDSurvivesAStopAfterKeyCreation(t *testing.T) {
+	w, h, keys, r := transportFixture(t)
+	h.readErr = errors.New("read unavailable")
+	if _, err := issueTest(t, w, h, r); err == nil {
+		t.Fatal("unavailable state accepted")
+	}
+	if keys.calls != 1 || len(keys.names) != 1 {
+		t.Fatal("key creation cut was not exercised")
+	}
+	h.readErr = nil
+	if _, err := issueTest(t, w, h, r); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys.names) != 2 || keys.names[0] != keys.names[1] || keys.names[0] == r.KeyName || !strings.HasPrefix(keys.names[0], "mtv2-") {
+		t.Fatal("key creation was not resumed using its journalled internal ID")
+	}
 }

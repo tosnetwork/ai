@@ -31,8 +31,8 @@ MUTANTS = [
     (
         "finalized-membership",
         "nativewallet/transport.go",
-        "err == nil {\n\t\t\treturn bytes.Clone(r.Delegation), nil",
-        "err == nil || len(r.Delegation)>0 {\n\t\t\treturn bytes.Clone(r.Delegation), nil",
+        "err == nil {\n\t\t\treturn TransportResult{Delegation: bytes.Clone(r.Delegation), VaultKeyName: r.VaultKeyName}, nil",
+        "err == nil || len(r.Delegation)>0 {\n\t\t\treturn TransportResult{Delegation: bytes.Clone(r.Delegation), VaultKeyName: r.VaultKeyName}, nil",
         WALLET,
         "TestTransportAcknowledgementIsNotFinalization",
     ),
@@ -211,6 +211,22 @@ MUTANTS = [
         'RequestId: "",',
         WALLET,
         "TestTransportRoundTripAndRerun",
+    ),
+    (
+        "key-purpose-separation",
+        "nativewallet/transport.go",
+        "w.Keys.EnsureKey(ctx, r.VaultKeyName)",
+        "w.Keys.EnsureKey(ctx, request.KeyName)",
+        WALLET,
+        "TestTransportRoundTripWithRealControllerCustody",
+    ),
+    (
+        "vault-id-before-create",
+        "nativewallet/transport.go",
+        'r.VaultKeyName = "mtv2-" + base64.RawURLEncoding.EncodeToString(keyID)\n\t\tif err = saveTransport(path, r); err != nil {',
+        'r.VaultKeyName = "mtv2-" + base64.RawURLEncoding.EncodeToString(keyID)\n\t\tif err = error(nil); err != nil {',
+        WALLET,
+        "TestTransportVaultIDSurvivesAStopAfterKeyCreation",
     ),
 ]
 

@@ -26,14 +26,16 @@ not a caller-defined signing protocol.
 
 `VAULT_URL` is the same credential-bearing environment input as for the
 controller signer. The transport view derives its custody location from that
-signer; it cannot silently select a second store. The key is generated **inside
-the vault**, Ed25519, non-extractable, using `NewOnly`. Only the public key is
+signer; it cannot silently select a second store. Each operation journals a fresh random 128-bit `mtv2-` vault ID before accessing
+custody. The user-provided name is a label, never the ID of an existing payment
+key. The key is generated **inside the vault**, Ed25519, non-extractable, using
+`NewOnly`. Only the public key is
 read. There is no plaintext seed file or seed argument. On a crash after vault
 commit, the same record is read back; generation never overwrites it. Existing
 extractable keys and other algorithms are refused. The vault enforces its
 existing file ownership, permissions, encrypted save and locking rules.
-`--key-name` is limited to 30 canonical characters because the existing CLI's
-public metadata table truncates longer names. The parser requires one complete
+`--key-name` is a label of at most 30 canonical characters. The generated vault
+ID is 27 characters, below the existing CLI's 30-character table limit. The parser requires one complete
 matching row; format changes refuse rather than guessing. Helper error bodies
 are never printed.
 
@@ -66,14 +68,17 @@ The timeout also cancels a blocked confirmation prompt; input is capped at
 256 bytes. The command has one prompt reader which ends on input or process
 exit after cancellation. No success or delegation is printed before a fresh
 `VerifyDelegation` passes.
-The result contains only the delegation's canonical base64, digest and key name.
+The result contains only the delegation's canonical base64, digest and actual
+vault key ID (the `key_name` field), which future transport signers can use.
 Transport keys remain separate from packet encryption and controller keys.
 
 ## Crash and retry rules
 
-Keep both the vault and the journal. Repeat the **same arguments and journal**:
+Keep both the vault and the journal. Repeat the **same arguments and journal**,
+including the original `--key-name` label; the returned random vault ID is for
+future transport signing, not a replacement label for this command:
 
-1. The request/network/key name is saved before key creation.
+1. The request/network/label and fresh internal vault key ID are saved before key creation.
 2. The exact delegation and unsigned action (including nonce) are saved before
    controller signing. A declined prompt can be resumed without changing them.
 3. The signed submission is atomically saved and synced before dispatch.

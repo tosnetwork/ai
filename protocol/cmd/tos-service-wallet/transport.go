@@ -53,7 +53,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	configPath := set.String("transport-config", "", "owner-private network/registry/read/relay JSON configuration")
 	directory := set.String("journal", "", "absolute owner-private operation directory; reuse it after a crash")
 	agent := set.String("agent", "", "Agent identifier")
-	key := set.String("key-name", "", "new non-extractable vault record name (up to 30 characters)")
+	key := set.String("key-name", "", "operation key label; a fresh internal vault ID is journalled")
 	epoch := set.Uint64("authorization-epoch", 0, "current finalized epoch; legacy approved test networks require zero")
 	purposes := set.Uint("purposes", 7, "nonzero transport purpose mask, 1..7")
 	lifetime := set.Uint64("lifetime-seconds", 86400, "delegation lifetime, at most 31536000 seconds")
@@ -137,11 +137,11 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 		}
 		return confirmTransportHash(ctx, input, review.ActionHash)
 	}}
-	wire, err := issuer.IssueTransport(ctx, *directory, nativewallet.TransportRequest{AgentID: *agent, KeyName: *key, Epoch: *epoch, Purposes: agenttransport.Purpose(*purposes), Lifetime: *lifetime, CredentialLifetime: uint32(*credential), Controllers: controllers})
+	result, err := issuer.IssueTransport(ctx, *directory, nativewallet.TransportRequest{AgentID: *agent, KeyName: *key, Epoch: *epoch, Purposes: agenttransport.Purpose(*purposes), Lifetime: *lifetime, CredentialLifetime: uint32(*credential), Controllers: controllers})
 	if err != nil {
 		return err
 	}
-	digest, err := agenttransport.DelegationDigest(wire)
+	digest, err := agenttransport.DelegationDigest(result.Delegation)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 		Delegation string `json:"delegation_base64"`
 		Digest     string `json:"delegation_digest"`
 		KeyName    string `json:"key_name"`
-	}{"tos-service-transport-delegation.v1", base64.StdEncoding.EncodeToString(wire), "sha256:" + hex.EncodeToString(digest[:]), *key})
+	}{"tos-service-transport-delegation.v1", base64.StdEncoding.EncodeToString(result.Delegation), "sha256:" + hex.EncodeToString(digest[:]), result.VaultKeyName})
 }
 
 type unopenedReader struct{}
