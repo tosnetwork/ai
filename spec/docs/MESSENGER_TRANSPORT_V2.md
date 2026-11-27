@@ -8,7 +8,9 @@ are verified offline and revoked by finalized chain state.
 **Status: ⬜ Design draft.** Nothing in this document is implemented. It is
 an incubation design under [ROADMAP section 8.1](ROADMAP.md#81-incubation-designs):
 it carries no gate status and supplies no gate evidence. Section 16 lists the
-evidence each part needs; section 17 is the implementation order.
+evidence each part needs; section 17 is the implementation order. Until the
+registry change of section 18 Q1 is finalized on a network, V2 transport is
+limited to test networks (5.1).
 
 MUST, MUST NOT, SHOULD and MAY are normative. "Relay spec" is
 [Agent Packet Relay V1](AGENT_PACKET_RELAY_V1.md); "carriage" is
@@ -87,7 +89,8 @@ What the M0-R work did establish, and this design relies on:
 - **G4. Mailboxes are private to their owner.** Listing and downloading need
   the owner's credential. Other relay users learn nothing about a mailbox.
 - **G5. Strangers cannot crowd out contacts.** Deposits without a credential
-  share a small stranger lane; each contact deposits in its own lane.
+  share a small stranger lane per mailbox and a bounded stranger share of the
+  whole relay; each contact deposits in its own lane.
 - **G6. An Agent ID is enough to find a peer.** Signed reachability hints in
   relay directories name the peer's relays, cards and Messenger evidence, so
   first contact needs no contact file. A hint never authorizes anything.
@@ -154,7 +157,7 @@ What the M0-R work did establish, and this design relies on:
 | Network attacker | observe and drop traffic; spoof UDP sources | read anything (TLS, ADNL channel, HPKE); complete a direct hello without the peer's transport key; replay a request proof outside its window |
 | Stranger | deposit into the stranger lane up to its quota; publish its own hints; look up public hints | list or download another mailbox; take contact-lane capacity; fill a directory without a live finalized Agent per record |
 | Malicious contact | deposit up to its lane quota; hand its credential to others | widen its credential (section 6.4); deposit after revocation; hide that its lane is the one filling |
-| Compromised transport key | sign hints and credentials for its Agent until the delegation is revoked, so redirect new traffic to relays it chooses and fetch ciphertext from the real relays | read a packet (the HPKE keys are separate); sign a packet; outlive a policy update or the delegation's withdrawal by more than the re-check interval |
+| Compromised transport key | sign hints and credentials for its Agent until the delegation is revoked, so redirect new traffic to relays it chooses and fetch ciphertext from the real relays | read a packet (the HPKE keys are separate); sign a packet; outlive a policy update, recovery or withdrawal by more than the revocation bounds of 5.1 on a network with the authorization epoch |
 | Compromised controller | everything the Agent can do | nothing less than total identity compromise; recovered by policy rotation, which also revokes every transport delegation (5.1) |
 | Lying chain endpoint at a relay | answer a stale or false state, if it controls a majority of that relay's configured endpoints | affect any other relay or any recipient's own verification |
 | MCP client or model | send and read through the runtime API within owner policy | choose a route, relay, key, device or session; approve a stranger; manage rooms (section 13) |
@@ -169,11 +172,16 @@ Invariants:
 - **I3.** The same journaled envelope bytes travel on every path, so every
   copy deduplicates by envelope ID and inner packet.
 - **I4.** A relay never evicts a stored envelope to admit another (relay
-  spec 9.8), and no lane can take another lane's reserved capacity.
-- **I5.** Revocation is a chain fact: a policy update, a delegation
-  withdrawal (once that action exists, section 18 Q1) or a tombstone stops
-  every credential and hint of the delegation within 300 seconds at every
-  honest relay and sender, without waiting for expiry.
+  spec 9.8). Stranger deposits can never take the capacity reserved for
+  contact lanes, neither within one mailbox nor across the relay (6.2).
+- **I5.** Revocation is a chain fact: a policy update, a recovery
+  completion, a tombstone or a delegation withdrawal (the last two only once
+  the registry change of section 18 Q1 exists) stops every credential and hint
+  of the delegation at every honest relay and sender without waiting for
+  expiry: within 300 seconds while finalized reads succeed, and within 600
+  seconds while they fail (5.1). On test networks without the authorization
+  epoch, a policy change that returns to an earlier policy is a known gap
+  (5.1).
 
 ## 4. Components
 
@@ -214,10 +222,13 @@ change is made. Frozen vectors (A1) pin them.
 ### 5.1 Transport delegation
 
 ```text
-transport_delegation (159 bytes) =
+transport_delegation (167 bytes) =
   D("tos.service.agent-transport-delegation.v1")   42
   agent_digest                                     32
   transport_public_key                             32   Ed25519
+  authorization_epoch                              u64  the Agent's finalized authorization
+                                                        epoch at issue (below); 0 only on
+                                                        test networks before it exists
   policy_hash                                      32   representation hash of the
                                                         finalized policy cell at issue
   purposes                                         u8   bit 0 relay access, bit 1 hints,
@@ -232,7 +243,40 @@ delegation_digest = SHA-256(transport_delegation)
 
 The Agent commits `delegation_digest` with the existing add-delegation action
 (`DelegateAgentV1`, [`NATIVE_REGISTRY_STATE_MACHINES.md`](NATIVE_REGISTRY_STATE_MACHINES.md)),
-authorized by its delegation-purpose controllers. No chain change is needed.
+authorized by its delegation-purpose controllers.
+
+**Why the policy hash is not enough.** The registry keeps delegation digests
+across an ordinary policy update; only recovery completion and the tombstone
+clear them (`tos` `crypto/smartcont/native-registry-code.fc`: the
+`kind::update_agent_policy` branch at line 759 replaces only the policy,
+while the `kind::complete_recovery` branch at line 780 empties the
+delegations at line 790 and the `kind::revoke_agent` branch at lines 791-792
+does too; checked at `tos` `db4503c02`). A binding to the
+policy hash alone is therefore undone by a policy change A → B → A, which
+makes a delegation issued under A verify again, and is never triggered by an
+update that installs identical policy bytes.
+
+**No existing value fits.** The Agent state holds `generation` and
+`sequence` (`native-registry-code.fc:504-509`). `generation` advances only on
+recovery completion (`:690-691`). `sequence` advances on every action
+(`:693`), including `DelegateAgentV1` itself, so a delegation bound to it
+would be revoked by the commit of the next delegation, and its own commit
+cannot be named in it.
+
+**The authorization epoch.** The Agent state gains a u64
+`authorization_epoch`, set to 1 at registration and incremented by exactly
+these actions: policy update (whatever bytes it installs), recovery
+completion, tombstone, and delegation withdrawal. It is never decremented or
+reused, and adding a delegation does not change it. It ships together with
+the withdraw-delegation action of section 18 Q1, as one registry change in
+`tos` and `protocol/pkg/nativecore`, outside this plan (section 17).
+
+**Production gating.** Until that change is finalized on a network, V2
+transport runs only on test networks: delegations carry
+`authorization_epoch = 0`, verifiers check the policy hash only, and the A →
+B → A and same-bytes cases above are known gaps. A verifier configured for a
+production network refuses every delegation with epoch 0, and a production
+network configuration that lacks the epoch is refused at startup.
 
 `VerifyDelegation(bytes, purpose, now)` passes only if:
 
@@ -240,23 +284,35 @@ authorized by its delegation-purpose controllers. No chain change is needed.
 2. the Agent resolves from finalized state, is not tombstoned, and
    `CheckState` accepts it;
 3. `delegation_digest` is in the Agent's finalized `delegation_digests`;
-4. `policy_hash` equals the hash of the Agent's finalized policy;
-5. `not_before_unix <= now + 300` and `now < not_after_unix`;
-6. the requested purpose bit is set.
+4. `authorization_epoch` equals the Agent's finalized authorization epoch
+   (on a test network without it: the field is 0);
+5. `policy_hash` equals the hash of the Agent's finalized policy;
+6. `not_before_unix <= now + 300` and `now < not_after_unix`;
+7. the requested purpose bit is set.
 
-Checks 2 to 4 are the revocation checks. A verifier MAY reuse a passing
+Checks 2 to 5 are the revocation checks. A verifier MAY reuse a passing
 result for at most **300 seconds** (the re-check interval); after that it
 reads finalized state again before the next use. When finalized state cannot
 be read, a cached pass stays usable until it is **600 seconds** old and is
 then refused (fail closed).
 
-**Revocation and rotation.** Any policy update, recovery completion or
-tombstone changes check 2 or 4 and revokes every transport delegation of the
-Agent at once; a node re-commits a fresh delegation after a policy update.
-The registry has no action that removes one delegation digest; section 18 Q1
-decides to add it, and check 3 then also covers withdrawal. Until then,
-revoking one compromised transport key without touching the policy is not
-possible, and the response to a compromised transport key is a policy update.
+**Revocation bounds.** Measured from the moment the verifier's finalized
+reader first can return the revoking state (finality and the reader's own lag
+are not part of the bound):
+
+- **healthy reads:** at most 300 seconds, because the next use after the
+  re-check interval reads the revoking state;
+- **reads failing:** at most 600 seconds, because a cached pass is refused at
+  that age. The worst case is a revocation that finalizes just after a
+  successful read, followed at once by the reader's endpoints failing: the
+  stale pass is honoured for the remainder of the 600 seconds and then
+  refused.
+
+**Revocation and rotation.** Any policy update, recovery completion,
+tombstone or (once it exists) withdrawal changes check 2, 3 or 4 and
+revokes every transport delegation of the Agent at once; a node re-commits a
+fresh delegation under the new epoch. The registry has no action that
+removes one delegation digest today; section 18 Q1 adds it.
 
 **Between a revocation and the new delegation.** Mailboxes are keyed by
 Agent, not by delegation, so nothing stored is lost: relays keep accepting
@@ -267,17 +323,31 @@ everything still held, republishes its hints, and issues new contact
 credentials in band. Envelopes that outlive the gap at a relay are covered by
 the senders' re-deposit until the delivery acknowledgement (D10).
 
-An Agent SHOULD keep one delegation per lane process (the chat node and the
-rail node each hold their own key) and MUST NOT hold more than 4 transport
-delegations that verify at once; a verifier that sees more uses none of them
-past the fourth in digest order, so a fifth cannot displace live ones.
+**Objects written under a delegation.** A relay stores every owner-written
+object (mailbox policy, hint record) together with the delegation that
+authorized it, and treats the object as void once that delegation no longer
+verifies, whatever its timestamps: a new epoch therefore supersedes
+everything written under an older one. Among objects whose delegations
+verify, the newest is the one with the greatest `issued_at_unix`, then the
+greatest SHA-256 of its bytes. A relay refuses an object whose
+`issued_at_unix` is more than 300 seconds ahead of its clock. Revocation
+entries (6.3) are the exception: they only refuse, so they stay until their
+own expiry whichever delegation wrote them.
+
+**Selecting among delegations.** Finalized state holds digests, not their
+preimages, so no verifier enumerates an Agent's delegations. A verifier
+verifies only the delegation presented to it, in a credential, a hint or a
+hello. An Agent SHOULD keep one delegation per lane process (the chat node
+and the rail node each hold their own key). The only per-Agent count is the
+directory's (6.5), which admits a new delegation's record only into a free
+slot and never displaces one.
 
 ### 5.2 Relay credential
 
 ```text
 credential =
   D("tos.service.relay-credential.v1")     32
-  transport_delegation                     159
+  transport_delegation                     167
   block_count                              u8    1 .. 4
   block × block_count
 
@@ -308,7 +378,7 @@ Each signature covers the chain value, which covers every earlier signature,
 so blocks cannot be reordered, dropped from the middle, or spliced from
 another credential. The holder can append a block (it holds the private holder
 key) but cannot remove or change one. A credential is at most **2,048
-bytes**; the largest valid one is 1,908.
+bytes**; the largest valid one is 1,916.
 
 ### 5.3 Caveats
 
@@ -372,8 +442,29 @@ TOS-Relay-Credential: base64url(credential), no padding
 TOS-Relay-Proof:      base64url(issued_at_unix u64 || nonce 32 || signature 64), no padding
 ```
 
-The relay requires `|now - issued_at_unix| <= 120`, claims the nonce per
-`credential_id` for 240 seconds in a bounded table, and refuses a reused one.
+The relay requires `|now - issued_at_unix| <= 120` and claims the pair
+(`credential_id`, `nonce`) in its replay table before acting. The table:
+
+- holds at most a configured number of entries (default 262,144, about
+  19 MB of keys) and at most 64 live entries per `credential_id`; when either is
+  full it refuses the request (`503 replay_table_full`, or `429` for one
+  credential) instead of evicting a live entry. It never evicts an entry
+  whose `issued_at_unix` is still inside the window;
+- drops an entry only once `now - issued_at_unix > 120`, and keeps a
+  **floor**, the greatest `issued_at_unix` it ever dropped; a proof whose
+  `issued_at_unix` is at or below the floor is refused. A backward step of the
+  wall clock therefore cannot bring a dropped proof back into the window;
+- survives a restart without being written per request: every 10 seconds
+  the relay durably records a **high-water mark** `H = now + 140`, and it
+  admits a proof only if its `issued_at_unix` is below the last recorded
+  `H`. An honest proof always is (`issued_at_unix <= now + 120`, and the
+  recorded `H` is at least `now + 130`); if recording fails, proofs soon
+  exceed `H` and are refused, so the failure is closed. After a restart the
+  floor starts at the recorded `H`, so every proof admitted before the
+  restart is refused. A proof at or below the floor is answered
+  `503 proof_floor` with `Retry-After` up to the floor, at most 140 seconds
+  after a restart; clients re-sign then. Stranger deposits and
+  acknowledgements need no proof and are unaffected.
 Binding the relay URL means a malicious relay cannot replay a proof it
 received at another relay; binding the body means a proof cannot carry other
 bytes. Credentials and proofs never appear in a URL.
@@ -383,7 +474,7 @@ bytes. Credentials and proofs never appear in a URL.
 ```text
 hint =
   D("tos.service.agent-reachability-hint.v1")     39
-  transport_delegation                            159
+  transport_delegation                            167
   issued_at_unix                                  u64
   expires_at_unix                                 u64  issued < expires <= issued + 86,400
   relay_count                                     u8   1 .. 4
@@ -398,6 +489,7 @@ hint =
 object kinds:  1 = rail key card packet JSON (<= 9,216 bytes)
                2 = chat key card packet JSON (<= 9,216 bytes)
                3 = Messenger relay identity evidence (<= 18,432 bytes, carriage 2.5)
+relay_count:   1 .. 4 on test networks; 2 .. 4 on a production network (section 10)
 object digest = SHA-256( D("tos.service.agent-reachability-hint.object.v1") || u8(kind) || object )
 
 hint_record =
@@ -406,8 +498,23 @@ hint_record =
   object bytes, in the hint's order, each exactly its listed length
 ```
 
-A hint is at most 1,536 bytes (1,504 when maximal); a hint record at most
+A hint is at most 1,536 bytes (1,512 when maximal); a hint record at most
 **40,960 bytes**.
+
+**What a hint publishes, and why no more.** A hint is public. By default it
+carries only what a peer needs to reach a lane: relays, and the rail card of
+an Agent that sells (rail cards are already public in offer files). The chat
+card (kind 2) and the Messenger evidence (kind 3) are published only when the
+owner opts the chat lane into **public contact** (`public_contact: true`,
+default off), which is what first contact by Agent ID needs: a stranger must
+seal to the chat card and run the first-contact bootstrap against the
+evidence. That evidence discloses the Agent's Messaging Endpoint delegation
+(Endpoint ID and key, ADNL identity commitment, policy digests), its
+descriptor policy, its Contact Descriptor and its device's signed prekey
+bundle set (device ID and keys): exactly what a contact file holds today,
+now readable by anyone. An Agent that does not opt in stays reachable only
+by invite or contact file, as in carriage D4. Direct entries are published
+only under 8.1. Nothing else about an Agent is published.
 
 `inbound_class` is what the publisher knows about inbound UDP to that
 address: 1 = declared by its operator (a public address or a forwarded port),
@@ -454,7 +561,7 @@ Q11 removes the card's list later.
 hello =
   D("tos.service.agent-direct-hello.v1")      34
   role                                        u8   1 = initiator, 2 = responder
-  transport_delegation                        159
+  transport_delegation                        167
   local_adnl_id                               32
   peer_adnl_id                                32
   initiator_nonce                             32
@@ -473,7 +580,7 @@ receipt =
   signature                                   64   recipient's transport key
 ```
 
-A hello is 394 bytes and travels in one ADNL query, inside the measured
+A hello is 402 bytes and travels in one ADNL query, inside the measured
 8,192-byte cap. Envelopes travel only as RLDP2 queries, because almost every
 relay frame bucket exceeds one ADNL query.
 
@@ -482,7 +589,16 @@ relay frame bucket exceeds one ADNL query.
 V2 keeps every rule of relay spec section 9 that this section does not
 change: HTTPS only, no redirects, no query strings, the request evaluation
 order, the deposit steps, the acknowledgement secret, tombstones, bounds,
-retention and the D10 TTLs. Paths are below the base URL `B`.
+retention and the D10 TTLs, including the 64 KiB bound on every response
+but a downloaded envelope. Paths are below the base URL `B`.
+
+**Separate stores while V1 runs.** A relay that serves both APIs keeps V2
+mailboxes in a store of their own; no V1 request reads, lists, downloads or
+acknowledges an envelope deposited through V2, and V1 mailbox paths of an
+Agent answer from the V1 store only. The privacy claims of this design (G4,
+section 11) hold for the V2 store, and for a relay only once its V1
+endpoints are disabled or its stores are separate. The V1 endpoints are
+removed in section 17 PR 14.
 
 ### 6.1 Operations
 
@@ -495,7 +611,8 @@ retention and the D10 TTLs. Paths are below the base URL `B`.
 | `PUT B/v2/mailboxes/{agent}/policy` | publish, owner | mailbox policy (6.2) |
 | `POST B/v2/mailboxes/{agent}/revocations` | revoke, owner | revoke credential chains (6.3) |
 | `PUT B/v2/hints/{agent}` | none | store a hint record (6.5) |
-| `GET B/v2/hints/{agent}` | none | the newest record of each delegation of the Agent, at most 4 |
+| `GET B/v2/hints/{agent}` | none | the hint index (6.5): one entry per live record of the Agent, at most 4 |
+| `GET B/v2/hints/{agent}/{digest}` | none | one hint record (6.5), by its delegation digest |
 | `GET B/v2/relay` | none | description: the V1 fields plus `stranger_max_envelopes`, `stranger_max_bytes`, `max_wait_seconds`, `directory` |
 
 `{agent}` MUST equal the Agent of the credential's delegation; a mismatch is
@@ -523,21 +640,41 @@ Every stored envelope belongs to one lane of its mailbox:
 
 The per-recipient bound of 256 envelopes and 16 MiB stays, and the stranger
 lane can never hold more than 64 of it, so contact lanes always keep at least
-192 envelopes. A full lane answers `507 quota_exhausted` with the lane in
-the error (`"lane": "stranger"` or `"contact"`).
+192 envelopes.
+
+**Relay-wide reservation.** The global count and byte limits of relay spec
+9.8 are split: stranger envelopes across all mailboxes together hold at most
+25 % of each (`stranger_global_share`, at most 25 %), and the rest is
+reserved for contact lanes. One client address holds at most 64 stranger
+envelopes across all mailboxes (IPv6 per /64, and 256 per /48). A stranger
+flood spread over many arbitrary Agent IDs therefore fills at most the
+stranger share and leaves every contact lane its capacity. What remains: a
+contact lane deposit can still meet the contact share's own exhaustion, which
+takes many credentials from many owners.
+
+A full lane or share answers `507 quota_exhausted` with the lane in the error
+(`"lane": "stranger"` or `"contact"`).
 
 The owner MAY lower its stranger lane, to zero for a closed mailbox:
 
 ```text
 mailbox_policy =
   D("tos.service.relay-mailbox-policy.v1")
-  issued_at_unix           u64   strictly greater than the stored policy's
+  issued_at_unix           u64   at most now + 300 at the relay
   stranger_max_envelopes   u16   0 .. relay maximum
   stranger_max_bytes       u32   0 .. relay maximum
 ```
 
-The policy request is authorized by the owner credential and proof; the
-relay stores the newest policy per mailbox durably.
+The policy request is authorized by the owner credential and proof. The
+relay stores the newest policy per mailbox durably, together with the
+delegation that authorized it, under the rule for objects written under a
+delegation (5.1): a policy more than 300 seconds ahead is refused
+(`400 invalid_request`); a stored policy is void once its delegation no
+longer verifies, and the relay's defaults apply until the owner publishes
+again under a verifying delegation, whatever timestamp the void one carried.
+Among policies of verifying delegations a newer `issued_at_unix` wins. So a
+compromised transport key can write at most a policy dated 300 seconds
+ahead, and the owner's rotation voids it at once.
 
 ### 6.3 Revocation of credentials
 
@@ -576,9 +713,34 @@ of this.
 
 A relay stores a hint record only after `VerifyHint` passes, and only if it
 is newer than the stored record of the same delegation; an equal
-`issued_at_unix` with different bytes is `409 hint_conflict`. It keeps at
-most 4 records per Agent (one per delegation; a fifth delegation's record is
-refused, not swapped in) and a configured number of Agents (default 16,384).
+`issued_at_unix` with different bytes is `409 hint_conflict`. A stored record
+is void once its delegation no longer verifies (5.1).
+
+**Slots.** A relay keeps at most 4 live records per Agent, one per
+delegation digest. A record is live while its hint is unexpired and its
+delegation verifies. A record of a new delegation is admitted only into a
+free slot; with 4 live records it is refused (`507`), whatever its digest or
+time, and never replaces a live record. A slot frees when its record expires
+or its delegation stops verifying. Relays fill their slots independently, so
+two relays may hold different records of one Agent; a consumer asks at least
+two relays and merges what they return. The relay keeps a configured number
+of Agents (default 16,384).
+
+**Encoding.** The index and the records are separate responses, each within
+the 64 KiB response bound:
+
+```text
+hint_index (at most 209 bytes) =
+  D("tos.service.relay-hint-index.v1")
+  count u8 (0 .. 4)
+  count × ( delegation_digest 32 || issued_at_unix u64 || record_length u32 )
+  strictly ascending by delegation_digest
+```
+
+`GET B/v2/hints/{agent}` answers the index, `application/octet-stream`;
+`GET B/v2/hints/{agent}/{digest}` answers one record, at most 40,960 bytes,
+or `404`. No list response is paginated because none can exceed the bound;
+A1's vectors include an index of 4 entries and a maximal record.
 A full directory refuses new Agents with `507` and evicts only expired
 records. A relay stores records of Agents whose hint names it; a relay whose
 description says `"directory": true` stores records of any Agent.
@@ -609,6 +771,8 @@ The V1 codes stay. V2 adds, each code belonging to exactly one status:
 | 403 | `credential_revoked` | the delegation no longer verifies, or a chain value is revoked |
 | 409 | `hint_conflict` | an equal-time hint with different bytes |
 | 503 | `chain_unavailable` | finalized state could not be read and no cached pass younger than 600 s exists; retryable |
+| 503 | `replay_table_full` | the replay table is full (5.4); retryable |
+| 503 | `proof_floor` | the proof's time is at or below the replay floor after a restart (5.4); retry with a new proof after `Retry-After` |
 
 `403` with `credential_revoked` is terminal for that credential at that relay;
 the other `403` codes are terminal for those bytes. A client believes a code
@@ -776,8 +940,8 @@ In order, using the first that yields a valid hint for the needed lane:
 2. the local hint cache (newest per delegation, bounded to 4,096 peers);
 3. a hint record from a contact file, invite, offer file or Gateway Quote
    package;
-4. `GET /v2/hints/{agent}` at the peer's last known relays, then at directory
-   relays.
+4. the hint index and records (6.5) at the peer's last known relays, then at
+   no fewer than two directory relays, merged.
 
 Every answer is verified with `VerifyHint` before use, and the resolved
 cards and evidence with their own verifiers. With no valid hint, the V1 card
@@ -828,10 +992,15 @@ deposited from a stale hint are still collected.
    `carried` on the first acceptance (`200`, `201`, `410`), with the smallest
    advertised `max_ttl_seconds` of the hint's relays, exactly as the carriage
    reports it today.
-5. Continue in the background until **two** relays accepted the envelope, or
-   every relay was tried. A `409` abandons that relay for this envelope
-   (relay spec 8.6); a `507` on a contact lane retries that relay once on the
-   stranger lane; a `403 credential_revoked` drops that credential.
+5. Continue in the background until **two** relays accepted the envelope.
+   A `409`, a `422` and a `403` other than `credential_revoked` abandon that
+   relay for this envelope (relay spec 8.6, 9.2); a `507` on a contact lane
+   retries that relay once on the stranger lane; a `403 credential_revoked`
+   drops that credential and retries on the stranger lane. Every other
+   failure is retried at that relay with back-off from 30 seconds doubling to
+   10 minutes. The loop ends when two relays accepted, the delivery was
+   acknowledged, the envelope expired, or every relay was abandoned; ending
+   with one copy is recorded as `single-copy` in telemetry.
 6. Re-deposit and withdraw generations as the carriage specifies
    (section 4, D10): next generation at 80 % of the reported TTL, at least 10
    minutes apart, until the delivery's own expiry; packet expiry stays the
@@ -839,7 +1008,9 @@ deposited from a stale hint are still collected.
 
 Two copies instead of V1's one per relay: two survive any single relay loss,
 and four copies of every envelope would spend four relays' quotas for no
-further independence when the relays share an operator.
+further independence when the relays share an operator. Two copies need two
+relays, so a production hint MUST name at least two (5.5); a one-relay hint
+is a test configuration, and its records say so.
 
 **Recipient.**
 
@@ -860,15 +1031,25 @@ further independence when the relays share an operator.
 
 | Observer | Learns | Does not learn |
 |---|---|---|
-| Relay operator, mailbox it hosts | the owner's Agent ID and transport delegation (public in its hint); its poll and acknowledgement times and address; per envelope: recipient key ID, size (the frame bucket of carriage 1.1), deposit time, expiry, depositor address, and the lane: `stranger`, or an opaque lane value that links deposits of one contact over time | the sender Agent (except by matching addresses, as in V1), Endpoint, device, conversation, room, Event, frame kind, content |
+| Relay operator, mailbox it hosts | everything public in the owner's hints (row below), so its Endpoint and device when it opted into public contact; its poll and acknowledgement times and address; per envelope: recipient key ID, size (the frame bucket of carriage 1.1), deposit time, expiry, depositor address, and the lane: `stranger`, or an opaque lane value, credential chain values and holder key that link deposits of one contact over time | the sender Agent (except by matching addresses, as in V1), the sender's Endpoint or device, conversation, room, Event, frame kind, content |
 | Relay operator, directory | which address looked up which Agent, and when | why |
-| Another relay user, or anyone knowing an Agent ID | the Agent's public hints: relays, cards, Messenger evidence, and direct addresses if its owner enabled them | anything about its mailbox: count, sizes, times, ciphertext |
+| Another relay user, or anyone knowing an Agent ID | the Agent's public hints (5.5): its relays and transport delegation; its rail card if it sells; with public contact, its chat card and Messenger evidence, which name its Messaging Endpoint (ID, key, ADNL commitment), its Contact Descriptor, and its device (ID, signed prekey bundles); direct addresses if its owner enabled them | anything about its mailbox: count, sizes, times, ciphertext |
 | Network observer | that a node talks HTTPS to a relay, or ADNL to an address | anything inside |
 | Direct peer | the other side's IPv4 address and port | nothing a relay would not; it is the counterparty anyway |
 
 Compared with V1, the public loses all mailbox metadata (G4); the operator
-gains the lane value of contact deposits. Rules that keep the operator's view
-minimal:
+gains the lane value of contact deposits.
+
+**Correlation across relays.** Operators that share what they see link
+traffic without matching addresses: a sender deposits the same envelope ID
+and bytes at two relays (dedup needs that); a contact presents the same
+credential blocks, chain values, lane value and holder key at every relay of
+the owner, differing only in the appended relay block; and every relay sees
+the owner's same transport delegation. Unlinkability across relays is not a
+goal; choosing relays of independent operators buys availability, not
+privacy against their collusion.
+
+Rules that keep the operator's view minimal:
 
 - lane values are random per peer and never derived from an Agent ID or a key;
 - a relay MUST NOT log credentials, proofs, lane values, envelope IDs or
@@ -964,15 +1145,17 @@ Rules:
 
 | Item | Bound |
 |---|---|
-| Transport delegation | 159 bytes; lifetime at most 365 days; at most 4 verifying per Agent |
+| Transport delegation | 167 bytes; lifetime at most 365 days; production needs the authorization epoch (5.1) |
 | Re-check of finalized state | every 300 s; cached pass refused after 600 s without a read |
 | Credential | at most 2,048 bytes; 1..4 blocks; 1..8 caveats per block |
 | Owner credential lifetime | at most 3,600 s |
 | Contact credential lifetime | at most 604,800 s (and the delegation's `max_credential_seconds`); SHOULD 259,200 |
-| Request proof | clock window ±120 s; nonce memory 240 s per credential |
-| Hint / hint record | 1,536 / 40,960 bytes; lifetime at most 86,400 s, SHOULD 21,600; 1..4 relays; 0..2 direct entries; 0..3 objects |
-| Directory | at most 4 records per Agent; default 16,384 Agents; lookups 60/min per address |
-| Stranger lane | default 32 envelopes and 2 MiB per mailbox, at most 64 and 4 MiB; 8 per (address, mailbox) |
+| Request proof | clock window ±120 s; replay table default 262,144 entries, 64 per credential, fail closed when full; floor after restart at most 140 s ahead |
+| Revocation | at most 300 s with healthy reads, 600 s with failing reads (5.1) |
+| Owner-written objects | `issued_at_unix` at most 300 s ahead; void once their delegation fails |
+| Hint / hint record | 1,536 / 40,960 bytes; lifetime at most 86,400 s, SHOULD 21,600; 2..4 relays in production (1..4 in test); 0..2 direct entries; 0..3 objects |
+| Directory | at most 4 live records per Agent, never displaced; default 16,384 Agents; index at most 209 bytes; lookups 60/min per address |
+| Stranger lane | default 32 envelopes and 2 MiB per mailbox, at most 64 and 4 MiB; 8 per (address, mailbox); at most 64 per address relay-wide; at most 25 % of the relay's global limits |
 | Contact lane | at most 64 envelopes; contact lanes keep at least 192 of the 256 per recipient |
 | Revocations | 1..32 per request; 1,024 per mailbox; kept at most 604,800 + 300 s |
 | Long poll | 1..25 s; one waiting request per mailbox |
@@ -981,7 +1164,7 @@ Rules:
 | Relay TTL (D10) | 3,600 s on test relays, 10,800 s on production relays, at most 86,400 s |
 | Re-deposit (D10) | 80 % of the smallest advertised TTL; at least 600 s apart; until the delivery expiry (default 7 days, at most 30) |
 | Copies per envelope | two accepting relays |
-| Direct hello | 394 bytes, one ADNL query (cap 8,192) |
+| Direct hello | 402 bytes, one ADNL query (cap 8,192) |
 | Direct deliver | RLDP2, envelope at most 262,144 bytes; timeout 5 s + length at 32 KiB/s, at most 13 s |
 | Direct timing | probe 5 s; keepalive 15 s; idle close 600 s; cooldown 1 h doubling to 24 h |
 | Direct budget | 1 probe per peer per 10 min; 16 probes/min; 64 sessions per lane; 60 delivers/min and 4 in flight per peer |
@@ -998,19 +1181,22 @@ team's).
 |---|---|---|
 | A1 Codecs | delegation, credential, proof, hint, record, hello and receipt decode strictly; every negative refused with its class | frozen corpus `spec/test-vectors/agent-transport-v1.json`; an independent reproducer run with `python3 -I` under `make spec-check` |
 | A2 Narrowing | no appended block widens time, relay, operations, lane or size; splice, reorder and drop are refused | property and fuzz tests naming the generator seed; red-control mutants that merge blocks are caught |
-| A3 Chain revocation | after a policy update on a test chain, owner and contact credentials are refused (`credential_revoked`) by two relays within 300 s, and hints stop being served | chain transaction hash, relay logs of the refusal times, both relay commits |
+| A3 Chain revocation | after a policy update on a test chain, owner and contact credentials are refused (`credential_revoked`) by two relays within 300 s of the update being readable, and hints stop being served; and, combined, a revocation finalized just after a relay's successful read followed by stopping that relay's chain endpoints is refused within 600 s and not honoured after | chain transaction hashes, relay logs of the read and refusal times, both relay commits |
 | A4 Fail closed | with every chain endpoint of a relay stopped, credentialed requests get `503 chain_unavailable` once the cached pass is 600 s old; stranger deposits continue | relay log and client transcript |
-| A5 Closed mailbox | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403` | integration test and a live transcript against a deployed test relay |
-| A6 Lane isolation | a stranger flood from 64 IPv4 addresses fills only the stranger lane; a contact deposits throughout; `507` names the stranger lane | live run against a test relay, quota counters before and after |
+| A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step; a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
+| A6 Lane isolation | a stranger flood from 64 IPv4 addresses into one mailbox fills only its stranger lane; a stranger flood spread over 10,000 arbitrary Agent IDs stops at the relay-wide stranger share; contacts deposit throughout both; `507` names the stranger lane | live run against a test relay, per-mailbox and global quota counters before and after |
 | A7 Contact revocation | a revoked contact's deposits are refused at every relay of the hint; its stored envelopes stay until acknowledged | live transcript |
-| A8 Multi-relay | with two relays, one killed mid-run: no loss, exactly-once application, acknowledgement at both after restart, two accepted copies per envelope | relay store snapshots, journals, runtime outcome log |
+| A8 Multi-relay | with the minimum production configuration of two relays, one killed mid-run: no loss, exactly-once application, acknowledgement at both after restart, and every envelope deposited while one relay was down reaching its second copy after the restart through the retry of section 10 | relay store snapshots, journals, `single-copy` telemetry, runtime outcome log |
 | A9 First contact by Agent ID | an MCP client on a host without OpenFox resolves an OpenFox Agent by Agent ID through a directory relay (no contact file), sends, the owner admits, and the conversation proceeds both ways across two hosts | deployment record with both hosts' commits, the hint records, the MCP transcript |
 | A10 OpenFox on the library | OpenFox has no chat carrier code and imports `agentcarrier`; the M-R1 and M-R2 scenarios pass again on V2 relays | `go list -deps` output, the openfox commit, rerun records |
 | A11 Direct upgrade | between a node with a verified inbound IPv4 entry and a node behind NAT: upgrade after the first envelope, later envelopes delivered direct with no deposits at relays; a firewall drop mid-run falls back to relays within 13 s with no loss and no duplicate execution | relay deposit counters, sidecar logs, the receipts |
 | A12 Never required | with direct disabled, on an IPv6-only host, and between two NATed nodes: no probe is made and every message is delivered by relay | probe counters equal zero, delivery records |
-| A13 Metadata | relay store, logs and directory contain nothing of section 11's "does not learn" column; a third party holding the Agent ID gets only public hints | dumps of relay state and logs taken while envelopes were held |
+| A13 Metadata | relay store, logs and directory contain nothing of section 11's "does not learn" column; a third party holding the Agent ID gets only the hint contents section 5.5 lists for the Agent's publication setting, and nothing through the V1 URLs (list, download, acknowledgement) about envelopes deposited through V2 | dumps of relay state and logs taken while envelopes were held; requests to the V1 URLs recorded |
 | A14 D10 | test relays at 1 h: re-deposit at 48 min; production profile at 3 h: 2 h 24 min; packet expiry equals the business deadline | carrier journal timestamps against relay descriptions |
 | A15 Hygiene | no credential, proof, secret, lane value or plaintext in any URL or log; the relay holds no key but its TLS key and no `tosctl` | grep of logs and the relay's file system; process inspection |
+| A16 Timestamp poisoning | a mailbox policy and a hint dated `UINT64_MAX`, and one dated 301 s ahead, are refused; a compromised transport key's policy dated 300 s ahead with a zero stranger lane is accepted, then voided by the owner's policy update (on an epoch network) or by the delegation no longer verifying (on a test network), after which the owner's new policy with an earlier `issued_at_unix` is accepted | relay tests, and a live transcript on a test chain |
+| A17 Epoch revocation | on a registry with the authorization epoch: a delegation issued under policy A is refused after A → B → A, and after a policy update that installs identical bytes; on a test network without the epoch the same run shows the gap, which is why production is gated | registry and relay tests; the chain transactions |
+| A18 Directory slots | two relays populated with five delegations of one Agent in different orders each hold four live records and refuse the fifth; neither displaces a live record; a consumer merging both finds the lane's hint; a slot frees on expiry | relay tests; directory dumps |
 
 Production claims additionally need relays and directory relays run by an
 operator other than the core team, and a public chain, as ROADMAP Gate O
@@ -1019,7 +1205,11 @@ requires.
 ## 17. Implementation plan
 
 Small pull requests, in order; each runs `make verify` and lands with its
-tests.
+tests. Phase 1 ships first and alone makes the transport usable on test
+networks; phase 2 is gated separately; the registry change and the key card
+V2 are separate work outside this plan.
+
+**Phase 1: carrier extraction, relay V2 delivery and MCP.**
 
 1. This specification.
 2. `agenttransport`: transport delegation codec and `VerifyDelegation`
@@ -1044,15 +1234,25 @@ tests.
     `tos-messengerd`; `conversations.list`.
 13. Messenger: `tos-messenger-mcp` (A9).
 14. OpenFox: rail on `agentcarrier`, chat lane removed (A10); then remove
-    `carrierapi` and the V1 relay endpoints here.
-15. `tos`: `adnl/tos-adnl-transport` sidecar from the probe core.
-16. `adnlpath` driver and the direct state machine in `agentcarrier`, off by
-    default (A11, A12).
-17. Live evidence runs (A13 to A15) and status updates in this document,
-    the carriage, the relay spec and ROADMAP.
+    `carrierapi` and the V1 relay endpoints here, which ends the separate V1
+    store (section 6).
+15. Live evidence runs for phase 1 (A3 to A10, A13 to A16, A18) and status
+    updates in this document, the carriage, the relay spec and ROADMAP.
 
-Independent of the order: the registry action that withdraws one delegation
-digest (section 18 Q1), in `tos` and `protocol/pkg/nativecore`.
+**Phase 2: the direct path.** It starts only after phase 1 is accepted on
+test networks, and is enabled per lane by its own configuration.
+
+16. `tos`: `adnl/tos-adnl-transport` sidecar from the probe core.
+17. `adnlpath` driver and the direct state machine in `agentcarrier`, off by
+    default, with its evidence (A11, A12).
+
+**Separate work, outside this plan.**
+
+- The registry change of section 18 Q1: the withdraw-delegation action and
+  the authorization epoch, in `tos` and `protocol/pkg/nativecore` (A17).
+  Until it is finalized on a network, V2 transport runs on test networks
+  only (5.1).
+- Key card V2 without a relay list (section 18 Q11).
 
 ## 18. Decisions
 
@@ -1064,10 +1264,13 @@ The questions this design raised, each with its decision (recorded
   change or a tombstone (the carriage's "withdrawn on chain" assumes an
   action that does not exist). **Decided:** a registry action that withdraws
   one delegation digest is added as the reverse of `DelegateAgentV1`,
-  authorized like it. It is a `tos` contract change, scheduled after the
-  USDC and USDT settlement work. Until it lands, the `policy_hash` binding is
-  the revocation; once it lands, check 3 of 5.1 covers withdrawal with no
-  change to this design.
+  authorized like it, together with the Agent's authorization epoch of
+  5.1, which every policy update, recovery completion, tombstone and
+  withdrawal increments. It is a `tos` contract change, scheduled after the
+  USDC and USDT settlement work. Until it lands, V2 transport runs on test
+  networks only, with the `policy_hash` binding as the revocation; once it
+  lands, checks 3 and 4 of 5.1 cover withdrawal and every policy change with
+  no change to this design.
 - **Q2. Bind delegations to the policy hash?** It makes every policy update
   revoke every transport key, so a benign update costs a re-delegation.
   **Decided: yes, permanently.** A policy update is how an Agent responds to

@@ -725,7 +725,9 @@ gate item.
   against finalized state, stranger and contact quota lanes, signed
   reachability hints in relay directories, and a carrier library run by
   `tos-messengerd` with an MCP server, so Agents without OpenFox can chat. A V2
-  relay reads finalized state (read only, no keys, no authority). **Status:
+  relay reads finalized state (read only, no keys, no authority). Until a
+  registry change adds a per-Agent authorization epoch and a
+  withdraw-delegation action, it is limited to test networks. **Status:
   ⬜ Design draft.** Nothing is implemented; it supplies no gate evidence.
 - [Agent Intent Exchange V1](AGENT_INTENT_EXCHANGE_V1.md) defines a generic
   signed bulletin and Agent-to-Agent negotiation layer. A small signed
