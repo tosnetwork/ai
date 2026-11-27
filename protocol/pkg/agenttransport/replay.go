@@ -22,7 +22,8 @@ const (
 var (
 	// ErrReplayTableFull is 503 replay_table_full; retryable.
 	ErrReplayTableFull = errors.New("replay_table_full")
-	// ErrReplayCredentialFull is the 429 answer: 64 live entries for one credential.
+	// ErrReplayCredentialFull is the 429 answer: 64 live entries for one
+	// issued credential (chain_1), however many blocks its holders appended.
 	ErrReplayCredentialFull = errors.New("replay table holds the per-credential maximum")
 	// ErrProofFloor is 503 proof_floor: the proof is at or below the floor.
 	ErrProofFloor = errors.New("proof_floor")
@@ -39,7 +40,17 @@ type replayKey struct {
 
 type replayEntry struct {
 	key      replayKey
+	group    [32]byte
 	issuedAt uint64
+}
+
+// ReplayIdentity keys a request in the replay table. CredentialID with the
+// nonce makes a proof unique; IssuerChain (chain_1) bounds a holder, because a
+// holder mints a new CredentialID with every block it appends but cannot
+// change the issuer's block 0.
+type ReplayIdentity struct {
+	CredentialID [32]byte
+	IssuerChain  [32]byte
 }
 
 type replayHeap []replayEntry
@@ -65,8 +76,9 @@ type ReplayConfig struct {
 	PerCredential int
 }
 
-// ReplayTable claims (credential_id, nonce) pairs. It fails closed when full
-// and never evicts an entry whose issued_at_unix is inside the window.
+// ReplayTable claims (credential_id, nonce) pairs, at most PerCredential live
+// entries per issued credential (chain_1). It fails closed when full and
+// never evicts an entry whose issued_at_unix is inside the window.
 type ReplayTable struct {
 	mu     sync.Mutex
 	config ReplayConfig
@@ -132,7 +144,7 @@ func (t *ReplayTable) MarkRecorded(mark uint64) error {
 }
 
 // Claim admits a proof's nonce once. It runs after VerifyProof.
-func (t *ReplayTable) Claim(credentialID [32]byte, p Proof, now uint64) error {
+func (t *ReplayTable) Claim(k ReplayIdentity, p Proof, now uint64) error {
 	if err := CheckProofWindow(p.IssuedAt, now); err != nil {
 		return err
 	}
@@ -145,8 +157,8 @@ func (t *ReplayTable) Claim(credentialID [32]byte, p Proof, now uint64) error {
 			return errors.New("replay table order corrupted")
 		}
 		delete(t.live, e.key)
-		if t.counts[e.key.credential]--; t.counts[e.key.credential] <= 0 {
-			delete(t.counts, e.key.credential)
+		if t.counts[e.group]--; t.counts[e.group] <= 0 {
+			delete(t.counts, e.group)
 		}
 		t.floor = max(t.floor, e.issuedAt)
 	}
@@ -156,19 +168,20 @@ func (t *ReplayTable) Claim(credentialID [32]byte, p Proof, now uint64) error {
 	if p.IssuedAt >= t.mark {
 		return fmt.Errorf("%w: issued at %d, mark %d", ErrProofMark, p.IssuedAt, t.mark)
 	}
-	key := replayKey{credential: credentialID, nonce: p.Nonce}
+	key := replayKey{credential: k.CredentialID, nonce: p.Nonce}
+	group := k.IssuerChain
 	if _, seen := t.live[key]; seen {
 		return invalid("request proof nonce replayed")
 	}
 	if len(t.live) >= t.config.Entries {
 		return ErrReplayTableFull
 	}
-	if t.counts[credentialID] >= t.config.PerCredential {
+	if t.counts[group] >= t.config.PerCredential {
 		return ErrReplayCredentialFull
 	}
 	t.live[key] = struct{}{}
-	t.counts[credentialID]++
-	heap.Push(&t.byTime, replayEntry{key: key, issuedAt: p.IssuedAt})
+	t.counts[group]++
+	heap.Push(&t.byTime, replayEntry{key: key, group: group, issuedAt: p.IssuedAt})
 	return nil
 }
 

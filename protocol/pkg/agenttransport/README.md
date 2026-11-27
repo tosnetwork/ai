@@ -108,6 +108,14 @@ does not verify signatures; `VerifyChain` does, block 0 under the transport
 key and block i under block i-1's next key, each preimage covering the chain
 value of every earlier signature.
 
+A `Credential` comes only from `DecodeCredential` or `NewCredential`; its
+fields are private, accessors return copies, and a zero or nil value refuses
+every use with `ErrCredentialInvalid`. `CredentialID` is `chain_n` and only
+makes a proof unique: a holder mints a new one with every block it appends.
+`IssuerChain` is `chain_1`, created by the transport key alone and shared by
+every credential appended from one issued credential; the per-credential
+replay bound and the default quota lane are keyed by it (`ReplayIdentity`).
+
 `CheckScope` and `CheckDeposit` evaluate every caveat of every block on its
 own. Nothing merges blocks, so a later block can only add bounds (section
 6.4). Two different lane values make a credential unusable
@@ -126,8 +134,8 @@ relay purpose.
 
 `ReplayTable` is the admission logic of the replay table: claim once per
 `(credential_id, nonce)`, at most the configured entries and 64 per
-credential, refusing rather than evicting; entries drop only once more than
-120 seconds old, raising the floor; proofs at or below the floor
+issued credential (`issuer_chain`), refusing rather than evicting; entries
+drop only once more than 120 seconds old, raising the floor; proofs at or below the floor
 (`ErrProofFloor`) or at or above the last recorded high-water mark
 (`ErrProofMark`, which wraps `ErrReplayTableFull`: `503 replay_table_full`) are refused. `NextMark` never decreases, and
 `RestoreReplayTable` starts the floor at the recorded mark. Durable storage of

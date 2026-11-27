@@ -130,10 +130,18 @@ func SignRequest(c *Credential, holder ed25519.PrivateKey, r ProofRequest, issue
 	if err != nil {
 		return Proof{}, err
 	}
-	if public != c.HolderKey() {
+	current, err := c.HolderKey()
+	if err != nil {
+		return Proof{}, err
+	}
+	if public != current {
 		return Proof{}, invalid("signing key is not the credential's holder key")
 	}
-	preimage, err := ProofPreimage(c.CredentialID(), r, issuedAt, nonce)
+	id, err := c.CredentialID()
+	if err != nil {
+		return Proof{}, err
+	}
+	preimage, err := ProofPreimage(id, r, issuedAt, nonce)
 	if err != nil {
 		return Proof{}, err
 	}
@@ -156,11 +164,18 @@ func (c *Credential) VerifyProof(r ProofRequest, p Proof, now uint64) error {
 	if err := CheckProofWindow(p.IssuedAt, now); err != nil {
 		return err
 	}
-	preimage, err := ProofPreimage(c.CredentialID(), r, p.IssuedAt, p.Nonce)
+	id, err := c.CredentialID()
 	if err != nil {
 		return err
 	}
-	holder := c.HolderKey()
+	preimage, err := ProofPreimage(id, r, p.IssuedAt, p.Nonce)
+	if err != nil {
+		return err
+	}
+	holder, err := c.HolderKey()
+	if err != nil {
+		return err
+	}
 	if !ed25519.Verify(holder[:], preimage, p.Signature[:]) {
 		return invalid("request proof signature")
 	}
@@ -202,7 +217,7 @@ func CheckRequest(r Request) (CheckedRequest, error) {
 	if err != nil {
 		return CheckedRequest{}, err
 	}
-	if c.Delegation.AgentID() != r.AgentID {
+	if c.delegation.AgentID() != r.AgentID {
 		return CheckedRequest{}, scope("path names another Agent")
 	}
 	if err = c.VerifyChain(); err != nil {
@@ -215,4 +230,22 @@ func CheckRequest(r Request) (CheckedRequest, error) {
 		return CheckedRequest{}, err
 	}
 	return CheckedRequest{Credential: c, Proof: proof}, nil
+}
+
+// ReplayIdentity is what the replay table keys a checked request by.
+func (r CheckedRequest) ReplayIdentity() (ReplayIdentity, error) {
+	return r.Credential.ReplayIdentity()
+}
+
+// ReplayIdentity pairs the proof-uniqueness key with the holder bound key.
+func (c *Credential) ReplayIdentity() (ReplayIdentity, error) {
+	id, err := c.CredentialID()
+	if err != nil {
+		return ReplayIdentity{}, err
+	}
+	issuer, err := c.IssuerChain()
+	if err != nil {
+		return ReplayIdentity{}, err
+	}
+	return ReplayIdentity{CredentialID: id, IssuerChain: issuer}, nil
 }

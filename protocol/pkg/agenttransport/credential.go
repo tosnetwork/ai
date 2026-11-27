@@ -171,13 +171,59 @@ func (b Block) caveatBytes() []byte {
 	return out
 }
 
-// Credential is a decoded relay credential. Decoding checks structure only;
-// VerifyChain checks the signatures.
+// Credential is a decoded relay credential. Obtain one from DecodeCredential
+// or NewCredential: its fields are private, so the chain values always match
+// the blocks they were computed from. Decoding checks structure only;
+// VerifyChain checks the signatures. A zero or nil Credential refuses every
+// use with ErrCredentialInvalid.
 type Credential struct {
-	Delegation      Delegation
-	DelegationBytes []byte
-	Blocks          []Block
+	delegation      Delegation
+	delegationBytes []byte
+	blocks          []Block
 	chain           [][32]byte
+}
+
+func (c *Credential) ready() error {
+	if c == nil || len(c.blocks) == 0 || len(c.chain) != len(c.blocks)+1 || len(c.delegationBytes) != DelegationSize {
+		return invalid("credential was not obtained from DecodeCredential")
+	}
+	return nil
+}
+
+func cloneBlock(b Block) Block {
+	out := Block{NextPublicKey: b.NextPublicKey, Signature: b.Signature, Caveats: make([]Caveat, len(b.Caveats))}
+	for i, c := range b.Caveats {
+		out.Caveats[i] = Caveat{Type: c.Type, Value: append([]byte(nil), c.Value...)}
+	}
+	return out
+}
+
+// Delegation is the embedded delegation, decoded.
+func (c *Credential) Delegation() (Delegation, error) {
+	if err := c.ready(); err != nil {
+		return Delegation{}, err
+	}
+	return c.delegation, nil
+}
+
+// DelegationBytes is a copy of the embedded 167-byte delegation.
+func (c *Credential) DelegationBytes() ([]byte, error) {
+	if err := c.ready(); err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), c.delegationBytes...), nil
+}
+
+// Blocks returns a deep copy of the blocks; changing it changes nothing here.
+func (c *Credential) Blocks() ([]Block, error) {
+	if err := c.ready(); err != nil {
+		return nil, err
+	}
+	out := make([]Block, len(c.blocks))
+	for i, b := range c.blocks {
+		out[i] = cloneBlock(b)
+	}
+	return out, nil
 }
 
 func checkEd25519Key(key [32]byte) error {
@@ -272,12 +318,15 @@ func encodeBlock(b Block) ([]byte, error) {
 	return append(out, b.Signature[:]...), nil
 }
 
-// Encode serializes a credential. It re-validates every rule DecodeCredential
-// checks, so encoding and decoding agree.
-func (c *Credential) Encode() ([]byte, error) {
-	out := append([]byte(credentialDomain), c.DelegationBytes...)
-	out = append(out, byte(len(c.Blocks)))
-	for _, b := range c.Blocks {
+// encodeParts serializes a delegation and blocks and decodes the result, so
+// every rule DecodeCredential checks also binds what is encoded.
+func encodeParts(delegation []byte, blocks []Block) ([]byte, error) {
+	if len(blocks) > 0xff {
+		return nil, invalid("too many blocks")
+	}
+	out := append([]byte(credentialDomain), delegation...)
+	out = append(out, byte(len(blocks)))
+	for _, b := range blocks {
 		encoded, err := encodeBlock(b)
 		if err != nil {
 			return nil, err
@@ -288,6 +337,25 @@ func (c *Credential) Encode() ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Encode serializes a decoded credential.
+func (c *Credential) Encode() ([]byte, error) {
+	if err := c.ready(); err != nil {
+		return nil, err
+	}
+	return encodeParts(c.delegationBytes, c.blocks)
+}
+
+// NewCredential assembles and strictly decodes a credential from a delegation
+// and blocks signed outside this package (see BlockSigningPreimage). It does
+// not verify signatures.
+func NewCredential(delegation []byte, blocks []Block) (*Credential, error) {
+	wire, err := encodeParts(delegation, blocks)
+	if err != nil {
+		return nil, err
+	}
+	return DecodeCredential(wire)
 }
 
 // DecodeCredential strictly decodes a credential: canonical lengths, the
@@ -309,7 +377,7 @@ func DecodeCredential(b []byte) (*Credential, error) {
 	if count < 1 || count > MaxCredentialBlocks {
 		return nil, invalid("block_count %d", count)
 	}
-	c := &Credential{Delegation: d, DelegationBytes: append([]byte(nil), raw...)}
+	c := &Credential{delegation: d, delegationBytes: append([]byte(nil), raw...)}
 	rest := b[credentialHeaderSize:]
 	for index := range count {
 		if len(rest) < 2 {
@@ -323,16 +391,16 @@ func DecodeCredential(b []byte) (*Credential, error) {
 		if err != nil {
 			return nil, fmt.Errorf("block %d: %w", index, err)
 		}
-		c.Blocks = append(c.Blocks, block)
+		c.blocks = append(c.blocks, block)
 		rest = rest[2+length:]
 	}
 	if len(rest) != 0 {
 		return nil, invalid("trailing bytes after the last block")
 	}
-	if err := checkFirstBlock(d, c.Blocks[0]); err != nil {
+	if err := checkFirstBlock(d, c.blocks[0]); err != nil {
 		return nil, err
 	}
-	c.chain = computeChain(c.DelegationBytes, c.Blocks)
+	c.chain = computeChain(c.delegationBytes, c.blocks)
 	return c, nil
 }
 
@@ -380,8 +448,11 @@ func decodeBlock(body []byte) (Block, error) {
 // transport key, block i by the key block i-1 names. Each preimage covers the
 // chain value of every earlier signature, so reorder, drop and splice fail.
 func (c *Credential) VerifyChain() error {
-	signer := c.Delegation.TransportKey
-	for index, b := range c.Blocks {
+	if err := c.ready(); err != nil {
+		return err
+	}
+	signer := c.delegation.TransportKey
+	for index, b := range c.blocks {
 		if !ed25519.Verify(signer[:], blockPreimage(c.chain[index], index, b), b.Signature[:]) {
 			return invalid("block %d signature", index)
 		}
@@ -391,18 +462,50 @@ func (c *Credential) VerifyChain() error {
 }
 
 // ChainValues returns chain_0 .. chain_n; any of them may be revoked (6.3).
-func (c *Credential) ChainValues() [][32]byte { return slices.Clone(c.chain) }
+func (c *Credential) ChainValues() ([][32]byte, error) {
+	if err := c.ready(); err != nil {
+		return nil, err
+	}
+	return slices.Clone(c.chain), nil
+}
 
-// CredentialID is chain_n, the replay and default lane key.
-func (c *Credential) CredentialID() [32]byte { return c.chain[len(c.chain)-1] }
+// CredentialID is chain_n. With the nonce it makes a request proof unique.
+// A holder mints a new one with every block it appends, so nothing that
+// bounds a holder is keyed by it.
+func (c *Credential) CredentialID() ([32]byte, error) {
+	if err := c.ready(); err != nil {
+		return [32]byte{}, err
+	}
+	return c.chain[len(c.chain)-1], nil
+}
+
+// IssuerChain is chain_1, the chain value after the issuer's block 0. Only the
+// transport key can create one, and every credential appended from the same
+// issued credential shares it: the per-credential replay bound and the
+// default lane are keyed by it.
+func (c *Credential) IssuerChain() ([32]byte, error) {
+	if err := c.ready(); err != nil {
+		return [32]byte{}, err
+	}
+	return c.chain[1], nil
+}
 
 // HolderKey is next_public_key of the last block; it signs request proofs.
-func (c *Credential) HolderKey() [32]byte { return c.Blocks[len(c.Blocks)-1].NextPublicKey }
+func (c *Credential) HolderKey() ([32]byte, error) {
+	if err := c.ready(); err != nil {
+		return [32]byte{}, err
+	}
+	return c.blocks[len(c.blocks)-1].NextPublicKey, nil
+}
 
 // Lane returns the single lane value of the chain, if any. Two different
-// values make the credential unusable.
+// values make the credential unusable. Without a lane value the quota lane is
+// IssuerChain (6.2).
 func (c *Credential) Lane() (lane [16]byte, explicit bool, err error) {
-	for _, b := range c.Blocks {
+	if err := c.ready(); err != nil {
+		return [16]byte{}, false, err
+	}
+	for _, b := range c.blocks {
 		if v, ok := findCaveat(b, CaveatLane); ok {
 			if explicit && !bytes.Equal(lane[:], v.Value) {
 				return [16]byte{}, false, scope("credential carries two different lane values")
@@ -415,14 +518,17 @@ func (c *Credential) Lane() (lane [16]byte, explicit bool, err error) {
 }
 
 // NotAfter is the earliest not_after over the blocks, the credential expiry.
-func (c *Credential) NotAfter() uint64 {
+func (c *Credential) NotAfter() (uint64, error) {
+	if err := c.ready(); err != nil {
+		return 0, err
+	}
 	expiry := ^uint64(0)
-	for _, b := range c.Blocks {
+	for _, b := range c.blocks {
 		if v, ok := findCaveat(b, CaveatNotAfter); ok {
 			expiry = min(expiry, decodeU64(v))
 		}
 	}
-	return expiry
+	return expiry, nil
 }
 
 func checkOperation(op Operation) error {
@@ -448,7 +554,7 @@ func (c *Credential) CheckScope(now uint64, relayURL string, op Operation) error
 	if _, _, err := c.Lane(); err != nil {
 		return err
 	}
-	for index, b := range c.Blocks {
+	for index, b := range c.blocks {
 		for _, cv := range b.Caveats {
 			switch cv.Type {
 			case CaveatNotBefore:
@@ -489,6 +595,9 @@ type LaneUsage struct {
 // the lane and the deposited envelope. A contact lane never holds more than
 // MaxContactLaneEnvelopes whatever its caveats say.
 func (c *Credential) CheckDeposit(u LaneUsage) error {
+	if err := c.ready(); err != nil {
+		return err
+	}
 	if u.EnvelopeBytes == 0 || u.EnvelopeBytes > MaxEnvelopeBytes {
 		return scope("envelope size out of range")
 	}
@@ -496,7 +605,7 @@ func (c *Credential) CheckDeposit(u LaneUsage) error {
 		return scope("contact lane holds %d envelopes", MaxContactLaneEnvelopes)
 	}
 	total, overflow := addU64(u.StoredBytes, u.EnvelopeBytes)
-	for index, b := range c.Blocks {
+	for index, b := range c.blocks {
 		for _, cv := range b.Caveats {
 			switch cv.Type {
 			case CaveatMaxEnvelopes:
@@ -553,15 +662,14 @@ func publicOf(key ed25519.PrivateKey) ([32]byte, error) {
 // appendSigned signs one more block. The encoded result is decoded again, so
 // the block count, caveat rules and size limit have a single implementation.
 func (c *Credential) appendSigned(signer ed25519.PrivateKey, next [32]byte, caveats []Caveat) ([]byte, error) {
-	if len(caveats) > 0xff || len(c.Blocks) > 0xff {
+	if len(caveats) > 0xff || len(c.blocks) > 0xff {
 		return nil, invalid("block inputs out of range")
 	}
 	b := Block{NextPublicKey: next, Caveats: canonicalCaveats(caveats)}
-	index := len(c.Blocks)
-	chain := computeChain(c.DelegationBytes, c.Blocks)
+	index := len(c.blocks)
+	chain := computeChain(c.delegationBytes, c.blocks)
 	copy(b.Signature[:], ed25519.Sign(signer, blockPreimage(chain[index], index, b)))
-	extended := &Credential{Delegation: c.Delegation, DelegationBytes: c.DelegationBytes, Blocks: append(slices.Clone(c.Blocks), b)}
-	encoded, err := extended.Encode()
+	encoded, err := encodeParts(c.delegationBytes, append(slices.Clone(c.blocks), b))
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +700,7 @@ func IssueCredential(delegation []byte, transportKey ed25519.PrivateKey, next ed
 	if len(next) != ed25519.PublicKeySize {
 		return nil, invalid("next public key length")
 	}
-	c := &Credential{Delegation: d, DelegationBytes: append([]byte(nil), delegation...)}
+	c := &Credential{delegation: d, delegationBytes: append([]byte(nil), delegation...)}
 	return c.appendSigned(transportKey, [32]byte(next), caveats)
 }
 
@@ -610,7 +718,11 @@ func AppendCredentialBlock(credential []byte, holder ed25519.PrivateKey, next ed
 	if err != nil {
 		return nil, err
 	}
-	if signer != c.HolderKey() {
+	current, err := c.HolderKey()
+	if err != nil {
+		return nil, err
+	}
+	if signer != current {
 		return nil, invalid("signing key is not the credential's holder key")
 	}
 	if len(next) != ed25519.PublicKeySize {

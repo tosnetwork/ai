@@ -96,12 +96,12 @@ func TestFrozenCredentialVectors(t *testing.T) {
 			if err != nil || hex.EncodeToString(encoded) != v.Wire {
 				t.Fatalf("re-encoding: %v", err)
 			}
-			for i, value := range c.ChainValues() {
+			for i, value := range chainOf(t, c) {
 				if hex.EncodeToString(value[:]) != v.Chain[i] {
 					t.Fatalf("chain_%d", i)
 				}
 			}
-			id, holder := c.CredentialID(), c.HolderKey()
+			id, holder := idOf(t, c), holderOf(t, c)
 			if hex.EncodeToString(id[:]) != v.CredentialID || hex.EncodeToString(holder[:]) != v.Holder {
 				t.Fatal("credential id or holder")
 			}
@@ -132,7 +132,7 @@ func TestFrozenCredentialVectors(t *testing.T) {
 				t.Fatalf("got %s (%v), want %s", got, err, v.Expect)
 			}
 			if err == nil {
-				preimage, err := ProofPreimage(checked.Credential.CredentialID(), request, checked.Proof.IssuedAt, checked.Proof.Nonce)
+				preimage, err := ProofPreimage(idOf(t, checked.Credential), request, checked.Proof.IssuedAt, checked.Proof.Nonce)
 				if err != nil || hex.EncodeToString(preimage) != v.Preimage {
 					t.Fatalf("preimage: %v", err)
 				}

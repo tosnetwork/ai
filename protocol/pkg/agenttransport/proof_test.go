@@ -19,7 +19,7 @@ func newProofKit(t *testing.T) *proofKit {
 	k := newCredentialKit(t)
 	wire := k.chain(t, firstCaveats(OperationList|OperationDeposit), []Caveat{RelayCaveat(testRelay)})
 	c := decode(t, wire)
-	return &proofKit{k: k, c: c, wire: wire, request: ProofRequest{RelayURL: testRelay, Method: "GET", Path: "/v2/mailboxes/" + c.Delegation.AgentID() + "/envelopes"}}
+	return &proofKit{k: k, c: c, wire: wire, request: ProofRequest{RelayURL: testRelay, Method: "GET", Path: "/v2/mailboxes/" + c.delegation.AgentID() + "/envelopes"}}
 }
 
 func (p *proofKit) sign(t *testing.T, issuedAt uint64, nonce byte) Proof {
@@ -32,7 +32,7 @@ func (p *proofKit) sign(t *testing.T, issuedAt uint64, nonce byte) Proof {
 }
 
 func (p *proofKit) check(proof string, change func(*Request)) error {
-	r := Request{AgentID: p.c.Delegation.AgentID(), Operation: OperationList, Proof: p.request, CredentialValue: EncodeCredentialHeader(p.wire), ProofValue: proof, Now: testNow}
+	r := Request{AgentID: p.c.delegation.AgentID(), Operation: OperationList, Proof: p.request, CredentialValue: EncodeCredentialHeader(p.wire), ProofValue: proof, Now: testNow}
 	if change != nil {
 		change(&r)
 	}
@@ -87,6 +87,17 @@ func TestRequestProof(t *testing.T) {
 			}
 		}
 	})
+	// The proof header's time and nonce are signed: changing either breaks it.
+	t.Run("issued-at", func(t *testing.T) {
+		proof := p.sign(t, testNow, 6)
+		proof.IssuedAt++
+		wantClass(t, p.check(proof.Header(), nil), ErrCredentialInvalid)
+	})
+	t.Run("nonce", func(t *testing.T) {
+		proof := p.sign(t, testNow, 7)
+		proof.Nonce[31] ^= 1
+		wantClass(t, p.check(proof.Header(), nil), ErrCredentialInvalid)
+	})
 	t.Run("signature", func(t *testing.T) {
 		proof := p.sign(t, testNow, 3)
 		proof.Signature[0] ^= 1
@@ -100,7 +111,7 @@ func TestRequestProof(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := Request{AgentID: open.Delegation.AgentID(), Operation: OperationList, Proof: p.request, CredentialValue: EncodeCredentialHeader(openWire), ProofValue: proof.Header(), Now: testNow}
+		r := Request{AgentID: open.delegation.AgentID(), Operation: OperationList, Proof: p.request, CredentialValue: EncodeCredentialHeader(openWire), ProofValue: proof.Header(), Now: testNow}
 		if _, err = CheckRequest(r); err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +132,7 @@ func TestRequestProof(t *testing.T) {
 		// keeps the credential id and holder: only the block signature refuses.
 		raw := bytes.Replace(p.wire, []byte("relay-a"), []byte("relay-b"), 1)
 		forged, err := DecodeCredential(raw)
-		if err != nil || forged.CredentialID() != p.c.CredentialID() {
+		if err != nil || idOf(t, forged) != idOf(t, p.c) {
 			t.Fatalf("forgery setup: %v", err)
 		}
 		moved := p.request

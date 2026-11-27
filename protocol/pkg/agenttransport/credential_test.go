@@ -76,6 +76,42 @@ func decode(t testing.TB, wire []byte) *Credential {
 	return c
 }
 
+func idOf(t testing.TB, c *Credential) [32]byte {
+	t.Helper()
+	v, err := c.CredentialID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func holderOf(t testing.TB, c *Credential) [32]byte {
+	t.Helper()
+	v, err := c.HolderKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func chainOf(t testing.TB, c *Credential) [][32]byte {
+	t.Helper()
+	v, err := c.ChainValues()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func issuerOf(t testing.TB, c *Credential) [32]byte {
+	t.Helper()
+	v, err := c.IssuerChain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 func wantClass(t *testing.T, err, class error) {
 	t.Helper()
 	if !errors.Is(err, class) {
@@ -91,12 +127,12 @@ func TestCredentialRoundTripAndChain(t *testing.T) {
 	if err != nil || !bytes.Equal(encoded, wire) {
 		t.Fatalf("re-encoding: %v", err)
 	}
-	values := c.ChainValues()
+	values := chainOf(t, c)
 	digest := sha256.Sum256(k.delegation)
 	if len(values) != 3 || values[0] != sha256.Sum256(append([]byte(credentialChainDomain), digest[:]...)) {
 		t.Fatal("chain_0 is not SHA-256(domain || delegation_digest)")
 	}
-	if c.CredentialID() != values[2] || c.HolderKey() != [32]byte(pub(k.holders[1])) {
+	if idOf(t, c) != values[2] || holderOf(t, c) != [32]byte(pub(k.holders[1])) {
 		t.Fatal("credential id or holder key")
 	}
 }
@@ -224,15 +260,14 @@ func (k *credentialKit) rawSigned(t testing.TB, blocks ...[]Caveat) *Credential 
 		copy(b.Signature[:], ed25519.Sign(signers[i], preimage))
 		out = append(out, b)
 	}
-	d, err := DecodeDelegation(k.delegation)
+	c, err := NewCredential(k.delegation, out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, err := (&Credential{Delegation: d, DelegationBytes: k.delegation, Blocks: out}).Encode()
-	if err != nil {
+	if err = c.VerifyChain(); err != nil {
 		t.Fatal(err)
 	}
-	return decode(t, wire)
+	return c
 }
 
 func TestScopeEveryBlock(t *testing.T) {
@@ -334,38 +369,28 @@ func TestChainRefusesSpliceReorderDrop(t *testing.T) {
 	a := decode(t, k.chain(t, firstCaveats(allOperations), []Caveat{RelayCaveat(testRelay)}, []Caveat{OperationsCaveat(1)}, []Caveat{MaxEnvelopesCaveat(1)}))
 	b := decode(t, k.chain(t, firstCaveats(allOperations), []Caveat{RelayCaveat("https://relay-b.example")}, []Caveat{OperationsCaveat(2)}, []Caveat{MaxEnvelopesCaveat(2)}))
 	rebuilt := func(blocks ...Block) *Credential {
-		c := &Credential{Delegation: a.Delegation, DelegationBytes: a.DelegationBytes, Blocks: blocks}
-		wire, err := c.Encode()
-		if err != nil {
-			t.Fatal(err)
-		}
-		out, err := DecodeCredential(wire)
+		out, err := NewCredential(a.delegationBytes, blocks)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return out
 	}
 	for name, c := range map[string]*Credential{
-		"reorder": rebuilt(a.Blocks[0], a.Blocks[2], a.Blocks[1], a.Blocks[3]),
-		"drop":    rebuilt(a.Blocks[0], a.Blocks[2], a.Blocks[3]),
-		"splice":  rebuilt(a.Blocks[0], b.Blocks[1], a.Blocks[2], a.Blocks[3]),
-		"tail":    rebuilt(a.Blocks[0], a.Blocks[1], a.Blocks[2], b.Blocks[3]),
+		"reorder": rebuilt(a.blocks[0], a.blocks[2], a.blocks[1], a.blocks[3]),
+		"drop":    rebuilt(a.blocks[0], a.blocks[2], a.blocks[3]),
+		"splice":  rebuilt(a.blocks[0], b.blocks[1], a.blocks[2], a.blocks[3]),
+		"tail":    rebuilt(a.blocks[0], a.blocks[1], a.blocks[2], b.blocks[3]),
 	} {
 		t.Run(name, func(t *testing.T) { wantClass(t, c.VerifyChain(), ErrCredentialInvalid) })
 	}
 	t.Run("other-delegation", func(t *testing.T) {
-		d := a.Delegation
+		d := a.delegation
 		d.AuthorizationEpoch++
 		other, err := d.Encode()
 		if err != nil {
 			t.Fatal(err)
 		}
-		c := &Credential{Delegation: d, DelegationBytes: other, Blocks: a.Blocks}
-		wire, err := c.Encode()
-		if err != nil {
-			t.Fatal(err)
-		}
-		moved, err := DecodeCredential(wire)
+		moved, err := NewCredential(other, a.blocks)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -451,4 +476,116 @@ func TestCaveatValueRules(t *testing.T) {
 	if err := OperationsCaveat(0).validate(); err != nil {
 		t.Fatalf("an empty operations mask is a valid, unsatisfiable bound: %v", err)
 	}
+}
+
+// TestAppendedCredentialsShareIssuerBounds: a holder that appends blocks mints
+// a new credential_id each time, but every such credential shares chain_1, so
+// it shares one replay bound and one default lane.
+func TestAppendedCredentialsShareIssuerBounds(t *testing.T) {
+	k := newCredentialKit(t)
+	base := k.chain(t, firstCaveats(OperationDeposit))
+	baseCredential := decode(t, base)
+	issuer := issuerOf(t, baseCredential)
+	if issuer != chainOf(t, baseCredential)[1] {
+		t.Fatal("issuer chain is not chain_1")
+	}
+	table := freshTable(t, ReplayConfig{}, testNow)
+	ids := map[[32]byte]bool{}
+	accepted, refused := 0, 0
+	for i := range 10 {
+		next := testKey(fmt.Sprintf("minted-%d", i))
+		wire, err := AppendCredentialBlock(base, k.holders[0], pub(next), []Caveat{MaxEnvelopeBytesCaveat(uint32(1000 + i))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := decode(t, wire)
+		ids[idOf(t, c)] = true
+		if issuerOf(t, c) != issuer {
+			t.Fatal("an appended credential changed the issuer chain")
+		}
+		if _, explicit, err := c.Lane(); err != nil || explicit {
+			t.Fatalf("a credential without a lane caveat reported a lane: %v", err)
+		}
+		identity, err := c.ReplayIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for n := range 7 {
+			err := table.Claim(identity, proofAt(testNow, byte(i*7+n)), testNow)
+			switch {
+			case err == nil:
+				accepted++
+			case errors.Is(err, ErrReplayCredentialFull):
+				refused++
+			default:
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(ids) != 10 {
+		t.Fatalf("expected 10 distinct credential ids, got %d", len(ids))
+	}
+	if accepted != MaxReplayPerCredential || refused != 70-MaxReplayPerCredential {
+		t.Fatalf("one issued credential held %d live entries (refused %d), bound %d", accepted, refused, MaxReplayPerCredential)
+	}
+	// Another issued credential has its own bound.
+	other := decode(t, k.chain(t, firstCaveats(OperationDeposit|OperationList)))
+	identity, err := other.ReplayIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.IssuerChain == issuer {
+		t.Fatal("two issued credentials share an issuer chain")
+	}
+	if err = table.Claim(identity, proofAt(testNow, 1), testNow); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestZeroCredentialRefuses: a Credential not obtained from DecodeCredential
+// refuses every use instead of panicking, and decoded state cannot be changed
+// through the accessors.
+func TestZeroCredentialRefuses(t *testing.T) {
+	for name, c := range map[string]*Credential{"nil": nil, "zero": {}} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := c.CredentialID(); !errors.Is(err, ErrCredentialInvalid) {
+				t.Fatalf("CredentialID: %v", err)
+			}
+			if _, err := c.IssuerChain(); !errors.Is(err, ErrCredentialInvalid) {
+				t.Fatalf("IssuerChain: %v", err)
+			}
+			if _, err := c.HolderKey(); !errors.Is(err, ErrCredentialInvalid) {
+				t.Fatalf("HolderKey: %v", err)
+			}
+			wantClass(t, c.VerifyChain(), ErrCredentialInvalid)
+			wantClass(t, c.CheckDeposit(LaneUsage{EnvelopeBytes: 1}), ErrCredentialInvalid)
+			wantClass(t, c.CheckScope(testNow, testRelay, OperationDeposit), ErrCredentialInvalid)
+			if _, err := c.Encode(); err == nil {
+				t.Fatal("encoded a zero credential")
+			}
+			if _, err := SignRequest(c, testKey("holder-0"), ProofRequest{RelayURL: testRelay, Method: "GET", Path: "/"}, testNow, [32]byte{}); err == nil {
+				t.Fatal("signed with a zero credential")
+			}
+			wantClass(t, c.VerifyProof(ProofRequest{RelayURL: testRelay, Method: "GET", Path: "/"}, Proof{IssuedAt: testNow}, testNow), ErrCredentialInvalid)
+		})
+	}
+	t.Run("accessors-copy", func(t *testing.T) {
+		k := newCredentialKit(t)
+		c := decode(t, k.chain(t, firstCaveats(OperationDeposit)))
+		before := idOf(t, c)
+		blocks, err := c.Blocks()
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocks[0].Signature[0] ^= 1
+		blocks[0].Caveats[0].Value[0] ^= 1
+		raw, err := c.DelegationBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw[0] ^= 1
+		if idOf(t, c) != before || c.VerifyChain() != nil {
+			t.Fatal("changing a returned copy changed the credential")
+		}
+	})
 }

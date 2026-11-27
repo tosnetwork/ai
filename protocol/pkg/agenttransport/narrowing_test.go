@@ -257,19 +257,14 @@ func TestNarrowingSpliceReorderDrop(t *testing.T) {
 	for range 200 {
 		a, b := build(), build()
 		variants := [][]Block{
-			{a.Blocks[0], a.Blocks[2], a.Blocks[1], a.Blocks[3]},
-			{a.Blocks[0], a.Blocks[2], a.Blocks[3]},
-			{a.Blocks[0], a.Blocks[1], a.Blocks[3]},
-			{a.Blocks[0], b.Blocks[1], a.Blocks[2], a.Blocks[3]},
-			{a.Blocks[0], a.Blocks[1], b.Blocks[2]},
+			{a.blocks[0], a.blocks[2], a.blocks[1], a.blocks[3]},
+			{a.blocks[0], a.blocks[2], a.blocks[3]},
+			{a.blocks[0], a.blocks[1], a.blocks[3]},
+			{a.blocks[0], b.blocks[1], a.blocks[2], a.blocks[3]},
+			{a.blocks[0], a.blocks[1], b.blocks[2]},
 		}
 		for i, blocks := range variants {
-			c := &Credential{Delegation: a.Delegation, DelegationBytes: a.DelegationBytes, Blocks: blocks}
-			wire, err := c.Encode()
-			if err != nil {
-				t.Fatal(err)
-			}
-			moved, err := DecodeCredential(wire)
+			moved, err := NewCredential(a.delegationBytes, blocks)
 			if err != nil {
 				t.Fatal(err)
 			}

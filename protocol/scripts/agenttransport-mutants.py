@@ -508,8 +508,8 @@ MUTANTS = [
     (
         "holder-key",
         "credential.go",
-        "signer != c.HolderKey()",
-        "false && (signer != c.HolderKey())",
+        "signer != current",
+        "false && (signer != current)",
         "TestBuilderRefusals",
     ),
     (
@@ -536,36 +536,36 @@ MUTANTS = [
     (
         "scope-last-block-only",
         "credential.go",
-        "for index, b := range c.Blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
-        "for index, b := range c.Blocks[len(c.Blocks)-1:] {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
+        "for index, b := range c.blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
+        "for index, b := range c.blocks[len(c.blocks)-1:] {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
         "TestNarrowingProperty",
     ),
     (
         "scope-first-block-only",
         "credential.go",
-        "for index, b := range c.Blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
-        "for index, b := range c.Blocks[:1] {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
+        "for index, b := range c.blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
+        "for index, b := range c.blocks[:1] {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
         "TestNarrowingProperty",
     ),
     (
         "scope-merged-last-value",
         "credential.go",
-        "for index, b := range c.Blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
-        "for index, b := range c.Blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tif func() bool {\n\t\t\t\tfor _, later := range c.Blocks[index+1:] {\n\t\t\t\t\tif _, ok := findCaveat(later, cv.Type); ok {\n\t\t\t\t\t\treturn true\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\treturn false\n\t\t\t}() {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
+        "for index, b := range c.blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
+        "for index, b := range c.blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tif func() bool {\n\t\t\t\tfor _, later := range c.blocks[index+1:] {\n\t\t\t\t\tif _, ok := findCaveat(later, cv.Type); ok {\n\t\t\t\t\t\treturn true\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\treturn false\n\t\t\t}() {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatNotBefore:",
         "TestNarrowingProperty",
     ),
     (
         "deposit-last-block-only",
         "credential.go",
-        "for index, b := range c.Blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
-        "for index, b := range c.Blocks[len(c.Blocks)-1:] {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
+        "for index, b := range c.blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
+        "for index, b := range c.blocks[len(c.blocks)-1:] {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
         "TestNarrowingProperty",
     ),
     (
         "deposit-merged-last-value",
         "credential.go",
-        "for index, b := range c.Blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
-        "for index, b := range c.Blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tif func() bool {\n\t\t\t\tfor _, later := range c.Blocks[index+1:] {\n\t\t\t\t\tif _, ok := findCaveat(later, cv.Type); ok {\n\t\t\t\t\t\treturn true\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\treturn false\n\t\t\t}() {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
+        "for index, b := range c.blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
+        "for index, b := range c.blocks {\n\t\tfor _, cv := range b.Caveats {\n\t\t\tif func() bool {\n\t\t\t\tfor _, later := range c.blocks[index+1:] {\n\t\t\t\t\tif _, ok := findCaveat(later, cv.Type); ok {\n\t\t\t\t\t\treturn true\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\treturn false\n\t\t\t}() {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tswitch cv.Type {\n\t\t\tcase CaveatMaxEnvelopes:",
         "TestNarrowingProperty",
     ),
     (
@@ -725,8 +725,8 @@ MUTANTS = [
     (
         "proof-window",
         "proof.go",
-        "if err := CheckProofWindow(p.IssuedAt, now); err != nil {\n\t\treturn err\n\t}\n\tpreimage",
-        "if err := CheckProofWindow(p.IssuedAt, now); false && err != nil {\n\t\treturn err\n\t}\n\tpreimage",
+        "if err := CheckProofWindow(p.IssuedAt, now); err != nil {\n\t\treturn err\n\t}\n\tid, err := c.CredentialID()",
+        "if err := CheckProofWindow(p.IssuedAt, now); false && err != nil {\n\t\treturn err\n\t}\n\tid, err := c.CredentialID()",
         "TestRequestProof/window-ahead",
     ),
     (
@@ -753,15 +753,15 @@ MUTANTS = [
     (
         "proof-holder",
         "proof.go",
-        "public != c.HolderKey()",
-        "false && (public != c.HolderKey())",
+        "public != current",
+        "false && (public != current)",
         "TestRequestProof",
     ),
     (
         "request-agent",
         "proof.go",
-        "c.Delegation.AgentID() != r.AgentID",
-        "false && (c.Delegation.AgentID() != r.AgentID)",
+        "c.delegation.AgentID() != r.AgentID",
+        "false && (c.delegation.AgentID() != r.AgentID)",
         "TestRequestProof/agent",
     ),
     (
@@ -802,8 +802,8 @@ MUTANTS = [
     (
         "replay-per-credential",
         "replay.go",
-        "t.counts[credentialID] >= t.config.PerCredential",
-        "false && (t.counts[credentialID] >= t.config.PerCredential)",
+        "t.counts[group] >= t.config.PerCredential",
+        "false && (t.counts[group] >= t.config.PerCredential)",
         "TestReplayPerCredentialBound",
     ),
     (
@@ -882,6 +882,48 @@ MUTANTS = [
         "fmt.Errorf(\"%w: proof time is not below the recorded high-water mark\", ErrReplayTableFull)",
         "errors.New(\"proof time is not below the recorded high-water mark\")",
         "TestHighWaterMark",
+    ),
+    (
+        "issuer-chain-is-chain-1",
+        "credential.go",
+        "return c.chain[1], nil",
+        "return c.chain[len(c.chain)-1], nil",
+        "TestAppendedCredentialsShareIssuerBounds",
+    ),
+    (
+        "replay-group-by-issuer",
+        "replay.go",
+        "group := k.IssuerChain",
+        "group := k.CredentialID",
+        "TestAppendedCredentialsShareIssuerBounds",
+    ),
+    (
+        "ready-guard",
+        "credential.go",
+        "c == nil || len(c.blocks) == 0 || len(c.chain) != len(c.blocks)+1 || len(c.delegationBytes) != DelegationSize",
+        "c == nil",
+        "TestZeroCredentialRefuses",
+    ),
+    (
+        "blocks-deep-copy",
+        "credential.go",
+        "\t\tout[i] = cloneBlock(b)\n",
+        "\t\tout[i] = b\n",
+        "TestZeroCredentialRefuses/accessors-copy",
+    ),
+    (
+        "proof-nonce-bound",
+        "proof.go",
+        "return append(out, nonce[:]...), nil",
+        "return out, nil",
+        "TestRequestProof/nonce",
+    ),
+    (
+        "proof-time-bound",
+        "proof.go",
+        "out = binary.BigEndian.AppendUint64(out, issuedAt)\n",
+        "_ = issuedAt\n",
+        "TestRequestProof/issued-at",
     ),
 ]
 

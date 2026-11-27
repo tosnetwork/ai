@@ -461,6 +461,7 @@ preimage_i  = D("tos.service.relay-credential.block.v1") || chain_i || u8(i)
 signature_i = Ed25519.Sign(signer_i, preimage_i)
 chain_i+1   = SHA-256( D("tos.service.relay-credential.chain.v1") || chain_i || signature_i )
 credential_id = chain_block_count
+issuer_chain  = chain_1
 holder key    = next_public_key of the last block
 ```
 
@@ -469,6 +470,15 @@ so blocks cannot be reordered, dropped from the middle, or spliced from
 another credential. The holder can append a block (it holds the private holder
 key) but cannot remove or change one. A credential is at most **2,048
 bytes**; the largest valid one is 1,916.
+
+**What a holder cannot change.** Every appended block yields a new
+`credential_id`, and a holder can append as often as it likes, with fresh
+next keys, from the credential it received. `credential_id` therefore only
+makes a request proof unique (5.4); nothing that bounds a holder is keyed by
+it. `issuer_chain`, the chain value after block 0, is created by the
+transport key alone and is shared by every credential appended from one
+issued credential. The per-credential replay bound (5.4) and the default
+quota lane (6.2) are keyed by it, so appending mints no new capacity.
 
 ### 5.3 Caveats
 
@@ -506,7 +516,8 @@ Rules:
   always satisfied. A contact lane holds at most 64 envelopes whatever its
   caveats say (6.2).
 - There is no sealing: appending only narrows, so the ability to append
-  grants nothing.
+  grants nothing. Appending does mint a new `credential_id`, which is why
+  holder bounds are keyed by `issuer_chain` instead (5.2).
 
 Profiles (what honest issuers produce). Their lifetimes and operation sets
 are issuer policy: a verifier does not enforce them, only the caveats and
@@ -554,9 +565,11 @@ The relay requires `|now - issued_at_unix| <= 120` and claims the pair
 (`credential_id`, `nonce`) in its replay table before acting. The table:
 
 - holds at most a configured number of entries (default 262,144, about
-  19 MB of keys) and at most 64 live entries per `credential_id`; when either is
-  full it refuses the request (`503 replay_table_full`, or `429` for one
-  credential) instead of evicting a live entry. It never evicts an entry
+  19 MB of keys) and at most 64 live entries per issued credential, keyed by
+  `issuer_chain` (5.2) and never by `credential_id`, which a holder can mint
+  by appending; when either is full it refuses the request
+  (`503 replay_table_full`, or `429` for one issued credential) instead of
+  evicting a live entry. It never evicts an entry
   whose `issued_at_unix` is still inside the window;
 - drops an entry only once `now - issued_at_unix > 120`, and keeps a
   **floor**, the greatest `issued_at_unix` it ever dropped; a proof whose
@@ -781,7 +794,9 @@ Every stored envelope belongs to one lane of its mailbox:
   `stranger_max_bytes` (default 2 MiB, maximum 4 MiB); per (client address,
   mailbox) at most 8 envelopes. Address aggregation is relay spec 9.8's.
 - **contact lanes**: deposits with a deposit credential, keyed by the
-  credential's `lane` value or, without one, by `credential_id`. A lane holds
+  credential's `lane` value or, without one, by its `issuer_chain` (5.2),
+  never by `credential_id`, so appending blocks cannot open a fresh lane. A
+  lane holds
   at most `min(max_envelopes, 64)` envelopes and `max_lane_bytes` bytes.
 
 The per-recipient bound of 256 envelopes and 16 MiB stays, and the stranger
@@ -932,7 +947,7 @@ The V1 codes stay. V2 adds, each code belonging to exactly one status:
 | 409 | `hint_conflict` | an equal-time hint with different bytes |
 | 503 | `chain_unavailable` | finalized state could not be read and no cached pass younger than 600 s exists; retryable |
 | 503 | `replay_table_full` | the replay table is full, or the proof's time is at or above the last recorded high-water mark (5.4); retryable |
-| 503 | `proof_floor` | the proof's time is at or below the replay floor after a restart (5.4); retry with a new proof after `Retry-After` |
+| 503 | `proof_floor` | the proof's time is at or below the replay floor (5.4); retry with a new proof after `Retry-After` |
 
 `403` with `credential_revoked` is terminal for that credential at that relay;
 the other `403` codes are terminal for those bytes. A client believes a code
@@ -1308,15 +1323,15 @@ Rules:
 | Transport delegation | 167 bytes; lifetime at most 365 days; production needs the authorization epoch (5.1) |
 | Re-check of finalized state | every 300 s; cached pass refused after 600 s without a read |
 | Credential | at most 2,048 bytes; 1..4 blocks; 1..8 caveats per block; block 0 `not_before < not_after`; at most one lane value |
-| Owner credential lifetime | at most 3,600 s |
+| Owner credential lifetime | at most 3,600 s (issuer policy, 5.3) |
 | Contact credential lifetime | at most 604,800 s (and the delegation's `max_credential_seconds`); SHOULD 259,200 |
-| Request proof | clock window ±120 s; replay table default 262,144 entries, 64 per credential, fail closed when full; high-water mark never decreases; restart refusal at most 141 s (`F + 1`) with aligned clocks, 261 s at the worst permitted skew, plus any backward relay clock step |
+| Request proof | clock window ±120 s; replay table default 262,144 entries, 64 per issued credential (`issuer_chain`), fail closed when full; high-water mark never decreases; restart refusal at most 141 s (`F + 1`) with aligned clocks, 261 s at the worst permitted skew, plus any backward relay clock step |
 | Revocation | at most 300 s with healthy reads, 600 s with failing reads (5.1) |
 | Owner-written objects | `issued_at_unix` at most 300 s ahead; void once their delegation fails |
 | Hint / hint record | 1,536 / 40,960 bytes; lifetime at most 86,400 s, SHOULD 21,600; 2..4 relays in production (1..4 in test); 0..2 direct entries; 0..3 objects |
 | Directory | at most 4 live records per Agent, never displaced; default 16,384 Agents; index at most 209 bytes; lookups 60/min per address |
 | Stranger lane | default 32 envelopes and 2 MiB per mailbox, at most 64 and 4 MiB; 8 per (address, mailbox); at most 64 per address relay-wide; at most 25 % of the relay's global limits |
-| Contact lane | at most 64 envelopes; contact lanes keep at least 192 of the 256 per recipient |
+| Contact lane | at most 64 envelopes; keyed by the `lane` value or else `issuer_chain`, never `credential_id`; contact lanes keep at least 192 of the 256 per recipient |
 | Revocations | 1..32 per request; 1,024 per mailbox; kept at most 604,800 + 300 s |
 | Long poll | 1..25 s; one waiting request per mailbox |
 | Envelope | at most 262,144 bytes (unchanged) |
@@ -1343,7 +1358,7 @@ team's).
 | A2 Narrowing | no appended block widens time, relay, operations, lane or size; splice, reorder and drop are refused | property and fuzz tests naming the generator seed; red-control mutants that merge blocks are caught |
 | A3 Chain revocation | after a policy update on a test chain, owner and contact credentials are refused (`credential_revoked`) by two relays within 300 s of the update being readable, and hints stop being served; and, combined, a revocation finalized just after a relay's successful read followed by stopping that relay's chain endpoints is refused within 600 s and not honoured after | chain transaction hashes, relay logs of the read and refusal times, both relay commits |
 | A4 Fail closed | with every chain endpoint of a relay stopped, credentialed requests get `503 chain_unavailable` once the cached pass is 600 s old; stranger deposits continue | relay log and client transcript |
-| A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step; the combined control: proof admitted, clock rolled back, high-water mark recorded, relay restarted, clock restored, same proof refused; a relay with a used V2 store refuses to start with its record missing and with it corrupted; the restart delay measured with aligned clocks (at most 141 s) and with the client 120 s behind (at most 261 s); a proof at or above the recorded high-water mark refused (`503 replay_table_full`); a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
+| A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step (`403` or `503 proof_floor`: a dropped proof is at or below the floor, which the relay cannot tell from an honest proof at the floor); one holder appending many blocks to one issued credential holds at most 64 live replay entries and one default lane; the combined control: proof admitted, clock rolled back, high-water mark recorded, relay restarted, clock restored, same proof refused; a relay with a used V2 store refuses to start with its record missing and with it corrupted; the restart delay measured with aligned clocks (at most 141 s) and with the client 120 s behind (at most 261 s); a proof at or above the recorded high-water mark refused (`503 replay_table_full`); a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
 | A6 Lane isolation | a stranger flood from 64 IPv4 addresses into one mailbox fills only its stranger lane; a stranger flood spread over 10,000 arbitrary Agent IDs stops at the relay-wide stranger share; a stranger deposit-and-withdraw cycle stops at the stranger share by its tombstones, also across a relay restart; contacts deposit throughout all three; `507` names the stranger lane | live run against a test relay, per-mailbox and global quota counters (tombstones included) before and after |
 | A7 Contact revocation | a revoked contact's deposits are refused at every relay of the hint; its stored envelopes stay until acknowledged | live transcript |
 | A8 Multi-relay | with the minimum production configuration of two relays, one killed mid-run: no loss, exactly-once application, acknowledgement at both after restart; every delivery deposited while one relay was down that is still pending and unexpired when it returns reaches its second copy through the retry of section 10; separately, a delivery the recipient acknowledged through the surviving relay during the outage gets no second copy and is not re-deposited | relay store snapshots, journals, `single-copy` telemetry, runtime outcome log |

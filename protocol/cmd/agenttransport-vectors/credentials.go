@@ -213,7 +213,11 @@ func (g *generator) credential(name, delegation string, steps ...step) error {
 		if err != nil {
 			return err
 		}
-		for _, cv := range c.Blocks[i].Caveats {
+		blocks, err := c.Blocks()
+		if err != nil {
+			return err
+		}
+		for _, cv := range blocks[i].Caveats {
 			d, err := describe(cv)
 			if err != nil {
 				return err
@@ -233,10 +237,21 @@ func (g *generator) record(v credentialVector, wire []byte) error {
 	if err = c.VerifyChain(); err != nil {
 		return err
 	}
-	for _, value := range c.ChainValues() {
+	chain, err := c.ChainValues()
+	if err != nil {
+		return err
+	}
+	for _, value := range chain {
 		v.Chain = append(v.Chain, hex.EncodeToString(value[:]))
 	}
-	id, holder := c.CredentialID(), c.HolderKey()
+	id, err := c.CredentialID()
+	if err != nil {
+		return err
+	}
+	holder, err := c.HolderKey()
+	if err != nil {
+		return err
+	}
 	v.CredentialID, v.Holder, v.Length, v.Wire = hex.EncodeToString(id[:]), hex.EncodeToString(holder[:]), len(wire), hex.EncodeToString(wire)
 	g.credentials[v.Name] = wire
 	g.out.Credentials = append(g.out.Credentials, v)
@@ -268,11 +283,10 @@ func (g *generator) rawCredential(name, delegation string, steps ...step) error 
 		}
 		v.Blocks = append(v.Blocks, bv)
 	}
-	d, err := agenttransport.DecodeDelegation(del)
+	c, err := agenttransport.NewCredential(del, blocks)
 	if err != nil {
 		return err
 	}
-	c := &agenttransport.Credential{Delegation: d, DelegationBytes: del, Blocks: blocks}
 	wire, err := c.Encode()
 	if err != nil {
 		return err
@@ -325,7 +339,11 @@ func (g *generator) proof(pc proofCase) error {
 		return err
 	}
 	nonce := nonceFor(pc.name)
-	preimage, err := agenttransport.ProofPreimage(c.CredentialID(), pc.request, pc.issuedAt, nonce)
+	id, err := c.CredentialID()
+	if err != nil {
+		return err
+	}
+	preimage, err := agenttransport.ProofPreimage(id, pc.request, pc.issuedAt, nonce)
 	if err != nil {
 		return err
 	}
@@ -333,7 +351,11 @@ func (g *generator) proof(pc proofCase) error {
 	copy(p.Signature[:], ed25519.Sign(g.key(pc.signer), preimage))
 	v := proofVector{Name: pc.name, Credential: pc.credential, Signer: pc.signer, Operation: pc.op, IssuedAt: pc.issuedAt, Nonce: hex.EncodeToString(nonce[:]), Now: pc.now,
 		CredentialHeader: agenttransport.EncodeCredentialHeader(wire), ProofHeader: p.Header()}
-	v.Agent = c.Delegation.AgentID()
+	d, err := c.Delegation()
+	if err != nil {
+		return err
+	}
+	v.Agent = d.AgentID()
 	if pc.agent != "" {
 		v.Agent = pc.agent
 	}
@@ -684,7 +706,11 @@ func (g *generator) negatives() error {
 	}
 	blocks := make([][]byte, 0, 4)
 	offset := headerEnd
-	for range decoded.Blocks {
+	decodedBlocks, err := decoded.Blocks()
+	if err != nil {
+		return err
+	}
+	for range decodedBlocks {
 		length := int(binary.BigEndian.Uint16(maximal[offset:]))
 		blocks = append(blocks, maximal[offset:offset+2+length])
 		offset += 2 + length
@@ -696,13 +722,25 @@ func (g *generator) negatives() error {
 	if err != nil {
 		return err
 	}
-	forged := contactDecoded.Blocks[0]
-	preimage, err := agenttransport.BlockSigningPreimage(contactDecoded.DelegationBytes, nil, forged)
+	contactBlocks, err := contactDecoded.Blocks()
+	if err != nil {
+		return err
+	}
+	contactDelegation, err := contactDecoded.DelegationBytes()
+	if err != nil {
+		return err
+	}
+	forged := contactBlocks[0]
+	preimage, err := agenttransport.BlockSigningPreimage(contactDelegation, nil, forged)
 	if err != nil {
 		return err
 	}
 	copy(forged.Signature[:], ed25519.Sign(g.key("holder-contact"), preimage))
-	wrongSigner, err := (&agenttransport.Credential{Delegation: contactDecoded.Delegation, DelegationBytes: contactDecoded.DelegationBytes, Blocks: []agenttransport.Block{forged}}).Encode()
+	wrongCredential, err := agenttransport.NewCredential(contactDelegation, []agenttransport.Block{forged})
+	if err != nil {
+		return err
+	}
+	wrongSigner, err := wrongCredential.Encode()
 	if err != nil {
 		return err
 	}
