@@ -202,6 +202,48 @@ CASES = [
         "TestTokenLockPreviewIsReadOnlyAndShowsReceivedAmount",
     ),
 ]
+CASES += [
+    (
+        "fee-ceil",
+        "protocol/pkg/tokenissuer/issuer.go",
+        "fee.Quo(fee, big.NewInt(10000))",
+        "fee.Add(fee, big.NewInt(9999)); fee.Quo(fee, big.NewInt(10000))",
+        "./protocol/pkg/tokenissuer",
+        "TestReceivedFloorsBeforeApplyingTheCap",
+    ),
+    (
+        "profile-blind-selector",
+        "protocol/pkg/tokenissuer/issuer.go",
+        'selector = "e47d6060"',
+        'selector = "fe575a87"',
+        "./protocol/pkg/tokenissuer",
+        "TestIssuerBlacklistUsesProfileAndRequestedReceiver",
+    ),
+    (
+        "fixed-blacklist-receiver",
+        "protocol/pkg/tokenissuer/issuer.go",
+        '"000000000000000000000000"+receiver[2:]',
+        '"000000000000000000000000"+r.policy.Bridge[2:]',
+        "./protocol/pkg/tokenissuer",
+        "TestIssuerBlacklistUsesProfileAndRequestedReceiver",
+    ),
+    (
+        "cap-one-low",
+        "protocol/pkg/tokenissuer/issuer.go",
+        "fee.Set(maximum)",
+        "fee.Set(new(big.Int).Sub(maximum, big.NewInt(1)))",
+        "./protocol/pkg/tokenissuer",
+        "TestReceivedFloorsBeforeApplyingTheCap",
+    ),
+    (
+        "cap-one-high",
+        "protocol/pkg/tokenissuer/issuer.go",
+        "fee.Set(maximum)",
+        "fee.Set(new(big.Int).Add(maximum, big.NewInt(1)))",
+        "./protocol/pkg/tokenissuer",
+        "TestReceivedFloorsBeforeApplyingTheCap",
+    ),
+]
 
 
 def execute(command):

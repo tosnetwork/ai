@@ -48,3 +48,19 @@ its named test. The independent anvil lane in tos-ops `anvil_t19_ai.py` runs the
 production Go reader with `protocol/tests/token-issuer-fixture`. It requires the
 built probe explicitly and never skips a missing dependency. This local evidence
 does not deploy a production asset or enable T12 by itself.
+
+The isolated anvil lanes in the companion ops checkout must run as separate
+pytest processes, rather than as a combined module selection (their plugin
+fixture registrations are not a supported combined lane):
+
+```sh
+python3 -m pytest -q testnet/tests/anvil_settlement_observer.py
+python3 -m pytest -q testnet/tests/anvil_redemption.py
+T19_AI_ISSUER_PROBE=/path/to/issuer-probe python3 -m pytest -q testnet/tests/anvil_t19_ai.py
+```
+
+Build the probe in this checkout with
+`go build -o /path/to/issuer-probe ./protocol/tests/token-issuer-fixture`.
+The unit fixtures expose only the chosen profile's blacklist selector and
+validate the requested receiver argument. Fee tests distinguish floor rounding
+on 100,000,001 at 19 bps and the values just below, at and above the fee cap.
