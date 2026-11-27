@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
@@ -92,5 +94,47 @@ func TestTransportCommandLimits(t *testing.T) {
 		if err := transportCommand(context.Background(), args, strings.NewReader(""), &out, &out); err == nil {
 			t.Fatal("invalid command accepted")
 		}
+	}
+}
+
+type transportPromptReader struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r transportPromptReader) Read(p []byte) (int, error) {
+	close(r.started)
+	<-r.release
+	return copy(p, []byte("expected\n")), nil
+}
+func TestTransportPromptHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	reader := transportPromptReader{make(chan struct{}), make(chan struct{})}
+	defer close(reader.release)
+	done := make(chan error, 1)
+	go func() { done <- confirmTransportHash(ctx, reader, "expected") }()
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("prompt never read input")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("prompt did not return cancellation:", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prompt ignored cancellation")
+	}
+}
+
+func TestTransportPromptBound(t *testing.T) {
+	if err := confirmTransportHash(t.Context(), strings.NewReader("expected\n"), "expected"); err != nil {
+		t.Fatal(err)
+	}
+	if err := confirmTransportHash(t.Context(), strings.NewReader("expected"+strings.Repeat(" ", 300)), "expected"); err == nil {
+		t.Fatal("overlong confirmation accepted")
 	}
 }

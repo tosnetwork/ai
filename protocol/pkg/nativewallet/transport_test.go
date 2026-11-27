@@ -119,7 +119,7 @@ func transportFixture(t *testing.T) (*TransportIssuer, *transportHarness, *trans
 	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{42}, 32))
 	keys := &transportTestKeys{}
 	copy(keys.key[:], private.Public().(ed25519.PublicKey))
-	issuer := &TransportIssuer{Config: agenttransport.Config{Mode: agenttransport.TestNetworkLegacyEpochZero, Network: network, Clock: transportTestClock{}, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{code}, Locator: transportTestLocator{}}}, Resolver: h, Keys: keys, Signer: fake, Submitter: h, Confirm: func(Review) error { return nil }, PollInterval: time.Millisecond}
+	issuer := &TransportIssuer{Config: agenttransport.Config{Mode: agenttransport.TestNetworkLegacyEpochZero, Network: network, Clock: transportTestClock{}, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{code}, Locator: transportTestLocator{}}}, Resolver: h, Keys: keys, Signer: fake, Submitter: h, Confirm: func(context.Context, Review) error { return nil }, PollInterval: time.Millisecond}
 	return issuer, h, keys, request
 }
 func issueTest(t *testing.T, w *TransportIssuer, h *transportHarness, r TransportRequest) ([]byte, error) {
@@ -285,7 +285,7 @@ func TestTransportDraftIsDurableBeforeSigning(t *testing.T) {
 }
 func TestTransportResumeKeepsDraftAfterDeclinedConfirmation(t *testing.T) {
 	w, h, _, r := transportFixture(t)
-	w.Confirm = func(Review) error { return errors.New("declined") }
+	w.Confirm = func(context.Context, Review) error { return errors.New("declined") }
 	if _, err := issueTest(t, w, h, r); err == nil {
 		t.Fatal("declined confirmation proceeded")
 	}
@@ -296,7 +296,7 @@ func TestTransportResumeKeepsDraftAfterDeclinedConfirmation(t *testing.T) {
 	if !bytes.Contains(before, []byte(`"phase":"drafted"`)) {
 		t.Fatal("draft missing")
 	}
-	w.Confirm = func(Review) error { return nil }
+	w.Confirm = func(context.Context, Review) error { return nil }
 	if _, err := issueTest(t, w, h, r); err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,10 @@ func TestTransportExpiryBeforeDispatchRefuses(t *testing.T) {
 	w, h, _, r := transportFixture(t)
 	clock := &transportMutableClock{time.Unix(1800000000, 0)}
 	w.Config.Clock = clock
-	w.Confirm = func(Review) error { clock.at = clock.at.Add(time.Duration(r.Lifetime) * time.Second); return nil }
+	w.Confirm = func(context.Context, Review) error {
+		clock.at = clock.at.Add(time.Duration(r.Lifetime) * time.Second)
+		return nil
+	}
 	if _, err := issueTest(t, w, h, r); err == nil || h.submits != 0 {
 		t.Fatal("expired delegation dispatched")
 	}

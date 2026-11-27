@@ -172,6 +172,22 @@ MUTANTS = [
         WALLET,
         "TestTransportSubmissionErrorDoesNotReflectCredentials",
     ),
+    (
+        "prompt-cancellation",
+        "../cmd/tos-service-wallet/transport.go",
+        "case <-ctx.Done():",
+        "case <-context.Background().Done():",
+        COMMAND,
+        "TestTransportPromptHonorsCancellation",
+    ),
+    (
+        "prompt-bound",
+        "../cmd/tos-service-wallet/transport.go",
+        "if len(line) > 256 {",
+        "if false && len(line) > 256 {",
+        COMMAND,
+        "TestTransportPromptBound",
+    ),
 ]
 
 

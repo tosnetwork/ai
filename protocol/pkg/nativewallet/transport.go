@@ -51,8 +51,9 @@ type TransportIssuer struct {
 	Signer    mldsa44.Signer
 	Submitter ActionSubmitter
 	// Confirm retains the wallet's full-action-hash confirmation. It is called
-	// before controller signing, not on an already journalled rerun.
-	Confirm      func(Review) error
+	// before controller signing, not on an already journalled rerun. It must
+	// honor the supplied context, including while waiting for operator input.
+	Confirm      func(context.Context, Review) error
 	PollInterval time.Duration
 }
 
@@ -224,7 +225,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		if err != nil {
 			return nil, err
 		}
-		if err = w.Confirm(review); err != nil {
+		if err = w.Confirm(ctx, review); err != nil {
 			return nil, err
 		}
 		signatures, err := Sign(ctx, w.Signer, built, request.Controllers)

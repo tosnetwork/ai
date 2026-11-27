@@ -62,7 +62,10 @@ per operation), repeated `--authority-controller`, and optional
 31536000), `--max-credential-seconds` (default 21600, maximum 604800).
 The full native action is reviewed and its complete action hash must be typed
 before controller signing. `--timeout` defaults to ten minutes, maximum thirty.
-No success or delegation is printed before a fresh `VerifyDelegation` passes.
+The timeout also cancels a blocked confirmation prompt; input is capped at
+256 bytes. The command has one prompt reader which ends on input or process
+exit after cancellation. No success or delegation is printed before a fresh
+`VerifyDelegation` passes.
 The result contains only the delegation's canonical base64, digest and key name.
 Transport keys remain separate from packet encryption and controller keys.
 

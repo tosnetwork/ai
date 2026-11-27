@@ -128,7 +128,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 		return err
 	}
 	defer relay.Close()
-	issuer := nativewallet.TransportIssuer{Config: agenttransport.Config{Mode: config.Mode, Network: config.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{config.RegistryCodeHash}, MinFinalizedCheckpoint: config.MinFinalizedCheckpoint, Locator: transportLocator{locator}}}, Resolver: legacy, Keys: vault, Signer: signer, Submitter: relay, Confirm: func(review nativewallet.Review) error {
+	issuer := nativewallet.TransportIssuer{Config: agenttransport.Config{Mode: config.Mode, Network: config.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{config.RegistryCodeHash}, MinFinalizedCheckpoint: config.MinFinalizedCheckpoint, Locator: transportLocator{locator}}}, Resolver: legacy, Keys: vault, Signer: signer, Submitter: relay, Confirm: func(ctx context.Context, review nativewallet.Review) error {
 		raw, err := json.MarshalIndent(review, "", "  ")
 		if err != nil {
 			return err
@@ -136,7 +136,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 		if _, err = fmt.Fprintf(reviewOutput, "%s\nType the complete action hash to sign: ", raw); err != nil {
 			return err
 		}
-		return nativewallet.ConfirmHash(bufio.NewReader(input), review.ActionHash)
+		return confirmTransportHash(ctx, input, review.ActionHash)
 	}}
 	wire, err := issuer.IssueTransport(ctx, *directory, nativewallet.TransportRequest{AgentID: *agent, KeyName: *key, Epoch: *epoch, Purposes: agenttransport.Purpose(*purposes), Lifetime: *lifetime, CredentialLifetime: uint32(*credential), Controllers: controllers})
 	if err != nil {
@@ -186,4 +186,31 @@ func makeTransportDirectory(path string) error {
 		return errors.New("journal must be an owner-private directory")
 	}
 	return nil
+}
+
+// The command makes one prompt, then exits on cancellation. The buffered
+// result lets a reader finish without blocking after the command times out.
+func confirmTransportHash(ctx context.Context, input io.Reader, expected string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	result := make(chan error, 1)
+	go func() {
+		line, err := bufio.NewReader(io.LimitReader(input, 257)).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			result <- err
+			return
+		}
+		if len(line) > 256 {
+			result <- errors.New("transport confirmation line exceeds 256 bytes")
+			return
+		}
+		result <- nativewallet.ConfirmHash(bufio.NewReader(strings.NewReader(line)), expected)
+	}()
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
