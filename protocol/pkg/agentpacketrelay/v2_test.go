@@ -992,3 +992,53 @@ func TestV2RecoveryAuditMustSucceedBeforeOpen(t *testing.T) {
 		t.Fatalf("audit failure lost the durable floor: %d", restored)
 	}
 }
+
+// Persisted metadata is validated independently of its checksum: a well-formed
+// checksum cannot make a malformed envelope or accounting record trustworthy.
+func TestV2RecordMetadataRefusals(t *testing.T) {
+	r := newRecipient(t)
+	now := uint64(testStart.Unix())
+	e := r.seal(t, testPacket(1), now+3600)
+	header, err := agentpacketseal.ParseEnvelope(e.envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := v2Record{Version: "tos.service.relay-envelope.v2", Agent: r.agentID, ID: e.id, KeyID: header.RecipientKeyID, Received: now, Expires: now + 3600, Client: v2Loopback(1), Size: int64(len(e.envelope)), Sum: sha256.Sum256(e.envelope), Body: e.envelope}
+	if err := valid.validate(); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(*v2Record){
+		"version":       func(r *v2Record) { r.Version = "unknown" },
+		"agent":         func(r *v2Record) { r.Agent = "invalid" },
+		"zero-id":       func(r *v2Record) { r.ID = [32]byte{} },
+		"client":        func(r *v2Record) { r.Client = netip.Addr{} },
+		"client-64":     func(r *v2Record) { r.Client = netip.MustParseAddr("2001:db8::1") },
+		"stranger-lane": func(r *v2Record) { r.Lane.Tag = v2DefaultLane },
+		"lane-tag":      func(r *v2Record) { r.Contact = true; r.Lane.Tag = 3 },
+		"received-zero": func(r *v2Record) { r.Received = 0 },
+		"expires":       func(r *v2Record) { r.Expires = r.Received },
+		"retention":     func(r *v2Record) { r.Received = r.Expires - 86401 },
+		"size":          func(r *v2Record) { r.Size++ },
+		"checksum":      func(r *v2Record) { r.Sum[0] ^= 1 },
+		"envelope-id":   func(r *v2Record) { r.ID[0] ^= 1 },
+		"key-id":        func(r *v2Record) { r.KeyID[0] ^= 1 },
+		"header-expiry": func(r *v2Record) { r.Expires++ },
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := valid
+			change(&rec)
+			raw, err := encodeV2(rec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded v2Record
+			if err = decodeV2(raw, &decoded); err != nil {
+				t.Fatal("checksum fixture failed before metadata validation", err)
+			}
+			if err = decoded.validate(); err == nil {
+				t.Fatal("invalid metadata accepted")
+			}
+		})
+	}
+}

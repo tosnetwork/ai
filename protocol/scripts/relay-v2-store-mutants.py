@@ -223,6 +223,32 @@ MUTANTS = [
 ]
 
 
+# Each metadata fixture carries a valid record checksum, so it can only fail at
+# the semantic validation it names, not an earlier corrupted-byte refusal.
+for label, anchor in [
+    ("version", 'r.Version != "tos.service.relay-envelope.v2"'),
+    ("client-64", "client != r.Client"),
+    ("lane-tag", "!r.Lane.valid(r.Contact)"),
+    ("received-zero", "r.Received == 0"),
+    ("expires", "r.Expires <= r.Received"),
+    ("retention", "r.Expires-r.Received > uint64(MaxTTL/time.Second)"),
+    ("size", "r.Size != int64(len(r.Body))"),
+    ("checksum", "sha256.Sum256(r.Body) != r.Sum"),
+    ("envelope-id", "header.EnvelopeID != r.ID"),
+    ("key-id", "header.RecipientKeyID != r.KeyID"),
+    ("header-expiry", "header.ExpiresAtUnix < r.Expires"),
+]:
+    MUTANTS.append(
+        (
+            "metadata-" + label,
+            "v2_store.go",
+            anchor,
+            "(" + anchor + " && false)",
+            "TestV2RecordMetadataRefusals/" + label,
+        )
+    )
+
+
 def execute(args):
     result = subprocess.run(
         args,
