@@ -353,10 +353,15 @@ per-Agent withdrawn-digest set **for the current epoch**:
   policy update, which also revokes all its transport delegations; it is
   never locked out.
 
-A delegation kind that relies on this permanence across epochs must carry
-the epoch as transport delegations do; one that does not (the Messaging
-Endpoint delegation today) is protected by the withdrawn set only within the
-epoch in which it was withdrawn.
+**Every delegation kind carries the epoch.** The same registry change adds
+`authorization_epoch` to the Messaging Endpoint delegation
+(`MessagingEndpointDelegationV1`, [`AGENT_NATIVE_MESSENGER_V1.md`](AGENT_NATIVE_MESSENGER_V1.md)
+section 9.2, implemented in `messenger/pkg/identity`), and its verifier
+requires it to equal the Agent's finalized epoch, as check 4 does here. TOS
+is pre-launch, so the format changes in place and its vectors are
+regenerated in that change. Every delegation kind is then withdrawn
+permanently by the same rule, and a policy update revokes every kind alike.
+A delegation kind added later MUST carry the epoch too.
 
 Replacing a compromised transport key therefore always uses a fresh
 delegation: a new key, hence a new digest, committed after the old one is
@@ -1289,7 +1294,7 @@ team's).
 | A16 Timestamp poisoning | a mailbox policy and a hint dated `UINT64_MAX`, and one dated 301 s ahead, are refused; a compromised transport key's policy dated 300 s ahead with a zero stranger lane is accepted, then voided by the owner's policy update (on an epoch network) or by the delegation no longer verifying (on a test network), after which the owner's new policy with an earlier `issued_at_unix` is accepted | relay tests, and a live transcript on a test chain |
 | A17 Epoch revocation | on a registry with the authorization epoch: a delegation issued under policy A is refused after A → B → A, and after a policy update that installs identical bytes; on a test network without the epoch the same run shows the gap, which is why production is gated | registry and relay tests; the chain transactions |
 | A18 Directory slots | two relays populated with five delegations of one Agent in different orders each hold four live records and refuse the fifth; neither displaces a live record; a consumer merging both finds the lane's hint; a slot frees on expiry | relay tests; directory dumps |
-| A19 Permanent withdrawal | within an epoch, re-adding a withdrawn digest is refused by the registry and the Agent's other delegations keep verifying; after a policy update clears the set, a digest withdrawn in the earlier epoch can be added again but its delegation is refused by `VerifyDelegation` (check 4, epoch); withdrawal still succeeds with both sets at their bound; add-delegation is refused at the 384 bound and accepted again after a policy update | registry tests in `tos`; `agenttransport` verifier tests; chain transactions on a test network |
+| A19 Permanent withdrawal | within an epoch, re-adding a withdrawn digest is refused by the registry and the Agent's other delegations keep verifying; after a policy update clears the set, a digest withdrawn in the earlier epoch can be added again but its delegation is refused by `VerifyDelegation` (check 4, epoch); withdrawal still succeeds with both sets at their bound; add-delegation is refused at the 384 bound and accepted again after a policy update; a withdrawn Messaging Endpoint delegation re-added after an epoch bump is refused by its epoch check | registry tests in `tos`; `agenttransport` and `messenger/pkg/identity` verifier tests; chain transactions on a test network |
 
 Production claims additionally need relays and directory relays run by an
 operator other than the core team, and a public chain, as ROADMAP Gate O
@@ -1344,7 +1349,9 @@ test networks, and is enabled per lane by its own configuration.
 - The registry change of section 18 Q1: the withdraw-delegation action, the
   per-epoch withdrawn-digest set (live at most 128, live and withdrawn at
   most 384 within one epoch, cleared on every epoch bump) and the
-  authorization epoch, in `tos` and `protocol/pkg/nativecore` (A17, A19).
+  authorization epoch, in `tos` and `protocol/pkg/nativecore`, together with
+  the epoch field and check in the Messaging Endpoint delegation
+  (`messenger/pkg/identity` and its vectors) (A17, A19).
   Until it is finalized on a network, V2 transport runs on test networks
   only (5.1).
 - Key card V2 without a relay list (section 18 Q11).
@@ -1367,8 +1374,9 @@ The questions this design raised, each with its decision (recorded
   digest from a per-epoch set (live at most 128, live and withdrawn at most
   384) that every epoch bump clears, and across epochs the epoch check
   refuses it (5.1). A full set blocks new delegations only until the next
-  epoch bump, never a withdrawal. A compromised key is replaced by a fresh
-  delegation. It is a `tos` contract change, scheduled after the
+  epoch bump, never a withdrawal. The Messaging Endpoint delegation gains
+  the epoch in the same change, so every delegation kind follows one rule. A
+  compromised key is replaced by a fresh delegation. It is a `tos` contract change, scheduled after the
   USDC and USDT settlement work. Until it lands, V2 transport runs on test
   networks only, with the `policy_hash` binding as the revocation; once it
   lands, check 3 of 5.1 covers withdrawal and check 4 every policy change,

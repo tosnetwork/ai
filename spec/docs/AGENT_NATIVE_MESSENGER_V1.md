@@ -1377,6 +1377,10 @@ contact_descriptor_policy_digest
 mailbox_policy_digest
 ```
 
+With the registry change of [Messenger Transport V2](MESSENGER_TRANSPORT_V2.md)
+section 18 Q1, this format gains `authorization_epoch`, verified against the
+Agent's finalized epoch (V2 section 5.1).
+
 The Agent account commits only the immutable delegation digest. The full
 document remains off-chain. Verification must:
 
