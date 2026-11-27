@@ -3,6 +3,7 @@ module github.com/tosnetwork/ai
 go 1.26.11
 
 require (
+	filippo.io/edwards25519 v1.2.0
 	connectrpc.com/connect v1.19.1
 	github.com/NVIDIA/go-nvml v0.13.3-1
 	github.com/containerd/cgroups/v3 v3.0.3
@@ -22,7 +23,6 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20231105174938-2b5cbb29f3e2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
