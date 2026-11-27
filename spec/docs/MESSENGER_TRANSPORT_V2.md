@@ -479,28 +479,38 @@ The caveat set is closed. An unknown type is a decode error, never ignored.
 | 1 | `not_before` | u64 | `not_before <= now + 300` |
 | 2 | `not_after` | u64 | `now < not_after` |
 | 3 | `relay` | canonical relay base URL, 1..256 bytes, the key-card URL rules of relay spec 6.2 | it equals the base URL the relay is configured with, byte for byte |
-| 4 | `operations` | u16 bitmask: bit 0 deposit, bit 1 list, bit 2 fetch, bit 3 publish, bit 4 revoke; others zero | the request's operation bit is set |
+| 4 | `operations` | u16 bitmask: bit 0 deposit, bit 1 list, bit 2 fetch, bit 3 publish, bit 4 revoke; others zero; 0 is valid and satisfied by no request | the request's operation bit is set |
 | 5 | `lane` | 16 bytes, not all zero | always; names the quota lane of deposits (6.2) |
-| 6 | `max_envelopes` | u32, at least 1 | the lane holds fewer stored envelopes than the value |
-| 7 | `max_envelope_bytes` | u32, 1 .. 262,144 | the deposited envelope is no longer |
-| 8 | `max_lane_bytes` | u64, at least 1 | the lane's stored bytes plus this envelope do not exceed it |
+| 6 | `max_envelopes` | u32, at least 1 | the lane holds fewer stored envelopes than the value (deposits only) |
+| 7 | `max_envelope_bytes` | u32, 1 .. 262,144 | the deposited envelope is no longer (deposits only) |
+| 8 | `max_lane_bytes` | u64, at least 1 | the lane's stored bytes plus this envelope do not exceed it (deposits only) |
 
 Rules:
 
 - Block 0 MUST carry `not_before`, `not_after` and `operations`, with
-  `not_after - not_before <= max_credential_seconds` of the delegation.
+  `not_before < not_after` and
+  `not_after - not_before <= max_credential_seconds` of the delegation; a
+  block 0 that breaks either is a decode error.
 - A request satisfies a credential only if it satisfies **every caveat of
   every block**. Caveats therefore only narrow: a later block can repeat,
   shrink or add a bound, and an attempt to widen one is simply another bound
   the request must also meet. The effective lifetime is the minimum
   `not_after` and the maximum `not_before` over the blocks.
-- At most one `lane` value may appear over the whole chain; two different
-  values make the credential unusable, so a holder cannot move its deposits
-  into another lane by appending one.
+- At most one `lane` value may appear over the whole chain (the same value
+  may repeat); two different values make the credential unusable, so a
+  holder cannot move its deposits into another lane by appending one. Such a
+  credential decodes, and every request with it is refused as
+  `credential_scope`. Issuing tooling refuses to build one.
+- The size and count caveats (types 6 to 8) constrain deposits only and are
+  evaluated at the quota step (6.1); for every other operation they are
+  always satisfied. A contact lane holds at most 64 envelopes whatever its
+  caveats say (6.2).
 - There is no sealing: appending only narrows, so the ability to append
   grants nothing.
 
-Profiles (what honest issuers produce):
+Profiles (what honest issuers produce). Their lifetimes and operation sets
+are issuer policy: a verifier does not enforce them, only the caveats and
+the delegation's `max_credential_seconds`.
 
 | Profile | Issued by | Blocks | Operations | Lifetime |
 |---|---|---|---|---|
@@ -532,6 +542,14 @@ TOS-Relay-Credential: base64url(credential), no padding
 TOS-Relay-Proof:      base64url(issued_at_unix u64 || nonce 32 || signature 64), no padding
 ```
 
+The relay base URL follows the `relay` caveat rules (5.3). The method is
+1 to 255 uppercase ASCII letters (`A` to `Z`). The path is 1 to 65,535
+bytes of printable ASCII (`0x21` to `0x7e`), begins with `/` and contains no
+`?` or `#`. The relay binds the escaped path exactly as received in the
+request target, never a decoded or re-escaped form. Both headers are the
+canonical unpadded base64url spelling: any other spelling, padding, line
+break or non-zero trailing bit is `credential_invalid`.
+
 The relay requires `|now - issued_at_unix| <= 120` and claims the pair
 (`credential_id`, `nonce`) in its replay table before acting. The table:
 
@@ -548,7 +566,9 @@ The relay requires `|now - issued_at_unix| <= 120` and claims the pair
   the relay durably records a **high-water mark**
   `H = max(H_recorded, now + 140)`, so the recorded mark never decreases,
   whatever the wall clock does. It admits a proof only if its
-  `issued_at_unix` is below the last recorded `H`. With a correct clock an
+  `issued_at_unix` is below the last recorded `H`; a proof at or above it is
+  answered `503 replay_table_full`, retryable, because the relay cannot
+  admit what it has not durably bounded. With a correct clock an
   honest proof always is (`issued_at_unix <= now + 120`, and the recorded `H`
   is at least `now + 130`); if recording fails, proofs soon exceed `H` and
   are refused, so the failure is closed. After a restart the floor starts at
@@ -568,16 +588,22 @@ The relay requires `|now - issued_at_unix| <= 120` and claims the pair
   floor of at least `now + 140`, which the relay logs; choosing it after a
   clock rollback is the operator's responsibility.
 
+The replay table and its durable record belong to the relay (section 17
+item 6). `protocol/pkg/agenttransport` provides the admission logic only:
+claim, bounds, floor, mark and restore; the relay persists the record and
+enforces the start rules above.
+
 **Restart refusal delay.** After a restart, a fresh proof passes once its
-`issued_at_unix` exceeds the floor `F` while the relay's window still admits
-it (`issued_at_unix >= relay_now - 120`). With `F` at most the restart time
+`issued_at_unix` exceeds the floor `F`, that is from `F + 1` in whole
+seconds, while the relay's window still admits it
+(`issued_at_unix >= relay_now - 120`). With `F` at most the restart time
 plus 140 seconds:
 
 - **aligned clocks** (client and relay agree, and the relay clock was not
-  stepped back): at most **140 seconds**;
+  stepped back): at most **141 seconds** (`F + 1`);
 - **worst permitted skew** (the client clock 120 seconds behind the relay's,
-  the most the window admits): at most **260 seconds**, since the client's
-  clock must pass `F`;
+  the most the window admits): at most **261 seconds**, since the client's
+  clock must reach `F + 1`;
 - **relay clock stepped back by d before the restart:** both bounds grow by
   d, because the mark kept its earlier, higher value.
 
@@ -901,11 +927,11 @@ The V1 codes stay. V2 adds, each code belonging to exactly one status:
 |---|---|---|
 | 401 | `credential_required` | list, fetch, policy or revocation without a credential |
 | 403 | `credential_invalid` | decode, chain, signature, proof or nonce failure |
-| 403 | `credential_scope` | a caveat fails, or the path names another Agent |
+| 403 | `credential_scope` | a caveat fails, the chain carries two different lane values, or the path names another Agent |
 | 403 | `credential_revoked` | the delegation no longer verifies, or a chain value is revoked |
 | 409 | `hint_conflict` | an equal-time hint with different bytes |
 | 503 | `chain_unavailable` | finalized state could not be read and no cached pass younger than 600 s exists; retryable |
-| 503 | `replay_table_full` | the replay table is full (5.4); retryable |
+| 503 | `replay_table_full` | the replay table is full, or the proof's time is at or above the last recorded high-water mark (5.4); retryable |
 | 503 | `proof_floor` | the proof's time is at or below the replay floor after a restart (5.4); retry with a new proof after `Retry-After` |
 
 `403` with `credential_revoked` is terminal for that credential at that relay;
@@ -1281,10 +1307,10 @@ Rules:
 |---|---|
 | Transport delegation | 167 bytes; lifetime at most 365 days; production needs the authorization epoch (5.1) |
 | Re-check of finalized state | every 300 s; cached pass refused after 600 s without a read |
-| Credential | at most 2,048 bytes; 1..4 blocks; 1..8 caveats per block |
+| Credential | at most 2,048 bytes; 1..4 blocks; 1..8 caveats per block; block 0 `not_before < not_after`; at most one lane value |
 | Owner credential lifetime | at most 3,600 s |
 | Contact credential lifetime | at most 604,800 s (and the delegation's `max_credential_seconds`); SHOULD 259,200 |
-| Request proof | clock window ±120 s; replay table default 262,144 entries, 64 per credential, fail closed when full; high-water mark never decreases; restart refusal at most 140 s with aligned clocks, 260 s at the worst permitted skew, plus any backward relay clock step |
+| Request proof | clock window ±120 s; replay table default 262,144 entries, 64 per credential, fail closed when full; high-water mark never decreases; restart refusal at most 141 s (`F + 1`) with aligned clocks, 261 s at the worst permitted skew, plus any backward relay clock step |
 | Revocation | at most 300 s with healthy reads, 600 s with failing reads (5.1) |
 | Owner-written objects | `issued_at_unix` at most 300 s ahead; void once their delegation fails |
 | Hint / hint record | 1,536 / 40,960 bytes; lifetime at most 86,400 s, SHOULD 21,600; 2..4 relays in production (1..4 in test); 0..2 direct entries; 0..3 objects |
@@ -1317,7 +1343,7 @@ team's).
 | A2 Narrowing | no appended block widens time, relay, operations, lane or size; splice, reorder and drop are refused | property and fuzz tests naming the generator seed; red-control mutants that merge blocks are caught |
 | A3 Chain revocation | after a policy update on a test chain, owner and contact credentials are refused (`credential_revoked`) by two relays within 300 s of the update being readable, and hints stop being served; and, combined, a revocation finalized just after a relay's successful read followed by stopping that relay's chain endpoints is refused within 600 s and not honoured after | chain transaction hashes, relay logs of the read and refusal times, both relay commits |
 | A4 Fail closed | with every chain endpoint of a relay stopped, credentialed requests get `503 chain_unavailable` once the cached pass is 600 s old; stranger deposits continue | relay log and client transcript |
-| A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step; the combined control: proof admitted, clock rolled back, high-water mark recorded, relay restarted, clock restored, same proof refused; a relay with a used V2 store refuses to start with its record missing and with it corrupted; the restart delay measured with aligned clocks (at most 140 s) and with the client 120 s behind (at most 260 s); a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
+| A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step; the combined control: proof admitted, clock rolled back, high-water mark recorded, relay restarted, clock restored, same proof refused; a relay with a used V2 store refuses to start with its record missing and with it corrupted; the restart delay measured with aligned clocks (at most 141 s) and with the client 120 s behind (at most 261 s); a proof at or above the recorded high-water mark refused (`503 replay_table_full`); a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
 | A6 Lane isolation | a stranger flood from 64 IPv4 addresses into one mailbox fills only its stranger lane; a stranger flood spread over 10,000 arbitrary Agent IDs stops at the relay-wide stranger share; a stranger deposit-and-withdraw cycle stops at the stranger share by its tombstones, also across a relay restart; contacts deposit throughout all three; `507` names the stranger lane | live run against a test relay, per-mailbox and global quota counters (tombstones included) before and after |
 | A7 Contact revocation | a revoked contact's deposits are refused at every relay of the hint; its stored envelopes stay until acknowledged | live transcript |
 | A8 Multi-relay | with the minimum production configuration of two relays, one killed mid-run: no loss, exactly-once application, acknowledgement at both after restart; every delivery deposited while one relay was down that is still pending and unexpired when it returns reaches its second copy through the retry of section 10; separately, a delivery the recipient acknowledged through the surviving relay during the outage gets no second copy and is not re-deposited | relay store snapshots, journals, `single-copy` telemetry, runtime outcome log |

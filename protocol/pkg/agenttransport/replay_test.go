@@ -138,8 +138,8 @@ func TestHighWaterMark(t *testing.T) {
 	if err = table.Claim([32]byte{2}, proofAt(mark-1, 1), stalled); err != nil {
 		t.Fatalf("just below the mark: %v", err)
 	}
-	if err = table.Claim([32]byte{2}, proofAt(mark, 2), stalled); !errors.Is(err, ErrProofMark) {
-		t.Fatalf("at the mark: %v", err)
+	if err = table.Claim([32]byte{2}, proofAt(mark, 2), stalled); !errors.Is(err, ErrProofMark) || !errors.Is(err, ErrReplayTableFull) {
+		t.Fatalf("at the mark, want replay_table_full: %v", err)
 	}
 	if table.NextMark(^uint64(0)-1) != ^uint64(0) {
 		t.Fatal("mark overflowed")

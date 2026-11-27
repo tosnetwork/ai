@@ -129,7 +129,7 @@ relay purpose.
 credential, refusing rather than evicting; entries drop only once more than
 120 seconds old, raising the floor; proofs at or below the floor
 (`ErrProofFloor`) or at or above the last recorded high-water mark
-(`ErrProofMark`) are refused. `NextMark` never decreases, and
+(`ErrProofMark`, which wraps `ErrReplayTableFull`: `503 replay_table_full`) are refused. `NextMark` never decreases, and
 `RestoreReplayTable` starts the floor at the recorded mark. Durable storage of
 the mark (one checksummed record, atomic replacement with file and directory
 sync, refusal to start on a missing or corrupt record of a used store, the

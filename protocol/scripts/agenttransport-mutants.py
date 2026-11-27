@@ -876,6 +876,13 @@ MUTANTS = [
         "if false",
         "TestRestartRefusesAdmittedProofs",
     ),
+    (
+        "mark-refusal-class",
+        "replay.go",
+        "fmt.Errorf(\"%w: proof time is not below the recorded high-water mark\", ErrReplayTableFull)",
+        "errors.New(\"proof time is not below the recorded high-water mark\")",
+        "TestHighWaterMark",
+    ),
 ]
 
 

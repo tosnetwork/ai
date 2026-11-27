@@ -27,9 +27,9 @@ var (
 	// ErrProofFloor is 503 proof_floor: the proof is at or below the floor.
 	ErrProofFloor = errors.New("proof_floor")
 	// ErrProofMark refuses a proof at or above the last recorded high-water
-	// mark: the relay could not record that it admitted it, so it fails closed
-	// with a retryable 503.
-	ErrProofMark = errors.New("proof time is not below the recorded high-water mark")
+	// mark: the relay has not durably bounded it, so it fails closed. It is
+	// answered as 503 replay_table_full and wraps ErrReplayTableFull.
+	ErrProofMark = fmt.Errorf("%w: proof time is not below the recorded high-water mark", ErrReplayTableFull)
 )
 
 type replayKey struct {
