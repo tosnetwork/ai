@@ -39,7 +39,7 @@ def run(value):
 def main():
     base = json.loads(CORPUS.read_text())
     code, output = run(base)
-    if code or "13 signed objects reproduced; 51 negatives refused" not in output:
+    if code or "13 signed objects reproduced; 57 negatives refused" not in output:
         raise RuntimeError("invalid reproducer baseline\n" + output)
     cases = []
     value = copy.deepcopy(base)

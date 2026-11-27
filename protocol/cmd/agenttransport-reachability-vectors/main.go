@@ -235,6 +235,18 @@ func run() error {
 	for _, base := range []string{"reduced", "hello-1", "receipt-1"} {
 		changes = append(changes, mutation{base + "-domain", base, "decode", func(b []byte) []byte { b[0] ^= 1; return b }}, mutation{base + "-trailing", base, "decode", func(b []byte) []byte { return append(b, 0) }}, mutation{base + "-truncated", base, "decode", func(b []byte) []byte { return b[:len(b)-1] }}, mutation{base + "-signature", base, "verify", func(b []byte) []byte { b[len(b)-1] ^= 1; return b }})
 	}
+	for _, base := range []string{"reduced", "hello-1", "receipt-1"} {
+		domain := map[string]string{"reduced": "tos.service.agent-reachability-record.v1\x00", "hello-1": "tos.service.agent-direct-hello.v1\x00", "receipt-1": "tos.service.agent-direct-receipt.v1\x00"}[base]
+		changes = append(changes,
+			mutation{base + "-unknown-version", base, "decode", func(b []byte) []byte { b[len(domain)-2] = '2'; return b }},
+			mutation{base + "-noncanonical-scalar", base, "verify", func(b []byte) []byte {
+				for i := len(b) - 32; i < len(b); i++ {
+					b[i] = 255
+				}
+				return b
+			}},
+		)
+	}
 	changes = append(changes,
 		mutation{"hint-domain", "reduced", "decode", func(b []byte) []byte { b[recordHeader] ^= 1; return b }},
 		mutation{"hint-length", "reduced", "decode", func(b []byte) []byte { binary.BigEndian.PutUint16(b[recordHeader-2:], 1537); return b }},

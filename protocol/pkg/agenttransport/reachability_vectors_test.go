@@ -96,7 +96,7 @@ func TestFrozenReachabilityVectors(t *testing.T) {
 	if err = json.Unmarshal(raw, &corpus); err != nil {
 		t.Fatal(err)
 	}
-	if corpus.Schema != "tos.agent-transport-reachability-v1.vectors" || len(corpus.Positive) != 13 || len(corpus.Negative) != 51 {
+	if corpus.Schema != "tos.agent-transport-reachability-v1.vectors" || len(corpus.Positive) != 13 || len(corpus.Negative) != 57 {
 		t.Fatal("incomplete reachability corpus")
 	}
 	bases := map[string]reachabilityVector{}

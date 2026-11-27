@@ -186,7 +186,7 @@ GOWORK=off go run ./protocol/cmd/agenttransport-reachability-vectors > spec/test
 `make spec-check` compares that output and runs the stdlib-only independent
 Python wire/signature reproducer. It derives test keys and each pure signature
 from the public fixture seed, using a cofactorless verification equation.
-The 13 positive and 51 negative objects include reduced/public-contact/maximal
+The 13 positive and 57 negative objects include reduced/public-contact/maximal
 hints, a private test configuration, all hello roles and receipt outcomes,
 structural and re-signed semantic refusals. Embedded card/evidence bytes are
 relay-level structural fixtures, **not authenticated ML-DSA cards or Messenger

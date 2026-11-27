@@ -477,7 +477,7 @@ def main():
         (ROOT / "test-vectors/agent-transport-reachability-v1.json").read_text()
     )
     require(corpus["schema"] == "tos.agent-transport-reachability-v1.vectors", "schema")
-    require(len(corpus["positive"]) == 13 and len(corpus["negative"]) == 51, "coverage")
+    require(len(corpus["positive"]) == 13 and len(corpus["negative"]) == 57, "coverage")
     bases = {}
     for v in corpus["positive"]:
         require(v["name"] not in bases, "duplicate positive")
