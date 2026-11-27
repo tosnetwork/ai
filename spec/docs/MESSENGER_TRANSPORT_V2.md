@@ -5,13 +5,16 @@ carrier leaves OpenFox: relay-first store-and-forward with an optional direct
 upgrade, signed reachability hints, and short-lived relay credentials that
 are verified offline and revoked by finalized chain state.
 
-**Status: 🟡 Delegation boundary implemented; transport not accepted.**
-`protocol/pkg/agenttransport` implements the delegation codec and finalized
-verifier of phase 1 item 2, with frozen vectors, an independent reproducer and
-synthetic epoch/cache tests. Production configuration refuses; there is no
-registry epoch adapter, relay deployment or live revocation evidence. The
-remaining transport surfaces are not implemented. This remains
-an incubation design under [ROADMAP section 8.1](ROADMAP.md#81-incubation-designs):
+**Status: 🟡 Delegation and credential boundaries implemented; transport not
+accepted.** `protocol/pkg/agenttransport` implements the delegation codec and
+finalized verifier of phase 1 item 2, and the credential, caveat and request
+proof codecs with the replay admission logic of item 3, each with frozen
+vectors (`spec/test-vectors/agent-transport-v1.json` and
+`agent-transport-credential-v1.json`), an independent reproducer and
+synthetic epoch/cache, narrowing and replay tests. Production configuration
+refuses; there is no registry epoch adapter, relay deployment or live
+revocation evidence. The remaining transport surfaces are not implemented.
+This remains an incubation design under [ROADMAP section 8.1](ROADMAP.md#81-incubation-designs):
 it carries no gate status and supplies no gate evidence. Section 16 lists the
 evidence each part needs; section 17 is the implementation order. Until the
 registry change of section 18 Q1 is finalized on a network, V2 transport is
@@ -1310,7 +1313,7 @@ team's).
 
 | Item | Shows | Evidence |
 |---|---|---|
-| A1 Codecs | delegation, credential, proof, hint, record, hello and receipt decode strictly; every negative refused with its class | frozen corpus `spec/test-vectors/agent-transport-v1.json`; an independent reproducer run with `python3 -I` under `make spec-check` |
+| A1 Codecs | delegation, credential, proof, hint, record, hello and receipt decode strictly; every negative refused with its class | frozen corpora `spec/test-vectors/agent-transport-v1.json` (delegation) and `spec/test-vectors/agent-transport-credential-v1.json` (credential and request proof), and one per later surface; an independent reproducer per corpus run with `python3 -I` under `make spec-check` |
 | A2 Narrowing | no appended block widens time, relay, operations, lane or size; splice, reorder and drop are refused | property and fuzz tests naming the generator seed; red-control mutants that merge blocks are caught |
 | A3 Chain revocation | after a policy update on a test chain, owner and contact credentials are refused (`credential_revoked`) by two relays within 300 s of the update being readable, and hints stop being served; and, combined, a revocation finalized just after a relay's successful read followed by stopping that relay's chain endpoints is refused within 600 s and not honoured after | chain transaction hashes, relay logs of the read and refusal times, both relay commits |
 | A4 Fail closed | with every chain endpoint of a relay stopped, credentialed requests get `503 chain_unavailable` once the cached pass is 600 s old; stranger deposits continue | relay log and client transcript |

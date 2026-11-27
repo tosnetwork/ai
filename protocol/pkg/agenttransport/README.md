@@ -1,9 +1,11 @@
 # Transport delegations
 
-This package implements Messenger Transport V2 section 5.1 only: the 167-byte
-fixed binary delegation, its SHA-256 digest, finalized authorization and the
-bounded revocation cache. Credentials, request proofs, hints and sessions are
-later surfaces. A delegation has no off-chain signature of its own.
+This package implements Messenger Transport V2 sections 5.1 to 5.4: the
+167-byte fixed binary delegation, its SHA-256 digest, finalized authorization
+and the bounded revocation cache; relay credentials, their closed caveat set
+and request proofs; and the in-memory replay admission logic. Hints and direct
+sessions are later surfaces. A delegation has no off-chain signature of its
+own.
 
 ## Authority and deployment gate
 
@@ -94,6 +96,45 @@ a way that could extend its authority. Reads are serialized, context-bounded
 (default 5 seconds, maximum 30), and no background refresh worker is created.
 Cancellation is not converted to authority.
 
+## Credentials and request proofs
+
+`DecodeCredential` is strict: domain, an embedded delegation that decodes,
+1 to 4 blocks whose `block_length` matches their content exactly, 1 to 8
+caveats per block in strictly ascending type, canonical non-small-order next
+keys, the closed caveat set with its value rules, block 0 carrying
+`not_before`, `not_after` and `operations` within the delegation's
+`max_credential_seconds`, at most 2,048 bytes and no trailing byte. Decoding
+does not verify signatures; `VerifyChain` does, block 0 under the transport
+key and block i under block i-1's next key, each preimage covering the chain
+value of every earlier signature.
+
+`CheckScope` and `CheckDeposit` evaluate every caveat of every block on its
+own. Nothing merges blocks, so a later block can only add bounds (section
+6.4). Two different lane values make a credential unusable
+(`credential_scope`); the builders refuse to produce one. A contact lane holds
+at most 64 envelopes whatever its caveats say. `IssueCredential` and
+`AppendCredentialBlock` sort the caveats, sign, and decode their own output,
+so issuance has no separate rule set. Owner and contact lifetimes of the
+profile table are issuer policy and are not enforced here.
+
+`CheckRequest` runs the stateless request checks of section 6.1 in order:
+header and credential decode, Agent match, chain, caveats, proof window and
+holder signature. Every refusal wraps exactly one of `ErrCredentialInvalid`
+or `ErrCredentialScope`. The relay then claims the nonce, checks its mailbox
+revocation set against `ChainValues`, and calls `VerifyDelegation` with the
+relay purpose.
+
+`ReplayTable` is the admission logic of the replay table: claim once per
+`(credential_id, nonce)`, at most the configured entries and 64 per
+credential, refusing rather than evicting; entries drop only once more than
+120 seconds old, raising the floor; proofs at or below the floor
+(`ErrProofFloor`) or at or above the last recorded high-water mark
+(`ErrProofMark`) are refused. `NextMark` never decreases, and
+`RestoreReplayTable` starts the floor at the recorded mark. Durable storage of
+the mark (one checksummed record, atomic replacement with file and directory
+sync, refusal to start on a missing or corrupt record of a used store, the
+operator override) belongs to the relay and is not implemented here.
+
 ## Reproduction and controls
 
 Generate the corpus deliberately with:
@@ -102,7 +143,25 @@ Generate the corpus deliberately with:
 GOWORK=off go run ./protocol/cmd/agenttransport-vectors > spec/test-vectors/agent-transport-v1.json
 ```
 
-Normal tests only read the frozen corpus; a mismatch never rewrites it.
+and the credential corpus with:
+
+```
+GOWORK=off go run ./protocol/cmd/agenttransport-vectors -corpus credential > spec/test-vectors/agent-transport-credential-v1.json
+```
+
+Normal tests only read the frozen corpora; a mismatch never rewrites them.
+`make spec-check` also runs `python3 -I
+spec/scripts/reproduce-agent-transport-credential-v1.py`, which re-derives
+every key from its seed, re-signs every block and proof with its own RFC 8032
+Ed25519, rebuilds every credential, and re-evaluates every scope, deposit,
+proof and negative case with its own decoder.
+
+`TestNarrowingProperty` (seed printed; `AGENTTRANSPORT_NARROWING_SEED`
+replays another) compares every prefix of 1,500 random chains against an
+independent per-block oracle, requires that no appended block ever admits a
+request its prefix refused, and requires the generator to reach cases where a
+last-value merge of blocks would widen. `FuzzNarrowing` and
+`FuzzDecodeCredential` run under `make fuzz`.
 `make spec-check` runs `python3 -I spec/scripts/reproduce-agent-transport-v1.py`:
 an independent stdlib implementation of the wire, digest and Edwards key
 validation/derivation. All four positive vectors carry their test-only seeds
