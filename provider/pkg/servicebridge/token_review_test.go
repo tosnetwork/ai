@@ -277,6 +277,11 @@ func TestTokenProviderPauseIsAssetScopedAndPreservesPolicy(t *testing.T) {
 	if err := CheckTokenSafety(context.Background(), w.c, w.env()); err != nil && !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("asset-specific pause send failed: %v", err)
 	}
+	// Check isolation before reconciliation: an unintended second actor send
+	// must fail this assertion, not a later per-actor history check.
+	if !other.Data.Active || w.sends != 1 {
+		t.Fatal("asset-specific pause affected USDC before reconciliation")
+	}
 	if err := CheckTokenSafety(context.Background(), w.c, w.env()); err != nil {
 		t.Fatalf("asset-specific pause reconciliation failed: %v", err)
 	}
