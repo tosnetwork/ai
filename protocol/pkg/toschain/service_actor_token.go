@@ -36,7 +36,7 @@ func (s *ServiceActorSession) ReadTokenActor(ctx context.Context, actor string) 
 		return nil, false, errors.New("token actor must be canonical on workchain 0")
 	}
 	vote, _, err := quorumRead(ctx, s.nodes, s.reader.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, canonical, s.seqno, s.reader.network, s.reader.codeHash)
+		return readNativeAccountStateAt(ctx, node, canonical, s.seqno, s.reader.network, s.reader.codeHash)
 	})
 	if err != nil {
 		return nil, false, err
@@ -140,7 +140,7 @@ func (s *ServiceActorSession) ReadTokenWallet(ctx context.Context, owner string,
 	}
 	codeHash := "tvm-cell-sha256:" + hex.EncodeToString(route.WalletCodeHash[:])
 	vote, _, err := quorumRead(ctx, s.nodes, s.reader.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, address, s.seqno, s.reader.network, codeHash)
+		return readNativeAccountStateAt(ctx, node, address, s.seqno, s.reader.network, codeHash)
 	})
 	if err != nil {
 		return nil, false, err

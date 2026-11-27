@@ -251,7 +251,7 @@ func (s *ServiceActorSession) ReadTokenAsset(ctx context.Context, master string,
 		return nil, errors.New("bridge configuration names another bridge")
 	}
 	vote, _, err := quorumRead(ctx, s.nodes, s.reader.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, selected.Bridge, s.seqno, s.reader.network, selected.BridgeCodeHash)
+		return readNativeAccountStateAt(ctx, node, selected.Bridge, s.seqno, s.reader.network, selected.BridgeCodeHash)
 	})
 	if err != nil {
 		return nil, err
@@ -278,7 +278,7 @@ func (s *ServiceActorSession) ReadTokenAsset(ctx context.Context, master string,
 		return nil, errors.New("token master address does not derive from the pinned bridge codes")
 	}
 	minter, _, err := quorumRead(ctx, s.nodes, s.reader.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, master, s.seqno, s.reader.network, selected.MinterCodeHash)
+		return readNativeAccountStateAt(ctx, node, master, s.seqno, s.reader.network, selected.MinterCodeHash)
 	})
 	if err != nil {
 		return nil, err

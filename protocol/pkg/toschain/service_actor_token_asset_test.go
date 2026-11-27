@@ -16,6 +16,7 @@ import (
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/tosutils-go/tlb"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
@@ -152,7 +153,7 @@ func TestTokenRecognitionReadsOneCheckpointAndChecksEveryBinding(t *testing.T) {
 	minterCode := cell.BeginCell().MustStoreUInt(1, 8).EndCell()
 	root := bytes.Repeat([]byte{8}, 32)
 	network := &nativev1.NetworkDomain{NetworkId: "tos:token-read", GenesisRootHash: "sha256:" + strings.Repeat("31", 32), GenesisFileHash: "sha256:" + strings.Repeat("32", 32)}
-	// Account history is exact even though the test code cells are synthetic.
+	// The last transaction may have been pruned while finalized account state remains.
 	txs := map[string]map[string]any{}
 	accounts := map[string]*cell.Cell{pin.Bridge: bridgeData, pin.Master: minterData}
 	// The transaction account must match too, not just the RPC account summary.
@@ -225,7 +226,8 @@ func TestTokenRecognitionReadsOneCheckpointAndChecksEveryBinding(t *testing.T) {
 					}
 					result = map[string]any{"@type": "raw.fullAccountState", "balance": "1000", "code": bocText(code), "data": bocText(accounts[call.Params.Address]), "last_transaction_id": txs[call.Params.Address]["transaction_id"], "block_id": block, "state": "active"}
 				case "getTransactions":
-					result = []any{txs[call.Params.Address]}
+					_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": call.ID, "error": map[string]any{"code": -32603, "message": "last transaction pruned: lt not in db"}})
+					return
 				case "runGetMethod":
 					if call.Params.Seqno != 42 {
 						t.Error("getter read unpinned")
@@ -329,7 +331,8 @@ func TestTokenActorInspectionDoesNotReadCurrentRecognition(t *testing.T) {
 				}
 				result = map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "1000", "code": fixture.Code, "data": fixture.Data, "last_transaction_id": transaction["transaction_id"], "block_id": block}
 			case "getTransactions":
-				result = []any{transaction}
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": call.ID, "error": map[string]any{"code": -32603, "message": "last transaction pruned"}})
+				return
 			default:
 				t.Errorf("account inspection consulted %s", call.Method)
 				return
@@ -405,5 +408,76 @@ func TestTokenConfigReadRequiresAWholeValueMajority(t *testing.T) {
 		} else if err == nil {
 			t.Fatal("one honest response became authority without majority")
 		}
+	}
+}
+
+func TestTokenWalletStateSurvivesPrunedLastTransaction(t *testing.T) {
+	code := cell.BeginCell().MustStoreUInt(2, 8).EndCell()
+	owner := testBuyer
+	master, err := nativecore.StandardAddress(testActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := nativecore.ServiceActorTokenAssetRouteV1{Master: master, BridgeConfigParam: 79, WalletCode: code}
+	copy(route.WalletCodeHash[:], code.Hash())
+	wallet, err := nativecore.DeriveServiceActorTokenWallet(owner, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement := cell.BeginCell().MustStoreUInt(0, 64).MustStoreUInt(0, 64).MustStoreBoolBit(false).MustStoreUInt(0, 32).MustStoreUInt(0, 64).MustStoreUInt(0, 64).MustStoreUInt(0, 64).MustStoreDict(nil).MustStoreUInt(0, 64).MustStoreUInt(0, 64).MustStoreDict(nil).EndCell()
+	data := cell.BeginCell().MustStoreCoins(123).MustStoreAddr(rawAddress(t, owner)).MustStoreAddr(rawAddress(t, testActor)).MustStoreRef(code).MustStoreRef(settlement).MustStoreUInt(0, 16).MustStoreDict(nil).EndCell()
+	network := &nativev1.NetworkDomain{NetworkId: "tos:pruned-wallet", GenesisRootHash: "sha256:" + strings.Repeat("31", 32), GenesisFileHash: "sha256:" + strings.Repeat("32", 32)}
+	serve := func() string {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var q struct {
+				ID     uint64 `json:"id"`
+				Method string `json:"method"`
+				Params struct {
+					Address string `json:"address"`
+					Seqno   uint64 `json:"seqno"`
+				} `json:"params"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+				t.Error(err)
+				return
+			}
+			block := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
+			var result any
+			switch q.Method {
+			case "getMasterchainInfo":
+				result = map[string]any{"@type": "blocks.masterchainInfo", "last": block, "init": map[string]any{"root_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x31}, 32)), "file_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x32}, 32))}}
+			case "getAddressInformation":
+				if q.Params.Address != wallet || q.Params.Seqno != 42 {
+					t.Error("wallet read escaped its identity or checkpoint")
+				}
+				result = map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "1000", "code": bocText(code), "data": bocText(data), "block_id": block, "last_transaction_id": map[string]any{"@type": "internal.transactionId", "lt": "10", "hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}}
+			case "getTransactions":
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "error": map[string]any{"code": -32603, "message": "last transaction pruned"}})
+				return
+			default:
+				t.Error("unexpected wallet RPC", q.Method)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "result": result})
+		}))
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+	chain, err := New(Config{Network: network.NetworkId, Endpoints: []string{serve(), serve(), serve()}, Quorum: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &ServiceActorSession{reader: &ServiceActorReader{chain: chain, network: network}, nodes: chain.nodes, seqno: 42}
+	state, found, err := session.ReadTokenWallet(context.Background(), owner, route)
+	if err != nil || !found {
+		t.Fatalf("pruned wallet state refused: %v", err)
+	}
+	if state.BalanceAtomic.Cmp(big.NewInt(123)) != 0 || state.LastTransaction.LT != 10 {
+		t.Fatal("wallet balance or finalized anchor missing")
+	}
+	// Execution evidence remains unavailable: state does not manufacture a BOC.
+	_, err = readNativeAccountAt(context.Background(), chain.nodes[0], wallet, 42, network, "tvm-cell-sha256:"+hex.EncodeToString(code.Hash()))
+	if err == nil || !strings.Contains(err.Error(), "pruned") {
+		t.Fatalf("execution read ignored missing history: %v", err)
 	}
 }
