@@ -44,3 +44,12 @@ func TestNoIssuerFeeIsAppliedTwiceToActorFunding(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenLockBudgetUsesTheFlooredReceivedAmount(t *testing.T) {
+	snapshot := tokenissuer.Snapshot{FeeBasisPoints: 19, MaximumFee: "1000000"}
+	limits := TokenAssetLimits{MaxPerCallAtomic: big.NewInt(99810001), MaxWindowAtomic: big.NewInt(99810001)}
+	preview, err := previewTokenLockAt(snapshot, "0:"+strings.Repeat("11", 32), "0:"+strings.Repeat("22", 32), big.NewInt(100000001), big.NewInt(100000001), new(big.Int), limits)
+	if err != nil || preview.MintedAtomic != "99810001" || preview.BudgetDebitAtomic != "99810001" || preview.IssuerFeeAtomic != "190000" {
+		t.Fatalf("floor budget: %+v %v", preview, err)
+	}
+}

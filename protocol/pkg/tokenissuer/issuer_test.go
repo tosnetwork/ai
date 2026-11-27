@@ -16,6 +16,7 @@ import (
 
 type fixture struct {
 	policy                                                         Policy
+	expectedReceiver                                               string
 	blacklisted, paused, deprecated                                bool
 	rate, maximum                                                  uint64
 	stale, wrongChain, wrongHash, wrongCode, failed, malformedBool bool
@@ -29,6 +30,7 @@ func newFixture(t *testing.T) *fixture {
 	code := []byte{0x60, 0x00}
 	hash := sha256.Sum256(code)
 	f := &fixture{policy: Policy{ChainID: 1, Token: "0x" + strings.Repeat("12", 20), Bridge: "0x" + strings.Repeat("34", 20), CodeSHA256: hex.EncodeToString(hash[:]), Profile: Legacy}}
+	f.expectedReceiver = f.policy.Bridge
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			ID     uint64            `json:"id"`
@@ -77,10 +79,29 @@ func newFixture(t *testing.T) *fixture {
 			if call["to"] != f.policy.Token {
 				t.Error("wrong token")
 			}
+			if len(call["data"]) < 10 {
+				t.Error("short fixture call")
+				w.WriteHeader(400)
+				return
+			}
 			selector := call["data"][:10]
 			n := uint64(0)
 			switch selector {
 			case "0xe47d6060", "0xfe575a87":
+				expected := "0xe47d6060"
+				if f.policy.Profile == Standard {
+					expected = "0xfe575a87"
+				}
+				if selector != expected {
+					t.Error("wrong profile blacklist selector")
+					w.WriteHeader(400)
+					return
+				}
+				if call["data"] != expected+strings.Repeat("0", 24)+f.expectedReceiver[2:] {
+					t.Error("blacklist receiver argument differs")
+					w.WriteHeader(400)
+					return
+				}
 				if f.blacklisted {
 					n = 1
 				}
@@ -232,5 +253,47 @@ func TestIssuerPolicyRefusesUnsafeEndpoints(t *testing.T) {
 		if _, err := NewReader(f.policy, nil); err == nil {
 			t.Fatalf("endpoint accepted %s", endpoint)
 		}
+	}
+}
+
+func TestIssuerBlacklistUsesProfileAndRequestedReceiver(t *testing.T) {
+	for _, profile := range []string{Legacy, Standard} {
+		t.Run(profile, func(t *testing.T) {
+			f := newFixture(t)
+			f.policy.Profile = profile
+			f.expectedReceiver = "0x" + strings.Repeat("78", 20)
+			reader, err := NewReader(f.policy, func() time.Time { return time.Unix(1800000000, 0) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = reader.Read(context.Background(), f.expectedReceiver); err != nil {
+				t.Fatal(err)
+			}
+			f.blacklisted = true
+			if _, err = reader.Read(context.Background(), f.expectedReceiver); err == nil || !strings.Contains(err.Error(), "blacklisted") {
+				t.Fatalf("blacklist refusal: %v", err)
+			}
+		})
+	}
+}
+
+func TestReceivedFloorsBeforeApplyingTheCap(t *testing.T) {
+	cases := []struct {
+		name                   string
+		nominal, received, fee int64
+	}{
+		{"non-divisible", 100000001, 99810001, 190000},
+		{"below-cap", 526315789, 525315790, 999999},
+		{"at-cap", 526315790, 525315790, 1000000},
+		{"above-cap", 526316316, 525316316, 1000000},
+	}
+	snapshot := Snapshot{FeeBasisPoints: 19, MaximumFee: "1000000"}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			received, fee, err := snapshot.Received(big.NewInt(tc.nominal))
+			if err != nil || received.Cmp(big.NewInt(tc.received)) != 0 || fee.Cmp(big.NewInt(tc.fee)) != 0 {
+				t.Fatalf("floor/cap: %v %v %v", received, fee, err)
+			}
+		})
 	}
 }
