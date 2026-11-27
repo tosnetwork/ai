@@ -155,3 +155,16 @@ make token-assets-mutants TOKEN_ASSET_MUTANT_LOG_DIR="$EVIDENCE/token-assets-mut
 Every selected test must pass unmutated and fail by its named assertion when
 mutated. Missing tests, source patterns, compilation failures and panics do not
 count as kills. The driver restores every source before proceeding.
+
+## Finalized state and retained history
+
+A fresh offer derives recognition, bridge-stored release codes, minter identity,
+actor policy and wallet balances from account/config state at one strict-majority
+finalized checkpoint. An idle bridge's last transaction need not remain in the
+node's transaction archive for those state reads to succeed. The last-transaction
+identifier in account state remains the anchor; a state read does not manufacture
+or certify that transaction's execution.
+
+Executed purchases, funding and settlement still require the exact relevant
+transaction cells and outcome checks. Keep their archived evidence before node
+pruning; unavailable execution history remains a refusal, never inferred success.
