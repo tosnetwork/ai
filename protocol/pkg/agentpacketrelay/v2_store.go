@@ -157,7 +157,7 @@ type V2OpenOptions struct {
 	RecoveryFloor *uint64
 	// Required for explicit recovery. The callback logs only the public floor,
 	// never a credential, proof, lane, secret or mailbox identifier.
-	RecoveryAudit func(uint64)
+	RecoveryAudit func(uint64) error
 }
 
 func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOptions) (*V2Store, error) {

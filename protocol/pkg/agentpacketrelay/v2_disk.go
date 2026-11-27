@@ -164,11 +164,18 @@ func (d *v2Disk) prepare(fresh bool) error {
 	}
 	return syncDir(d.root)
 }
-func (d *v2Disk) write(name string, data []byte) error {
+func (d *v2Disk) write(name string, data []byte) (result error) {
 	f, err := os.CreateTemp(filepath.Join(d.root, "tmp"), "write-")
 	if err != nil {
 		return err
 	}
+	// A failed periodic mark must not accumulate private temporary files.
+	// Process crashes bypass this defer; startup validates and removes those.
+	defer func() {
+		if err := os.Remove(f.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, err)
+		}
+	}()
 	if _, err = f.Write(data); err != nil {
 		f.Close()
 		return err

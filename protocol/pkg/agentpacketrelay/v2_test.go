@@ -579,7 +579,7 @@ func TestV2ExplicitReplayRecovery(t *testing.T) {
 			options := V2OpenOptions{RecoveryFloor: &floor}
 			var audited uint64
 			if name != "no-audit" {
-				options.RecoveryAudit = func(mark uint64) { audited = mark }
+				options.RecoveryAudit = func(mark uint64) error { audited = mark; return nil }
 			}
 			if name == "too-low" {
 				floor--
@@ -951,5 +951,44 @@ func TestV2InvalidReplayConfigDoesNotCreateState(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("invalid configuration touched storage")
+	}
+}
+
+func TestV2FailedWritesDoNotAccumulateTemporaryFiles(t *testing.T) {
+	s := v2Open(t, filepath.Join(v2Temp(t), "v2"), DefaultV2Limits(1024, 64<<20), testStart)
+	defer v2Close(t, s)
+	s.disk.beforeRename = func(string) error { return errors.New("injected pre-rename refusal") }
+	for range 100 {
+		if err := s.Replay().Record(uint64(testStart.Unix())); err == nil {
+			t.Fatal("write refusal ignored")
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(s.disk.root, "tmp"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed writes leaked temporary files: %d, %v", len(entries), err)
+	}
+}
+
+func TestV2RecoveryAuditMustSucceedBeforeOpen(t *testing.T) {
+	path := filepath.Join(v2Temp(t), "v2")
+	limits := DefaultV2Limits(1024, 64<<20)
+	s := v2Open(t, path, limits, testStart)
+	v2Close(t, s)
+	floor := uint64(testStart.Unix()) + 200
+	opened, err := OpenV2Store(path, limits, testStart, V2OpenOptions{
+		RecoveryFloor: &floor,
+		RecoveryAudit: func(uint64) error { return errors.New("audit sink unavailable") },
+	})
+	if err == nil {
+		v2Close(t, opened)
+		t.Fatal("recovery served without its audit")
+	}
+	// A failed audit may already have persisted a higher mark; a normal restart
+	// must preserve it, rather than rolling back to the last successfully logged one.
+	s = v2Open(t, path, limits, testStart)
+	defer v2Close(t, s)
+	restored, _, _ := s.Replay().State()
+	if restored != floor {
+		t.Fatalf("audit failure lost the durable floor: %d", restored)
 	}
 }

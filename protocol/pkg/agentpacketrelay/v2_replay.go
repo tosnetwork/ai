@@ -24,7 +24,7 @@ type V2Replay struct {
 	closed    bool
 }
 
-func openV2Replay(d *v2Disk, fresh bool, config agenttransport.ReplayConfig, now uint64, recoverFloor *uint64, audit func(uint64)) (*V2Replay, error) {
+func openV2Replay(d *v2Disk, fresh bool, config agenttransport.ReplayConfig, now uint64, recoverFloor *uint64, audit func(uint64) error) (*V2Replay, error) {
 	var mark v2Mark
 	raw, readErr := readV2File(d.root+"/REPLAY", 1024)
 	if readErr == nil {
@@ -56,7 +56,9 @@ func openV2Replay(d *v2Disk, fresh bool, config agenttransport.ReplayConfig, now
 			if err = d.write("REPLAY", raw); err != nil {
 				return nil, err
 			}
-			audit(*recoverFloor)
+			if err = audit(*recoverFloor); err != nil {
+				return nil, errors.New("replay recovery audit failed")
+			}
 		}
 		table, err = agenttransport.RestoreReplayTable(config, mark.Mark)
 	}

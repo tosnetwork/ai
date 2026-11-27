@@ -11,6 +11,34 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "./protocol/pkg/agentpacketrelay"
 MUTANTS = [
     (
+        "recovery-audit-failure",
+        "v2_replay.go",
+        "if err = audit(*recoverFloor); err != nil {",
+        "if err = audit(*recoverFloor); false && err != nil {",
+        "TestV2RecoveryAuditMustSucceedBeforeOpen",
+    ),
+    (
+        "missing-mark-rebaseline",
+        "v2_replay.go",
+        'return nil, errors.New("used V2 store has a missing or corrupt replay record")',
+        'mark = v2Mark{"tos.service.relay-replay.v2", now + agenttransport.MarkLeadSeconds}',
+        "TestV2MissingAndCorruptReplayRefuseUsedStore",
+    ),
+    (
+        "missing-data-directory",
+        "v2_disk.go",
+        "path := filepath.Join(d.root, name)\n\t\tif fresh {",
+        "path := filepath.Join(d.root, name)\n\t\tif true {",
+        "TestV2UsedStoreNeverRecreatesMissingDataDirectory",
+    ),
+    (
+        "failed-write-cleanup",
+        "v2_disk.go",
+        "if err := os.Remove(f.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {",
+        "if err := error(nil); err != nil && !errors.Is(err, os.ErrNotExist) {",
+        "TestV2FailedWritesDoNotAccumulateTemporaryFiles",
+    ),
+    (
         "tagged-lane",
         "v2_store.go",
         "v2DefaultLane  = 2",
