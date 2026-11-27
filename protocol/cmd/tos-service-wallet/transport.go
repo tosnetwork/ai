@@ -80,14 +80,13 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	}
 	// Enforce the same compiled network gate before opening a checkpoint, vault,
 	// signer, or relay connection. No production/epoch-aware registry exists yet.
-	if config.Mode != agenttransport.TestNetworkLegacyEpochZero || *epoch != 0 {
-		return errors.New("transport wallet requires explicit test-network-legacy-epoch-zero mode")
-	}
-	gate, err := agenttransport.NewLegacyTestNetworkResolver(config.Mode, config.Network, unopenedReader{})
-	if err != nil {
+
+	if _, err := agenttransport.NewLegacyTestNetworkResolver(config.Mode, config.Network, unopenedReader{}); err != nil {
 		return err
 	}
-	_ = gate
+	if *epoch != 0 {
+		return errors.New("transport wallet requires current epoch zero in test-network-legacy-epoch-zero mode")
+	}
 	if err := makeTransportDirectory(*directory); err != nil {
 		return err
 	}

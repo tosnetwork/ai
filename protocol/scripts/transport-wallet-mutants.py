@@ -159,8 +159,8 @@ MUTANTS = [
     (
         "epoch-command",
         "../cmd/tos-service-wallet/transport.go",
-        "|| *epoch != 0",
-        "|| (*epoch != 0 && false)",
+        "if *epoch != 0 {",
+        "if false && *epoch != 0 {",
         COMMAND,
         "TestTransportCommandNetworkGatePrecedesSideEffects/epoch",
     ),
