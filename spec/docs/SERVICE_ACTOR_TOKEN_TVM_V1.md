@@ -1317,8 +1317,9 @@ corpus is checked only by the reference script.
 
 The tos PR merged and the release published from tos main; the T3 vectors
 regenerated at that commit and recopied; T7's Go codecs and resolver
-reproducing every vector and refusing every negative; the T13 independent
-security review; the T10 live lifecycles. None is recorded.
+reproducing every vector and refusing every negative; the T10 live
+lifecycles. None is recorded. There is no external security review (owner
+decision 2026-11-27; settlement design 4.7).
 
 ## 17. Invariants
 
