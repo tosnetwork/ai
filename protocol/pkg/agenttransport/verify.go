@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"sync"
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -39,8 +38,8 @@ type Snapshot struct {
 
 // FinalizedResolver must honor cancellation and bound its response. An absent
 // Agent is a successful read with nil State, not an availability error.
-// Errors mean only that finalized state could not be read; invalid proofs or
-// contradictory evidence must return a successful, invalid snapshot instead.
+// Only ErrUnavailable denotes read unavailability; all other errors fail closed.
+// Returned snapshots must be immutable and internally consistent for the call.
 type FinalizedResolver interface {
 	ResolveFinalizedAgent(context.Context, string) (Snapshot, error)
 }
@@ -64,7 +63,7 @@ type Config struct {
 }
 
 type Verifier struct {
-	mu       sync.Mutex
+	gate     chan struct{}
 	config   Config
 	resolver FinalizedResolver
 	passes   map[[32]byte]time.Time
@@ -101,12 +100,12 @@ func NewVerifier(c Config, r FinalizedResolver) (*Verifier, error) {
 	}
 	c.Network = proto.Clone(c.Network).(*nativev1.NetworkDomain)
 	c.ChainPolicy.RegistryCodeHashes = append([]string(nil), c.ChainPolicy.RegistryCodeHashes...)
-	return &Verifier{config: c, resolver: r, passes: make(map[[32]byte]time.Time)}, nil
+	return &Verifier{gate: make(chan struct{}, 1), config: c, resolver: r, passes: make(map[[32]byte]time.Time)}, nil
 }
 
 func (v *Verifier) now() (time.Time, error) {
 	now := v.config.Clock.Now()
-	if now.Unix() < 0 || (!v.lastNow.IsZero() && now.Before(v.lastNow)) {
+	if now.Unix() < 0 || (!v.lastNow.IsZero() && (now.Before(v.lastNow) || now.Round(0).Before(v.lastNow.Round(0)))) {
 		clear(v.passes)
 		return now, errors.New("transport clock moved backwards or before its epoch")
 	}
@@ -132,12 +131,24 @@ func checkUse(d Delegation, purpose Purpose, now time.Time) error {
 // VerifyDelegation checks time and purpose on every use, including cached uses.
 // Only an availability error permits the bounded stale-pass fallback.
 func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpose) (Delegation, error) {
+	if err := ctx.Err(); err != nil {
+		return Delegation{}, err
+	}
 	d, err := DecodeDelegation(b)
 	if err != nil {
 		return d, err
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, v.config.ReadTimeout)
+	defer cancel()
+	select {
+	case v.gate <- struct{}{}:
+		defer func() { <-v.gate }()
+	case <-ctx.Done():
+		return d, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return d, err
+	}
 	now, err := v.now()
 	if err != nil {
 		return d, err
@@ -150,9 +161,11 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 	if cached && now.Sub(checked) < RefreshAfter {
 		return d, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, v.config.ReadTimeout)
-	defer cancel()
 	snapshot, readErr := v.resolver.ResolveFinalizedAgent(ctx, d.AgentID())
+	if err := ctx.Err(); err != nil {
+		delete(v.passes, sha256.Sum256(b))
+		return d, err
+	}
 	after, err := v.now()
 	if err != nil {
 		return d, err
@@ -194,6 +207,9 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 	agent, err := CheckState(v.config.ChainPolicy, v.config.Network, d.AgentID(), s.State)
 	if err != nil {
 		return err
+	}
+	if len(agent.DelegationDigests) > 128 || len(s.AdmissionEpochs) > 128 {
+		return errors.New("finalized delegation set exceeds its bound")
 	}
 	if admitted {
 		found := false
@@ -240,11 +256,21 @@ func (v *Verifier) BuildDelegation(ctx context.Context, d Delegation) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, v.config.ReadTimeout)
 	defer cancel()
+	select {
+	case v.gate <- struct{}{}:
+		defer func() { <-v.gate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s, err := v.resolver.ResolveFinalizedAgent(ctx, d.AgentID())
+	if expired := ctx.Err(); expired != nil {
+		return nil, expired
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -252,36 +278,4 @@ func (v *Verifier) BuildDelegation(ctx context.Context, d Delegation) ([]byte, e
 		return nil, err
 	}
 	return b, nil
-}
-
-// LegacyResolver is the deployed, epoch-less finalized state reader.
-type LegacyResolver interface {
-	ResolveAgent(context.Context, string) (*nativev1.NativeStateV1, bool, error)
-}
-
-type LegacyTestNetworkResolver struct{ source LegacyResolver }
-
-// NewLegacyTestNetworkResolver never enables production or fabricates epochs.
-func NewLegacyTestNetworkResolver(mode NetworkMode, source LegacyResolver) (*LegacyTestNetworkResolver, error) {
-	if mode != TestNetworkLegacyEpochZero || source == nil {
-		return nil, errors.New("epoch-less resolver requires explicit test-network-legacy-epoch-zero mode")
-	}
-	return &LegacyTestNetworkResolver{source: source}, nil
-}
-
-func (r *LegacyTestNetworkResolver) ResolveFinalizedAgent(ctx context.Context, id string) (Snapshot, error) {
-	if err := ctx.Err(); err != nil {
-		return Snapshot{}, err
-	}
-	state, found, err := r.source.ResolveAgent(ctx, id)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if err = ctx.Err(); err != nil {
-		return Snapshot{}, err
-	}
-	if !found {
-		state = nil
-	}
-	return Snapshot{State: state}, nil
 }

@@ -5,7 +5,12 @@ carrier leaves OpenFox: relay-first store-and-forward with an optional direct
 upgrade, signed reachability hints, and short-lived relay credentials that
 are verified offline and revoked by finalized chain state.
 
-**Status: ⬜ Design draft.** Nothing in this document is implemented. It is
+**Status: 🟡 Delegation boundary implemented; transport not accepted.**
+`protocol/pkg/agenttransport` implements the delegation codec and finalized
+verifier of phase 1 item 2, with frozen vectors, an independent reproducer and
+synthetic epoch/cache tests. Production configuration refuses; there is no
+registry epoch adapter, relay deployment or live revocation evidence. The
+remaining transport surfaces are not implemented. This remains
 an incubation design under [ROADMAP section 8.1](ROADMAP.md#81-incubation-designs):
 it carries no gate status and supplies no gate evidence. Section 16 lists the
 evidence each part needs; section 17 is the implementation order. Until the

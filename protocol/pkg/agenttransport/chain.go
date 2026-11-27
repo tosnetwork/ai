@@ -96,7 +96,7 @@ func CheckState(policy ChainPolicy, network *nativev1.NetworkDomain, agentID str
 	if err := validateNetwork(network); err != nil {
 		return nil, err
 	}
-	if !AgentPattern.MatchString(agentID) {
+	if !agentPattern.MatchString(agentID) {
 		return nil, errors.New("invalid Agent identifier")
 	}
 	if state == nil {
@@ -154,12 +154,15 @@ func CheckState(policy ChainPolicy, network *nativev1.NetworkDomain, agentID str
 	return agent, nil
 }
 
-var AgentPattern = regexp.MustCompile(`^agent_[0-9a-f]{64}$`)
+var (
+	agentPattern       = regexp.MustCompile(`^agent_[0-9a-f]{64}$`)
+	networkHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
 
 func validateNetwork(network *nativev1.NetworkDomain) error {
 	if network == nil || network.NetworkId == "" || len(network.NetworkId) > 128 ||
-		!regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(network.GenesisRootHash) ||
-		!regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(network.GenesisFileHash) {
+		!networkHashPattern.MatchString(network.GenesisRootHash) ||
+		!networkHashPattern.MatchString(network.GenesisFileHash) {
 		return errors.New("invalid delegation network domain")
 	}
 	return nil

@@ -1,4 +1,4 @@
-.PHONY: verify fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants token-assets-mutants \
+.PHONY: agenttransport-mutants verify fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants token-assets-mutants \
 	test-privileged \
 	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors messenger-cross-build \
 	messenger-fuzz
@@ -55,6 +55,8 @@ boundary-lint:
 # verify-service-actor-token-vector-copy.py --tos-repo DIR), and their
 # reproducer must rebuild its negative corpus and refuse every case.
 spec-check:
+	GOWORK=off go run ./protocol/cmd/agenttransport-vectors | cmp - spec/test-vectors/agent-transport-v1.json
+	python3 -I spec/scripts/reproduce-agent-transport-v1.py
 	python3 spec/scripts/verify-prediction-market-compatibility.py
 	python3 -I spec/scripts/reproduce-software-work-manifest-v1-service-actor.py
 	python3 -I spec/scripts/reproduce-service-actor-rail-work-frames-v1.py
@@ -160,3 +162,7 @@ MESSENGER_FUZZ_PACKAGES ?= ./messenger/pkg/identity ./messenger/pkg/directory ./
 MESSENGER_FUZZ_EXECUTIONS ?= 2000000
 messenger-fuzz:
 	GOWORK=off scripts/messenger-fuzz.sh $(MESSENGER_FUZZ_EXECUTIONS) $(MESSENGER_FUZZ_PACKAGES)
+
+# Check-removal controls use overlays; no mutated source is written into the checkout.
+agenttransport-mutants:
+	GOWORK=off python3 -I protocol/scripts/agenttransport-mutants.py

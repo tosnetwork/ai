@@ -1,0 +1,553 @@
+package agenttransport
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"google.golang.org/protobuf/proto"
+)
+
+type fakeClock struct{ at time.Time }
+
+func (c *fakeClock) Now() time.Time          { return c.at }
+func (c *fakeClock) advance(d time.Duration) { c.at = c.at.Add(d) }
+
+type locator string
+
+func (l locator) Locate(string, string) (string, error) { return string(l), nil }
+
+type reader struct {
+	snapshot Snapshot
+	err      error
+	calls    int
+	after    func()
+}
+
+func (r *reader) ResolveFinalizedAgent(ctx context.Context, _ string) (Snapshot, error) {
+	r.calls++
+	if _, ok := ctx.Deadline(); !ok {
+		return Snapshot{}, errors.New("missing read deadline")
+	}
+	if r.after != nil {
+		r.after()
+	}
+	return r.snapshot, r.err
+}
+
+type fixture struct {
+	d     Delegation
+	wire  []byte
+	c     Config
+	r     *reader
+	clock *fakeClock
+}
+
+func newFixture(t testing.TB) *fixture {
+	t.Helper()
+	d := sample()
+	public := make([]byte, mldsa44.PublicKeySize)
+	public[0] = 1
+	id, err := mldsa44.KeyID(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := &nativev1.ControllerPolicyV1{Threshold: 1, RecoveryThreshold: 1, Controllers: []*nativev1.ControllerV1{{KeyId: mldsa44.KeyIDText(id), Mldsa44PublicKey: public, Weight: 1, PurposeMask: 15, Recovery: true}}}
+	cell, err := nativecore.PolicyCell(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(d.PolicyHash[:], cell.Hash())
+	wire, err := d.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(wire)
+	network := &nativev1.NetworkDomain{NetworkId: "transport-test", GenesisRootHash: strings.Repeat("1", 64), GenesisFileHash: strings.Repeat("2", 64)}
+	code := "tvm-cell-sha256:" + strings.Repeat("3", 64)
+	state := &nativev1.NativeStateV1{Network: proto.Clone(network).(*nativev1.NetworkDomain), TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: d.AgentID(), Policy: policy, DelegationDigests: []string{"sha256:" + hex.EncodeToString(digest[:])}}}}
+	epoch := uint64(1)
+	r := &reader{snapshot: Snapshot{State: state, CurrentEpoch: &epoch, AdmissionEpochs: map[[32]byte]uint64{digest: 1}, EpochCheckpoint: 10}}
+	clock := &fakeClock{at: time.Unix(1800000010, 0)}
+	return &fixture{d: d, wire: wire, c: Config{Mode: TestNetworkEpochAware, Network: network, ChainPolicy: ChainPolicy{RegistryCodeHashes: []string{code}, MinFinalizedCheckpoint: 10, Locator: locator("0:test")}, Clock: clock}, r: r, clock: clock}
+}
+func (f *fixture) verifier(t testing.TB) *Verifier {
+	t.Helper()
+	v, err := NewVerifier(f.c, f.r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+func verify(t *testing.T, v *Verifier, b []byte, p Purpose, want bool) {
+	t.Helper()
+	_, err := v.VerifyDelegation(context.Background(), b, p)
+	if (err == nil) != want {
+		t.Fatalf("want accepted=%v, got %v", want, err)
+	}
+}
+func (f *fixture) reencode(t *testing.T) {
+	t.Helper()
+	b, err := f.d.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.wire = b
+	digest := sha256.Sum256(b)
+	f.r.snapshot.State.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(digest[:])}
+	f.r.snapshot.AdmissionEpochs = map[[32]byte]uint64{digest: f.d.AuthorizationEpoch}
+}
+
+func TestVerificationChecks(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*fixture)
+		purpose Purpose
+	}{
+		{"strict-domain", func(f *fixture) { f.wire[0] ^= 1 }, Relay},
+		{"network", func(f *fixture) { f.r.snapshot.State.Network.NetworkId = "other" }, Relay},
+		{"finality", func(f *fixture) {
+			f.c.ChainPolicy.MinFinalizedCheckpoint = 0
+			f.r.snapshot.EpochCheckpoint = 0
+			f.r.snapshot.State.Reference.FinalizedCheckpoint = 0
+		}, Relay},
+		{"stale-checkpoint", func(f *fixture) {
+			f.r.snapshot.EpochCheckpoint = 9
+			f.r.snapshot.State.Reference.FinalizedCheckpoint = 9
+		}, Relay},
+		{"registry-code", func(f *fixture) {
+			f.r.snapshot.State.Reference.ContractCodeHash = "tvm-cell-sha256:" + strings.Repeat("6", 64)
+		}, Relay},
+		{"account", func(f *fixture) { f.r.snapshot.State.Reference.Account = "0:other" }, Relay},
+		{"reference", func(f *fixture) { f.r.snapshot.State.Reference = nil }, Relay},
+		{"typed-state-hash", func(f *fixture) { f.r.snapshot.State.TvmStateHash = "" }, Relay},
+		{"transaction-hash", func(f *fixture) { f.r.snapshot.State.Reference.TransactionHash = "" }, Relay},
+		{"agent", func(f *fixture) { f.r.snapshot.State.GetAgent().AgentId = "agent_" + strings.Repeat("a", 64) }, Relay},
+		{"absent", func(f *fixture) { f.r.snapshot.State = nil }, Relay},
+		{"tombstone", func(f *fixture) { f.r.snapshot.State.GetAgent().Tombstoned = true }, Relay},
+		{"membership", func(f *fixture) { f.r.snapshot.State.GetAgent().DelegationDigests = nil }, Relay},
+		{"current-epoch", func(f *fixture) { *f.r.snapshot.CurrentEpoch = 2 }, Relay},
+		{"admission-epoch", func(f *fixture) {
+			for key := range f.r.snapshot.AdmissionEpochs {
+				f.r.snapshot.AdmissionEpochs[key] = 2
+			}
+		}, Relay},
+		{"missing-admission", func(f *fixture) { f.r.snapshot.AdmissionEpochs = nil }, Relay},
+		{"missing-current", func(f *fixture) { f.r.snapshot.CurrentEpoch = nil }, Relay},
+		{"mixed-checkpoints", func(f *fixture) { f.r.snapshot.EpochCheckpoint = 11 }, Relay},
+		{"policy", func(f *fixture) { f.d.PolicyHash[0] ^= 1; f.reencode(t) }, Relay},
+		{"not-before", func(f *fixture) { f.clock.at = time.Unix(int64(f.d.NotBefore)-301, 0) }, Relay},
+		{"expired", func(f *fixture) { f.clock.at = time.Unix(int64(f.d.NotAfter), 0) }, Relay},
+		{"purpose", func(f *fixture) { f.d.Purposes = Hints; f.reencode(t) }, Relay},
+		{"unknown-purpose", func(*fixture) {}, Purpose(3)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			verify(t, f.verifier(t), f.wire, Relay, true)
+			f = newFixture(t)
+			tc.mutate(f)
+			verify(t, f.verifier(t), f.wire, tc.purpose, false)
+		})
+	}
+}
+
+func TestCacheBounds(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	verify(t, v, f.wire, Relay, true)
+	f.clock.advance(299 * time.Second)
+	verify(t, v, f.wire, Relay, true)
+	if f.r.calls != 1 {
+		t.Fatal("refreshed too early")
+	}
+	f.clock.advance(time.Second)
+	verify(t, v, f.wire, Relay, true)
+	if f.r.calls != 2 {
+		t.Fatal("did not refresh at 300 seconds")
+	}
+	f.r.err = ErrUnavailable
+	f.clock.advance(599 * time.Second)
+	verify(t, v, f.wire, Relay, true)
+	f.clock.advance(time.Second)
+	verify(t, v, f.wire, Relay, false)
+	if len(v.passes) != 0 {
+		t.Fatal("expired pass retained")
+	}
+}
+func TestFallbackNeverHidesRevocationOrIntegrity(t *testing.T) {
+	for _, integrity := range []bool{false, true} {
+		f := newFixture(t)
+		v := f.verifier(t)
+		verify(t, v, f.wire, Relay, true)
+		f.clock.advance(300 * time.Second)
+		if integrity {
+			f.r.err = errors.New("invalid proof")
+		} else {
+			f.r.snapshot.State.GetAgent().DelegationDigests = nil
+		}
+		verify(t, v, f.wire, Relay, false)
+		f.r.err = ErrUnavailable
+		verify(t, v, f.wire, Relay, false)
+	}
+	f := newFixture(t)
+	f.r.err = ErrUnavailable
+	verify(t, f.verifier(t), f.wire, Relay, false)
+}
+func TestTimeAndPurposeAreNotCached(t *testing.T) {
+	f := newFixture(t)
+	f.d.Purposes = Relay
+	f.d.NotAfter = f.d.NotBefore + 20
+	f.reencode(t)
+	v := f.verifier(t)
+	verify(t, v, f.wire, Relay, true)
+	verify(t, v, f.wire, Hints, false)
+	f.clock.advance(10 * time.Second)
+	verify(t, v, f.wire, Relay, false)
+	f = newFixture(t)
+	f.r.after = func() { f.clock.advance(time.Hour) }
+	verify(t, f.verifier(t), f.wire, Relay, false)
+}
+func TestCacheCapacityAndClockRollback(t *testing.T) {
+	f := newFixture(t)
+	f.c.CacheEntries = 1
+	v := f.verifier(t)
+	verify(t, v, f.wire, Relay, true)
+	f.d.NotAfter++
+	f.reencode(t)
+	verify(t, v, f.wire, Relay, true)
+	if len(v.passes) != 1 {
+		t.Fatal("unbounded cache")
+	}
+	f.clock.advance(-time.Second)
+	verify(t, v, f.wire, Relay, false)
+	if len(v.passes) != 0 {
+		t.Fatal("rollback retained passes")
+	}
+}
+func TestProductionAndLegacyModes(t *testing.T) {
+	f := newFixture(t)
+	for _, mode := range []NetworkMode{Production, "", "typo"} {
+		c := f.c
+		c.Mode = mode
+		if _, err := NewVerifier(c, f.r); err == nil {
+			t.Fatal("production or unknown mode accepted")
+		}
+	}
+	f.c.Mode = TestNetworkLegacyEpochZero
+	f.d.AuthorizationEpoch = 0
+	f.reencode(t)
+	f.r.snapshot.CurrentEpoch = nil
+	f.r.snapshot.AdmissionEpochs = nil
+	f.r.snapshot.EpochCheckpoint = 0
+	verify(t, f.verifier(t), f.wire, Relay, true)
+	f.d.AuthorizationEpoch = 1
+	f.reencode(t)
+	f.r.snapshot.AdmissionEpochs = nil
+	verify(t, f.verifier(t), f.wire, Relay, false)
+	f.d.AuthorizationEpoch = 0
+	f.reencode(t)
+	epoch := uint64(1)
+	f.r.snapshot.CurrentEpoch = &epoch
+	verify(t, f.verifier(t), f.wire, Relay, false)
+}
+func TestBuilderRequiresCurrentEpochAndPolicy(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	// A builder checks before commitment, so there is intentionally no membership.
+	f.r.snapshot.State.GetAgent().DelegationDigests = nil
+	if _, err := v.BuildDelegation(context.Background(), f.d); err != nil {
+		t.Fatal(err)
+	}
+	f.d.AuthorizationEpoch = 2
+	if _, err := v.BuildDelegation(context.Background(), f.d); err == nil {
+		t.Fatal("built future epoch")
+	}
+	f.d.AuthorizationEpoch = 1
+	f.d.PolicyHash[0] ^= 1
+	if _, err := v.BuildDelegation(context.Background(), f.d); err == nil {
+		t.Fatal("built another policy")
+	}
+}
+func TestPolicyCyclesNeverResurrectOldEpoch(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	verify(t, v, f.wire, Relay, true)
+	original := proto.Clone(f.r.snapshot.State.GetAgent().Policy).(*nativev1.ControllerPolicyV1)
+	f.r.snapshot.State.GetAgent().Policy.RecoveryTimelockSeconds = 60
+	*f.r.snapshot.CurrentEpoch = 2
+	f.clock.advance(300 * time.Second)
+	verify(t, v, f.wire, Relay, false)
+	f.r.snapshot.State.GetAgent().Policy = original
+	*f.r.snapshot.CurrentEpoch = 3
+	verify(t, v, f.wire, Relay, false)
+	// Installing identical bytes still advances the epoch.
+	*f.r.snapshot.CurrentEpoch = 4
+	verify(t, v, f.wire, Relay, false)
+	// Admitting a future-encoded digest early does not authorize that epoch.
+	f.d.AuthorizationEpoch = 5
+	f.reencode(t)
+	for key := range f.r.snapshot.AdmissionEpochs {
+		f.r.snapshot.AdmissionEpochs[key] = 4
+	}
+	verify(t, v, f.wire, Relay, false)
+	*f.r.snapshot.CurrentEpoch = 5
+	verify(t, v, f.wire, Relay, false)
+}
+
+func TestWindowBoundaries(t *testing.T) {
+	f := newFixture(t)
+	f.clock.at = time.Unix(int64(f.d.NotBefore)-300, 0)
+	v := f.verifier(t)
+	for _, purpose := range []Purpose{Relay, Hints, Direct} {
+		verify(t, v, f.wire, purpose, true)
+	}
+	f.clock.at = time.Unix(int64(f.d.NotAfter)-1, 0)
+	verify(t, v, f.wire, Relay, true)
+	f.clock.at = time.Unix(int64(f.d.NotAfter), 0)
+	verify(t, v, f.wire, Relay, false)
+}
+func TestConfigurationBounds(t *testing.T) {
+	for _, change := range []func(*Config){
+		func(c *Config) { c.CacheEntries = -1 }, func(c *Config) { c.CacheEntries = MaxCacheEntries + 1 },
+		func(c *Config) { c.ReadTimeout = -time.Second }, func(c *Config) { c.ReadTimeout = 31 * time.Second },
+		func(c *Config) { c.Network = nil }, func(c *Config) { c.ChainPolicy.Locator = nil },
+	} {
+		f := newFixture(t)
+		change(&f.c)
+		if _, err := NewVerifier(f.c, f.r); err == nil {
+			t.Fatal("invalid configuration accepted")
+		}
+	}
+	f := newFixture(t)
+	f.c.Clock = nil
+	v := f.verifier(t)
+	if _, ok := v.config.Clock.(systemClock); !ok {
+		t.Fatal("no real clock by default")
+	}
+	if _, err := NewVerifier(f.c, nil); err == nil {
+		t.Fatal("no resolver")
+	}
+}
+
+type legacySource struct {
+	state *nativev1.NativeStateV1
+	found bool
+	err   error
+}
+
+func (s legacySource) ResolveState(context.Context, string, string) (*nativev1.NativeStateV1, bool, error) {
+	return s.state, s.found, s.err
+}
+func TestLegacyAdapterIsExplicit(t *testing.T) {
+	f := newFixture(t)
+	source := legacySource{state: f.r.snapshot.State, found: true}
+	for _, mode := range []NetworkMode{Production, TestNetworkEpochAware, ""} {
+		if _, err := NewLegacyTestNetworkResolver(mode, f.c.Network, source); err == nil {
+			t.Fatal("implicit legacy adapter")
+		}
+	}
+	adapter, err := NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := adapter.ResolveFinalizedAgent(context.Background(), f.d.AgentID())
+	if err != nil || !proto.Equal(snapshot.State, source.state) || snapshot.CurrentEpoch != nil || snapshot.AdmissionEpochs != nil || snapshot.EpochCheckpoint != 0 {
+		t.Fatalf("fabricated metadata: %v", err)
+	}
+	source.found = false
+	adapter, err = NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = adapter.ResolveFinalizedAgent(context.Background(), f.d.AgentID())
+	if err != nil || snapshot.State != nil {
+		t.Fatal("missing Agent accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err = adapter.ResolveFinalizedAgent(ctx, f.d.AgentID()); err == nil {
+		t.Fatal("ignored cancellation")
+	}
+}
+func TestCancelledRequestNeverUsesAPass(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	verify(t, v, f.wire, Relay, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := v.VerifyDelegation(ctx, f.wire, Relay); err == nil {
+		t.Fatal("cancelled request accepted")
+	}
+}
+
+func TestLegacyPolicyCycleHasTheDocumentedGap(t *testing.T) {
+	f := newFixture(t)
+	f.c.Mode = TestNetworkLegacyEpochZero
+	f.d.AuthorizationEpoch = 0
+	f.reencode(t)
+	f.r.snapshot.CurrentEpoch = nil
+	f.r.snapshot.AdmissionEpochs = nil
+	f.r.snapshot.EpochCheckpoint = 0
+	v := f.verifier(t)
+	verify(t, v, f.wire, Relay, true)
+	original := proto.Clone(f.r.snapshot.State.GetAgent().Policy).(*nativev1.ControllerPolicyV1)
+	f.r.snapshot.State.GetAgent().Policy.RecoveryTimelockSeconds = 60
+	f.clock.advance(300 * time.Second)
+	verify(t, v, f.wire, Relay, false)
+	f.r.snapshot.State.GetAgent().Policy = original
+	// No epoch exists: returning to A resurrects its digest, and installing
+	// identical bytes cannot be detected. This is why this mode is test-only.
+	verify(t, v, f.wire, Relay, true)
+	f.r.snapshot.State.GetAgent().Sequence++
+	f.clock.advance(300 * time.Second)
+	verify(t, v, f.wire, Relay, true)
+}
+func TestWithdrawalAndReadmissionAreScopedByEpoch(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	verify(t, v, f.wire, Relay, true)
+	old := append([]byte{}, f.wire...)
+	oldDigest := sha256.Sum256(old)
+	f.d.NotAfter++
+	f.reencode(t)
+	sibling := append([]byte{}, f.wire...)
+	// Withdrawing the first digest does not revoke its sibling in this epoch.
+	f.clock.advance(300 * time.Second)
+	verify(t, v, old, Relay, false)
+	verify(t, v, sibling, Relay, true)
+	// A new admission after an epoch bump cannot revive bytes encoding epoch 1.
+	*f.r.snapshot.CurrentEpoch = 2
+	f.r.snapshot.State.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(oldDigest[:])}
+	f.r.snapshot.AdmissionEpochs = map[[32]byte]uint64{oldDigest: 2}
+	verify(t, v, old, Relay, false)
+	// A future-encoded digest admitted now is not valid in the next epoch under
+	// its earlier admission. Only a deliberate new admission can authorize it.
+	f.d.AuthorizationEpoch = 3
+	f.reencode(t)
+	digest := sha256.Sum256(f.wire)
+	f.r.snapshot.AdmissionEpochs[digest] = 2
+	verify(t, v, f.wire, Relay, false)
+	*f.r.snapshot.CurrentEpoch = 3
+	verify(t, v, f.wire, Relay, false)
+	f.r.snapshot.AdmissionEpochs[digest] = 3
+	verify(t, v, f.wire, Relay, true)
+}
+func TestFinalizedSetBounds(t *testing.T) {
+	f := newFixture(t)
+	f.r.snapshot.State.GetAgent().DelegationDigests = append(f.r.snapshot.State.GetAgent().DelegationDigests, make([]string, 128)...)
+	verify(t, f.verifier(t), f.wire, Relay, false)
+	f = newFixture(t)
+	for i := range 129 {
+		var digest [32]byte
+		digest[0] = byte(i)
+		f.r.snapshot.AdmissionEpochs[digest] = 1
+	}
+	verify(t, f.verifier(t), f.wire, Relay, false)
+}
+
+func TestTimeArithmeticDoesNotWrap(t *testing.T) {
+	f := newFixture(t)
+	f.d.NotBefore = ^uint64(0) - 10
+	f.d.NotAfter = ^uint64(0)
+	f.reencode(t)
+	verify(t, f.verifier(t), f.wire, Relay, false)
+	f = newFixture(t)
+	f.clock.at = time.Unix(-1, 0)
+	verify(t, f.verifier(t), f.wire, Relay, false)
+}
+
+// signalledContext exposes entry to the wait without an ordering sleep.
+type signalledContext struct {
+	context.Context
+	entered chan struct{}
+}
+
+func (c signalledContext) Done() <-chan struct{} {
+	select {
+	case c.entered <- struct{}{}:
+	default:
+	}
+	return c.Context.Done()
+}
+func TestCancellationInterruptsTheSerializationWait(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	v.gate <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{}, 1)
+	finished := make(chan error, 1)
+	go func() {
+		_, err := v.VerifyDelegation(signalledContext{Context: ctx, entered: entered}, f.wire, Relay)
+		finished <- err
+	}()
+	<-entered
+	cancel()
+	if err := <-finished; err == nil {
+		t.Fatal("cancelled wait passed")
+	}
+	if f.r.calls != 0 {
+		t.Fatal("cancelled waiter performed a read")
+	}
+	<-v.gate
+	verify(t, v, f.wire, Relay, true)
+}
+
+func TestTimeAfterReadAtExpiration(t *testing.T) {
+	f := newFixture(t)
+	f.clock.at = time.Unix(int64(f.d.NotAfter)-1, 0)
+	f.r.after = func() { f.clock.advance(time.Second) }
+	verify(t, f.verifier(t), f.wire, Relay, false)
+}
+
+func TestLegacyReaderUsesTheOriginalNetworkBeforeNormalization(t *testing.T) {
+	f := newFixture(t)
+	f.c.Mode = TestNetworkLegacyEpochZero
+	f.d.AuthorizationEpoch = 0
+	f.reencode(t)
+	original := f.r.snapshot.State
+	original.Network.GenesisRootHash = "sha256:" + original.Network.GenesisRootHash
+	original.Network.GenesisFileHash = "sha256:" + original.Network.GenesisFileHash
+	source := legacySource{state: original, found: true}
+	adapter, err := NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, &source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := NewVerifier(f.c, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify(t, v, f.wire, Relay, true)
+	if original.Network.GenesisRootHash == f.c.Network.GenesisRootHash {
+		t.Fatal("mutated the reader's snapshot")
+	}
+	// A mismatched original tuple must not be laundered by normalization.
+	original.Network.GenesisRootHash = "sha256:" + strings.Repeat("a", 64)
+	f.clock.advance(300 * time.Second)
+	verify(t, v, f.wire, Relay, false)
+	source.err = ErrUnavailable
+	verify(t, v, f.wire, Relay, false)
+}
+
+func BenchmarkVerifyCached(b *testing.B) {
+	f := newFixture(b)
+	v := f.verifier(b)
+	if _, err := v.VerifyDelegation(context.Background(), f.wire, Relay); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := v.VerifyDelegation(context.Background(), f.wire, Relay); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
