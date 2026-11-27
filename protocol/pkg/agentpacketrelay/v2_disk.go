@@ -32,7 +32,7 @@ func openV2Disk(path string) (*v2Disk, bool, error) {
 	for parent := path; ; parent = filepath.Dir(parent) {
 		info, err := os.Lstat(parent)
 		if err == nil {
-			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || (info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0) {
+			if !trustedV2Ancestor(info) {
 				return nil, false, errors.New("V2 store has an untrusted ancestor")
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -118,6 +118,10 @@ func openV2Disk(path string) (*v2Disk, bool, error) {
 	}
 	return d, false, nil
 }
+func trustedV2Ancestor(info os.FileInfo) bool {
+	return info != nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 && osguard.TrustedExecutableOwner(info) && (info.Mode().Perm()&0o022 == 0 || info.Mode()&os.ModeSticky != 0)
+}
+
 func privateV2File(path string, absent bool) error {
 	info, err := os.Lstat(path)
 	if absent && errors.Is(err, os.ErrNotExist) {

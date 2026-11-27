@@ -11,6 +11,13 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "./protocol/pkg/agentpacketrelay"
 MUTANTS = [
     (
+        "ancestor-owner",
+        "v2_disk.go",
+        "osguard.TrustedExecutableOwner(info)",
+        "(osguard.TrustedExecutableOwner(info) || true)",
+        "TestV2AncestorOwnerCannotReplaceStore",
+    ),
+    (
         "recovery-audit-failure",
         "v2_replay.go",
         "if err = audit(*recoverFloor); err != nil {",
