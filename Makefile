@@ -179,6 +179,7 @@ spec-check: reachability-vectors-check
 reachability-vectors-check:
 	GOWORK=off go run ./protocol/cmd/agenttransport-reachability-vectors | cmp - spec/test-vectors/agent-transport-reachability-v1.json
 	python3 -I spec/scripts/reproduce-agent-transport-reachability-v1.py
+	python3 -I protocol/scripts/test-reachability-reproducer.py
 
 agenttransport-mutants: agenttransport-reachability-mutants
 agenttransport-reachability-mutants:

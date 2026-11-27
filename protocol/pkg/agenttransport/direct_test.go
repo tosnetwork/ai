@@ -165,6 +165,12 @@ func TestReceiptOutcomesAndBindings(t *testing.T) {
 		if _, err := v.VerifyReceipt(context.Background(), wire, f.wire, receipt.RecipientAgent, other); err == nil {
 			t.Fatal("receipt envelope binding ignored")
 		}
+		forgedRecipient := bytes.Clone(wire)
+		forgedRecipient[len(receiptDomain)] ^= 1
+		copy(forgedRecipient[len(forgedRecipient)-64:], ed25519.Sign(key, forgedRecipient[:len(forgedRecipient)-64]))
+		if _, err := v.VerifyReceipt(context.Background(), forgedRecipient, f.wire, receipt.RecipientAgent, receipt.EnvelopeID); err == nil {
+			t.Fatal("signed receipt named another recipient")
+		}
 		agent := receipt.RecipientAgent
 		agent[0]++
 		if _, err := v.VerifyReceipt(context.Background(), wire, f.wire, agent, receipt.EnvelopeID); err == nil {
