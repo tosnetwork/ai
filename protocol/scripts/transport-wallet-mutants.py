@@ -77,7 +77,7 @@ MUTANTS = [
         "TestTransportPrivateJournalAndBinding/request",
     ),
     (
-        "empty-record",
+        "missing-version-default",
         "nativewallet/transport.go",
         "r = transportRecord{}",
         "// leave defaults in the decoder",

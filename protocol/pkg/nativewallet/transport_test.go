@@ -261,7 +261,21 @@ func TestTransportPrivateJournalAndBinding(t *testing.T) {
 				case "key":
 					k.key[0] ^= 1
 				case "corrupt":
-					if err := os.WriteFile(filepath.Join(h.directory, "transport.json"), []byte(`{}`), 0o600); err != nil {
+					path := filepath.Join(h.directory, "transport.json")
+					raw, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var record map[string]json.RawMessage
+					if err = json.Unmarshal(raw, &record); err != nil {
+						t.Fatal(err)
+					}
+					delete(record, "version")
+					raw, err = json.Marshal(record)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err = os.WriteFile(path, raw, 0o600); err != nil {
 						t.Fatal(err)
 					}
 				}
