@@ -3,6 +3,7 @@ package toschain
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -479,5 +480,90 @@ func TestTokenWalletStateSurvivesPrunedLastTransaction(t *testing.T) {
 	_, err = readNativeAccountAt(context.Background(), chain.nodes[0], wallet, 42, network, "tvm-cell-sha256:"+hex.EncodeToString(code.Hash()))
 	if err == nil || !strings.Contains(err.Error(), "pruned") {
 		t.Fatalf("execution read ignored missing history: %v", err)
+	}
+}
+
+func TestOfferRegistryStateSurvivesPrunedLastTransaction(t *testing.T) {
+	locator := guarantorTestLocator(t)
+	fixture := newGuarantorFixture(t, locator)
+	subject := registryCapability
+	identity, err := locator.Locate(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, err := decodeCellBOC(identity.StateInitBOC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initSlice := init.MustBeginParse()
+	initSlice.MustLoadUInt(3)
+	initSlice.MustLoadRef()
+	initSlice.MustLoadUInt(1)
+	initialData := initSlice.MustLoadRef()
+	config := initialData.MustLoadRef().MustToCell()
+	version := "1.0.0"
+	key := sha256.Sum256([]byte(version))
+	versions := cell.NewDict(256)
+	err = versions.Set(cell.BeginCell().MustStoreSlice(key[:], 256).EndCell(), cell.BeginCell().MustStoreSlice(bytes.Repeat([]byte{0x55}, 32), 256).MustStoreBoolBit(false).MustStoreRef(cell.BeginCell().MustStoreBinarySnake([]byte(version)).EndCell()).EndCell())
+	if err != nil {
+		t.Fatal(err)
+	}
+	typed := cell.BeginCell().MustStoreUInt(0x4e565331, 32).MustStoreUInt(1, 16).MustStoreUInt(2, 8).MustStoreBoolBit(false).MustStoreUInt(1, 64).MustStoreUInt(1, 64).MustStoreSlice(bytes.Repeat([]byte{0x44}, 32), 256).MustStoreSlice(bytes.Repeat([]byte{0x66}, 32), 256).MustStoreRef(cell.BeginCell().MustStoreUInt(1, 16).MustStoreDict(versions).EndCell()).EndCell()
+	rawID, err := hex.DecodeString(strings.TrimPrefix(subject, "cap_"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := cell.BeginCell().MustStoreUInt(0x4e564431, 32).MustStoreUInt(1, 16).MustStoreUInt(2, 8).MustStoreSlice(rawID, 256).MustStoreRef(config).MustStoreBoolBit(true).MustStoreRef(typed).EndCell()
+	fixture.account = identity.Address
+	fixture.data = bocText(data)
+	fixture.history = []tlb.Transaction{accountTransaction(t, identity.Address, 400, 1000, nil)}
+	block := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
+	serve := func() string {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var q struct {
+				ID     uint64 `json:"id"`
+				Method string `json:"method"`
+				Params struct {
+					Address string `json:"address"`
+					Seqno   uint64 `json:"seqno"`
+				} `json:"params"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+				t.Error(err)
+				return
+			}
+			var result any
+			switch q.Method {
+			case "getMasterchainInfo":
+				result = map[string]any{"@type": "blocks.masterchainInfo", "last": block, "init": map[string]any{"root_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xaa}, 32)), "file_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xbb}, 32))}}
+			case "getAddressInformation":
+				if q.Params.Address != fixture.account || q.Params.Seqno != 42 {
+					t.Error("registry read escaped its identity or checkpoint")
+				}
+				result = map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "1000", "code": fixture.code, "data": fixture.data, "block_id": block, "last_transaction_id": headID(fixture.history[0])}
+			case "getTransactions":
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "error": map[string]any{"code": -32603, "message": "last registry transaction pruned"}})
+				return
+			default:
+				t.Error("unexpected registry RPC", q.Method)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "result": result})
+		}))
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+	chain, err := New(Config{Network: locator.Network.NetworkId, Endpoints: []string{serve(), serve(), serve()}, Quorum: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewSimplifiedNativeResolver(chain, locator, fenceDirectory(t)+"/registry.checkpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &ServiceActorSession{reader: &ServiceActorReader{chain: chain, network: locator.Network, registry: resolver}, nodes: chain.nodes, seqno: 42}
+	state, found, err := session.ResolveRegistry(context.Background(), subject)
+	if err != nil || !found || state == nil || state.GetCapability().GetCapabilityId() != subject || state.GetReference().GetLogicalTime() != 400 || state.GetReference().GetFinalizedCheckpoint() != 42 {
+		t.Fatalf("finalized registry state unavailable after pruning: found=%v err=%v", found, err)
 	}
 }

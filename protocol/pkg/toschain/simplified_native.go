@@ -105,7 +105,7 @@ func (r *SimplifiedNativeResolver) readNativeAtCheckpoint(ctx context.Context, a
 		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadAction, "invalid DNS Native account", err)
 	}
 	vote, _, err := quorumRead(ctx, r.chain.nodes, r.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, canonical, checkpoint.Sequence, r.network, r.locator.CodeHash)
+		return readNativeAccountStateAt(ctx, node, canonical, checkpoint.Sequence, r.network, r.locator.CodeHash)
 	})
 	if err != nil {
 		return nil, false, err
