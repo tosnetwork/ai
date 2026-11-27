@@ -1,4 +1,5 @@
-// agenttransport-vectors deliberately emits the frozen delegation corpus.
+// agenttransport-vectors deliberately emits a frozen transport corpus: the
+// delegation corpus by default, the credential corpus with -corpus credential.
 package main
 
 import (
@@ -7,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 
@@ -112,7 +114,18 @@ func run() error {
 	return encoder.Encode(output)
 }
 func main() {
-	if err := run(); err != nil {
+	corpus := flag.String("corpus", "delegation", "delegation or credential")
+	flag.Parse()
+	var err error
+	switch *corpus {
+	case "delegation":
+		err = run()
+	case "credential":
+		err = runCredentials()
+	default:
+		err = fmt.Errorf("unknown corpus %q", *corpus)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

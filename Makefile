@@ -57,6 +57,8 @@ boundary-lint:
 spec-check:
 	GOWORK=off go run ./protocol/cmd/agenttransport-vectors | cmp - spec/test-vectors/agent-transport-v1.json
 	python3 -I spec/scripts/reproduce-agent-transport-v1.py
+	GOWORK=off go run ./protocol/cmd/agenttransport-vectors -corpus credential | cmp - spec/test-vectors/agent-transport-credential-v1.json
+	python3 -I spec/scripts/reproduce-agent-transport-credential-v1.py
 	python3 spec/scripts/verify-prediction-market-compatibility.py
 	python3 -I spec/scripts/reproduce-software-work-manifest-v1-service-actor.py
 	python3 -I spec/scripts/reproduce-service-actor-rail-work-frames-v1.py
@@ -90,6 +92,8 @@ token-assets-mutants:
 FUZZ_EXECUTIONS ?= 1000000
 fuzz:
 	GOWORK=off go test ./protocol/pkg/predictionmarket -run '^$$' -fuzz '^FuzzPredictionDecoders$$' -fuzztime=$(FUZZ_EXECUTIONS)x
+	GOWORK=off go test ./protocol/pkg/agenttransport -run '^$$' -fuzz '^FuzzDecodeCredential$$' -fuzztime=$(FUZZ_EXECUTIONS)x
+	GOWORK=off go test ./protocol/pkg/agenttransport -run '^$$' -fuzz '^FuzzNarrowing$$' -fuzztime=$(FUZZ_EXECUTIONS)x
 
 # The executor service's privileged suite: needs passwordless sudo and the
 # private containerd. Opt-in; not part of verify.
