@@ -42,9 +42,28 @@ func openV2Disk(path string) (*v2Disk, bool, error) {
 			break
 		}
 	}
+	var created []string
+	for p := path; ; p = filepath.Dir(p) {
+		_, err := os.Lstat(p)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, false, err
+		}
+		created = append(created, p)
+	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return nil, false, err
 	}
+	// File/record sync alone does not make a freshly created root's name
+	// durable in its parent. Persist every new directory link before use.
+	for _, p := range append(created, path) {
+		if err := syncDir(filepath.Dir(p)); err != nil {
+			return nil, false, err
+		}
+	}
+
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info) {
 		return nil, false, errors.New("V2 store must be owner-private")

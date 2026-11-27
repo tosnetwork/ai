@@ -64,6 +64,21 @@ func checkedV2Lane(checked agenttransport.CheckedRequest) (v2LaneKey, error) {
 		return v2LaneKey{}, err
 	}
 	if explicit {
+		blocks, err := checked.Credential.Blocks()
+		if err != nil {
+			return v2LaneKey{}, err
+		}
+		firstExplicit := false
+		for _, caveat := range blocks[0].Caveats {
+			if caveat.Type == agenttransport.CaveatLane {
+				firstExplicit = true
+			}
+		}
+		// The implicit issuer-chain lane is already a lane choice. A holder
+		// may repeat a block-0 lane, but cannot replace a default lane.
+		if !firstExplicit {
+			return v2LaneKey{}, agenttransport.ErrCredentialScope
+		}
 		var key v2LaneKey
 		key.Tag = v2ExplicitLane
 		copy(key.Value[:16], lane[:])

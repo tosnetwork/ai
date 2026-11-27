@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -435,4 +436,416 @@ func v2Temp(t testing.TB) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+func TestV2AddressAndByteShares(t *testing.T) {
+	now := uint64(testStart.Unix())
+	r := newRecipient(t)
+	t.Run("per-mailbox-address", func(t *testing.T) {
+		s := newV2Store(DefaultV2Limits(1024, 64<<20))
+		for i := range 9 {
+			want := depositCreated
+			if i == 8 {
+				want = depositQuota
+			}
+			if got := v2Deposit(t, s, r, r.seal(t, testPacket(1), now+3600), v2Loopback(1), now, nil); got != want {
+				t.Fatal("address/mailbox cap", i, got)
+			}
+		}
+	})
+	t.Run("relay-address", func(t *testing.T) {
+		s := newV2Store(DefaultV2Limits(4096, 64<<20))
+		for i := range 65 {
+			peer := newRecipient(t)
+			want := depositCreated
+			if i == 64 {
+				want = depositQuota
+			}
+			if got := v2Deposit(t, s, peer, peer.seal(t, testPacket(1), now+3600), v2Loopback(1), now, nil); got != want {
+				t.Fatal("relay address cap", i, got)
+			}
+		}
+	})
+	t.Run("ipv6-sites", func(t *testing.T) {
+		s := newV2Store(DefaultV2Limits(4096, 64<<20))
+		for i := range 257 {
+			peer := newRecipient(t)
+			var addr [16]byte
+			addr[0] = 0xfd
+			addr[1] = 1
+			addr[6] = byte(i >> 8)
+			addr[7] = byte(i)
+			addr[15] = 1
+			want := depositCreated
+			if i == 256 {
+				want = depositQuota
+			}
+			if got := v2Deposit(t, s, peer, peer.seal(t, testPacket(1), now+3600), netip.AddrFrom16(addr), now, nil); got != want {
+				t.Fatal("IPv6 /48 cap", i, got)
+			}
+		}
+	})
+	t.Run("byte-reservation", func(t *testing.T) {
+		e := r.seal(t, testPacket(100000), now+3600)
+		size := int64(len(e.envelope))
+		l := DefaultV2Limits(1024, size*4)
+		s := newV2Store(l)
+		if got := v2Deposit(t, s, r, e, v2Loopback(1), now, nil); got != depositCreated {
+			t.Fatal(got)
+		}
+		if got := v2Deposit(t, s, r, r.seal(t, testPacket(100000), now+3600), v2Loopback(2), now, nil); got != depositQuota {
+			t.Fatal("stranger byte share borrowed contact reserve")
+		}
+		wire, holder := v2Credential(t, r)
+		checked := v2Checked(t, wire, holder, r.agentID, now, 1)
+		if got := v2Deposit(t, s, r, r.seal(t, testPacket(100000), now+3600), v2Loopback(2), now, &checked); got != depositCreated {
+			t.Fatal("no contact byte reserve")
+		}
+	})
+}
+func TestV2ReplayIssuerBoundAndNoLiveEviction(t *testing.T) {
+	r := newRecipient(t)
+	wire, holder := v2Credential(t, r)
+	now := uint64(testStart.Unix())
+	path := filepath.Join(v2Temp(t), "v2")
+	s, err := OpenV2Store(path, DefaultV2Limits(1024, 64<<20), testStart, V2OpenOptions{Replay: agenttransport.ReplayConfig{Entries: 66}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v2Close(t, s)
+	var first agenttransport.CheckedRequest
+	for i := range 65 {
+		next := v2TestKey(fmt.Sprint("replay-holder-", i))
+		child, err := agenttransport.AppendCredentialBlock(wire, holder, next.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.MaxEnvelopeBytesCaveat(2000 + uint32(i))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		checked := v2Checked(t, child, next, r.agentID, now, byte(i))
+		if i == 0 {
+			first = checked
+		}
+		err = s.replay.Claim(checked, now)
+		if i < 64 && err != nil {
+			t.Fatal(err)
+		}
+		if i == 64 && !errors.Is(err, agenttransport.ErrReplayCredentialFull) {
+			t.Fatal("appending escaped issuer bound", err)
+		}
+	}
+	other, otherHolder := v2Credential(t, newRecipient(t))
+	for i := range 3 {
+		checked := v2Checked(t, other, otherHolder, func() string {
+			c, e := agenttransport.DecodeCredential(other)
+			if e != nil {
+				t.Fatal(e)
+			}
+			d, e := c.Delegation()
+			if e != nil {
+				t.Fatal(e)
+			}
+			return d.AgentID()
+		}(), now, byte(i))
+		err = s.replay.Claim(checked, now)
+		if i < 2 && err != nil {
+			t.Fatal(err)
+		}
+		if i == 2 && !errors.Is(err, agenttransport.ErrReplayTableFull) {
+			t.Fatal("global full not refused", err)
+		}
+	}
+	if err = s.replay.Claim(first, now); !errors.Is(err, agenttransport.ErrCredentialInvalid) {
+		t.Fatal("full table evicted live nonce", err)
+	}
+}
+func TestV2ExplicitReplayRecovery(t *testing.T) {
+	l := DefaultV2Limits(1024, 64<<20)
+	now := uint64(testStart.Unix())
+	for _, name := range []string{"no-audit", "too-low", "valid", "valid-old-mark"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(v2Temp(t), "v2")
+			s := v2Open(t, path, l, testStart)
+			v2Close(t, s)
+			floor := now + 140
+			start := testStart
+			if name == "valid-old-mark" {
+				start = testStart.Add(-100 * time.Second)
+				floor = now + 40
+			} else if err := os.WriteFile(filepath.Join(path, "REPLAY"), []byte("damaged"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			options := V2OpenOptions{RecoveryFloor: &floor}
+			var audited uint64
+			if name != "no-audit" {
+				options.RecoveryAudit = func(mark uint64) { audited = mark }
+			}
+			if name == "too-low" {
+				floor--
+			}
+			recovered, err := OpenV2Store(path, l, start, options)
+			if name == "valid" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer v2Close(t, recovered)
+				f, _, _ := recovered.replay.State()
+				if f != floor || audited != floor {
+					t.Fatal("recovery not restored/audited")
+				}
+			} else if err == nil {
+				v2Close(t, recovered)
+				t.Fatal("unsafe recovery accepted")
+			}
+		})
+	}
+}
+func TestV2CrashWorker(t *testing.T) {
+	root := os.Getenv("RELAY_V2_CRASH_ROOT")
+	if root == "" {
+		return
+	}
+	s := v2Open(t, root, DefaultV2Limits(1024, 64<<20), testStart)
+	hook := func(name string) error {
+		if name == "REPLAY" {
+			os.Exit(23)
+		}
+		return nil
+	}
+	if os.Getenv("RELAY_V2_CRASH_POINT") == "before-rename" {
+		s.disk.beforeRename = hook
+	} else {
+		s.disk.beforeSync = hook
+	}
+	if err := s.replay.Record(uint64(testStart.Unix()) + 100); err != nil {
+		t.Fatal(err)
+	}
+	t.Fatal("crash cut was not reached")
+}
+func TestV2CrashRecordCutsKeepReplaysRefused(t *testing.T) {
+	for _, point := range []string{"before-rename", "after-rename"} {
+		t.Run(point, func(t *testing.T) {
+			path := filepath.Join(v2Temp(t), "v2")
+			l := DefaultV2Limits(1024, 64<<20)
+			s := v2Open(t, path, l, testStart)
+			r := newRecipient(t)
+			wire, holder := v2Credential(t, r)
+			checked := v2Checked(t, wire, holder, r.agentID, uint64(testStart.Unix())+100, 1)
+			if err := s.replay.Claim(checked, uint64(testStart.Unix())); err != nil {
+				t.Fatal(err)
+			}
+			v2Close(t, s)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestV2CrashWorker$", "-test.count=1")
+			cmd.Env = append(os.Environ(), "RELAY_V2_CRASH_ROOT="+path, "RELAY_V2_CRASH_POINT="+point)
+			err := cmd.Run()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 23 {
+				t.Fatal("child did not reach exact cut", err)
+			}
+			s = v2Open(t, path, l, testStart)
+			defer v2Close(t, s)
+			if err = s.replay.Claim(checked, uint64(testStart.Unix())); !errors.Is(err, agenttransport.ErrProofFloor) {
+				t.Fatal("crash resurrected replay", err)
+			}
+		})
+	}
+}
+func TestV2RequestLockWaitIsCancellable(t *testing.T) {
+	s := newV2Store(DefaultV2Limits(1024, 64<<20))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := s.list(ctx, agentDigest{}, uint64(testStart.Unix())); !errors.Is(err, context.Canceled) {
+		t.Fatal("store lock ignored request cancellation", err)
+	}
+}
+
+func TestV2LimitsAndLargestEnvelope(t *testing.T) {
+	l := DefaultV2Limits(4096, 64<<20)
+	for _, bad := range []V2Limits{
+		{l.Base, 65, l.StrangerMaxBytes, 25}, {l.Base, 32, (4 << 20) + 1, 25}, {l.Base, 32, l.StrangerMaxBytes, 26}, {l.Base, -1, l.StrangerMaxBytes, 25}, {l.Base, 32, -1, 25},
+	} {
+		if bad.Validate() == nil {
+			t.Fatal("unbounded limits accepted")
+		}
+	}
+	if l.Validate() != nil {
+		t.Fatal("valid limits refused")
+	}
+	r := newRecipient(t)
+	now := uint64(testStart.Unix())
+	wire, holder := v2Credential(t, r)
+	checked := v2Checked(t, wire, holder, r.agentID, now, 1)
+	s := newV2Store(l)
+	e := r.seal(t, testPacket(agentpacketseal.MaxPacketJSONBytes-len(testPacket(0))), now+3600)
+	if v2Deposit(t, s, r, e, v2Loopback(1), now, &checked) != depositCreated {
+		t.Fatal("large envelope refused")
+	}
+	agent, _ := parseAgentText(r.agentID)
+	body, err := s.get(t.Context(), agent, e.id, now)
+	if err != nil || !bytes.Equal(body, e.envelope) {
+		t.Fatal("large roundtrip failed", err)
+	}
+}
+func TestV2CheckedRecordShapeAndStorePermissions(t *testing.T) {
+	for _, name := range []string{"format", "unknown-root", "extra-record", "public-root", "link-root"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(v2Temp(t), "v2")
+			l := DefaultV2Limits(1024, 64<<20)
+			s := v2Open(t, path, l, testStart)
+			v2Close(t, s)
+			switch name {
+			case "format":
+				if err := os.WriteFile(filepath.Join(path, "FORMAT"), []byte("wrong"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "unknown-root":
+				if err := os.WriteFile(filepath.Join(path, "unknown"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "extra-record":
+				if err := os.WriteFile(filepath.Join(path, "records", "unknown"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "public-root":
+				if err := os.Chmod(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			case "link-root":
+				alias := filepath.Join(v2Temp(t), "alias")
+				if err := os.Symlink(path, alias); err != nil {
+					t.Fatal(err)
+				}
+				path = alias
+			}
+			if _, err := OpenV2Store(path, l, testStart, V2OpenOptions{}); err == nil {
+				t.Fatal("invalid storage accepted")
+			}
+		})
+	}
+}
+func TestV2RecordsExpireAndFreeBothShares(t *testing.T) {
+	s := newV2Store(DefaultV2Limits(16, 4<<20))
+	r := newRecipient(t)
+	now := uint64(testStart.Unix())
+	agent, _ := parseAgentText(r.agentID)
+	for i := range 4 {
+		e := r.seal(t, testPacket(1), now+3600)
+		if v2Deposit(t, s, r, e, v2Loopback(i+1), now, nil) != depositCreated {
+			t.Fatal("share refused below cap")
+		}
+		if _, err := s.ack(t.Context(), agent, e.id, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.Usage().StrangerEntries != 4 {
+		t.Fatal("tombstones not held")
+	}
+	if err := s.Sweep(testStart.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Usage(); got.StrangerEntries != 0 || got.StrangerBytes != 0 || len(s.strangers) != 0 || len(s.sites) != 0 {
+		t.Fatal("expiry did not free quota", got)
+	}
+}
+
+func TestV2HolderCannotReplaceDefaultLane(t *testing.T) {
+	r := newRecipient(t)
+	wire, holder := v2Credential(t, r)
+	next := v2TestKey("lane-switch")
+	child, err := agenttransport.AppendCredentialBlock(wire, holder, next.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.LaneCaveat([16]byte{1})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := v2Checked(t, child, next, r.agentID, uint64(testStart.Unix()), 1)
+	if _, err = checkedV2Lane(checked); !errors.Is(err, agenttransport.ErrCredentialScope) {
+		t.Fatal("holder moved a default lane", err)
+	}
+	explicit, holder := v2Credential(t, r, agenttransport.LaneCaveat([16]byte{1}))
+	child, err = agenttransport.AppendCredentialBlock(explicit, holder, next.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.LaneCaveat([16]byte{1})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked = v2Checked(t, child, next, r.agentID, uint64(testStart.Unix()), 2)
+	if lane, err := checkedV2Lane(checked); err != nil || lane.Tag != v2ExplicitLane {
+		t.Fatal("repeated issued lane refused", err)
+	}
+}
+
+func TestV2DroppedProofStaysRefusedAfterBackwardClock(t *testing.T) {
+	path := filepath.Join(v2Temp(t), "v2")
+	s := v2Open(t, path, DefaultV2Limits(1024, 64<<20), testStart)
+	defer v2Close(t, s)
+	r := newRecipient(t)
+	wire, holder := v2Credential(t, r)
+	now := uint64(testStart.Unix())
+	old := v2Checked(t, wire, holder, r.agentID, now, 1)
+	if err := s.replay.Claim(old, now); err != nil {
+		t.Fatal(err)
+	}
+	later := v2Checked(t, wire, holder, r.agentID, now+121, 2)
+	if err := s.replay.Claim(later, now+121); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.replay.Record(now - 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.replay.Claim(old, now); !errors.Is(err, agenttransport.ErrProofFloor) {
+		t.Fatal("backward clock revived dropped proof", err)
+	}
+}
+func TestV2ClosedMailboxAndContactEnvelopeScope(t *testing.T) {
+	s := newV2Store(DefaultV2Limits(1024, 64<<20))
+	r := newRecipient(t)
+	now := uint64(testStart.Unix())
+	e := r.seal(t, testPacket(1), now+3600)
+	header, err := agentpacketseal.ParseEnvelope(e.envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := depositInput{header, e.envelope, v2Loopback(1), now, now + 3600}
+	if status, err := s.deposit(t.Context(), input, nil, v2Usage{}); err != nil || status != depositQuota {
+		t.Fatal("closed stranger lane accepted", status, err)
+	}
+	wire, holder := v2Credential(t, r, agenttransport.MaxEnvelopeBytesCaveat(1))
+	checked := v2Checked(t, wire, holder, r.agentID, now, 1)
+	if _, err := s.deposit(t.Context(), input, &checked, v2Usage{}); !errors.Is(err, agenttransport.ErrCredentialScope) {
+		t.Fatal("envelope size caveat not scoped", err)
+	}
+	wire, holder = v2Credential(t, r)
+	checked = v2Checked(t, wire, holder, r.agentID, now, 2)
+	if status, err := s.deposit(t.Context(), input, &checked, v2Usage{}); err != nil || status != depositCreated {
+		t.Fatal("closed stranger policy blocked contact", status, err)
+	}
+}
+func FuzzV2RecordDecoder(f *testing.F) {
+	r := newRecipient(f)
+	now := uint64(testStart.Unix())
+	e := r.seal(f, testPacket(1), now+3600)
+	header, err := agentpacketseal.ParseEnvelope(e.envelope)
+	if err != nil {
+		f.Fatal(err)
+	}
+	rec := v2Record{Version: "tos.service.relay-envelope.v2", Agent: r.agentID, ID: e.id, KeyID: header.RecipientKeyID, Received: now, Expires: now + 3600, Client: v2Loopback(1), Size: int64(len(e.envelope)), Sum: sha256.Sum256(e.envelope), Body: e.envelope}
+	raw, err := encodeV2(rec)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{}`))
+	f.Add([]byte(v2Format))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > maxV2RecordBytes {
+			return
+		}
+		var decoded v2Record
+		if decodeV2(data, &decoded) != nil || decoded.validate() != nil {
+			return
+		}
+		encoded, err := encodeV2(decoded)
+		if err != nil || !bytes.Equal(encoded, data) {
+			t.Fatal("accepted record did not preserve exact bytes", err)
+		}
+	})
 }
