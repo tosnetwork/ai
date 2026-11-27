@@ -118,7 +118,7 @@ func TestV2SeparateFormatsAndExclusiveStore(t *testing.T) {
 	}
 }
 func TestV2TombstoneChargesSurviveRestart(t *testing.T) {
-	l := DefaultV2Limits(256, 64<<20)
+	l := DefaultV2Limits(1024, 64<<20)
 	l.StrangerMaxEnvelopes = 64
 	path := filepath.Join(v2Temp(t), "v2")
 	s := v2Open(t, path, l, testStart)
@@ -145,7 +145,10 @@ func TestV2TombstoneChargesSurviveRestart(t *testing.T) {
 		t.Fatal("restart lost charge")
 	}
 	if got := v2Deposit(t, s, r, r.seal(t, testPacket(1), now+3600), v2Loopback(1), now, nil); got != depositQuota {
-		t.Fatal("stranger tombstones freed share")
+		t.Fatal("stranger tombstones freed the source address budget")
+	}
+	if got := v2Deposit(t, s, r, r.seal(t, testPacket(1), now+3600), v2Loopback(2), now, nil); got != depositCreated {
+		t.Fatal("global share masked the per-address tombstone test")
 	}
 	wire, holder := v2Credential(t, r)
 	checked := v2Checked(t, wire, holder, r.agentID, now, 1)
@@ -420,7 +423,7 @@ func TestV2RecordChecksumsAndNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw[len(raw)/2] ^= 1
+	raw[len(raw)-3] ^= 1
 	if err = os.WriteFile(record, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -848,4 +851,105 @@ func FuzzV2RecordDecoder(f *testing.F) {
 			t.Fatal("accepted record did not preserve exact bytes", err)
 		}
 	})
+}
+
+func TestV2ContactMailboxCountAndBytes(t *testing.T) {
+	now := uint64(testStart.Unix())
+	r := newRecipient(t)
+	t.Run("count", func(t *testing.T) {
+		s := newV2Store(DefaultV2Limits(4096, 256<<20))
+		for lane := range 5 {
+			wire, holder := v2Credential(t, r, agenttransport.LaneCaveat([16]byte{byte(lane + 1)}))
+			checked := v2Checked(t, wire, holder, r.agentID, now, byte(lane))
+			n := 64
+			if lane == 4 {
+				n = 1
+			}
+			for range n {
+				got := v2Deposit(t, s, r, r.seal(t, testPacket(1), now+3600), v2Loopback(lane+1), now, &checked)
+				want := depositCreated
+				if lane == 4 {
+					want = depositQuota
+				}
+				if got != want {
+					t.Fatal("mailbox count cap", lane, got)
+				}
+			}
+		}
+		agent, _ := parseAgentText(r.agentID)
+		entries, err := s.list(t.Context(), agent, now)
+		if err != nil || len(entries) != 256 {
+			t.Fatal("full listing lost entries", len(entries), err)
+		}
+	})
+	t.Run("bytes", func(t *testing.T) {
+		s := newV2Store(DefaultV2Limits(4096, 256<<20))
+		for lane := range 2 {
+			wire, holder := v2Credential(t, r, agenttransport.LaneCaveat([16]byte{byte(lane + 1)}))
+			checked := v2Checked(t, wire, holder, r.agentID, now, byte(lane))
+			n := 64
+			if lane == 1 {
+				n = 1
+			}
+			for range n {
+				e := r.seal(t, testPacket(agentpacketseal.MaxPacketJSONBytes-len(testPacket(0))), now+3600)
+				if len(e.envelope) != MaxEnvelopeBytes {
+					t.Fatal("bound fixture is not maximal", len(e.envelope))
+				}
+				got := v2Deposit(t, s, r, e, v2Loopback(lane+1), now, &checked)
+				want := depositCreated
+				if lane == 1 {
+					want = depositQuota
+				}
+				if got != want {
+					t.Fatal("mailbox byte cap", lane, got)
+				}
+			}
+		}
+	})
+}
+func TestV2IPv6AddressesShareTheir64(t *testing.T) {
+	s := newV2Store(DefaultV2Limits(4096, 64<<20))
+	now := uint64(testStart.Unix())
+	for i := range 65 {
+		r := newRecipient(t)
+		var bytes [16]byte
+		bytes[0] = 0xfd
+		bytes[1] = 1
+		bytes[15] = byte(i + 1)
+		want := depositCreated
+		if i == 64 {
+			want = depositQuota
+		}
+		if got := v2Deposit(t, s, r, r.seal(t, testPacket(1), now+3600), netip.AddrFrom16(bytes), now, nil); got != want {
+			t.Fatal("IPv6 addresses escaped /64", i, got)
+		}
+	}
+}
+
+func TestV2UsedStoreNeverRecreatesMissingDataDirectory(t *testing.T) {
+	for _, name := range []string{"records", "controls", "tmp"} {
+		t.Run(name, func(t *testing.T) {
+			root := v2Temp(t)
+			path := filepath.Join(root, "v2")
+			l := DefaultV2Limits(1024, 64<<20)
+			s := v2Open(t, path, l, testStart)
+			v2Close(t, s)
+			if err := os.Rename(filepath.Join(path, name), filepath.Join(root, "saved-"+name)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := OpenV2Store(path, l, testStart, V2OpenOptions{}); err == nil {
+				t.Fatal("missing used directory was silently initialized")
+			}
+		})
+	}
+}
+func TestV2InvalidReplayConfigDoesNotCreateState(t *testing.T) {
+	path := filepath.Join(v2Temp(t), "v2")
+	if _, err := OpenV2Store(path, DefaultV2Limits(1024, 64<<20), testStart, V2OpenOptions{Replay: agenttransport.ReplayConfig{Entries: -1}}); err == nil {
+		t.Fatal("invalid replay bounds accepted")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("invalid configuration touched storage")
+	}
 }

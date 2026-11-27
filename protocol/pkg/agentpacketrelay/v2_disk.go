@@ -149,11 +149,13 @@ func readV2File(path string, limit int) ([]byte, error) {
 	}
 	return data, nil
 }
-func (d *v2Disk) prepare() error {
+func (d *v2Disk) prepare(fresh bool) error {
 	for _, name := range []string{"records", "controls", "tmp"} {
 		path := filepath.Join(d.root, name)
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			return err
+		if fresh {
+			if err := os.MkdirAll(path, 0o700); err != nil {
+				return err
+			}
 		}
 		info, err := os.Lstat(path)
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info) {
@@ -245,7 +247,11 @@ func decodeV2(raw []byte, value any) error {
 	}
 	// Writer has exactly one JSON representation. Reject missing/duplicate fields
 	// and alternate encodings rather than interpreting a damaged record's defaults.
-	canonical, err := encodeV2(value)
+	canonicalPayload, err := json.Marshal(value)
+	if err != nil || !bytes.Equal(canonicalPayload, wrapper.Payload) {
+		return errors.New("noncanonical V2 payload")
+	}
+	canonical, err := json.Marshal(wrapper)
 	if err != nil || !bytes.Equal(canonical, raw) {
 		return errors.New("noncanonical V2 record")
 	}

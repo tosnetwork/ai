@@ -164,6 +164,9 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 	if err := limits.Validate(); err != nil {
 		return nil, err
 	}
+	if _, err := agenttransport.NewReplayTable(options.Replay); err != nil {
+		return nil, err
+	}
 	if now.Unix() <= 0 {
 		return nil, errors.New("invalid V2 store clock")
 	}
@@ -171,7 +174,11 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 	if err != nil {
 		return nil, err
 	}
-	if err = d.prepare(); err != nil {
+	if fresh && options.RecoveryFloor != nil {
+		d.release()
+		return nil, errors.New("cannot recover an unused V2 store")
+	}
+	if err = d.prepare(fresh); err != nil {
 		d.release()
 		return nil, err
 	}
