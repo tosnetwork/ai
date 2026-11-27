@@ -177,7 +177,7 @@ func TestTwoPinnedAssetsVerifyIndependently(t *testing.T) {
 func TestSuspendedSecondAssetLeavesFirstActive(t *testing.T) {
 	s, pins := twoAssetSession(t, true)
 	if _, err := s.ReadTokenAsset(context.Background(), pins[0].Master, pins); err != nil {
-		t.Fatal(err)
+		t.Fatalf("active first asset affected by second status: %v", err)
 	}
 	if _, err := s.ReadTokenAsset(context.Background(), pins[1].Master, pins); err == nil || !strings.Contains(err.Error(), "not active") {
 		t.Fatalf("suspended asset: %v", err)

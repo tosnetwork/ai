@@ -215,7 +215,7 @@ func tokenHeaderServer(t *testing.T, history []tlb.Transaction, root []byte) str
 	return server.URL
 }
 
-func TestForeignAssetNotificationStaysANotificationWithoutAdmission(t *testing.T) {
+func TestTokenNotificationWithoutSAT1IsNotAnAdmission(t *testing.T) {
 	walletCode := cell.BeginCell().MustStoreUInt(2, 8).EndCell()
 	var walletHash [32]byte
 	copy(walletHash[:], walletCode.Hash())
@@ -244,7 +244,8 @@ func TestForeignAssetNotificationStaysANotificationWithoutAdmission(t *testing.T
 		t.Fatal(err)
 	}
 	body := cell.BeginCell().MustStoreUInt(0x7362d09c, 32).MustStoreUInt(3, 64).MustStoreCoins(1000000).MustStoreAddr(rawAddress(t, testBuyer)).MustStoreBoolBit(true).MustStoreRef(payload).EndCell()
-	// The foreign-notification path finishes normally but emits no SAT1 or SAF1.
+	// Classification alone does not authenticate the sender: without SAT1,
+	// an executed notification is not an admission.
 	tx := buildTransaction(t, 10, 1000, nil, internalIn(t, foreign, body), true, 0)
 	decoded := decodeTokenTestTX(t, tx)
 	if !decoded.TookEffect || decoded.Kind != "notification" || decoded.Sender != foreign || decoded.Sender == own || decoded.Notification == nil || decoded.Notification.Payload == nil || len(decoded.Logs) != 0 {
