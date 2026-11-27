@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/agentrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/tosutils-go/address"
+	"github.com/tosnetwork/tosutils-go/tlb"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
@@ -43,6 +45,13 @@ type prunedCall struct {
 // every other method, or false for a method the read must not consult.
 func prunedHistoryServers(t *testing.T, answer func(call prunedCall) (any, bool)) []string {
 	t.Helper()
+	return prunedHistoryServersByIndex(t, func(_ int, call prunedCall) (any, bool) { return answer(call) })
+}
+
+// prunedHistoryServersByIndex is prunedHistoryServers with each answer told
+// which of the three endpoints it serves.
+func prunedHistoryServersByIndex(t *testing.T, answer func(index int, call prunedCall) (any, bool)) []string {
+	t.Helper()
 	urls := make([]string, 3)
 	for index := range urls {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +65,7 @@ func prunedHistoryServers(t *testing.T, answer func(call prunedCall) (any, bool)
 					"error": map[string]any{"code": -32603, "message": prunedHistoryError}})
 				return
 			}
-			result, ok := answer(call)
+			result, ok := answer(index, call)
 			if !ok {
 				t.Errorf("pruned-history read consulted %s", call.Method)
 				http.Error(w, "unexpected method", http.StatusBadRequest)
@@ -142,32 +151,49 @@ func TestServiceActorStateSurvivesPrunedLastTransaction(t *testing.T) {
 	key := storedAttestorKey(t, dataCell)
 	actor := "0:" + strings.Repeat("4b", 32)
 	block := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
-	urls := prunedHistoryServers(t, func(call prunedCall) (any, bool) {
-		switch call.Method {
-		case "getMasterchainInfo":
-			return prunedMasterchainInfo(block), true
-		case "getAddressInformation":
-			if call.Params.Address != actor || call.Params.Seqno != 42 {
-				t.Error("actor read escaped its identity or checkpoint")
+	// forked endpoints serve the account at the same seqno from another block.
+	actorServers := func(forked map[int]bool) []string {
+		return prunedHistoryServersByIndex(t, func(index int, call prunedCall) (any, bool) {
+			switch call.Method {
+			case "getMasterchainInfo":
+				return prunedMasterchainInfo(block), true
+			case "getAddressInformation":
+				if call.Params.Address != actor || call.Params.Seqno != 42 {
+					t.Error("actor read escaped its identity or checkpoint")
+				}
+				accountBlock := block
+				if forked[index] {
+					accountBlock = tokenTestBlock(bytes.Repeat([]byte{6}, 32), 42)
+				}
+				return map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "1000",
+					"code": vector.Code, "data": vector.Data, "block_id": accountBlock, "last_transaction_id": prunedAnchor()}, true
+			case "runGetMethod":
+				if call.Params.Seqno != 42 || call.Params.Method != "get_attestor_key" {
+					t.Error("attestor getter escaped its checkpoint")
+				}
+				return map[string]any{"@type": "smc.runResult", "exit_code": 0, "block_id": block,
+					"stack": []any{[]any{"cell", map[string]any{"bytes": bocText(key)}}}}, true
 			}
-			return map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "1000",
-				"code": vector.Code, "data": vector.Data, "block_id": block, "last_transaction_id": prunedAnchor()}, true
-		case "runGetMethod":
-			if call.Params.Seqno != 42 || call.Params.Method != "get_attestor_key" {
-				t.Error("attestor getter escaped its checkpoint")
-			}
-			return map[string]any{"@type": "smc.runResult", "exit_code": 0, "block_id": block,
-				"stack": []any{[]any{"cell", map[string]any{"bytes": bocText(key)}}}}, true
-		}
-		return nil, false
-	})
-	network := prunedNetwork("tos:pruned-actor")
-	chain, err := New(Config{Network: network.NetworkId, Endpoints: urls, Quorum: 2})
-	if err != nil {
-		t.Fatal(err)
+			return nil, false
+		})
 	}
-	session := &ServiceActorSession{reader: &ServiceActorReader{chain: chain, network: network, codeHash: vector.CodeHash},
-		nodes: chain.nodes, seqno: 42}
+	network := prunedNetwork("tos:pruned-actor")
+	newSession := func(urls []string) *ServiceActorSession {
+		chain, err := New(Config{Network: network.NetworkId, Endpoints: urls, Quorum: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &ServiceActorSession{reader: &ServiceActorReader{chain: chain, network: network, codeHash: vector.CodeHash},
+			nodes: chain.nodes, seqno: 42}
+	}
+	// Two of three endpoints agree on the account at seqno 42 but from another
+	// block than the getter's: the state read is pinned to the session's one
+	// block, so the mixed read is refused.
+	forked := newSession(actorServers(map[int]bool{0: true, 1: true}))
+	if _, _, err := forked.ReadActor(context.Background(), actor); err == nil || !strings.Contains(err.Error(), "different checkpoint blocks") {
+		t.Fatalf("actor state from another block at the same seqno was accepted: %v", err)
+	}
+	session := newSession(actorServers(nil))
 	account, found, err := session.ReadActor(context.Background(), actor)
 	if err != nil || !found {
 		t.Fatalf("pruned actor state refused: found=%v err=%v", found, err)
@@ -238,7 +264,8 @@ func TestAgentAccountStateSurvivesPrunedLastTransaction(t *testing.T) {
 		t.Fatalf("pruned Agent Account state refused: %v", err)
 	}
 	if !state.Active || state.Address != account || state.OwnerAddress != owner.StringRaw() || state.ControllerEpoch != 9 ||
-		state.Seqno != 7 || state.GlobalID != 42 || state.BalanceAtomic != 9_000_000_000 || at != uint32(now.Unix()) {
+		state.Seqno != 7 || state.GlobalID != 42 || state.BalanceAtomic != 9_000_000_000 || at != uint32(now.Unix()) ||
+		state.CodeHash != reader.accountCode {
 		t.Fatalf("wrong Agent Account state: %+v at=%d", state, at)
 	}
 	// Gift execution evidence is still exact: the pruned transaction is an
@@ -253,9 +280,12 @@ func TestAgentAccountStateSurvivesPrunedLastTransaction(t *testing.T) {
 }
 
 // The relay is an execution-time consumer: its last-transaction time anchors
-// the invalidation window, so it keeps the exact transaction read. A retained
-// transaction yields its authenticated time; a pruned one refuses the vote.
-func TestRelayObservationKeepsExactLastTransactionTime(t *testing.T) {
+// the invalidation window, so it reads the exact last transaction before any
+// state-derived step. A pruned transaction or one without a time refuses the
+// vote at that read; a valid one passes it and reaches the relay authority
+// projection, whose production code pin refuses the synthetic code reported
+// by the state read.
+func TestRelayObservationReadsTheExactLastTransactionFirst(t *testing.T) {
 	fixture, boc, key := loadRelayRustFixture(t)
 	parsed, err := agentgift.ParseAgentNativeSendBOC(boc)
 	if err != nil {
@@ -278,12 +308,14 @@ func TestRelayObservationKeepsExactLastTransactionTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	last.AccountAddr = sender
-	served := rawTransactionOf(t, last)
+	timeless := buildTransaction(t, 10, 0, nil, internalIn(t, fixture.Target, cell.BeginCell().EndCell()), true, 0)
+	timeless.AccountAddr = sender
 	network := relayTestNetwork()
 	block := map[string]any{"@type": "tos.blockIdExt", "workchain": -1, "shard": masterchainShard, "seqno": 42,
 		"root_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32)),
 		"file_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))}
-	observe := func(t *testing.T, pruned bool) (relayNodeVote, error) {
+	observe := func(t *testing.T, transaction tlb.Transaction, pruned bool) (relayNodeVote, error) {
+		served := rawTransactionOf(t, transaction)
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var call prunedCall
 			if err := json.NewDecoder(r.Body).Decode(&call); err != nil {
@@ -338,14 +370,203 @@ func TestRelayObservationKeepsExactLastTransactionTime(t *testing.T) {
 				AuthorizedAgentID: "agent:buyer"}, parsed,
 			agentrelay.RelayExecutionRequest{SignedTransactionBytes: boc, CreatedAtUnix: lastTime - 100})
 	}
-	vote, err := observe(t, false)
+	if _, err := observe(t, last, true); err == nil || !strings.Contains(err.Error(), "lt not in db") {
+		t.Fatalf("relay observation did not refuse at the exact read of a pruned transaction: %v", err)
+	}
+	if _, err := observe(t, timeless, false); err == nil || !strings.Contains(err.Error(), "Native transaction time is missing") {
+		t.Fatalf("relay observation did not authenticate the last-transaction time: %v", err)
+	}
+	if _, err := observe(t, last, false); err == nil || !strings.Contains(err.Error(), "authority projection is invalid") {
+		t.Fatalf("relay authority accepted the code hash the state read did not check: %v", err)
+	}
+}
+
+// prunedAnchorSession serves a newest-first history at checkpoint 42 whose
+// newest retained transactions are still archived and whose older ones,
+// including the oldest retained transaction's predecessor, are pruned.
+func prunedAnchorSession(t *testing.T, history []tlb.Transaction, retained int) *ServiceActorSession {
+	t.Helper()
+	block := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
+	kept := history[:retained]
+	urls := prunedHistoryServersWith(t, func(call prunedCall, raw json.RawMessage) (any, bool) {
+		switch call.Method {
+		case "getMasterchainInfo":
+			return prunedMasterchainInfo(block), true
+		case "getAddressInformation":
+			return map[string]any{"@type": "raw.fullAccountState", "state": "active", "block_id": block,
+				"last_transaction_id": headID(history[0])}, true
+		case "getTransactions":
+			var params struct {
+				Limit int    `json:"limit"`
+				LT    string `json:"lt"`
+				Hash  string `json:"hash"`
+			}
+			if err := json.Unmarshal(raw, &params); err != nil {
+				t.Error(err)
+				return nil, false
+			}
+			for index, transaction := range kept {
+				if strconv.FormatUint(transaction.LT, 10) != params.LT {
+					continue
+				}
+				page := []map[string]any{}
+				for _, item := range kept[index:] {
+					if len(page) == params.Limit {
+						break
+					}
+					encoded, err := item.ToCell()
+					if err != nil {
+						t.Error(err)
+						return nil, false
+					}
+					page = append(page, map[string]any{"@type": "raw.transaction", "data": base64.StdEncoding.EncodeToString(encoded.ToBOC()),
+						"account": strings.TrimPrefix(testActor, "0:"), "transaction_id": map[string]string{"@type": "internal.transactionId",
+							"lt": strconv.FormatUint(item.LT, 10), "hash": base64.StdEncoding.EncodeToString(item.Hash)}})
+				}
+				return page, true
+			}
+			return prunedRPCError, true
+		}
+		return nil, false
+	})
+	network := prunedNetwork("tos:pruned-anchor")
+	chain, err := New(Config{Network: network.NetworkId, Endpoints: urls, Quorum: 2})
 	if err != nil {
-		t.Fatalf("retained relay history refused: %v", err)
+		t.Fatal(err)
 	}
-	if !vote.Candidate.AccountFound || vote.Candidate.CurrentLastTransactionTime != lastTime || vote.Candidate.ExactExternalFound {
-		t.Fatalf("relay vote lost the authenticated last-transaction time: %+v", vote.Candidate)
+	return &ServiceActorSession{reader: &ServiceActorReader{chain: chain, network: network, maxHistory: 1000},
+		nodes: chain.nodes, seqno: 42}
+}
+
+// prunedRPCError makes prunedHistoryServersWith answer with the node's
+// pruned-history error.
+var prunedRPCError = &struct{ pruned bool }{true}
+
+func prunedHistoryServersWith(t *testing.T, answer func(call prunedCall, params json.RawMessage) (any, bool)) []string {
+	t.Helper()
+	urls := make([]string, 3)
+	for index := range urls {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var call struct {
+				prunedCall
+				Raw json.RawMessage `json:"params"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&call); err != nil {
+				t.Error(err)
+				return
+			}
+			call.prunedCall.ID = call.ID
+			if err := json.Unmarshal(call.Raw, &call.prunedCall.Params); err != nil {
+				t.Error(err)
+				return
+			}
+			result, ok := answer(call.prunedCall, call.Raw)
+			switch {
+			case !ok:
+				t.Errorf("pruned-anchor read consulted %s", call.Method)
+				http.Error(w, "unexpected method", http.StatusBadRequest)
+			case result == prunedRPCError:
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": call.ID,
+					"error": map[string]any{"code": -32603, "message": prunedHistoryError}})
+			default:
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": call.ID, "result": result})
+			}
+		}))
+		t.Cleanup(server.Close)
+		urls[index] = server.URL
 	}
-	if _, err := observe(t, true); err == nil || !strings.Contains(err.Error(), "lt not in db") {
-		t.Fatalf("relay observation accepted pruned history: %v", err)
+	return urls
+}
+
+// A sender records the account's last transaction as the anchor before it
+// sends: withdraw and the actor index walk History from it, a token action
+// walks TokenHistory, and wallet senders walk TokenWalletHistory and
+// WalletHistory. Once the node prunes that anchor, each walk still reaches it
+// through the verified predecessor link of the newer transactions.
+func TestAnchoredWalksReachAPrunedAnchorByItsVerifiedLink(t *testing.T) {
+	history := linearHistory(t, 600)
+	ctx := context.Background()
+	walks := map[string]func(*ServiceActorSession, ActorTxID) (ActorTxID, int, error){
+		"withdraw and index History": func(s *ServiceActorSession, anchor ActorTxID) (ActorTxID, int, error) {
+			h, err := s.History(ctx, testActor, &anchor)
+			if err != nil {
+				return ActorTxID{}, 0, err
+			}
+			if h.Result != HistoryAnchorReached {
+				return ActorTxID{}, 0, errors.New("History did not reach its anchor")
+			}
+			return h.Head, len(h.Transactions), nil
+		},
+		"token action TokenHistory": func(s *ServiceActorSession, anchor ActorTxID) (ActorTxID, int, error) {
+			h, err := s.TokenHistory(ctx, testActor, &anchor)
+			if err != nil {
+				return ActorTxID{}, 0, err
+			}
+			if h.Result != HistoryAnchorReached {
+				return ActorTxID{}, 0, errors.New("TokenHistory did not reach its anchor")
+			}
+			return h.Head, len(h.Transactions), nil
+		},
+		"token wallet TokenWalletHistory": func(s *ServiceActorSession, anchor ActorTxID) (ActorTxID, int, error) {
+			h, err := s.TokenWalletHistory(ctx, testActor, &anchor)
+			if err != nil {
+				return ActorTxID{}, 0, err
+			}
+			if h.Result != HistoryAnchorReached {
+				return ActorTxID{}, 0, errors.New("TokenWalletHistory did not reach its anchor")
+			}
+			return h.Head, len(h.Transactions), nil
+		},
+		"buyer wallet WalletHistory": func(s *ServiceActorSession, anchor ActorTxID) (ActorTxID, int, error) {
+			h, err := s.WalletHistory(ctx, testActor, anchor)
+			if err != nil {
+				return ActorTxID{}, 0, err
+			}
+			return h.Head, len(h.Transactions), nil
+		},
+	}
+	head := tokenAnchorID(history[0])
+	for name, walk := range walks {
+		// One sent transaction, a full page, and more than a page above the anchor.
+		for _, retained := range []int{1, actorHistoryPage, actorHistoryPage + 44} {
+			t.Run(name+"/"+strconv.Itoa(retained)+" newer", func(t *testing.T) {
+				session := prunedAnchorSession(t, history, retained)
+				anchor := tokenAnchorID(history[retained])
+				got, count, err := walk(session, anchor)
+				if err != nil || got != head || count != retained {
+					t.Fatalf("pruned anchor not reached: head=%+v count=%d err=%v", got, count, err)
+				}
+			})
+		}
+		t.Run(name+"/link names another hash", func(t *testing.T) {
+			session := prunedAnchorSession(t, history, 3)
+			anchor := tokenAnchorID(history[3])
+			anchor.Hash = strings.Repeat("ab", 32)
+			if _, _, err := walk(session, anchor); err == nil {
+				t.Fatal("an anchor the verified link does not name was accepted")
+			}
+		})
+		t.Run(name+"/anchor older than the retained link", func(t *testing.T) {
+			session := prunedAnchorSession(t, history, 3)
+			if _, _, err := walk(session, tokenAnchorID(history[5])); err == nil || !strings.Contains(err.Error(), "lt not in db") {
+				t.Fatalf("an anchor behind pruned history was inferred: %v", err)
+			}
+		})
+	}
+}
+
+// Production readers pin the real Agent Account code; nothing else sets it.
+func TestAgentGiftReaderPinsTheAgentAccountCode(t *testing.T) {
+	network := prunedNetwork("tos:agent-code-pin")
+	chain, err := New(Config{Network: network.NetworkId, Endpoints: []string{"http://127.0.0.1:1", "http://127.0.0.1:2", "http://127.0.0.1:3"}, Quorum: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := NewAgentGiftReader(chain, network)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reader.accountCode != agentgift.AgentAccountCodeHash {
+		t.Fatalf("Agent Gift reader pins %q, not the Agent Account code", reader.accountCode)
 	}
 }

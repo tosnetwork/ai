@@ -318,7 +318,7 @@ func (r *AgentGiftReader) finalizedAgentAccountAt(ctx context.Context, canonical
 	if err != nil {
 		return agentgift.FinalizedAgentAccount{}, err
 	}
-	decoded, err := decodeAgentAccountData(vote.Data, canonical, vote.Balance, globalID, uint32(observation.observedAt.Unix()))
+	decoded, err := decodeAgentAccountData(vote.Data, canonical, r.accountCode, vote.Balance, globalID, uint32(observation.observedAt.Unix()))
 	return decoded, err
 }
 
@@ -355,7 +355,9 @@ func agentGiftGlobalID(ctx context.Context, nodes []*rpcNode, quorum int, seqno 
 	return returnValue, err
 }
 
-func decodeAgentAccountData(encoded, account string, balance uint64, globalID int32, chainTime uint32) (agentgift.FinalizedAgentAccount, error) {
+// decodeAgentAccountData decodes Agent Account data read under codeHash and
+// reports that code hash, so a consumer's own code pin checks what was read.
+func decodeAgentAccountData(encoded, account, codeHash string, balance uint64, globalID int32, chainTime uint32) (agentgift.FinalizedAgentAccount, error) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return agentgift.FinalizedAgentAccount{}, err
@@ -436,5 +438,5 @@ func decodeAgentAccountData(encoded, account string, balance uint64, globalID in
 	if spentToday < dailyLimit {
 		remaining = dailyLimit - spentToday
 	}
-	return agentgift.FinalizedAgentAccount{Active: true, Address: account, OwnerAddress: owner.StringRaw(), CodeHash: agentgift.AgentAccountCodeHash, DeploymentID: "sha256:" + hex.EncodeToString(deploymentID), GlobalID: globalID, TVMVersion: agentgift.MinimumAgentAccountTVMVersion, ControllerPublicKey: append(ed25519.PublicKey(nil), controller...), ControllerEpoch: controllerEpoch, Seqno: uint32(seqno), BalanceAtomic: balance, MaxPerTxAtomic: maxPerTx, DailyRemainingAtomic: remaining, DefaultTaskTimeoutSecs: defaultTaskTimeout}, nil
+	return agentgift.FinalizedAgentAccount{Active: true, Address: account, OwnerAddress: owner.StringRaw(), CodeHash: codeHash, DeploymentID: "sha256:" + hex.EncodeToString(deploymentID), GlobalID: globalID, TVMVersion: agentgift.MinimumAgentAccountTVMVersion, ControllerPublicKey: append(ed25519.PublicKey(nil), controller...), ControllerEpoch: controllerEpoch, Seqno: uint32(seqno), BalanceAtomic: balance, MaxPerTxAtomic: maxPerTx, DailyRemainingAtomic: remaining, DefaultTaskTimeoutSecs: defaultTaskTimeout}, nil
 }

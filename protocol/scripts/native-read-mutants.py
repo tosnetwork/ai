@@ -19,9 +19,11 @@ EXACT = "readNativeAccountAt("
 RECOGNITION = "TestTokenRecognitionReadsOneCheckpointAndChecksEveryBinding"
 REGISTRY = "TestOfferRegistryStateSurvivesPrunedLastTransaction"
 WALLET = "TestTokenWalletStateSurvivesPrunedLastTransaction"
-RELAY = "TestRelayObservationKeepsExactLastTransactionTime"
+RELAY = "TestRelayObservationReadsTheExactLastTransactionFirst"
+ANCHORED = "TestAnchoredWalksReachAPrunedAnchorByItsVerifiedLink"
+BRIDGE = "./provider/pkg/servicebridge"
 
-# (name, file, unique source anchor, replacement, test that must fail)
+# (name, file, unique source anchor, replacement, test that must fail[, package])
 CASES = [
     # State reads restored to the exact-transaction read.
     (
@@ -108,6 +110,55 @@ CASES = [
         "if false {",
         RECOGNITION,
     ),
+    # The actor state read is pinned to the session's one block.
+    (
+        "actor-block-pin",
+        "service_actor.go",
+        (
+            "if err := s.pin(vote); err != nil {\n\t\treturn nil, false, err\n\t}\n"
+            "\tif !vote.Found {\n\t\treturn nil, false, nil\n\t}\n\tdataCell"
+        ),
+        "if !vote.Found {\n\t\treturn nil, false, nil\n\t}\n\tdataCell",
+        "TestServiceActorStateSurvivesPrunedLastTransaction",
+    ),
+    # The Agent Account code pin is the production one and is reported as read.
+    (
+        "agent-code-constructor",
+        "agent_gift.go",
+        "accountCode: agentgift.AgentAccountCodeHash}",
+        'accountCode: agentgift.AgentAccountCodeHash + "0"}',
+        "TestAgentGiftReaderPinsTheAgentAccountCode",
+    ),
+    (
+        "agent-code-reported",
+        "agent_gift.go",
+        "CodeHash: codeHash, DeploymentID:",
+        "CodeHash: agentgift.AgentAccountCodeHash, DeploymentID:",
+        "TestAgentAccountStateSurvivesPrunedLastTransaction",
+    ),
+    (
+        "agent-code-reported-to-relay",
+        "agent_gift.go",
+        "CodeHash: codeHash, DeploymentID:",
+        "CodeHash: agentgift.AgentAccountCodeHash, DeploymentID:",
+        RELAY,
+    ),
+    # An anchored walk reaches a pruned anchor through the verified link.
+    (
+        "anchor-link-history",
+        "service_actor.go",
+        "if anchor != nil && lastMatches(next, *anchor) {\n\t\t\treturn out, HistoryAnchorReached, nil\n\t\t}",
+        "",
+        ANCHORED,
+    ),
+    (
+        "anchor-link-withdraw",
+        "service_actor.go",
+        "if anchor != nil && lastMatches(next, *anchor) {\n\t\t\treturn out, HistoryAnchorReached, nil\n\t\t}",
+        "",
+        "TestWithdrawalResolvesAfterItsAnchorIsPruned",
+        BRIDGE,
+    ),
     # Execution-time readers keep the exact transaction.
     (
         "exact-read-guard",
@@ -170,14 +221,21 @@ def execute(command):
     return result.returncode, result.stdout + result.stderr
 
 
+def package_of(case):
+    return case[5] if len(case) > 5 else PACKAGE
+
+
 def main():
-    tests = sorted({c[4] for c in CASES})
-    code, output = execute(
-        ["go", "test", "-count=1", "-run", "^(" + "|".join(tests) + ")$", PACKAGE]
-    )
-    if code:
-        raise RuntimeError("baseline failed\n" + output)
-    for name, file, old, new, test in CASES:
+    for package in sorted({package_of(c) for c in CASES}):
+        tests = sorted({c[4] for c in CASES if package_of(c) == package})
+        code, output = execute(
+            ["go", "test", "-count=1", "-run", "^(" + "|".join(tests) + ")$", package]
+        )
+        if code:
+            raise RuntimeError("baseline failed\n" + output)
+    for case in CASES:
+        name, file, old, new, test = case[:5]
+        package = package_of(case)
         source = ROOT / (TOSCHAIN + file)
         original = source.read_text()
         if original.count(old) != 1:
@@ -197,7 +255,7 @@ def main():
                     str(overlay),
                     "-run",
                     "^" + test + "$",
-                    PACKAGE,
+                    package,
                 ]
             )
         if (

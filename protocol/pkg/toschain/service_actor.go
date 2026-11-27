@@ -573,6 +573,12 @@ func walkHistoryEntries(ctx context.Context, node *rpcNode, address string, last
 		}
 		next = transactionID{Type: "internal.transactionId", LT: strconv.FormatUint(oldest.PrevTxLT, 10),
 			Hash: base64.StdEncoding.EncodeToString(oldest.PrevTxHash)}
+		// The oldest fetched transaction's cell hash is verified and commits to
+		// its predecessor, so a link that names the anchor proves the anchor
+		// without reading the anchor's own cell, which a node may have pruned.
+		if anchor != nil && lastMatches(next, *anchor) {
+			return out, HistoryAnchorReached, nil
+		}
 	}
 }
 

@@ -172,6 +172,10 @@ pruning; unavailable execution history remains a refusal, never inferred success
 The same split holds for the native rail and Agent Accounts: `ReadActor` and
 the Agent Account state read need only finalized state, while relay
 observation keeps the exact last transaction because its time anchors the
-invalidation window. `make native-read-mutants` restores each old read, drops
+invalidation window. A sender's recorded anchor may itself be pruned
+later; an anchored history walk reaches it through the hash-verified
+predecessor link of the newer transaction instead of reading the anchor's own
+cell, and an anchor that link does not name still needs its cell.
+`make native-read-mutants` restores each old read, drops
 each anchor check and weakens each execution-time guard in a Go overlay, and
 requires the named test to fail.

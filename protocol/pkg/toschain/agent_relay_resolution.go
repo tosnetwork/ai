@@ -1009,7 +1009,7 @@ func (reader *agentGiftExactRelayCheckpointReader) observeNodeAt(ctx context.Con
 	if !vote.Found {
 		return relayNodeVote{CheckpointID: checkpointID, Candidate: candidate}, nil
 	}
-	account, err := decodeAgentAccountData(vote.Data, parsed.SenderAgentAccount, vote.Balance,
+	account, err := decodeAgentAccountData(vote.Data, parsed.SenderAgentAccount, reader.reader.accountCode, vote.Balance,
 		reader.network.GlobalID, uint32(checkpoint.observedAt.Unix()))
 	if err != nil {
 		return relayNodeVote{}, err
