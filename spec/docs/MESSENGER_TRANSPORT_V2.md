@@ -321,11 +321,36 @@ are not part of the bound):
   stale pass is honoured for the remainder of the 600 seconds and then
   refused.
 
-**Revocation and rotation.** Any policy update, recovery completion,
-tombstone or (once it exists) withdrawal changes check 2, 3 or 4 and
-revokes every transport delegation of the Agent at once; a node re-commits a
-fresh delegation under the new epoch. The registry has no action that
+**Revocation and rotation.** A policy update, recovery completion or
+tombstone changes check 2 or 4 and revokes every transport delegation of the
+Agent at once; a node then re-commits a fresh delegation under the new
+epoch. A withdrawal (once it exists) is selective: it removes one digest, so
+check 3 refuses that delegation alone, the epoch is unchanged and the
+Agent's other delegations keep verifying. The registry has no action that
 removes one delegation digest today; section 18 Q1 adds it.
+
+**Withdrawal is permanent.** A withdrawn digest can never be added again,
+so a withdrawn delegation can never verify again, whatever later happens to
+the policy. The registry change MUST enforce this with a per-Agent set of
+withdrawn digests, which add-delegation checks and refuses:
+
+- withdrawal moves a digest from the live set to the withdrawn set; it is
+  refused only for a digest that is not live, so it never fails for lack of
+  space and a compromised key can always be revoked;
+- the live set stays bounded at 128 digests, as today, and the two sets
+  together at **384** digests per Agent; add-delegation is refused when the
+  live set is full or the two sets together are, so an Agent can commit at
+  most 384 delegations over its lifetime, and the storage, about 12 KiB at
+  the bound, is paid by the Agent like any other state;
+- neither a policy update nor recovery completion clears the withdrawn set;
+  the tombstone, which ends the Agent, may;
+- an Agent that has exhausted the budget can still revoke everything with a
+  policy update (the epoch) but can add no further delegation; at one
+  rotation a month the budget lasts over thirty years.
+
+Replacing a compromised transport key therefore always uses a fresh
+delegation: a new key, hence a new digest, committed after the old one is
+withdrawn.
 
 **Between a revocation and the new delegation.** Mailboxes are keyed by
 Agent, not by delegation, so nothing stored is lost: relays keep accepting
@@ -1254,6 +1279,7 @@ team's).
 | A16 Timestamp poisoning | a mailbox policy and a hint dated `UINT64_MAX`, and one dated 301 s ahead, are refused; a compromised transport key's policy dated 300 s ahead with a zero stranger lane is accepted, then voided by the owner's policy update (on an epoch network) or by the delegation no longer verifying (on a test network), after which the owner's new policy with an earlier `issued_at_unix` is accepted | relay tests, and a live transcript on a test chain |
 | A17 Epoch revocation | on a registry with the authorization epoch: a delegation issued under policy A is refused after A → B → A, and after a policy update that installs identical bytes; on a test network without the epoch the same run shows the gap, which is why production is gated | registry and relay tests; the chain transactions |
 | A18 Directory slots | two relays populated with five delegations of one Agent in different orders each hold four live records and refuse the fifth; neither displaces a live record; a consumer merging both finds the lane's hint; a slot frees on expiry | relay tests; directory dumps |
+| A19 Permanent withdrawal | after withdrawing a digest, re-adding it is refused, also after a policy update and after recovery completion; the other delegations keep verifying; withdrawal still succeeds with both sets at their bound; add-delegation is refused at the 384-digest bound | registry tests in `tos`; chain transactions on a test network |
 
 Production claims additionally need relays and directory relays run by an
 operator other than the core team, and a public chain, as ROADMAP Gate O
@@ -1305,8 +1331,9 @@ test networks, and is enabled per lane by its own configuration.
 
 **Separate work, outside this plan.**
 
-- The registry change of section 18 Q1: the withdraw-delegation action and
-  the authorization epoch, in `tos` and `protocol/pkg/nativecore` (A17).
+- The registry change of section 18 Q1: the withdraw-delegation action, the
+  permanent withdrawn-digest set with its 384-digest bound, and the
+  authorization epoch, in `tos` and `protocol/pkg/nativecore` (A17, A19).
   Until it is finalized on a network, V2 transport runs on test networks
   only (5.1).
 - Key card V2 without a relay list (section 18 Q11).
@@ -1324,7 +1351,9 @@ The questions this design raised, each with its decision (recorded
   authorized like it, together with the Agent's authorization epoch of
   5.1, which every policy update, recovery completion and tombstone
   increments; withdrawal removes one digest without changing the epoch, so
-  it revokes one transport key and leaves the others. It is a `tos` contract change, scheduled after the
+  it revokes one transport key and leaves the others. Withdrawal is
+  permanent: the registry refuses to re-add a withdrawn digest (5.1), and a
+  compromised key is replaced by a fresh delegation. It is a `tos` contract change, scheduled after the
   USDC and USDT settlement work. Until it lands, V2 transport runs on test
   networks only, with the `policy_hash` binding as the revocation; once it
   lands, check 3 of 5.1 covers withdrawal and check 4 every policy change,
