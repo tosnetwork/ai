@@ -188,6 +188,30 @@ MUTANTS = [
         COMMAND,
         "TestTransportPromptBound",
     ),
+    (
+        "private-journal",
+        "nativewallet/transport.go",
+        "!info.Mode().IsRegular() || !singleTransportLink(info) || info.Mode().Perm()&0o077 != 0",
+        "!info.Mode().IsRegular() || !singleTransportLink(info) || (info.Mode().Perm()&0o077 != 0 && false)",
+        WALLET,
+        "TestTransportPrivateJournalAndBinding/journal",
+    ),
+    (
+        "operation-lock",
+        "nativewallet/transport.go",
+        "if !acquired {",
+        "if false && !acquired {",
+        WALLET,
+        "TestTransportPrivateJournalAndBinding/busy",
+    ),
+    (
+        "native-request-context",
+        "nativewallet/transport.go",
+        "RequestId: requestID,",
+        'RequestId: "",',
+        WALLET,
+        "TestTransportRoundTripAndRerun",
+    ),
 ]
 
 
