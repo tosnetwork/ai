@@ -549,6 +549,8 @@ func TestOfferRegistryStateSurvivesPrunedLastTransaction(t *testing.T) {
 	fixture.data = bocText(data)
 	fixture.history = []tlb.Transaction{accountTransaction(t, identity.Address, 400, 1000, nil)}
 	block := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
+	// The endpoints report one chain-authored consensus time, as real nodes do.
+	consensusTime := time.Now().Unix()
 	serve := func() string {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var q struct {
@@ -566,7 +568,7 @@ func TestOfferRegistryStateSurvivesPrunedLastTransaction(t *testing.T) {
 			var result any
 			switch q.Method {
 			case "getConsensusBlock":
-				result = map[string]any{"@type": "ext.blocks.consensusBlock", "consensus_block": uint64(42), "timestamp": time.Now().Unix(), "last_block_utime": time.Now().Unix()}
+				result = map[string]any{"@type": "ext.blocks.consensusBlock", "consensus_block": uint64(42), "timestamp": consensusTime, "last_block_utime": consensusTime}
 			case "getMasterchainInfo":
 				result = map[string]any{"@type": "blocks.masterchainInfo", "last": block, "init": map[string]any{"root_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xaa}, 32)), "file_hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xbb}, 32))}}
 			case "getAddressInformation":
