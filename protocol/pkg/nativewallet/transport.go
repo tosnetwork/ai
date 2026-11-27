@@ -74,6 +74,8 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	if ctx == nil || w.Keys == nil || w.Signer == nil || w.Submitter == nil || w.Confirm == nil {
 		return nil, errors.New("transport issuer dependencies required")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
 	// Constructor enforces the code-pinned network allowlist before any key or
 	// journal operation. Runtime configuration cannot authorize another genesis.
 	verifier, err := agenttransport.NewVerifier(w.Config, w.Resolver)
@@ -108,6 +110,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	}
 	raw, err := readTransportFile(path)
 	if err == nil {
+		r = transportRecord{}
 		if err = jsonstrict.Decode(raw, &r); err != nil {
 			return nil, errors.New("invalid transport operation journal")
 		}
@@ -129,7 +132,9 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		return nil, err
 	}
 	if r.Phase == "key" {
-		snapshot, err := w.Resolver.ResolveFinalizedAgent(ctx, request.AgentID)
+		readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
+		snapshot, err := w.Resolver.ResolveFinalizedAgent(readCtx, request.AgentID)
+		readCancel()
 		if err != nil {
 			return nil, err
 		}
@@ -170,8 +175,8 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		if _, err = rand.Read(nonce); err != nil {
 			return nil, err
 		}
-		action := &nativev1.NativeActionV1{Protocol: nativecore.Protocol, Network: proto.Clone(w.Config.Network).(*nativev1.NetworkDomain), TargetObjectId: request.AgentID, TargetContractCodeHash: snapshot.State.Reference.ContractCodeHash, Generation: agent.Generation, Sequence: agent.Sequence + 1, PredecessorTvmStateHash: snapshot.State.TvmStateHash, Nonce: nonce, Payload: &nativev1.NativeActionV1_DelegateAgent{DelegateAgent: &nativev1.DelegateAgentV1{DelegationDigest: "sha256:" + hex.EncodeToString(digest[:])}}}
-		submission, err := protojson.Marshal(&nativev1.SignedNativeActionV1{Action: action})
+		action := &nativev1.NativeActionV1{Protocol: nativecore.Protocol, Network: NativeTransportNetwork(w.Config.Network), TargetObjectId: request.AgentID, TargetContractCodeHash: snapshot.State.Reference.ContractCodeHash, Generation: agent.Generation, Sequence: agent.Sequence + 1, PredecessorTvmStateHash: snapshot.State.TvmStateHash, Nonce: nonce, Payload: &nativev1.NativeActionV1_DelegateAgent{DelegateAgent: &nativev1.DelegateAgentV1{DelegationDigest: "sha256:" + hex.EncodeToString(digest[:])}}}
+		submission, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&nativev1.SignedNativeActionV1{Action: action})
 		if err != nil {
 			return nil, err
 		}
@@ -210,7 +215,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 			return nil, err
 		}
 		signed.AuthoritySignatures = signatures
-		encoded, err := protojson.Marshal(&signed)
+		encoded, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&signed)
 		if err != nil {
 			return nil, err
 		}
@@ -221,6 +226,14 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	}
 
 	if r.Phase == "prepared" {
+		now := time.Now()
+		if w.Config.Clock != nil {
+			now = w.Config.Clock.Now()
+		}
+		if now.Unix() < 0 || uint64(now.Unix()) >= d.NotAfter {
+			return nil, errors.New("journalled delegation expired before submission")
+		}
+
 		if _, err = verifier.BuildDelegation(ctx, d); err != nil {
 			return nil, err
 		}
@@ -230,8 +243,17 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		if err = saveTransport(path, r); err != nil {
 			return nil, err
 		}
-		if _, err = w.Submitter.SubmitNativeAction(ctx, &nativev1.SubmitNativeActionRequest{Submission: &signed}); err != nil {
-			return nil, fmt.Errorf("delegation outcome unknown; rerun this operation to reconcile: %w", err)
+		built, err := nativecore.BuildAction(signed.Action)
+		if err != nil {
+			return nil, err
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return nil, errors.New("transport submission deadline required")
+		}
+		requestID := "transport-" + strings.TrimPrefix(built.HashString, "tvm-cell-sha256:")
+		if _, err = w.Submitter.SubmitNativeAction(ctx, &nativev1.SubmitNativeActionRequest{Submission: &signed, Context: &nativev1.RequestContext{RequestId: requestID, IdempotencyKey: requestID, CallerId: request.AgentID, DeadlineUnixMillis: deadline.UnixMilli()}}); err != nil {
+			return nil, errors.New("delegation outcome unknown; keep this journal and rerun to reconcile")
 		}
 	}
 	interval := w.PollInterval
@@ -289,7 +311,7 @@ func validateTransportSubmission(s *nativev1.SignedNativeActionV1, wire []byte, 
 	if err != nil {
 		return err
 	}
-	if s.Action == nil || !proto.Equal(s.Action.Network, network) || s.Action.TargetObjectId != d.AgentID() || s.Action.GetDelegateAgent() == nil || s.Action.GetDelegateAgent().DelegationDigest != "sha256:"+hex.EncodeToString(digest[:]) {
+	if s.Action == nil || !proto.Equal(s.Action.Network, NativeTransportNetwork(network)) || s.Action.TargetObjectId != d.AgentID() || s.Action.GetDelegateAgent() == nil || s.Action.GetDelegateAgent().DelegationDigest != "sha256:"+hex.EncodeToString(digest[:]) {
 		return errors.New("journal action differs from transport delegation")
 	}
 	_, err = nativecore.BuildAction(s.Action)
@@ -369,4 +391,16 @@ func saveTransport(path string, r transportRecord) error {
 	}
 	defer dir.Close()
 	return dir.Sync()
+}
+
+// NativeTransportNetwork converts only the textual hash representation used by
+// native actions; it cannot select a different genesis.
+func NativeTransportNetwork(network *nativev1.NetworkDomain) *nativev1.NetworkDomain {
+	if network == nil {
+		return nil
+	}
+	result := proto.Clone(network).(*nativev1.NetworkDomain)
+	result.GenesisRootHash = "sha256:" + result.GenesisRootHash
+	result.GenesisFileHash = "sha256:" + result.GenesisFileHash
+	return result
 }

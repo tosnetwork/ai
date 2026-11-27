@@ -17,6 +17,7 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
+	"github.com/tosnetwork/ai/protocol/internal/osguard"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativeclient"
@@ -79,7 +80,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	}
 	// Enforce the same compiled network gate before opening a checkpoint, vault,
 	// signer, or relay connection. No production/epoch-aware registry exists yet.
-	if config.Mode != agenttransport.TestNetworkLegacyEpochZero {
+	if config.Mode != agenttransport.TestNetworkLegacyEpochZero || *epoch != 0 {
 		return errors.New("transport wallet requires explicit test-network-legacy-epoch-zero mode")
 	}
 	gate, err := agenttransport.NewLegacyTestNetworkResolver(config.Mode, config.Network, unopenedReader{})
@@ -90,7 +91,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	if err := makeTransportDirectory(*directory); err != nil {
 		return err
 	}
-	locator, err := nativecore.NewLocator(config.Network, 0, config.RegistryCodeBOC, config.RegistryCodeHash)
+	locator, err := nativecore.NewLocator(nativewallet.NativeTransportNetwork(config.Network), 0, config.RegistryCodeBOC, config.RegistryCodeHash)
 	if err != nil {
 		return err
 	}
@@ -102,7 +103,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	if idText == "3" {
 		globalID = 3
 	}
-	adapter, err := toschain.New(toschain.Config{Network: config.Network.NetworkId, Endpoints: config.RPC, Quorum: config.Quorum, PinnedNetworkDomain: &toschain.PinnedNetworkDomain{NetworkID: config.Network.NetworkId, GlobalID: globalID, ZeroStateRootHash: config.Network.GenesisRootHash, ZeroStateFileHash: config.Network.GenesisFileHash, WorkchainID: 0}})
+	adapter, err := toschain.New(toschain.Config{Network: config.Network.NetworkId, Endpoints: config.RPC, Quorum: config.Quorum, PinnedNetworkDomain: &toschain.PinnedNetworkDomain{NetworkID: config.Network.NetworkId, GlobalID: globalID, ZeroStateRootHash: "sha256:" + config.Network.GenesisRootHash, ZeroStateFileHash: "sha256:" + config.Network.GenesisFileHash, WorkchainID: 0}})
 	if err != nil {
 		return err
 	}
@@ -114,11 +115,11 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	if err != nil {
 		return err
 	}
-	vault, err := mldsa44.NewTransportVault(*vaultBinary, *vaultPin, os.Getenv("VAULT_URL"))
+	signer, err := mldsa44.NewTosctl(mldsa44.TosctlConfig{Binary: *binary, SHA256: *pin, ConfigPath: *walletConfig, VaultURL: os.Getenv("VAULT_URL")})
 	if err != nil {
 		return err
 	}
-	signer, err := mldsa44.NewTosctl(mldsa44.TosctlConfig{Binary: *binary, SHA256: *pin, ConfigPath: *walletConfig, VaultURL: os.Getenv("VAULT_URL")})
+	vault, err := signer.TransportKeys(*vaultBinary, *vaultPin)
 	if err != nil {
 		return err
 	}
@@ -163,7 +164,7 @@ func loadTransportConfig(path string, config *transportConfig) error {
 		return errors.New("transport config must be an absolute clean path")
 	}
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > 1<<20 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info) || info.Size() > 1<<20 {
 		return errors.New("transport config must be a bounded owner-private regular file")
 	}
 	raw, err := os.ReadFile(path)
@@ -181,7 +182,7 @@ func makeTransportDirectory(path string) error {
 		return err
 	}
 	info, err := os.Lstat(path)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || !osguard.CurrentUserOwns(info) {
 		return errors.New("journal must be an owner-private directory")
 	}
 	return nil

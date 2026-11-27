@@ -83,8 +83,9 @@ func (v *TransportVault) run(ctx context.Context, args ...string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	// The sealed snapshot is shared; ExtraFiles duplicates it for the child.
 	command := exec.CommandContext(ctx, "/proc/self/fd/3", args...)
+	command.Dir = "/"
 	command.ExtraFiles = []*os.File{file}
 	command.Env = []string{"VAULT_URL=" + v.vaultURL, "NO_COLOR=1"}
 	command.WaitDelay = 5 * time.Second
@@ -97,4 +98,13 @@ func (v *TransportVault) run(ctx context.Context, args ...string) ([]byte, error
 		return nil, errors.New("transport vault output exceeds limit")
 	}
 	return out.Bytes(), nil
+}
+
+// TransportKeys opens the transport-key view of this signer's exact custody
+// location without exposing vault credentials to the caller.
+func (t *Tosctl) TransportKeys(binary, pin string) (*TransportVault, error) {
+	if t == nil || !t.CanSign() {
+		return nil, errors.New("controller custody is not configured")
+	}
+	return NewTransportVault(binary, pin, t.config.VaultURL)
 }

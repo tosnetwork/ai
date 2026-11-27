@@ -60,11 +60,13 @@ jobs:
           key: tosctl-${{ env.TOS_HELPER_COMMIT }}
       - name: Build the tosctl helper
         working-directory: tos/tosctl/src
-        run: cargo build -p tosctl --bin tosctl --locked
+        run: |
+          cargo build -p tosctl --bin tosctl --locked
+          cargo build -p secrets-vault --bin secrets-vault-cli --features secrets-vault-cli --locked
       - name: Pin the tosctl helper for the tests
         run: |
           helper="$GITHUB_WORKSPACE/tos/tosctl/src/target/debug/tosctl"
-          chmod 0755 "$helper"
+          chmod 0755 "$helper" "$GITHUB_WORKSPACE/tos/tosctl/src/target/debug/secrets-vault-cli"
           echo "TOS_SERVICE_TOSCTL=$helper" >> "$GITHUB_ENV"
           echo "TOS_SERVICE_TOSCTL_SHA256=$(sha256sum "$helper" | cut -d' ' -f1)" >> "$GITHUB_ENV"
       - uses: actions/setup-go@v5
