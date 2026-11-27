@@ -334,6 +334,10 @@ func (v *Verifier) VerifyHint(ctx context.Context, raw []byte, policy HintPolicy
 type ObjectVerifier func(context.Context, HintObjectKind, []byte) (string, error)
 
 func (v *Verifier) VerifyConsumerHint(ctx context.Context, raw []byte, policy HintPolicy, verify ObjectVerifier) (VerifiedHint, error) {
+	if len(raw) > MaxHintRecordSize {
+		return VerifiedHint{}, ErrHint
+	}
+	raw = bytes.Clone(raw)
 	ctx, cancel := context.WithTimeout(ctx, v.config.ReadTimeout)
 	defer cancel()
 	result, err := v.VerifyHint(ctx, raw, policy)

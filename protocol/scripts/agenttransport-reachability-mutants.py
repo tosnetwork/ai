@@ -187,10 +187,10 @@ MUTANTS = [
         "TestHintObjectsArePresentAndBound",
     ),
     (
-        "record-object-kind",
+        "record-object-binding",
         "hint.go",
-        "object.Kind != ref.Kind",
-        "false",
+        "err != nil || object.Kind != ref.Kind || uint64(len(object.Bytes)) != uint64(ref.Length) || digest != ref.Digest",
+        "false && (err != nil || object.Kind != ref.Kind || uint64(len(object.Bytes)) != uint64(ref.Length) || digest != ref.Digest)",
         "TestHintObjectsArePresentAndBound",
     ),
     (
@@ -246,7 +246,7 @@ MUTANTS = [
         "hint-address",
         "hint.go",
         "!validDirectIPv4(entry.IPv4, policy.AllowPrivateIPv4)",
-        "false",
+        "false && !validDirectIPv4(entry.IPv4, policy.AllowPrivateIPv4)",
         "TestDirectAddressPolicy",
     ),
     (
@@ -288,7 +288,7 @@ MUTANTS = [
         "consumer-agent",
         "hint.go",
         "agent != result.Record.Hint.Delegation.AgentID()",
-        "false",
+        "false && agent != result.Record.Hint.Delegation.AgentID()",
         "TestConsumerMustAuthenticateObjects",
     ),
     (
@@ -324,7 +324,7 @@ MUTANTS = [
         "hint.go",
         "a.IssuedAt < b.IssuedAt",
         "false",
-        "TestHintNewestIsPerDelegation",
+        "TestHintNewestTimestampBeatsDigest",
     ),
     (
         "newest-tie",
@@ -528,6 +528,29 @@ MUTANTS = [
         "!ed25519.Verify(d.TransportKey[:], preimage, r.Signature[:])",
         "false && !ed25519.Verify(d.TransportKey[:], preimage, r.Signature[:])",
         "TestReceiptOutcomesAndBindings",
+    ),
+]
+MUTANTS += [
+    (
+        "consumer-snapshot",
+        "hint.go",
+        "raw = bytes.Clone(raw)",
+        "raw = raw",
+        "TestConsumerSnapshotCannotChangeDuringVerification",
+    ),
+    (
+        "consumer-before-copy-bound",
+        "hint.go",
+        "if len(raw) > MaxHintRecordSize {",
+        "if false {",
+        "TestConsumerOversizedInputRefusesBeforeAllocation",
+    ),
+    (
+        "newest-greater-issued",
+        "hint.go",
+        "a.IssuedAt > b.IssuedAt",
+        "false",
+        "TestHintNewestTimestampBeatsDigest",
     ),
 ]
 

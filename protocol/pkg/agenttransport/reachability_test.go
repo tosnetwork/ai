@@ -408,3 +408,87 @@ func TestSignedObjectsRespectCancellationAndClockRollback(t *testing.T) {
 		t.Fatal("cancelled receipt accepted")
 	}
 }
+
+func TestHintNewestTimestampBeatsDigest(t *testing.T) {
+	_, base, key := hintSample(t)
+	found := false
+	for i := range 128 {
+		older := base // Keep URLs printable and canonical while varying the signed digest.
+		older.Relays = []string{"https://relay.invalid/p" + strings.Repeat("x", i)}
+		a, err := SignHint(older, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		newer := older
+		newer.IssuedAt++
+		b, err := SignHint(newer, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		aw, err := a.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		bw, err := b.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ah, bh := sha256.Sum256(aw), sha256.Sum256(bw)
+		if bytes.Compare(ah[:], bh[:]) <= 0 {
+			continue
+		}
+		found = true
+		if got, err := CompareHints(a, b); err != nil || got != -1 {
+			t.Fatal("time lost to digest")
+		}
+		if got, err := CompareHints(b, a); err != nil || got != 1 {
+			t.Fatal("newer time lost to digest")
+		}
+		break
+	}
+	if !found {
+		t.Fatal("timestamp-vs-digest control was vacuous")
+	}
+}
+
+func TestConsumerSnapshotCannotChangeDuringVerification(t *testing.T) {
+	f, h, key := hintSample(t)
+	original := cardJSON(t, f.d.AgentID(), 150)
+	changed := bytes.Clone(original)
+	for i, value := range changed {
+		if value == 'p' {
+			changed[i] = 'q'
+			break
+		}
+	}
+	wire := signRecord(t, h, []HintObject{{RailCard, original}}, key)
+	replacement := signRecord(t, h, []HintObject{{RailCard, changed}}, key)
+	if len(wire) != len(replacement) {
+		t.Fatal("mutation length changed")
+	}
+	verified := 0
+	got, err := f.verifier(t).VerifyConsumerHint(context.Background(), wire, HintPolicy{}, func(_ context.Context, _ HintObjectKind, body []byte) (string, error) {
+		if !bytes.Equal(body, original) {
+			t.Fatal("callback did not see original object")
+		}
+		copy(wire, replacement)
+		verified++
+		return f.d.AgentID(), nil
+	})
+	if err != nil || verified != 1 || !bytes.Equal(got.Record.Objects[0].Bytes, original) {
+		t.Fatalf("consumer mixed snapshots: %v", err)
+	}
+}
+func TestConsumerOversizedInputRefusesBeforeAllocation(t *testing.T) {
+	f, _, _ := hintSample(t)
+	v := f.verifier(t)
+	raw := make([]byte, MaxHintRecordSize+1)
+	allocations := testing.AllocsPerRun(10, func() {
+		if _, err := v.VerifyConsumerHint(context.Background(), raw, HintPolicy{}, nil); err == nil {
+			t.Fatal("oversized input accepted")
+		}
+	})
+	if allocations != 0 {
+		t.Fatalf("oversized input allocated %v", allocations)
+	}
+}
