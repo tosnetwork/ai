@@ -150,7 +150,26 @@ type nativeAccountVote struct {
 	BlockFile       string `json:"block_file"`
 }
 
+// readNativeAccountAt additionally authenticates the last transaction and its
+// timestamp for consumers of execution evidence. State-only readers must not
+// depend on retention of that transaction's block.
 func readNativeAccountAt(ctx context.Context, node *rpcNode, address string, seqno uint64, network *nativev1.NetworkDomain, allowedCodeHash string) (nativeAccountVote, error) {
+	vote, err := readNativeAccountStateAt(ctx, node, address, seqno, network, allowedCodeHash)
+	if err != nil || !vote.Found {
+		return vote, err
+	}
+	id := transactionID{Type: "internal.transactionId", LT: vote.LT, Hash: vote.TransactionHash}
+	vote.TransactionTime, err = verifyNativeLastTransactionTuple(ctx, node, address, id)
+	if err != nil {
+		return nativeAccountVote{}, err
+	}
+	return vote, nil
+}
+
+// readNativeAccountStateAt reads account code, data and its last-transaction
+// anchor at one finalized block. A strict majority and the session block pin
+// authenticate these fields; historical transaction cells are not state proofs.
+func readNativeAccountStateAt(ctx context.Context, node *rpcNode, address string, seqno uint64, network *nativev1.NetworkDomain, allowedCodeHash string) (nativeAccountVote, error) {
 	if network == nil {
 		return nativeAccountVote{}, nativecore.NewProtocolError(nativecore.ErrWrongNetwork, "Native network is missing", nil)
 	}
@@ -209,8 +228,10 @@ func readNativeAccountAt(ctx context.Context, node *rpcNode, address string, seq
 	}
 	vote.Found, vote.Balance, vote.Code, vote.Data = true, balance, info.Code, info.Data
 	vote.LT, vote.TransactionHash = info.LastTransactionID.LT, info.LastTransactionID.Hash
-	vote.TransactionTime, err = verifyNativeLastTransactionTuple(ctx, node, address, info.LastTransactionID)
-	if err != nil {
+	if info.LastTransactionID.Type != "internal.transactionId" {
+		return nativeAccountVote{}, errors.New("Native account last transaction is malformed")
+	}
+	if _, _, err := transactionTuple(vote); err != nil {
 		return nativeAccountVote{}, err
 	}
 	return vote, nil

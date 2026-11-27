@@ -226,7 +226,7 @@ func (s *ServiceActorSession) ResolveRegistry(ctx context.Context, objectID stri
 		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadAction, "invalid Native object", err)
 	}
 	vote, _, err := quorumRead(ctx, s.nodes, s.reader.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, identity.Address, s.seqno, s.reader.network, registry.locator.CodeHash)
+		return readNativeAccountStateAt(ctx, node, identity.Address, s.seqno, s.reader.network, registry.locator.CodeHash)
 	})
 	if err != nil {
 		return nil, false, err
