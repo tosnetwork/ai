@@ -552,6 +552,30 @@ func TestAnchoredWalksReachAPrunedAnchorByItsVerifiedLink(t *testing.T) {
 				t.Fatalf("an anchor behind pruned history was inferred: %v", err)
 			}
 		})
+		t.Run(name+"/link names the hash at another logical time", func(t *testing.T) {
+			// The first page ends at history[255], whose link names
+			// history[256]. The anchor carries that hash but the logical time
+			// of history[255], so the link stop must not take it; the walk
+			// reads on and finds the anchor absent.
+			session := prunedAnchorSession(t, history, len(history))
+			anchor := tokenAnchorID(history[actorHistoryPage])
+			anchor.LT = history[actorHistoryPage-1].LT
+			if _, _, err := walk(session, anchor); !errors.Is(err, ErrHistoryAnchorMissing) {
+				t.Fatalf("an anchor matching the link by hash only was not refused as missing: %v", err)
+			}
+		})
+	}
+}
+
+// Execution evidence needs the named transaction's own cell. A target that
+// is pruned but linked from a retained newer transaction is an unknown, not
+// a reached anchor and not a known absence.
+func TestTokenWalletTransactionNeedsThePrunedTargetCell(t *testing.T) {
+	history := linearHistory(t, 10)
+	session := prunedAnchorSession(t, history, 3)
+	tx, err := session.TokenWalletTransaction(context.Background(), testActor, tokenAnchorID(history[3]))
+	if err == nil || tx != nil || !strings.Contains(err.Error(), "lt not in db") || errors.Is(err, ErrHistoryAnchorMissing) {
+		t.Fatalf("a pruned execution target was not left unknown: tx=%+v err=%v", tx, err)
 	}
 }
 

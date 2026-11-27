@@ -159,6 +159,32 @@ CASES = [
         "TestWithdrawalResolvesAfterItsAnchorIsPruned",
         BRIDGE,
     ),
+    (
+        "anchor-link-hash-only",
+        "service_actor.go",
+        "if anchor != nil && lastMatches(next, *anchor) {",
+        (
+            "if anchor != nil && func() bool {\n"
+            "\t\t\traw, err := hex.DecodeString(anchor.Hash)\n"
+            "\t\t\treturn err == nil && next.Hash == base64.StdEncoding.EncodeToString(raw)\n"
+            "\t\t}() {"
+        ),
+        ANCHORED,
+    ),
+    (
+        "link-stop-in-execution-walk",
+        "service_actor_token_history.go",
+        (
+            "Hash: base64.StdEncoding.EncodeToString(oldest.PrevTxHash)}\n\t}\n}\n"
+            "func reduceTokenWalletTransaction("
+        ),
+        (
+            "Hash: base64.StdEncoding.EncodeToString(oldest.PrevTxHash)}\n"
+            "\t\tif lastMatches(next, target) {\n\t\t\treturn page[len(page)-1], nil\n\t\t}\n\t}\n}\n"
+            "func reduceTokenWalletTransaction("
+        ),
+        "TestTokenWalletTransactionNeedsThePrunedTargetCell",
+    ),
     # Execution-time readers keep the exact transaction.
     (
         "exact-read-guard",
