@@ -20,6 +20,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/railwork"
+	"github.com/tosnetwork/ai/protocol/pkg/tokenissuer"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -65,6 +66,8 @@ type Config struct {
 	Accepted AcceptedResults
 	// Offers serves search and quote; nil refuses both.
 	Offers *Offers
+	// TokenIssuers is owner-pinned source policy for read-only import previews.
+	TokenIssuers map[string]tokenissuer.Policy
 	// MaxLifecycleSends bounds the expire, claim_refund and sweep sends in
 	// one budget window. Zero means 2 * MaxCalls + 8 (section 6).
 	MaxLifecycleSends int
@@ -82,7 +85,8 @@ type Agent struct {
 	changed chan struct{}
 	// duties serializes the refund duties, so the background loop and a
 	// client's refund request never send the same operation twice.
-	duties sync.Mutex
+	duties         sync.Mutex
+	sourcePreviews rateWindow
 }
 
 // Open checks the state directory, takes the single-instance lock and
@@ -116,6 +120,17 @@ func Open(config Config) (*Agent, error) {
 		config.Random = func(value []byte) error { _, err := rand.Read(value); return err }
 	}
 	config.Network = proto.Clone(config.Network).(*nativev1.NetworkDomain)
+	if len(config.TokenIssuers) > 2 {
+		return nil, errors.New("too many token issuer policies")
+	}
+	issuers := make(map[string]tokenissuer.Policy, len(config.TokenIssuers))
+	for master, policy := range config.TokenIssuers {
+		if err := policy.Validate(); err != nil {
+			return nil, err
+		}
+		issuers[master] = policy
+	}
+	config.TokenIssuers = issuers
 	release, acquired, err := osguard.TryExclusiveFileLock(filepath.Join(config.StateDir, "agent.lock"), 0o600)
 	if err != nil {
 		return nil, err
@@ -123,7 +138,7 @@ func Open(config Config) (*Agent, error) {
 	if !acquired {
 		return nil, errors.New("another buyer agent holds this state directory")
 	}
-	agent := &Agent{config: config, store: store{root: config.StateDir}, release: release, changed: make(chan struct{})}
+	agent := &Agent{config: config, store: store{root: config.StateDir}, release: release, changed: make(chan struct{}), sourcePreviews: rateWindow{limit: 20, window: time.Minute}}
 	if err := agent.store.ensure(); err != nil {
 		release()
 		return nil, err

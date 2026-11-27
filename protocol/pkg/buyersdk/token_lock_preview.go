@@ -36,12 +36,12 @@ func PreviewTokenLock(ctx context.Context, policy tokenissuer.Policy, master, ac
 	if err != nil {
 		return preview, err
 	}
-	return PreviewTokenLockAt(observation, master, actor, nominal, actorPrice, reserved, limits)
+	return previewTokenLockAt(observation, master, actor, nominal, actorPrice, reserved, limits)
 }
 
-// PreviewTokenLockAt prices an authenticated observation from the caller's
-// issuer reader. It reserves no budget and never builds a transfer.
-func PreviewTokenLockAt(observation tokenissuer.Snapshot, master, actor string, nominal, actorPrice, reserved *big.Int, limits TokenAssetLimits) (TokenLockPreview, error) {
+// previewTokenLockAt prices the issuer reader's checked observation.
+// It reserves no budget and never builds a transfer.
+func previewTokenLockAt(observation tokenissuer.Snapshot, master, actor string, nominal, actorPrice, reserved *big.Int, limits TokenAssetLimits) (TokenLockPreview, error) {
 	var result TokenLockPreview
 	if !rawTokenPreviewAddress(master) || !rawTokenPreviewAddress(actor) || actorPrice == nil || actorPrice.Sign() <= 0 || actorPrice.BitLen() > 120 || reserved == nil || reserved.Sign() < 0 || reserved.BitLen() > 120 || limits.MaxPerCallAtomic == nil || limits.MaxWindowAtomic == nil || limits.MaxPerCallAtomic.Sign() <= 0 || limits.MaxWindowAtomic.Cmp(limits.MaxPerCallAtomic) < 0 || limits.MaxWindowAtomic.BitLen() > 120 {
 		return result, errors.New("invalid token lock preview or asset budget")

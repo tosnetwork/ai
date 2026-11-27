@@ -72,18 +72,19 @@ func RoleFor(peerUID, custodyUID, clientUID uint32) Role {
 // (MCP_BUYER_ADAPTER_V1 section 2.3). Only the custody account may present
 // or decide.
 var methodRoles = map[string]map[Role]bool{
-	"search":          {RoleClient: true, RoleCustody: true},
-	"quote":           {RoleClient: true, RoleCustody: true},
-	"prepare":         {RoleClient: true},
-	"withdraw":        {RoleClient: true, RoleCustody: true},
-	"request_payment": {RoleClient: true},
-	"status":          {RoleClient: true, RoleCustody: true},
-	"purchases":       {RoleClient: true, RoleCustody: true},
-	"refund_now":      {RoleClient: true, RoleCustody: true},
-	"result":          {RoleClient: true, RoleCustody: true},
-	"pending":         {RoleCustody: true},
-	"present":         {RoleCustody: true},
-	"decide":          {RoleCustody: true},
+	"search":             {RoleClient: true, RoleCustody: true},
+	"quote":              {RoleClient: true, RoleCustody: true},
+	"token_lock_preview": {RoleClient: true, RoleCustody: true},
+	"prepare":            {RoleClient: true},
+	"withdraw":           {RoleClient: true, RoleCustody: true},
+	"request_payment":    {RoleClient: true},
+	"status":             {RoleClient: true, RoleCustody: true},
+	"purchases":          {RoleClient: true, RoleCustody: true},
+	"refund_now":         {RoleClient: true, RoleCustody: true},
+	"result":             {RoleClient: true, RoleCustody: true},
+	"pending":            {RoleCustody: true},
+	"present":            {RoleCustody: true},
+	"decide":             {RoleCustody: true},
 }
 
 // Allowed reports whether role may call method.
@@ -365,6 +366,12 @@ func (s *Server) call(ctx context.Context, request Request) (any, error) {
 			return nil, err
 		}
 		return agent.Quote(ctx, params)
+	case "token_lock_preview":
+		var params TokenLockPreviewParams
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return agent.PreviewTokenLock(ctx, params)
 	case "prepare":
 		var params PrepareParams
 		if err := decodeParams(request.Params, &params); err != nil {

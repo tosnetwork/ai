@@ -335,6 +335,10 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
+	issuerPolicies, err := tokenIssuerPolicies(config.TokenAssets)
+	if err != nil {
+		return nil, err
+	}
 	tokenPins, tokenLimits, err := tokenPolicy(config.TokenAssets)
 	if err != nil {
 		return nil, err
@@ -404,7 +408,7 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 		return nil, err
 	}
 	agent, err := buyeragent.Open(buyeragent.Config{StateDir: agentDir, BuyerAgentID: config.BuyerAgentID, Network: network,
-		Buyer: buyer, Carriage: carrier, Delivery: carrier, Results: carrier, Accepted: carrier, Offers: offers,
+		Buyer: buyer, Carriage: carrier, Delivery: carrier, Results: carrier, Accepted: carrier, Offers: offers, TokenIssuers: issuerPolicies,
 		MaxLifecycleSends: config.Budget.MaxLifecycleSends})
 	if err != nil {
 		return nil, err

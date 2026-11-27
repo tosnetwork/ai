@@ -67,6 +67,7 @@ func boolPointer(value bool) *bool { return &value }
 // Register adds the tools to server.
 func (t *Tools) Register(server *mcp.Server) {
 	t.registerMarket(server)
+	t.registerTokenLockPreview(server)
 	mcp.AddTool(server, &mcp.Tool{Name: ToolPrepare, Title: "Prepare a TOS purchase",
 		Description: "Prepares one software-work purchase from a stored Quote and a source directory or tar under a " +
 			"workspace root. It pays nothing and returns a preview: price, storage fee, deadlines, refund terms and " +

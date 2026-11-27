@@ -7,22 +7,24 @@ import (
 	"strings"
 
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
+	"github.com/tosnetwork/ai/protocol/pkg/tokenissuer"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 // tokenAssetConfig is custody-owned policy. No quote or gateway can add an asset.
 type tokenAssetConfig struct {
-	Master            string `json:"master"`
-	Bridge            string `json:"bridge"`
-	BridgeConfigParam uint32 `json:"bridge_config_param"`
-	Decimals          uint8  `json:"decimals"`
-	SourceChainID     uint32 `json:"source_chain_id"`
-	SourceToken       string `json:"source_token"`
-	BridgeCodeHash    string `json:"bridge_code_hash"`
-	MinterCodeHash    string `json:"minter_code_hash"`
-	WalletCodeHash    string `json:"wallet_code_hash"`
-	MaxPerCallAtomic  string `json:"max_per_call_atomic"`
-	MaxWindowAtomic   string `json:"max_window_atomic"`
+	Issuer            *tokenissuer.Policy `json:"issuer,omitempty"`
+	Master            string              `json:"master"`
+	Bridge            string              `json:"bridge"`
+	BridgeConfigParam uint32              `json:"bridge_config_param"`
+	Decimals          uint8               `json:"decimals"`
+	SourceChainID     uint32              `json:"source_chain_id"`
+	SourceToken       string              `json:"source_token"`
+	BridgeCodeHash    string              `json:"bridge_code_hash"`
+	MinterCodeHash    string              `json:"minter_code_hash"`
+	WalletCodeHash    string              `json:"wallet_code_hash"`
+	MaxPerCallAtomic  string              `json:"max_per_call_atomic"`
+	MaxWindowAtomic   string              `json:"max_window_atomic"`
 }
 
 func tokenPolicy(configs []tokenAssetConfig) ([]toschain.TokenAssetPin, map[string]buyersdk.TokenAssetLimits, error) {
@@ -72,4 +74,25 @@ func rawTokenAddress(v string) bool {
 	s, ok := strings.CutPrefix(v, "0:")
 	b, e := hex.DecodeString(s)
 	return ok && e == nil && len(b) == 32 && strings.ToLower(s) == s && strings.Trim(s, "0") != ""
+}
+
+func tokenIssuerPolicies(configs []tokenAssetConfig) (map[string]tokenissuer.Policy, error) {
+	policies := make(map[string]tokenissuer.Policy)
+	for _, asset := range configs {
+		if asset.Issuer == nil {
+			continue
+		}
+		policy := *asset.Issuer
+		if err := policy.Validate(); err != nil {
+			return nil, err
+		}
+		if policy.ChainID != uint64(asset.SourceChainID) || policy.Token != "0x"+asset.SourceToken {
+			return nil, errors.New("issuer policy differs from the pinned source asset")
+		}
+		if _, duplicate := policies[asset.Master]; duplicate {
+			return nil, errors.New("duplicate issuer policy")
+		}
+		policies[asset.Master] = policy
+	}
+	return policies, nil
 }
