@@ -16,6 +16,10 @@ import (
 
 const settlementAssetCellBudget = 1024
 
+// MaxPinnedTokenAssets bounds client policy, independently of the governance
+// dictionary limit. Entries outside these explicit pins never grant support.
+const MaxPinnedTokenAssets = 2
+
 // TokenAssetPin is owner policy, never learned from the recognition dictionary.
 // Each supported asset pins its namespace and all three audited releases.
 type TokenAssetPin struct {
@@ -196,7 +200,7 @@ type TokenAssetRecognition struct {
 // ReadTokenAsset self-verifies only an explicitly pinned, active asset. Every
 // account, config and getter read shares this session's checkpoint and block.
 func (s *ServiceActorSession) ReadTokenAsset(ctx context.Context, master string, pins []TokenAssetPin) (*TokenAssetRecognition, error) {
-	if s == nil || s.reader == nil || len(pins) == 0 || len(pins) > 2 {
+	if s == nil || s.reader == nil || len(pins) == 0 || len(pins) > MaxPinnedTokenAssets {
 		return nil, errors.New("one or two token asset pins are required")
 	}
 	pins = append([]TokenAssetPin(nil), pins...)

@@ -219,3 +219,20 @@ retryable. The runtime retries while the execution and response budgets still
 fit before the response deadline; only a finalized not-pending request or an
 exhausted response window abandons it. Nothing is
 executed during the hold.
+
+## Two assets on one bridge
+
+Configure independent USDC and USDT pins and separate actors/manifests; one
+actor still has exactly one immutable master. Each actor has its own
+`max_liability_atomic`. The local test pair uses six decimals and slot 81,
+with different source tokens and derived masters even when their release code
+hashes match. Use the governance receipt for deployment pins: unit-test pins
+are not deployment configuration, and no production USDT pin is enabled by
+this repository.
+
+The asset label is only the join to the trusted monitor report. A USDT
+suspension or alarm must not be applied to a USDC actor. Bridge-wide alarms can
+cover both explicitly. Offers, execution and revenue remain bound to the
+actor's pinned master; matching tickers, code hashes or decimals cannot merge
+or substitute assets. The buyer-side policy and budget rules are documented in
+[the token buyer guide](../../protocol/docs/token-buyer-adapter.md#two-independently-pinned-assets).

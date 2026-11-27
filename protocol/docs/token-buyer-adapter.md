@@ -112,3 +112,46 @@ effective expiry reported by the helper, rather than trusting flag acceptance.
 Companion CLI support is a deployment prerequisite; local tests exercise the
 concrete sender with a recording runner, not a live submission. The adapter
 never retries without the option or falls back to a default lifetime.
+
+## Two independently pinned assets
+
+A token configuration accepts at most two pins, matching the resolver's policy
+bound. This is separate from the 16-entry governance dictionary limit. To use
+test USDC and test USDT locally, install the two governance-derived pins in
+`token_assets`, each with its own `master`, source token and atomic budget. Both
+use six decimals and bridge slot 81, and may share all three audited code
+hashes and the bridge address. Sharing code or decimals never joins masters.
+The clients contain no default production USDT master or recognition record:
+production pins remain absent until governance and its release checks complete.
+
+Obtain the local deployment identities and exact ConfigParam 84 value from the
+operations governance receipt. Do not promote the synthetic unit-test pins to a
+deployment or derive authority from a ticker. Before a purchase, the reader
+checks the selected entry, bridge-stored codes, derived master and deployed
+minter at one finalized checkpoint. An active USDC entry can still be used when
+the USDT entry is suspended; a shared bridge failure can affect both.
+
+Principal reservations and MCP summaries have one bucket for each complete
+configured asset key (master, wallet-code hash, decimals). The daemon's fixed
+network and independently pinned minter release supply the remaining identity
+context. Never add these buckets together or convert between them. Native fee
+reservations are separate and may be shared across the two assets. Existing
+liabilities continue to resolve against their immutable quote/actor identity
+when recognition is suspended; suspension only blocks new admission.
+
+The two-asset tests exercise majority reads, independent budgets, separate
+reservation aggregates and MCP rendering. Foreign-wallet notifications do not
+become accepted token calls, even when the amount, decimals and payload match.
+Contract execution and the second asset's live lifecycles are separate local
+acceptance runs, not claims made by these client fixtures.
+
+Reproduce the client isolation controls from the repository root, under the
+host's prescribed thermal/build guard:
+
+```sh
+make token-assets-mutants TOKEN_ASSET_MUTANT_LOG_DIR="$EVIDENCE/token-assets-mutants"
+```
+
+Every selected test must pass unmutated and fail by its named assertion when
+mutated. Missing tests, source patterns, compilation failures and panics do not
+count as kills. The driver restores every source before proceeding.

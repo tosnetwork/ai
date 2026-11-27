@@ -1,4 +1,4 @@
-.PHONY: verify fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants \
+.PHONY: verify fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants token-assets-mutants \
 	test-privileged \
 	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors messenger-cross-build \
 	messenger-fuzz
@@ -72,6 +72,11 @@ railwork-mutants:
 # rules. Opt-in; not part of verify.
 buyeragent-mutants:
 	GOWORK=off python3 -I protocol/scripts/buyeragent-mutants.py
+
+# Two-asset isolation controls write receipts outside the checkout.
+token-assets-mutants:
+	@test -n "$(TOKEN_ASSET_MUTANT_LOG_DIR)" || { echo "set TOKEN_ASSET_MUTANT_LOG_DIR outside the checkout"; exit 2; }
+	GOWORK=off python3 -I protocol/scripts/token-assets-mutants.py --log-dir "$(TOKEN_ASSET_MUTANT_LOG_DIR)"
 
 # Bounded native fuzzing of the strict PredictionMarket decoders; the regular
 # suite runs the fixed seeds. The budget is an execution count, not a
