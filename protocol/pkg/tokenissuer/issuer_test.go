@@ -49,6 +49,9 @@ func newFixture(t *testing.T) *fixture {
 				value = "0x2"
 			}
 		case "eth_getBlockByNumber":
+			if request.ID == 2 && string(request.Params[0]) != "\"finalized\"" {
+				t.Error("issuer finality tag lost")
+			}
 			stamp := uint64(1800000000)
 			if f.stale {
 				stamp -= MaxAgeSeconds + 1

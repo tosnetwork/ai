@@ -10,6 +10,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
     (
+        "finalized-tag",
+        "protocol/pkg/tokenissuer/issuer.go",
+        'rpc.call(ctx, "eth_getBlockByNumber", "finalized", false)',
+        'rpc.call(ctx, "eth_getBlockByNumber", "latest", false)',
+        "./protocol/pkg/tokenissuer",
+        "TestFinalizedIssuerReadAndReceivedAmount",
+    ),
+    (
+        "canonical-point",
+        "protocol/pkg/tokenissuer/issuer.go",
+        '"requireCanonical": true',
+        '"requireCanonical": false',
+        "./protocol/pkg/tokenissuer",
+        "TestFinalizedIssuerReadAndReceivedAmount",
+    ),
+    (
         "exact-actor-price",
         "protocol/pkg/buyersdk/token_lock_preview.go",
         "ActorPriceAtomic: actorPrice.String()",
