@@ -28,11 +28,19 @@ func TestTokenLockBudgetUsesMintedAmount(t *testing.T) {
 	}
 }
 func TestNoIssuerFeeIsAppliedTwiceToActorFunding(t *testing.T) {
-	snapshot := tokenissuer.Snapshot{FeeBasisPoints: 0, MaximumFee: "0"}
-	price := big.NewInt(100000000)
-	limit := TokenAssetLimits{MaxPerCallAtomic: price, MaxWindowAtomic: price}
-	p, err := previewTokenLockAt(snapshot, "0:"+strings.Repeat("11", 32), "0:"+strings.Repeat("22", 32), price, price, new(big.Int), limit)
-	if err != nil || p.MintedAtomic != price.String() || p.ActorPriceAtomic != price.String() || p.Warning != "" {
-		t.Fatalf("zero fee: %+v %v", p, err)
+	for _, rate := range []uint64{0, 19} {
+		snapshot := tokenissuer.Snapshot{FeeBasisPoints: rate, MaximumFee: "1000000"}
+		price := big.NewInt(100000000)
+		limit := TokenAssetLimits{MaxPerCallAtomic: price, MaxWindowAtomic: price}
+		p, err := previewTokenLockAt(snapshot, "0:"+strings.Repeat("11", 32), "0:"+strings.Repeat("22", 32), price, price, new(big.Int), limit)
+		if err != nil || p.ActorPriceAtomic != "100000000" || p.NominalAtomic != "100000000" || price.String() != "100000000" {
+			t.Fatalf("actor price changed: %+v %v", p, err)
+		}
+		if rate == 0 && (p.MintedAtomic != "100000000" || p.Warning != "") {
+			t.Fatal("zero-fee preview changed")
+		}
+		if rate == 19 && (p.MintedAtomic != "99810000" || p.Warning == "") {
+			t.Fatal("fee was not isolated to the source amount")
+		}
 	}
 }

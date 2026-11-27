@@ -10,6 +10,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
     (
+        "exact-actor-price",
+        "protocol/pkg/buyersdk/token_lock_preview.go",
+        "ActorPriceAtomic: actorPrice.String()",
+        "ActorPriceAtomic: received.String()",
+        "./protocol/pkg/buyersdk",
+        "TestNoIssuerFeeIsAppliedTwiceToActorFunding",
+    ),
+    (
         "issuer-evidence-redaction",
         "protocol/cmd/tos-service-buyer/token.go",
         "result[i].Issuer = nil",
