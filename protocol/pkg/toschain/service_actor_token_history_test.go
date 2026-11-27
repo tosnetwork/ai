@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,4 +213,41 @@ func tokenHeaderServer(t *testing.T, history []tlb.Transaction, root []byte) str
 	}))
 	t.Cleanup(server.Close)
 	return server.URL
+}
+
+func TestForeignAssetNotificationStaysANotificationWithoutAdmission(t *testing.T) {
+	walletCode := cell.BeginCell().MustStoreUInt(2, 8).EndCell()
+	var walletHash [32]byte
+	copy(walletHash[:], walletCode.Hash())
+	master, err := nativecore.StandardAddress("0:" + strings.Repeat("ab", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := nativecore.ServiceActorTokenAssetRouteV1{Master: master, WalletCode: walletCode, WalletCodeHash: walletHash, BridgeConfigParam: 81}
+	own, err := nativecore.DeriveServiceActorTokenWallet(testActor, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.Master, err = nativecore.StandardAddress("0:" + strings.Repeat("ac", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := nativecore.DeriveServiceActorTokenWallet(testActor, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own == foreign {
+		t.Fatal("two masters derive the same actor wallet")
+	}
+	payload, err := nativecore.BuildServiceActorTokenCallPayload([32]byte{1}, [32]byte{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := cell.BeginCell().MustStoreUInt(0x7362d09c, 32).MustStoreUInt(3, 64).MustStoreCoins(1000000).MustStoreAddr(rawAddress(t, testBuyer)).MustStoreBoolBit(true).MustStoreRef(payload).EndCell()
+	// The foreign-notification path finishes normally but emits no SAT1 or SAF1.
+	tx := buildTransaction(t, 10, 1000, nil, internalIn(t, foreign, body), true, 0)
+	decoded := decodeTokenTestTX(t, tx)
+	if !decoded.TookEffect || decoded.Kind != "notification" || decoded.Sender != foreign || decoded.Sender == own || decoded.Notification == nil || decoded.Notification.Payload == nil || len(decoded.Logs) != 0 {
+		t.Fatalf("foreign notification relabelled as admission: %+v", decoded)
+	}
 }

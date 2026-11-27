@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
@@ -181,5 +182,37 @@ func TestTokenExistingBindsTheAcceptanceProofToTheCall(t *testing.T) {
 	after.VersionRevocation = &toschain.RegistryTransitionTx{LT: call.LT + 20, Hash: strings.Repeat("cc", 32)}
 	if err := verify(e, p, r, call, after); err != nil {
 		t.Fatalf("a revocation after the call refused the existing request: %v", err)
+	}
+}
+
+func TestOtherAssetNotificationCannotFundThePinnedActor(t *testing.T) {
+	e, p, r, call := tokenBindingFixture(t)
+	// Same release, decimals, buyer, amount and payload; only the asset master
+	// differs. Derive its wallet for this actor instead of inventing a sender.
+	other := e.Actor.Data.Route
+	other.Master = msgAddress(t, "0:"+strings.Repeat("ac", 32))
+	otherWallet, err := nativecore.DeriveServiceActorTokenWallet(testActor, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherWallet == e.Actor.OwnWallet {
+		t.Fatal("distinct assets share a wallet")
+	}
+	if _, err = VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest, tokenAcceptanceFor(call)); err != nil {
+		t.Fatal(err)
+	}
+	call.Sender = otherWallet
+	if _, err = VerifyTokenExistingRequest(e, nativecore.ServiceActorTokenReleaseCodeHash, &r, p, call, testBuyer, testRequest, tokenAcceptanceFor(call)); err == nil || !strings.Contains(err.Error(), "funding notification is not authenticated") {
+		t.Fatalf("foreign notification admitted: %v", err)
+	}
+	// An ordinary foreign notification has no SAT1 and creates no request. Even
+	// attaching a forged SAT1 cannot turn it into this actor's accepted call.
+	foreign := call
+	foreign.Kind = "notification"
+	foreign.Logs = nil
+	history := &toschain.TokenActorHistory{Result: toschain.HistoryComplete, Head: e.Actor.LastTransaction, Transactions: []toschain.TokenActorTransaction{foreign}}
+	requests, err := ReplayTokenRequests(e.Actor, history, time.Unix(int64(call.Now), 0))
+	if err != nil || len(requests) != 0 {
+		t.Fatalf("foreign notification created a request: %v %v", requests, err)
 	}
 }

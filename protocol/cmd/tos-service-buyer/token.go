@@ -26,8 +26,8 @@ type tokenAssetConfig struct {
 }
 
 func tokenPolicy(configs []tokenAssetConfig) ([]toschain.TokenAssetPin, map[string]buyersdk.TokenAssetLimits, error) {
-	if len(configs) > 16 {
-		return nil, nil, errors.New("at most 16 pinned token assets are allowed")
+	if len(configs) > toschain.MaxPinnedTokenAssets {
+		return nil, nil, errors.New("at most two pinned token assets are allowed")
 	}
 	var pins []toschain.TokenAssetPin
 	limits := make(map[string]buyersdk.TokenAssetLimits, len(configs))

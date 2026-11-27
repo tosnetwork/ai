@@ -44,3 +44,24 @@ func TestTokenPolicyRefusesMalformedAndDuplicateOwnerPolicy(t *testing.T) {
 		t.Fatal("duplicate accepted")
 	}
 }
+
+func TestClientPolicyHasTheSameTwoAssetBoundAsTheResolver(t *testing.T) {
+	configs := make([]tokenAssetConfig, 3)
+	for i := range configs {
+		configs[i] = tokenConfigFixture()
+		configs[i].Master = "0:" + strings.Repeat([]string{"11", "22", "33"}[i], 32)
+	}
+	if _, _, err := tokenPolicy(configs[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tokenPolicy(configs); err == nil || !strings.Contains(err.Error(), "at most two") {
+		t.Fatalf("client accepted a policy its resolver refuses: %v", err)
+	}
+}
+
+func TestTokenPolicyRequiresExplicitAssetPins(t *testing.T) {
+	pins, limits, err := tokenPolicy(nil)
+	if err != nil || len(pins) != 0 || len(limits) != 0 {
+		t.Fatalf("implicit asset pins appeared: %v %v %v", pins, limits, err)
+	}
+}

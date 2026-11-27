@@ -257,3 +257,22 @@ func TestTokenExecuteOnceRetriesOnlyAnAdmittedGuardRefusal(t *testing.T) {
 		t.Fatalf("completed slot repeated: %+v runs=%d", third, runs)
 	}
 }
+
+func TestTwoAssetGateSelectsPinByIdentityNotPosition(t *testing.T) {
+	v, claim, _ := tokenFixture(t)
+	selected := v.config.TokenPins[0]
+	other := selected
+	other.Master = "0:" + strings.Repeat("ac", 32)
+	v.config.TokenPins = []toschain.TokenAssetPin{other, selected}
+	verified, err := v.Verify(context.Background(), claim)
+	if err != nil {
+		t.Fatalf("second configured asset could not execute: %v", err)
+	}
+	if verified.AssetMaster == nil || "0:"+hex.EncodeToString(verified.AssetMaster[:]) != selected.Master {
+		t.Fatal("gate returned another asset")
+	}
+	v.config.TokenPins = []toschain.TokenAssetPin{other}
+	if _, err = v.Verify(context.Background(), claim); err == nil {
+		t.Fatal("gate executed an asset with no independent pin")
+	}
+}

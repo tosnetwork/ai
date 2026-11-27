@@ -27,6 +27,7 @@ type fakeAgent struct {
 	// purchase's status.
 	accepted *buyeragent.AcceptedView
 	notReady bool
+	budgets  []buyeragent.TokenBudgetView
 }
 
 func (f *fakeAgent) Call(_ context.Context, method string, params, result any) error {
@@ -60,7 +61,7 @@ func (f *fakeAgent) Call(_ context.Context, method string, params, result any) e
 	}
 	if method == "purchases" {
 		answer = buyeragent.PurchasesView{Purchases: []buyeragent.PurchaseView{view},
-			Budget: buyeragent.BudgetView{ReservedNanoTOS: "700000000", ReservedCalls: 1}}
+			Budget: buyeragent.BudgetView{ReservedNanoTOS: "700000000", ReservedCalls: 1, TokenAssets: f.budgets}}
 	}
 	if method == "result" && !f.notReady {
 		answer = f.accepted
@@ -401,5 +402,25 @@ func TestTokenSurplusStatusDoesNotPromiseAFundingReturn(t *testing.T) {
 	}
 	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "no request was admitted and no buyer return is owed") {
 		t.Fatalf("misleading surplus outcome: %s", text)
+	}
+}
+
+func TestPurchasesRenderEachAssetBudgetSeparately(t *testing.T) {
+	budgets := []buyeragent.TokenBudgetView{
+		{AssetKey: "0:" + strings.Repeat("ab", 32) + "|wallet|6", ReservedAtomic: "100", MaxPerCallAtomic: "100", MaxWindowAtomic: "200"},
+		{AssetKey: "0:" + strings.Repeat("ac", 32) + "|wallet|6", ReservedAtomic: "7", MaxPerCallAtomic: "10", MaxWindowAtomic: "20"},
+	}
+	h := connect(t, &fakeAgent{budgets: budgets})
+	result := h.call(t, ToolPurchases, map[string]any{})
+	var out PurchasesResult
+	structured(t, result, &out)
+	if result.IsError || out.Budget == nil || len(out.Budget.TokenAssets) != 2 {
+		t.Fatalf("budgets lost: %+v", out)
+	}
+	for _, b := range budgets {
+		want := "Asset " + b.AssetKey + ": reserved " + b.ReservedAtomic + " atomic; per-call cap " + b.MaxPerCallAtomic + "; window cap " + b.MaxWindowAtomic + " atomic."
+		if !strings.Contains(text(result), want) {
+			t.Fatalf("asset budget not rendered: %s", text(result))
+		}
 	}
 }

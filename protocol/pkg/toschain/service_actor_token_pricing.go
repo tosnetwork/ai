@@ -181,7 +181,7 @@ func (s *ServiceActorSession) ReadTokenGlobalID(ctx context.Context) (int32, err
 // owner policy. It does not consult current recognition status: retirement stops
 // new admissions, not completion of already admitted requests.
 func MatchTokenAssetPin(route nativecore.ServiceActorTokenAssetRouteV1, decimals uint8, pins []TokenAssetPin) (TokenAssetPin, error) {
-	if len(pins) == 0 || len(pins) > 2 {
+	if len(pins) == 0 || len(pins) > MaxPinnedTokenAssets {
 		return TokenAssetPin{}, errors.New("one or two token pins are required")
 	}
 	master, ok := route.Master.RawStandard()

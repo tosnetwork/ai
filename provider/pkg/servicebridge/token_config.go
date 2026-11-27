@@ -55,7 +55,7 @@ func tokenUnits(text string, positive bool) (*big.Int, error) {
 	return n, nil
 }
 func (c TokenProviderConfig) Validate() error {
-	if len(c.Actors) == 0 || len(c.Actors) > 64 || len(c.Pins) == 0 || len(c.Pins) > 2 || !cleanAbsolute(c.MonitorReport) || c.MaxReportAgeSeconds > 3600 {
+	if len(c.Actors) == 0 || len(c.Actors) > 64 || len(c.Pins) == 0 || len(c.Pins) > toschain.MaxPinnedTokenAssets || !cleanAbsolute(c.MonitorReport) || c.MaxReportAgeSeconds > 3600 {
 		return errors.New("invalid token provider configuration bounds")
 	}
 	seen := map[string]bool{}
