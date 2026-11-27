@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/tosnetwork/ai/protocol/pkg/tokenissuer"
 	"strings"
 	"testing"
@@ -82,5 +83,23 @@ func TestIssuerPolicyIsBoundToThePinnedSourceAsset(t *testing.T) {
 	asset.Issuer.ChainID = 2
 	if _, err = tokenIssuerPolicies([]tokenAssetConfig{asset}); err == nil {
 		t.Fatal("issuer chain substitution accepted")
+	}
+}
+
+func TestTokenEvidenceOmitsIssuerEndpoint(t *testing.T) {
+	asset := tokenConfigFixture()
+	asset.Issuer = &tokenissuer.Policy{RPCURL: "https://issuer.invalid/private-access-path"}
+	encoded, err := json.Marshal(publicTokenAssets([]tokenAssetConfig{asset}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-access-path") || strings.Contains(string(encoded), "issuer") {
+		t.Fatal("issuer routing escaped into public evidence")
+	}
+	if asset.Issuer == nil {
+		t.Fatal("redaction mutated live policy")
+	}
+	if !strings.Contains(string(encoded), asset.SourceToken) || !strings.Contains(string(encoded), asset.MaxPerCallAtomic) {
+		t.Fatal("redaction removed settlement pins or budget")
 	}
 }

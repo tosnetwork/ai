@@ -96,3 +96,13 @@ func tokenIssuerPolicies(configs []tokenAssetConfig) (map[string]tokenissuer.Pol
 	}
 	return policies, nil
 }
+
+// publicTokenAssets exports settlement pins and budgets, never RPC routing
+// configuration, whose path may contain an access credential.
+func publicTokenAssets(configs []tokenAssetConfig) []tokenAssetConfig {
+	result := append([]tokenAssetConfig(nil), configs...)
+	for i := range result {
+		result[i].Issuer = nil
+	}
+	return result
+}
