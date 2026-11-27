@@ -11,6 +11,7 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agentgift"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/tosutils-go/tlb"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 	"google.golang.org/protobuf/proto"
@@ -60,7 +61,7 @@ func (r *AgentGiftReader) resolveFinalizedGift(ctx context.Context, accountAddre
 	if err != nil {
 		return base, err
 	}
-	current, err := r.finalizedAgentAccountAt(ctx, accountAddress, observation, nodes)
+	current, block, err := r.finalizedAgentAccountAt(ctx, accountAddress, observation, nodes)
 	if err != nil {
 		return base, err
 	}
@@ -79,7 +80,7 @@ func (r *AgentGiftReader) resolveFinalizedGift(ctx context.Context, accountAddre
 		return base, err
 	}
 	execution, _, err := quorumRead(ctx, nodes, r.chain.quorum, func(ctx context.Context, node *rpcNode) (giftExecutionVote, error) {
-		last, err := finalizedAccountLastTransaction(ctx, node, accountAddress, observation.seqno)
+		last, err := finalizedAccountLastTransaction(ctx, node, accountAddress, observation.seqno, block)
 		if err != nil {
 			return giftExecutionVote{}, err
 		}
@@ -102,7 +103,7 @@ func (r *AgentGiftReader) resolveFinalizedGift(ctx context.Context, accountAddre
 		return base, nil
 	}
 	credit, _, err := quorumRead(ctx, nodes, r.chain.quorum, func(ctx context.Context, node *rpcNode) (giftCreditVote, error) {
-		last, err := finalizedAccountLastTransaction(ctx, node, destination, observation.seqno)
+		last, err := finalizedAccountLastTransaction(ctx, node, destination, observation.seqno, block)
 		if err != nil {
 			return giftCreditVote{}, err
 		}
@@ -116,7 +117,21 @@ func (r *AgentGiftReader) resolveFinalizedGift(ctx context.Context, accountAddre
 	return base, nil
 }
 
-func finalizedAccountLastTransaction(ctx context.Context, node *rpcNode, address string, seqno uint64) (transactionID, error) {
+// agentGiftBlock is the block identity the Agent Account state was read at.
+// Every later read of the same resolution must report this block, not only
+// its seqno: two endpoints can serve one seqno from different blocks.
+type agentGiftBlock struct {
+	root, file string
+}
+
+func (b agentGiftBlock) matches(root, file string) bool {
+	return b.root != "" && b.file != "" && b.root == root && b.file == file
+}
+
+var errAgentGiftBlockMismatch = nativecore.NewProtocolError(nativecore.ErrBadSequence,
+	"Agent Account reads of one checkpoint saw different blocks", nil)
+
+func finalizedAccountLastTransaction(ctx context.Context, node *rpcNode, address string, seqno uint64, block agentGiftBlock) (transactionID, error) {
 	var info accountInformation
 	if err := node.client.Call(ctx, "getAddressInformation", struct {
 		Address string `json:"address"`
@@ -124,8 +139,15 @@ func finalizedAccountLastTransaction(ctx context.Context, node *rpcNode, address
 	}{address, seqno}, &info); err != nil {
 		return transactionID{}, err
 	}
-	if info.BlockID.Type != "tos.blockIdExt" || info.BlockID.Seqno != seqno || info.LastTransactionID.Type != "internal.transactionId" {
+	if info.BlockID.Type != "tos.blockIdExt" || info.BlockID.Workchain != -1 || info.BlockID.Seqno != seqno || info.LastTransactionID.Type != "internal.transactionId" {
 		return transactionID{}, errors.New("Gift account response is not checkpoint-finalized")
+	}
+	root, file, err := blockHashes(info.BlockID)
+	if err != nil {
+		return transactionID{}, err
+	}
+	if !block.matches(root, file) {
+		return transactionID{}, errAgentGiftBlockMismatch
 	}
 	return info.LastTransactionID, nil
 }
@@ -294,65 +316,100 @@ func (r *AgentGiftReader) FinalizedAgentAccount(ctx context.Context, account str
 	if err != nil {
 		return zero, 0, err
 	}
-	decoded, err := r.finalizedAgentAccountAt(ctx, canonical, observation, nodes)
+	decoded, _, err := r.finalizedAgentAccountAt(ctx, canonical, observation, nodes)
 	if err != nil {
 		return zero, uint32(observation.observedAt.Unix()), err
 	}
 	return decoded, uint32(observation.observedAt.Unix()), nil
 }
 
-// finalizedAgentAccountAt decodes account state at one finalized checkpoint.
-// It never needs the last transaction's archived cell: Gift execution and
-// credit are proven separately from exact transaction history.
-func (r *AgentGiftReader) finalizedAgentAccountAt(ctx context.Context, canonical string, observation consensusObservation, nodes []*rpcNode) (agentgift.FinalizedAgentAccount, error) {
+// finalizedAgentAccountAt decodes account state at one finalized checkpoint
+// and returns the block the state was read at; every other read of the same
+// resolution is bound to that block. It never needs the last transaction's
+// archived cell: Gift execution and credit are proven separately from exact
+// transaction history.
+func (r *AgentGiftReader) finalizedAgentAccountAt(ctx context.Context, canonical string, observation consensusObservation, nodes []*rpcNode) (agentgift.FinalizedAgentAccount, agentGiftBlock, error) {
 	vote, _, err := quorumRead(ctx, nodes, r.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
 		return readNativeAccountStateAt(ctx, node, canonical, observation.seqno, r.network, r.accountCode)
 	})
 	if err != nil {
-		return agentgift.FinalizedAgentAccount{}, err
+		return agentgift.FinalizedAgentAccount{}, agentGiftBlock{}, err
+	}
+	// The block identity is part of the quorum vote, so a majority agreed on it.
+	block := agentGiftBlock{root: vote.BlockRoot, file: vote.BlockFile}
+	if block.root == "" || block.file == "" {
+		return agentgift.FinalizedAgentAccount{}, agentGiftBlock{}, errors.New("finalized Agent Account read carries no block identity")
 	}
 	if !vote.Found {
-		return agentgift.FinalizedAgentAccount{}, errors.New("finalized Agent Account is not active")
+		return agentgift.FinalizedAgentAccount{}, agentGiftBlock{}, errors.New("finalized Agent Account is not active")
 	}
-	globalID, err := agentGiftGlobalID(ctx, nodes, r.chain.quorum, observation.seqno)
+	globalID, err := agentGiftGlobalID(ctx, nodes, r.chain.quorum, observation.seqno, block)
 	if err != nil {
-		return agentgift.FinalizedAgentAccount{}, err
+		return agentgift.FinalizedAgentAccount{}, agentGiftBlock{}, err
 	}
 	decoded, err := decodeAgentAccountData(vote.Data, canonical, r.accountCode, vote.Balance, globalID, uint32(observation.observedAt.Unix()))
-	return decoded, err
+	if err != nil {
+		return agentgift.FinalizedAgentAccount{}, agentGiftBlock{}, err
+	}
+	return decoded, block, nil
 }
 
-func agentGiftGlobalID(ctx context.Context, nodes []*rpcNode, quorum int, seqno uint64) (int32, error) {
-	returnValue, _, err := quorumRead(ctx, nodes, quorum, func(ctx context.Context, node *rpcNode) (int32, error) {
-		var result dnsConfigResult
+// agentGiftGlobalIDVote is one endpoint's ConfigParam 19 answer together with
+// the block it was read at, so the quorum agrees on both.
+type agentGiftGlobalIDVote struct {
+	GlobalID int32  `json:"global_id"`
+	Root     string `json:"root"`
+	File     string `json:"file"`
+}
+
+// agentGiftGlobalID reads ConfigParam 19 at seqno by quorum and requires the
+// agreed answer to come from block, the block of the account state read.
+func agentGiftGlobalID(ctx context.Context, nodes []*rpcNode, quorum int, seqno uint64, block agentGiftBlock) (int32, error) {
+	vote, _, err := quorumRead(ctx, nodes, quorum, func(ctx context.Context, node *rpcNode) (agentGiftGlobalIDVote, error) {
+		var result tokenConfigResult
+		// with_proof makes the endpoint name the block it read the parameter at.
 		if err := node.client.Call(ctx, "getConfigParam", struct {
-			Param int    `json:"param"`
-			Seqno uint64 `json:"seqno"`
-		}{19, seqno}, &result); err != nil {
-			return 0, err
+			Param     int    `json:"param"`
+			Seqno     uint64 `json:"seqno"`
+			WithProof bool   `json:"with_proof"`
+		}{19, seqno, true}, &result); err != nil {
+			return agentGiftGlobalIDVote{}, err
 		}
 		if result.Type != "configInfo" || result.Config.Type != "tvm.cell" {
-			return 0, errors.New("invalid ConfigParam 19 response")
+			return agentGiftGlobalIDVote{}, errors.New("invalid ConfigParam 19 response")
+		}
+		if result.BlockID.Type != "tos.blockIdExt" || result.BlockID.Workchain != -1 || result.BlockID.Seqno != seqno {
+			return agentGiftGlobalIDVote{}, errors.New("ConfigParam 19 read is not checkpoint-finalized")
+		}
+		root, file, err := blockHashes(result.BlockID)
+		if err != nil {
+			return agentGiftGlobalIDVote{}, err
 		}
 		raw, err := base64.StdEncoding.DecodeString(result.Config.Bytes)
 		if err != nil {
-			return 0, err
+			return agentGiftGlobalIDVote{}, err
 		}
-		root, err := cell.FromBOC(raw)
+		parameter, err := cell.FromBOC(raw)
 		if err != nil {
-			return 0, err
+			return agentGiftGlobalIDVote{}, err
 		}
-		slice, err := root.BeginParse()
+		slice, err := parameter.BeginParse()
 		if err != nil || slice.BitsLeft() != 32 || slice.RefsNum() != 0 {
-			return 0, errors.New("invalid ConfigParam 19 cell")
+			return agentGiftGlobalIDVote{}, errors.New("invalid ConfigParam 19 cell")
 		}
 		value, err := slice.LoadInt(32)
 		if err != nil || value == 0 {
-			return 0, errors.New("invalid zero TOS global ID")
+			return agentGiftGlobalIDVote{}, errors.New("invalid zero TOS global ID")
 		}
-		return int32(value), nil
+		return agentGiftGlobalIDVote{GlobalID: int32(value), Root: root, File: file}, nil
 	})
-	return returnValue, err
+	if err != nil {
+		return 0, err
+	}
+	if !block.matches(vote.Root, vote.File) {
+		return 0, errAgentGiftBlockMismatch
+	}
+	return vote.GlobalID, nil
 }
 
 // decodeAgentAccountData decodes Agent Account data read under codeHash and

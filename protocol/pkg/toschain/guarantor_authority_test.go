@@ -150,7 +150,11 @@ func txID(transaction tlb.Transaction) map[string]string {
 		"hash": base64.StdEncoding.EncodeToString(transaction.Hash)}
 }
 
-func (f guarantorFixture) server(t *testing.T, node guarantorChain) string {
+// server serves one endpoint of the chain. chainTime is the consensus
+// block's chain-authored time; every endpoint of one chain reports the same
+// one, as real nodes do, so the consensus quorum never depends on the wall
+// clock crossing a second between their answers.
+func (f guarantorFixture) server(t *testing.T, node guarantorChain, chainTime int64) string {
 	t.Helper()
 	genesisRoot, _ := hex.DecodeString(strings.TrimPrefix(guarantorTestNetwork.GenesisRootHash, "sha256:"))
 	if node.genesisRoot != nil {
@@ -176,7 +180,7 @@ func (f guarantorFixture) server(t *testing.T, node guarantorChain) string {
 			LT      string `json:"lt"`
 		}
 		_ = json.Unmarshal(call.Params, &params)
-		now := time.Now().Unix()
+		now := chainTime
 		var result any
 		switch call.Method {
 		case "getConsensusBlock":
@@ -229,8 +233,9 @@ func goodGuarantorChain() guarantorChain {
 func guarantorReader(t *testing.T, fixture guarantorFixture, locator *nativecore.Locator, nodes []guarantorChain, maxHistory int) *GuarantorAuthorityReader {
 	t.Helper()
 	urls := make([]string, 0, len(nodes))
+	chainTime := time.Now().Unix()
 	for _, node := range nodes {
-		urls = append(urls, fixture.server(t, node))
+		urls = append(urls, fixture.server(t, node, chainTime))
 	}
 	adapter, err := New(Config{Network: guarantorTestNetwork.NetworkId, Endpoints: urls, Quorum: 2})
 	if err != nil {

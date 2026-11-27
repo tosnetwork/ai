@@ -38,6 +38,10 @@ func newFenceChain(t *testing.T, locator *nativecore.Locator, head uint64) *fenc
 	t.Helper()
 	chain := &fenceChain{}
 	chain.head.Store(head)
+	// One chain-authored time for every endpoint and answer: the consensus
+	// quorum votes on it, and real nodes agree on it, so it must not follow
+	// the wall clock across a second between two endpoints' answers.
+	chainTime := time.Now().Unix()
 	genesis := func(value string) string {
 		raw, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
 		if err != nil {
@@ -63,7 +67,7 @@ func newFenceChain(t *testing.T, locator *nativecore.Locator, head uint64) *fenc
 			return
 		}
 		head := chain.head.Load()
-		now := time.Now().Unix()
+		now := chainTime
 		var result any
 		switch call.Method {
 		case "getConsensusBlock":

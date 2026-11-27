@@ -21,6 +21,7 @@ REGISTRY = "TestOfferRegistryStateSurvivesPrunedLastTransaction"
 WALLET = "TestTokenWalletStateSurvivesPrunedLastTransaction"
 RELAY = "TestRelayObservationReadsTheExactLastTransactionFirst"
 ANCHORED = "TestAnchoredWalksReachAPrunedAnchorByItsVerifiedLink"
+AGENT_BLOCK = "TestAgentAccountReadsBindToOneBlockOfTheSeqno"
 BRIDGE = "./provider/pkg/servicebridge"
 
 # (name, file, unique source anchor, replacement, test that must fail[, package])
@@ -120,6 +121,28 @@ CASES = [
         ),
         "if !vote.Found {\n\t\treturn nil, false, nil\n\t}\n\tdataCell",
         "TestServiceActorStateSurvivesPrunedLastTransaction",
+    ),
+    # Agent Account reads are bound to the state read's block, not its seqno.
+    (
+        "agent-global-id-block-bind",
+        "agent_gift.go",
+        "if !block.matches(vote.Root, vote.File) {",
+        "if false && !block.matches(vote.Root, vote.File) {",
+        AGENT_BLOCK,
+    ),
+    (
+        "agent-last-transaction-block-bind",
+        "agent_gift.go",
+        "if !block.matches(root, file) {",
+        "if false && !block.matches(root, file) {",
+        AGENT_BLOCK,
+    ),
+    (
+        "agent-block-file-hash",
+        "agent_gift.go",
+        "b.root == root && b.file == file",
+        "b.root == root",
+        AGENT_BLOCK,
     ),
     # The Agent Account code pin is the production one and is reported as read.
     (
