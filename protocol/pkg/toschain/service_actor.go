@@ -276,13 +276,16 @@ type ActorTxID struct {
 // The account must be active, run the pinned code and decode exactly, its
 // live state must be internally consistent, and get_attestor_key must agree
 // with the decoded policy key. found is false only for an inactive account.
+// It reads finalized state only: LastTransaction is the account-state anchor,
+// not proof that the transaction is still archived. Consumers that need the
+// executed transaction read it through History, which verifies it exactly.
 func (s *ServiceActorSession) ReadActor(ctx context.Context, actor string) (*ActorAccount, bool, error) {
 	canonical, err := CanonicalAddress(actor)
 	if err != nil || !strings.HasPrefix(canonical, "0:") {
 		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadAction, "a Service Actor is a raw workchain 0 address", err)
 	}
 	vote, _, err := quorumRead(ctx, s.nodes, s.reader.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, canonical, s.seqno, s.reader.network, s.reader.codeHash)
+		return readNativeAccountStateAt(ctx, node, canonical, s.seqno, s.reader.network, s.reader.codeHash)
 	})
 	if err != nil {
 		return nil, false, err
@@ -570,6 +573,12 @@ func walkHistoryEntries(ctx context.Context, node *rpcNode, address string, last
 		}
 		next = transactionID{Type: "internal.transactionId", LT: strconv.FormatUint(oldest.PrevTxLT, 10),
 			Hash: base64.StdEncoding.EncodeToString(oldest.PrevTxHash)}
+		// The oldest fetched transaction's cell hash is verified and commits to
+		// its predecessor, so a link that names the anchor proves the anchor
+		// without reading the anchor's own cell, which a node may have pruned.
+		if anchor != nil && lastMatches(next, *anchor) {
+			return out, HistoryAnchorReached, nil
+		}
 	}
 }
 

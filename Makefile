@@ -1,4 +1,4 @@
-.PHONY: token-issuer-mutants agenttransport-mutants verify fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants token-assets-mutants \
+.PHONY: token-issuer-mutants native-read-mutants agenttransport-mutants verify fmt-check proto-check schema-check vet test-race build conformance boundary-lint spec-check fuzz railwork-mutants buyeragent-mutants token-assets-mutants \
 	test-privileged \
 	messenger-test-adnl messenger-test-openmls messenger-test-roomtest messenger-sandbox messenger-vectors messenger-cross-build \
 	messenger-fuzz
@@ -169,3 +169,6 @@ agenttransport-mutants:
 
 token-issuer-mutants:
 	GOWORK=off python3 -I protocol/scripts/token-issuer-mutants.py
+
+native-read-mutants:
+	GOWORK=off python3 -I protocol/scripts/native-read-mutants.py

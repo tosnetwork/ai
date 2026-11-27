@@ -19,6 +19,8 @@ import (
 type AgentGiftReader struct {
 	chain   *Adapter
 	network *nativev1.NetworkDomain
+	// accountCode is the Agent Account code hash every read requires.
+	accountCode string
 }
 
 const maxGiftHistoryTransactions = 256
@@ -272,7 +274,8 @@ func NewAgentGiftReader(chain *Adapter, network *nativev1.NetworkDomain) (*Agent
 	if chain == nil || network == nil || chain.network != network.NetworkId || network.GenesisRootHash == "" || network.GenesisFileHash == "" {
 		return nil, errors.New("invalid Agent Gift chain reader configuration")
 	}
-	return &AgentGiftReader{chain: chain, network: proto.Clone(network).(*nativev1.NetworkDomain)}, nil
+	return &AgentGiftReader{chain: chain, network: proto.Clone(network).(*nativev1.NetworkDomain),
+		accountCode: agentgift.AgentAccountCodeHash}, nil
 }
 
 // FinalizedAgentAccount resolves the exact Agent Account state from a strict
@@ -298,9 +301,12 @@ func (r *AgentGiftReader) FinalizedAgentAccount(ctx context.Context, account str
 	return decoded, uint32(observation.observedAt.Unix()), nil
 }
 
+// finalizedAgentAccountAt decodes account state at one finalized checkpoint.
+// It never needs the last transaction's archived cell: Gift execution and
+// credit are proven separately from exact transaction history.
 func (r *AgentGiftReader) finalizedAgentAccountAt(ctx context.Context, canonical string, observation consensusObservation, nodes []*rpcNode) (agentgift.FinalizedAgentAccount, error) {
 	vote, _, err := quorumRead(ctx, nodes, r.chain.quorum, func(ctx context.Context, node *rpcNode) (nativeAccountVote, error) {
-		return readNativeAccountAt(ctx, node, canonical, observation.seqno, r.network, agentgift.AgentAccountCodeHash)
+		return readNativeAccountStateAt(ctx, node, canonical, observation.seqno, r.network, r.accountCode)
 	})
 	if err != nil {
 		return agentgift.FinalizedAgentAccount{}, err
@@ -312,7 +318,7 @@ func (r *AgentGiftReader) finalizedAgentAccountAt(ctx context.Context, canonical
 	if err != nil {
 		return agentgift.FinalizedAgentAccount{}, err
 	}
-	decoded, err := decodeAgentAccountData(vote.Data, canonical, vote.Balance, globalID, uint32(observation.observedAt.Unix()))
+	decoded, err := decodeAgentAccountData(vote.Data, canonical, r.accountCode, vote.Balance, globalID, uint32(observation.observedAt.Unix()))
 	return decoded, err
 }
 
@@ -349,7 +355,9 @@ func agentGiftGlobalID(ctx context.Context, nodes []*rpcNode, quorum int, seqno 
 	return returnValue, err
 }
 
-func decodeAgentAccountData(encoded, account string, balance uint64, globalID int32, chainTime uint32) (agentgift.FinalizedAgentAccount, error) {
+// decodeAgentAccountData decodes Agent Account data read under codeHash and
+// reports that code hash, so a consumer's own code pin checks what was read.
+func decodeAgentAccountData(encoded, account, codeHash string, balance uint64, globalID int32, chainTime uint32) (agentgift.FinalizedAgentAccount, error) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return agentgift.FinalizedAgentAccount{}, err
@@ -430,5 +438,5 @@ func decodeAgentAccountData(encoded, account string, balance uint64, globalID in
 	if spentToday < dailyLimit {
 		remaining = dailyLimit - spentToday
 	}
-	return agentgift.FinalizedAgentAccount{Active: true, Address: account, OwnerAddress: owner.StringRaw(), CodeHash: agentgift.AgentAccountCodeHash, DeploymentID: "sha256:" + hex.EncodeToString(deploymentID), GlobalID: globalID, TVMVersion: agentgift.MinimumAgentAccountTVMVersion, ControllerPublicKey: append(ed25519.PublicKey(nil), controller...), ControllerEpoch: controllerEpoch, Seqno: uint32(seqno), BalanceAtomic: balance, MaxPerTxAtomic: maxPerTx, DailyRemainingAtomic: remaining, DefaultTaskTimeoutSecs: defaultTaskTimeout}, nil
+	return agentgift.FinalizedAgentAccount{Active: true, Address: account, OwnerAddress: owner.StringRaw(), CodeHash: codeHash, DeploymentID: "sha256:" + hex.EncodeToString(deploymentID), GlobalID: globalID, TVMVersion: agentgift.MinimumAgentAccountTVMVersion, ControllerPublicKey: append(ed25519.PublicKey(nil), controller...), ControllerEpoch: controllerEpoch, Seqno: uint32(seqno), BalanceAtomic: balance, MaxPerTxAtomic: maxPerTx, DailyRemainingAtomic: remaining, DefaultTaskTimeoutSecs: defaultTaskTimeout}, nil
 }
