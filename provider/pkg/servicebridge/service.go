@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tosnetwork/ai/execution/pkg/railgate"
 	"time"
 )
 
@@ -137,7 +138,7 @@ func (s *Service) Dispatch(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err := s.handle(ctx, message); err != nil {
-			if errors.Is(err, ErrAdmissionPaused) {
+			if errors.Is(err, ErrAdmissionPaused) || errors.Is(err, railgate.ErrExecutionGuard) {
 				// Held, not failed: the attempt cap must not retire a funded
 				// request's task while the owner has paused admission. A held
 				// task leaves the open-message bounds, so it cannot keep out

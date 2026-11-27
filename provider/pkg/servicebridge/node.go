@@ -3,6 +3,7 @@ package servicebridge
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -222,7 +223,9 @@ type NodeOptions struct {
 	// Lane is handed to the registered relay lane when it opens, for tests.
 	Lane   any
 	Report func(stage string, err error)
-	Now    func() time.Time
+	// Now supplies one clock to finalized reads, deadline checks and monitor checks.
+	// Nil keeps the production wall clock.
+	Now func() time.Time
 	// AdmissionLimiter, when set, bounds the provider's admissions
 	// (ProviderConfig.Limiter); the provider agent sets its daily cap here.
 	AdmissionLimiter AdmissionLimiter
@@ -315,9 +318,16 @@ func effectiveQuorum(config NodeConfig) int {
 
 // newChainAdapter validates the endpoint set and quorum without contacting
 // any endpoint.
-func newChainAdapter(config NodeConfig) (*toschain.Adapter, error) {
+func newChainAdapter(config NodeConfig, clocks ...func() time.Time) (*toschain.Adapter, error) {
+	if len(clocks) > 1 {
+		return nil, errors.New("servicebridge: only one chain clock may be supplied")
+	}
+	var clock func() time.Time
+	if len(clocks) == 1 {
+		clock = clocks[0]
+	}
 	return toschain.New(toschain.Config{
-		Network: config.Network.NetworkID, Endpoints: config.RPCEndpoints, Quorum: effectiveQuorum(config),
+		Network: config.Network.NetworkID, Endpoints: config.RPCEndpoints, Quorum: effectiveQuorum(config), Now: clock,
 	})
 }
 
@@ -327,8 +337,9 @@ func openServiceActorReader(
 	config NodeConfig,
 	network *nativev1.NetworkDomain,
 	checkpointDir string,
+	clocks ...func() time.Time,
 ) (*toschain.ServiceActorReader, error) {
-	chain, err := newChainAdapter(config)
+	chain, err := newChainAdapter(config, clocks...)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +408,7 @@ func OpenNode(ctx context.Context, config NodeConfig, options NodeOptions) (*Nod
 		NetworkId: config.Network.NetworkID, GenesisRootHash: config.Network.GenesisRootHash,
 		GenesisFileHash: config.Network.GenesisFileHash,
 	}
-	node.Reader, err = openServiceActorReader(config, node.Network, config.StateDir)
+	node.Reader, err = openServiceActorReader(config, node.Network, config.StateDir, options.Now)
 	if err != nil {
 		return fail(err)
 	}
@@ -443,7 +454,14 @@ func OpenNode(ctx context.Context, config NodeConfig, options NodeOptions) (*Nod
 	if err != nil {
 		return fail(err)
 	}
-	lifecycle, err := NewTOSCTLLifecycle(TOSCTLLifecycleConfig{
+	tokenProfile := ""
+	if config.ActorCodeHash == "tvm-cell-sha256:"+hex.EncodeToString(nativecore.ServiceActorTokenTestProfileCodeHash[:]) {
+		tokenProfile = "test"
+	}
+	if config.ActorCodeHash == "tvm-cell-sha256:"+hex.EncodeToString(nativecore.ServiceActorTokenReleaseCodeHash[:]) {
+		tokenProfile = "release"
+	}
+	lifecycle, err := NewTOSCTLLifecycle(TOSCTLLifecycleConfig{TokenCodeProfile: tokenProfile,
 		BinaryPath: config.TOSCTL.Binary, BinarySHA256: config.TOSCTL.SHA256,
 		ConfigPath: config.TOSCTL.ConfigPath, VaultURL: vaultURL, WalletName: config.WalletName,
 	})
@@ -606,8 +624,29 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 	}
 	n.Manifests.Put(digest, manifestCBOR)
 	respond := time.Duration(config.RespondBudgetSecond) * time.Second
+	isToken := manifest.Settlement.Rail == nativecore.ServiceActorTokenRail
+	var tokenPins []toschain.TokenAssetPin
+	var executionGuard func(context.Context, railgate.Session) error
+	if isToken {
+		if n.Config.Token == nil {
+			return errors.New("servicebridge: token execution needs configured asset pins")
+		}
+		actor := "0:" + hex.EncodeToString(manifest.Settlement.ActorAccountID)
+		a, err := n.Config.Token.Actor(actor)
+		if err != nil {
+			return err
+		}
+		if a.CodeHash != n.Config.ActorCodeHash || len(manifest.SupportedAssets) != 1 || a.Master != "0:"+hex.EncodeToString(manifest.SupportedAssets[0].MasterAccountID) {
+			return errors.New("servicebridge: token execution code pin differs")
+		}
+		tokenPins = n.Config.Token.Pins
+		executionGuard = func(_ context.Context, s railgate.Session) error {
+			return tokenWorkSafety(n.Config, a.AssetID, s, options.Now())
+		}
+	}
 	verifier, err := railgate.NewVerifier(railgate.VerifierConfig{
-		Reader:          railReader{reader: n.Reader},
+		Reader: railReader{reader: n.Reader}, Now: options.Now,
+		TokenPins: tokenPins, CheckExecution: executionGuard,
 		Manifests:       n.Manifests,
 		Network:         n.Network,
 		ActorCodeHash:   n.Config.ActorCodeHash,
@@ -674,7 +713,7 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 	if (runner == nil && service == nil) || store == nil {
 		return errors.New("servicebridge: the provider has no executor")
 	}
-	n.Provider, err = NewProvider(ProviderConfig{
+	n.Provider, err = NewProvider(ProviderConfig{Token: isToken,
 		AgentID:            n.Config.AgentID,
 		CapabilityID:       config.CapabilityID,
 		Version:            config.Version,

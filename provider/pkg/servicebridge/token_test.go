@@ -142,9 +142,12 @@ func (w *tokenWorld) Run(_ context.Context, call TOSCTLCall) ([]byte, error) {
 	var body string
 	if call.Label == "wallet build token" {
 		var dest string
+		var bounce bool
 		var value uint64
 		for i, arg := range call.Args {
 			switch arg {
+			case "--bounce":
+				bounce = true
 			case "--body-boc":
 				body = call.Args[i+1]
 			case "--to":
@@ -174,7 +177,7 @@ func (w *tokenWorld) Run(_ context.Context, call TOSCTLCall) ([]byte, error) {
 		if e != nil {
 			return nil, e
 		}
-		internal, e := tlb.ToCell(&tlb.InternalMessage{IHRDisabled: true, Bounce: true, DstAddr: to, Amount: amount, Body: root})
+		internal, e := tlb.ToCell(&tlb.InternalMessage{IHRDisabled: true, Bounce: bounce, DstAddr: to, Amount: amount, Body: root})
 		if e != nil {
 			return nil, e
 		}
@@ -763,6 +766,16 @@ func mustTokenBalanceQuery(t *testing.T, w *tokenWorld) uint64 {
 	}
 	t.Fatal("missing provide_balance")
 	return 0
+}
+
+func TestTokenProviderCustodyExplicitlyRequestsBounce(t *testing.T) {
+	w := newTokenWorld(t)
+	in := w.action("withdraw-revenue")
+	in.TokenAmount = "100"
+	preview := w.preview(t, in)
+	if _, err := RunTokenAction(context.Background(), w.c, in, true, preview.Preview.Digest, w.env()); err != nil || w.sends != 1 {
+		t.Fatalf("reference CLI defaults must not change the confirmed bounce: err=%v sends=%d", err, w.sends)
+	}
 }
 
 func TestTokenCustodyRequiresV2AndTheSignedExpiry(t *testing.T) {

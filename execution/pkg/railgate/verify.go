@@ -80,6 +80,8 @@ func FromChain(reader *toschain.ServiceActorReader) (Reader, error) {
 // VerifierConfig binds a verifier to one provider offer.
 type VerifierConfig struct {
 	Reader          Reader
+	TokenPins       []toschain.TokenAssetPin
+	CheckExecution  func(context.Context, Session) error
 	Manifests       serviceactor.ManifestSource
 	Network         *nativev1.NetworkDomain
 	ActorCodeHash   string
@@ -123,6 +125,7 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 	if err != nil || len(raw) != 32 {
 		return nil, errors.New("railgate: invalid actor code hash")
 	}
+	config.TokenPins = append([]toschain.TokenAssetPin(nil), config.TokenPins...)
 	verifier := &Verifier{config: config}
 	copy(verifier.codeHash[:], raw)
 	config.Network = proto.Clone(config.Network).(*nativev1.NetworkDomain)
@@ -143,6 +146,8 @@ type Claim struct {
 
 // Verified is a claim proven at one finalized checkpoint.
 type Verified struct {
+	AssetMaster *[32]byte
+
 	Checkpoint       uint64
 	ChainTime        time.Time
 	Actor            string
@@ -193,6 +198,9 @@ func (v *Verifier) verify(ctx context.Context, claim Claim, budget time.Duration
 	if proposal.CapabilityId != v.config.CapabilityID || proposal.CapabilityVersion != v.config.Version ||
 		proposal.ProviderAgentId != v.config.ProviderAgentID {
 		return nil, errors.New("railgate: the Quote names another provider, Capability or version")
+	}
+	if proposal.Asset != nil || proposal.PriceAtomic != "" {
+		return v.verifyToken(ctx, claim, budget, started)
 	}
 	validated, err := quoteexchange.ValidatePortable(v.config.Network, &nativev1.RequestQuoteProposalRequest{
 		CapabilityId: proposal.CapabilityId, CapabilityVersion: proposal.CapabilityVersion, BuyerAddress: claim.BuyerWallet}, claim.Package)
@@ -369,8 +377,15 @@ func (v *Verifier) Recheck(ctx context.Context, claim Claim, expected *Verified)
 		return err
 	}
 	if verified.SlotKey() != expected.SlotKey() || verified.RequestHash != expected.RequestHash ||
-		verified.Price.Cmp(expected.Price) != 0 || verified.ResponseDeadline != expected.ResponseDeadline {
+		verified.Price.Cmp(expected.Price) != 0 || !sameAsset(verified.AssetMaster, expected.AssetMaster) || verified.ResponseDeadline != expected.ResponseDeadline {
 		return errors.New("railgate: the request changed since it was verified")
 	}
 	return nil
+}
+
+func sameAsset(a, b *[32]byte) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }

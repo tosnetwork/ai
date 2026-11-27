@@ -52,6 +52,8 @@ const (
 const AmbiguousAfterRestart = "restart"
 
 var (
+	// ErrExecutionGuard leaves an admitted slot retryable; no execution started.
+	ErrExecutionGuard = errors.New("railgate: execution safety guard refused")
 	// ErrSlotTaken reports a claim whose slot already exists: it is never
 	// admitted for a second execution.
 	ErrSlotTaken = errors.New("railgate: this request already has an execution slot")
@@ -152,7 +154,11 @@ func OpenGate(verifier *Verifier, directory string) (*Gate, error) {
 	if err != nil {
 		return nil, errors.New("railgate: slot directory is already owned")
 	}
-	gate := &Gate{verifier: verifier, root: directory, lock: lock, now: time.Now}
+	clock := verifier.config.Now
+	if clock == nil {
+		clock = time.Now
+	}
+	gate := &Gate{verifier: verifier, root: directory, lock: lock, now: clock}
 	if err := gate.recover(); err != nil {
 		_ = lock.Close()
 		return nil, err
@@ -243,6 +249,9 @@ func (g *Gate) Run(ctx context.Context, slot Slot, claim Claim, execute func(con
 		// the verification and the slot write that precede it.
 		budget := g.verifier.config.ExecutionBudget + g.verifier.config.RespondBudget
 		err = checkSlack(currentTime(verified.ChainTime, started, g.now()), verified.ResponseDeadline, budget)
+	}
+	if errors.Is(err, ErrExecutionGuard) {
+		return err
 	}
 	if err != nil {
 		if transitionErr := g.transition(slot.Key(), SlotAdmitted, SlotAbandoned, ""); transitionErr != nil {

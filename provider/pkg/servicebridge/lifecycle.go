@@ -35,6 +35,8 @@ type LifecycleSender interface {
 
 // TOSCTLLifecycleConfig pins the tosctl binary by SHA-256.
 type TOSCTLLifecycleConfig struct {
+	TokenCodeProfile string
+
 	BinaryPath   string
 	BinarySHA256 string
 	ConfigPath   string
@@ -46,6 +48,8 @@ type TOSCTLLifecycleConfig struct {
 // TOSCTLLifecycle runs `tosctl agent service send` from a sealed in-memory
 // snapshot of the pinned binary, with only the vault URL in its environment.
 type TOSCTLLifecycle struct {
+	tokenProfile string
+
 	binary  []byte
 	config  string
 	vault   string
@@ -56,6 +60,9 @@ type TOSCTLLifecycle struct {
 
 // NewTOSCTLLifecycle reads the binary once and refuses any other bytes.
 func NewTOSCTLLifecycle(config TOSCTLLifecycleConfig) (*TOSCTLLifecycle, error) {
+	if config.TokenCodeProfile != "" && config.TokenCodeProfile != "test" && config.TokenCodeProfile != "release" {
+		return nil, errors.New("invalid token code profile")
+	}
 	if !filepath.IsAbs(config.BinaryPath) || filepath.Clean(config.BinaryPath) != config.BinaryPath ||
 		!filepath.IsAbs(config.ConfigPath) || filepath.Clean(config.ConfigPath) != config.ConfigPath ||
 		!hex64Pattern.MatchString(config.BinarySHA256) || !walletNamePattern.MatchString(config.WalletName) {
@@ -83,7 +90,7 @@ func NewTOSCTLLifecycle(config TOSCTLLifecycleConfig) (*TOSCTLLifecycle, error) 
 	if hex.EncodeToString(digest[:]) != config.BinarySHA256 {
 		return nil, errors.New("servicebridge: the tosctl binary does not have the pinned SHA-256")
 	}
-	sender := &TOSCTLLifecycle{
+	sender := &TOSCTLLifecycle{tokenProfile: config.TokenCodeProfile,
 		binary: binary, config: config.ConfigPath, vault: config.VaultURL, wallet: config.WalletName,
 		timeout: config.Timeout,
 	}
@@ -166,13 +173,17 @@ func (s *TOSCTLLifecycle) send(ctx context.Context, operation, actor string, req
 		"agent", "service", "send", "--operation", operation, "--config", s.config, "--address", actor,
 		"--from", s.wallet, "--request-id", strconv.FormatUint(requestID, 10),
 	}, extra...)
+	if s.tokenProfile != "" {
+		args[1] = "service-token"
+		args = append(args, "--code-profile", s.tokenProfile)
+	}
 	args = append(args, "--yes")
 	_, err := s.run(ctx, args)
 	return err
 }
 
 // Respond sends respond with the attestor controller signing the request
-// bound SRP2 domain inside tosctl.
+// bound response domain inside tosctl.
 func (s *TOSCTLLifecycle) Respond(
 	ctx context.Context,
 	actor string,

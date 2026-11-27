@@ -137,7 +137,7 @@ func LoadProfile(path string) (Profile, []byte, error) {
 		return Profile{}, nil, errors.New("provider Quote manifest names a Service Actor release other than the pinned one")
 	}
 	if decoded.Settlement.Rail == nativecore.ServiceActorTokenRail {
-		if len(profile.TokenPins) == 0 || len(profile.TokenPins) > 2 {
+		if len(profile.TokenPins) == 0 || len(profile.TokenPins) > toschain.MaxPinnedTokenAssets {
 			return Profile{}, nil, errors.New("token Quote profile needs one or two owner asset pins")
 		}
 	} else if len(profile.TokenPins) != 0 {

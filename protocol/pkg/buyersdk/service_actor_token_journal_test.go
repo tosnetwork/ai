@@ -216,3 +216,58 @@ func TestTokenPrincipalLimitsAreAtMost120Bits(t *testing.T) {
 		t.Fatal("per-call principal cap exceeds 120 bits")
 	}
 }
+
+func TestTwoAssetsHaveIndependentBudgets(t *testing.T) {
+	j, limits, first := tokenJournalFixture(t)
+	limits.MaxCalls = 10
+	firstKey := TokenAssetBudgetKey(first.AssetMaster, first.AssetWalletCodeHash, 6)
+	limits.TokenAssets[firstKey] = TokenAssetLimits{MaxPerCallAtomic: big.NewInt(10), MaxWindowAtomic: big.NewInt(10)}
+	second := first
+	second.AssetMaster = saBuyer
+	second.PriceAtomic = "7"
+	second.RequestHash = strings.Repeat("b2", 32)
+	second.QueryID = 2
+	secondKey := TokenAssetBudgetKey(second.AssetMaster, second.AssetWalletCodeHash, 6)
+	limits.TokenAssets[secondKey] = TokenAssetLimits{MaxPerCallAtomic: big.NewInt(7), MaxWindowAtomic: big.NewInt(7)}
+	if err := j.Create(first, limits, saNow); err != nil {
+		t.Fatal(err)
+	}
+	// Exhausting the first asset does not spend any of the second's principal.
+	if err := j.Create(second, limits, saNow); err != nil {
+		t.Fatalf("second asset shared first budget: %v", err)
+	}
+	for i, record := range []CallRecord{first, second} {
+		record.QueryID = uint64(i + 3)
+		record.RequestHash = strings.Repeat([]string{"c3", "d4"}[i], 32)
+		record.PriceAtomic = "1"
+		if err := j.Create(record, limits, saNow); !errors.Is(err, ErrOverBudget) {
+			t.Fatalf("asset %d exceeded its own window: %v", i, err)
+		}
+	}
+}
+
+func TestTwoAssetsAggregateOnlyWithinTheirOwnIdentity(t *testing.T) {
+	j, limits, first := tokenJournalFixture(t)
+	limits.MaxCalls = 10
+	second := first
+	second.AssetMaster = saBuyer
+	second.PriceAtomic = "7"
+	second.QueryID = 2
+	second.RequestHash = strings.Repeat("b2", 32)
+	keyA := TokenAssetBudgetKey(first.AssetMaster, first.AssetWalletCodeHash, 6)
+	keyB := TokenAssetBudgetKey(second.AssetMaster, second.AssetWalletCodeHash, 6)
+	limits.TokenAssets[keyB] = TokenAssetLimits{MaxPerCallAtomic: big.NewInt(7), MaxWindowAtomic: big.NewInt(14)}
+	for _, record := range []CallRecord{first, second} {
+		if err := j.Create(record, limits, saNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held, err := j.ReservedToken(limits, saNow)
+	if err != nil || len(held) != 2 || held[keyA] == nil || held[keyB] == nil || held[keyA].String() != "10" || held[keyB].String() != "7" {
+		t.Fatalf("mixed principal: %v %v", held, err)
+	}
+	native, calls, err := j.Reserved(limits, saNow)
+	if err != nil || native.String() != "200" || calls != 2 {
+		t.Fatalf("native cost mixed with token principal: %v %d %v", native, calls, err)
+	}
+}
