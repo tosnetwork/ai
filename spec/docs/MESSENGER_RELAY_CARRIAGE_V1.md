@@ -13,6 +13,15 @@ Section 8 states what each phase's live record must prove; section 9 lists
 the code changes of M-R1 (9.1) and M-R2 (9.2). Citations added for M-R2 refer
 to `tosnetwork/openfox` `main` `edd88e11`.
 
+**Successor design (draft).** [Messenger Transport V2](MESSENGER_TRANSPORT_V2.md)
+moves the carrier described here out of OpenFox into this repository
+(`tos-messengerd` runs the chat lane itself), replaces the open V1 relay with
+credentialed mailboxes, lanes and signed reachability hints, and adds an
+optional direct path. The frames, double encryption, relay identity evidence,
+acknowledgements and rooms of this document stay; the relay frame gains one
+field (V2 section 9.3). Until V2 is implemented this document describes the
+running system.
+
 **Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
 
 **Errata (M-R2 relay frame implementation).** Section 11.1 gains the
@@ -1459,7 +1468,10 @@ part, C3):
 - **D1. M0-R and Messenger's own Mailbox Relay are retired for the OpenFox
   profile.** This covers `tos-mailboxd`, `pkg/mailbox` and the M0-R study.
   The code is removed in a separate PR after M-R1 passes. Reason: one relay
-  infrastructure, as the owner decided.
+  infrastructure, as the owner decided. Messenger Transport V2 keeps the relay
+  as the route that always works and uses the M0-R measurements only to decide
+  when an optional direct upgrade is attempted (V2 section 8); it does not
+  reopen the route choice.
 - **D2. No second relay instance now.** M-R1 shares the two test relays
   between chat and rail. Quota isolation is listed as not proven in M-R1, and
   it must be shown before production (section 7).

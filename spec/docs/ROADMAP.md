@@ -718,6 +718,17 @@ gate item.
   independent implementation of the corpus and the live adversarial and quota
   evidence of its section 12 do not exist. It supplies no gate evidence until
   that evidence exists against independent deployments.
+- [Messenger Transport V2](MESSENGER_TRANSPORT_V2.md) is the successor
+  carrier design: relay-first store-and-forward with an optional direct ADNL
+  upgrade gated by the M0-R measurements, credentialed relay mailboxes whose
+  Ed25519 transport key is delegated by the finalized Agent and re-checked
+  against finalized state, stranger and contact quota lanes, signed
+  reachability hints in relay directories, and a carrier library run by
+  `tos-messengerd` with an MCP server, so Agents without OpenFox can chat. A V2
+  relay reads finalized state (read only, no keys, no authority). Until a
+  registry change adds a per-Agent authorization epoch and a
+  withdraw-delegation action, it is limited to test networks. **Status:
+  ⬜ Design draft.** Nothing is implemented; it supplies no gate evidence.
 - [Agent Intent Exchange V1](AGENT_INTENT_EXCHANGE_V1.md) defines a generic
   signed bulletin and Agent-to-Agent negotiation layer. A small signed
   Discovery Card exposes coarse category, keyword, approximate value, time,

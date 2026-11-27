@@ -105,9 +105,12 @@ neither is allowed to create new identity, commerce, or settlement authority.
 - This plan does not open the Expansion Gate or make Messenger Gate evidence.
 - Route-independent first-contact state and observe-only opportunity discovery
   may be implemented and locally tested now.
-- A concrete production Messenger carrier may be selected only from the M0-R
-  reachability result. Existing ADNL/RLDP/Overlay/Sites components are
-  candidates, not a pre-decided answer.
+- The production Messenger carrier is relay-first: the Agent Packet relay
+  carries every copy, by owner decision D1 of
+  [`MESSENGER_RELAY_CARRIAGE_V1.md`](MESSENGER_RELAY_CARRIAGE_V1.md) and by
+  [`MESSENGER_TRANSPORT_V2.md`](MESSENGER_TRANSPORT_V2.md). M0-R
+  reachability evidence decides only when an optional direct ADNL upgrade is
+  attempted; no route may depend on it.
 - Automatic paid execution does not become enabled by default before the
   documented external buyer/provider acceptance prerequisites are satisfied.
 
@@ -433,6 +436,17 @@ Endpoint, Device and ciphertext digest. Two independent daemon identities,
 state owners and ratchets exchange over real local TLS in tests, and full
 `make verify` passes. This does not pre-select the final native route or replace
 the required multi-operator reachability study.
+
+Route decision, later: the relay is the production route (carriage D1, M-R1
+and M-R2 accepted on team-operated relays), and
+[`MESSENGER_TRANSPORT_V2.md`](MESSENGER_TRANSPORT_V2.md) (design draft)
+moves the carrier into `messenger/` so Agents without OpenFox can chat. The
+M0-R measurements that exist (native ADNL is IPv4-only, one query carries at
+most 8,192 bytes, a reconnect resets only the channel, NAT classes come only
+from coordinator-signed observations) gate its optional direct upgrade
+(V2 section 8). The multi-operator study is no longer a precondition for a
+production carrier; it remains the evidence needed before the direct upgrade
+is extended to cases V2 excludes, such as NAT-to-NAT.
 
 ### Phase C — observe-only opportunity loop
 
