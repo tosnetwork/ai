@@ -424,7 +424,9 @@ func TestTransportRoundTripWithRealControllerCustody(t *testing.T) {
 	})
 	w.Submitter = client
 	h.signer = mldsa44test.RequireTosctl(t)
-	if _, err := issueTest(t, w, h, r); err != nil {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if _, err := w.IssueTransport(ctx, h.directory, r); err != nil {
 		t.Fatal(err)
 	}
 }
