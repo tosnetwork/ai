@@ -63,7 +63,7 @@ CASES = (
         "provider-pause-is-asset-local",
         "provider/pkg/servicebridge/token_monitor.go",
         "if !alerts[a.AssetID] {",
-        "if false {",
+        "if len(alerts) == 0 {",
         "provider/pkg/servicebridge",
         "TestTokenProviderPauseIsAssetScopedAndPreservesPolicy",
         "asset-specific pause",

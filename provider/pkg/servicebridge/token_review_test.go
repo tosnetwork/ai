@@ -273,8 +273,12 @@ func TestTokenProviderPauseIsAssetScopedAndPreservesPolicy(t *testing.T) {
 	w.account.Data.Policy.AuthorizedCaller = caller
 	before := w.account.Data.Policy
 	w.report(t, []string{"usdt"})
+	// A successful broadcast is pending until the next finalized observation.
+	if err := CheckTokenSafety(context.Background(), w.c, w.env()); err != nil && !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("asset-specific pause send failed: %v", err)
+	}
 	if err := CheckTokenSafety(context.Background(), w.c, w.env()); err != nil {
-		t.Fatalf("asset-specific pause failed: %v", err)
+		t.Fatalf("asset-specific pause reconciliation failed: %v", err)
 	}
 	if w.account.Data.Active || !other.Data.Active || w.sends != 1 {
 		t.Fatal("asset-specific pause affected USDC or failed to pause USDT")
