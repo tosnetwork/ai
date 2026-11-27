@@ -254,9 +254,18 @@ then refused (fail closed).
 tombstone changes check 2 or 4 and revokes every transport delegation of the
 Agent at once; a node re-commits a fresh delegation after a policy update.
 The registry has no action that removes one delegation digest; section 18 Q1
-recommends adding it, and check 3 then also covers withdrawal. Until then,
+decides to add it, and check 3 then also covers withdrawal. Until then,
 revoking one compromised transport key without touching the policy is not
 possible, and the response to a compromised transport key is a policy update.
+
+**Between a revocation and the new delegation.** Mailboxes are keyed by
+Agent, not by delegation, so nothing stored is lost: relays keep accepting
+stranger-lane deposits, and contact credentials of the revoked delegation are
+refused (`credential_revoked`), so contacts fall back to the stranger lane.
+The owner cannot fetch until its new delegation is finalized; it then fetches
+everything still held, republishes its hints, and issues new contact
+credentials in band. Envelopes that outlive the gap at a relay are covered by
+the senders' re-deposit until the delivery acknowledgement (D10).
 
 An Agent SHOULD keep one delegation per lane process (the chat node and the
 rail node each hold their own key) and MUST NOT hold more than 4 transport
@@ -547,7 +556,11 @@ after block 0 of a contact credential revokes that credential and everything
 its holder appended. The relay keeps each entry until `until_unix`, which
 MUST be at most `now + 604,800 + 300`; a mailbox holds at most 1,024 entries
 (`507` past that). An owner revoking a contact posts to every relay of its
-live hints. Stored envelopes of a revoked lane stay until acknowledged or
+live hints and of its retired relays under 9.4. It journals the revocation
+first and retries each relay with back-off until that relay answered `204`
+or the revoked credential has expired, so a relay that was down at the time
+learns it on return; until then the contact can deposit there, bounded by its
+lane quota. Stored envelopes of a revoked lane stay until acknowledged or
 expired: revocation stops new deposits, it does not delete.
 
 ### 6.4 Narrowing, checked
@@ -689,6 +702,9 @@ Per (lane, peer Agent):
    the intended peer, and that the responder's `local_adnl_id` equals the
    ADNL ID of the hint entry it dialed.
 
+A session ends at once when either side stops admitting the other (contact
+removed, purchase ended), not at the next re-check.
+
 At most one session per (lane, peer); at most 64 direct sessions per lane;
 a crossed dial (both sides initiating) keeps the session whose initiator has
 the smaller ADNL ID and closes the other.
@@ -706,10 +722,25 @@ exactly the relay spec 8.5 steps 1 to 6 and answers:
   This is stronger than a relay's `201`: it is what the relay acknowledgement
   means;
 - `refused` for a permanent 8.5 step 4 or 5 failure: the sender does not
-  deposit either;
+  deposit either, exactly as a relay copy the recipient refused is
+  acknowledged and gone;
 - no receipt, a transient failure, or an invalid receipt: the sender deposits
   the same journaled bytes at relays at once (I3), counts a failure, and
   stays in DIRECT until the second consecutive failure.
+
+What the carrier reports does not depend on the path. A settled or refused
+direct delivery is reported to the Messenger daemon as `carried`, with the smallest advertised TTL of the hint's relays, so the
+Messenger journal keeps its re-deposit schedule and still waits for the
+Endpoint-signed delivery acknowledgement (carriage 5.2, 5.3); a lost
+acknowledgement costs one relay re-deposit, answered `duplicate`.
+
+Crash windows: the sender journals before the first attempt, so a sender
+that dies after a receipt but before recording it restarts in RELAY and
+deposits the same bytes, which the recipient acknowledges at the relay
+without downloading (below), or, if a restart lost its memory of settled
+IDs, downloads and finds to be a duplicate in its inbox. A recipient that dies after its inbox write
+but before answering leaves the sender to time out and deposit; the copy is
+then a duplicate.
 
 The recipient keeps polling its relays in every state: other peers, and this
 peer's fallbacks, still arrive there. An envelope ID settled on the direct
@@ -1023,64 +1054,67 @@ tests.
 Independent of the order: the registry action that withdraws one delegation
 digest (section 18 Q1), in `tos` and `protocol/pkg/nativecore`.
 
-## 18. Open questions
+## 18. Decisions
 
-Each has a recommended answer, decided from first principles; the owner may
-overrule any.
+The questions this design raised, each with its decision (recorded
+2026-11-27).
 
 - **Q1. The registry cannot withdraw a delegation digest.** Add-delegation
   exists; removal does not, so today a delegation dies only with a policy
   change or a tombstone (the carriage's "withdrawn on chain" assumes an
-  action that does not exist). **Recommended:** add a withdraw-delegation
-  action, authorized like add-delegation, as the reverse of an existing
-  transition; until it exists, the `policy_hash` binding is the revocation.
+  action that does not exist). **Decided:** a registry action that withdraws
+  one delegation digest is added as the reverse of `DelegateAgentV1`,
+  authorized like it. It is a `tos` contract change, scheduled after the
+  USDC and USDT settlement work. Until it lands, the `policy_hash` binding is
+  the revocation; once it lands, check 3 of 5.1 covers withdrawal with no
+  change to this design.
 - **Q2. Bind delegations to the policy hash?** It makes every policy update
   revoke every transport key, so a benign update costs a re-delegation.
-  **Recommended: yes, permanently.** A policy update is how an Agent responds
-  to compromise; a transport key that survives it would be the one key a
+  **Decided: yes, permanently.** A policy update is how an Agent responds to
+  compromise; a transport key that survives it would be the one key a
   rotation misses.
 - **Q3. One lane per contact, or one shared contact lane?** Per-contact lanes
   give the operator a stable pseudonym per contact; a shared lane lets one
-  contact fill it. **Recommended: per contact.** Abuse isolation is the point
-  of lanes, and the operator can already link a sender's deposits by address.
+  contact fill it. **Decided: per contact.** Abuse isolation is the point of
+  lanes, and the operator can already link a sender's deposits by address.
 - **Q4. Opaque mailbox IDs instead of Agent IDs?** The relay learns the Agent
   from the owner credential anyway, which it needs to check revocation, and
-  closed listing already hides mailboxes from everyone else. **Recommended:
-  keep Agent IDs**; an opaque ID would add a mapping and hide nothing.
+  closed listing already hides mailboxes from everyone else. **Decided: keep
+  Agent IDs**; an opaque ID would add a mapping and hide nothing.
 - **Q5. Hints in the TOS DHT?** A DHT key is the short ID of the publishing
   key, not the Agent ID, and a DHT value is at most 768 bytes, below a hint
-  record. **Recommended: not in V2**; relay directories answer lookup by
-  Agent ID. Revisit for nodes that run only the native stack.
+  record. **Decided: not in V2**; relay directories answer lookup by Agent
+  ID. Revisit for nodes that run only the native stack.
 - **Q6. NAT-to-NAT hole punching?** No field evidence; it needs a rendezvous
   and simultaneous dials that the probe avoids on purpose (crossed
-  handshakes). **Recommended: not in V2**; reopen when a field M0-R study shows
-  a cell worth it, with relays offering a UDP reflection service.
+  handshakes). **Decided: not in V2**; reopen when a field M0-R study shows a
+  cell worth it, with relays offering a UDP reflection service.
 - **Q7. Native sidecar or a Go ADNL implementation?** The measured facts come
   from the native stack, and the study itself asks for cross-checking against
-  it. **Recommended: the native sidecar in production**; the Go implementation
+  it. **Decided: the native sidecar in production**; the Go implementation
   stays a test peer.
 - **Q8. IPv6 direct routes?** The native sidecar aborts on udp6.
-  **Recommended: no**, until native IPv6 is a separate `tos` work item with its
+  **Decided: no**, until native IPv6 is a separate `tos` work item with its
   own evidence; IPv6-only nodes use relays.
 - **Q9. Should a settled direct delivery skip the relay deposit?**
-  **Recommended: yes.** The receipt states what a relay acknowledgement
-  states; depositing anyway doubles load and changes no guarantee.
+  **Decided: yes.** The receipt states what a relay acknowledgement states;
+  depositing anyway doubles load and changes no guarantee.
 - **Q10. Drop the per-frame ML-DSA packet signature now that relays check
-  credentials?** **Recommended: no.** Credentials authorize storage at a
-  relay; the packet signature is what proves the sender, post-quantum, on
-  every path (carriage 1).
+  credentials?** **Decided: no.** Credentials authorize storage at a relay;
+  the packet signature is what proves the sender, post-quantum, on every
+  path (carriage 1).
 - **Q11. Remove the relay list from the key card?** Two signed sources of
-  routes is one too many. **Recommended:** after A9, a key card V2 without a
+  routes is one too many. **Decided:** after A9, a key card V2 without a
   relay list; until then the hint takes precedence (5.5).
-- **Q12. Who runs directory relays?** **Recommended:** at least two operators
+- **Q12. Who runs directory relays?** **Decided:** at least two operators
   listed in network settings, the core team being one; none is trusted, and
   every answer is verified.
-- **Q13. Credential lifetimes.** **Recommended:** 1 hour for owner credentials
+- **Q13. Credential lifetimes.** **Decided:** 1 hour for owner credentials
   (local, cheap) and 3 days for contact credentials (at most 7), because
   revocation is by chain re-check and relay revocation lists, and a peer away
   for days should not drop to the stranger lane on return.
-- **Q14. Long poll or push?** **Recommended:** a bounded long poll on one
-  relay; push wake-ups would add a third party that learns online times.
+- **Q14. Long poll or push?** **Decided:** a bounded long poll on one relay;
+  push wake-ups would add a third party that learns online times.
 
 ## 19. Changes to other documents
 
