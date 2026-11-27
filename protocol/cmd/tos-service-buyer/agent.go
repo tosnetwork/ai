@@ -153,6 +153,9 @@ func readAgentConfig(path string) (agentConfig, error) {
 	if _, _, err := tokenPolicy(config.TokenAssets); err != nil {
 		return config, err
 	}
+	if _, err := tokenIssuerPolicies(config.TokenAssets); err != nil {
+		return config, err
+	}
 	if err := checkGatewayConfig(config); err != nil {
 		return config, err
 	}

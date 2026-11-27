@@ -12,7 +12,7 @@ import (
 const ToolTokenLockPreview = "tos_buyer_preview_token_lock"
 
 func (t *Tools) registerTokenLockPreview(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{Name: ToolTokenLockPreview, Title: "Preview a source token lock", Description: "Reads owner-pinned issuer state at a finalized hash-pinned block and previews the issuer fee, minted delta and per-asset budget. It signs and sends nothing. Actor admission is rechecked by prepare; already-minted TOS token transfers are exact.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}}, t.tokenLockPreview)
+	mcp.AddTool(server, &mcp.Tool{Name: ToolTokenLockPreview, Title: "Preview a source token lock", Description: "Reads owner-pinned issuer state at a finalized hash-pinned block and previews the issuer fee, minted delta and per-asset budget. It signs and sends nothing. Actor admission is rechecked by prepare; already-minted TOS token transfers are exact." + untrustedNote, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}}, t.tokenLockPreview)
 }
 
 func (t *Tools) tokenLockPreview(ctx context.Context, _ *mcp.CallToolRequest, input buyeragent.TokenLockPreviewParams) (*mcp.CallToolResult, buyersdk.TokenLockPreview, error) {

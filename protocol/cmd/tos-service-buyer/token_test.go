@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/tosnetwork/ai/protocol/pkg/tokenissuer"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,23 @@ func TestTokenPolicyRequiresExplicitAssetPins(t *testing.T) {
 	pins, limits, err := tokenPolicy(nil)
 	if err != nil || len(pins) != 0 || len(limits) != 0 {
 		t.Fatalf("implicit asset pins appeared: %v %v %v", pins, limits, err)
+	}
+}
+
+func TestIssuerPolicyIsBoundToThePinnedSourceAsset(t *testing.T) {
+	asset := tokenConfigFixture()
+	asset.Issuer = &tokenissuer.Policy{RPCURL: "http://127.0.0.1:8545", ChainID: 1, Token: "0x" + asset.SourceToken, Bridge: "0x" + strings.Repeat("44", 20), CodeSHA256: strings.Repeat("ab", 32), Profile: tokenissuer.Legacy}
+	policies, err := tokenIssuerPolicies([]tokenAssetConfig{asset})
+	if err != nil || len(policies) != 1 {
+		t.Fatal(err)
+	}
+	asset.Issuer.Token = "0x" + strings.Repeat("55", 20)
+	if _, err = tokenIssuerPolicies([]tokenAssetConfig{asset}); err == nil {
+		t.Fatal("issuer token substitution accepted")
+	}
+	asset.Issuer.Token = "0x" + asset.SourceToken
+	asset.Issuer.ChainID = 2
+	if _, err = tokenIssuerPolicies([]tokenAssetConfig{asset}); err == nil {
+		t.Fatal("issuer chain substitution accepted")
 	}
 }
