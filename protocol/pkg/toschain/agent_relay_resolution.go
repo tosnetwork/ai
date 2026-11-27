@@ -994,8 +994,10 @@ func (reader *agentGiftExactRelayCheckpointReader) observeExactAgentNativeSendRe
 func (reader *agentGiftExactRelayCheckpointReader) observeNodeAt(ctx context.Context, node *rpcNode,
 	checkpoint consensusObservation, binding AgentAccountAgentBinding, parsed agentgift.ParsedNativeSend,
 	request agentrelay.RelayExecutionRequest) (relayNodeVote, error) {
+	// The exact last-transaction read authenticates CurrentLastTransactionTime,
+	// which anchors the invalidation window below.
 	vote, err := readNativeAccountAt(ctx, node, parsed.SenderAgentAccount, checkpoint.seqno,
-		reader.reader.network, agentgift.AgentAccountCodeHash)
+		reader.reader.network, reader.reader.accountCode)
 	if err != nil {
 		return relayNodeVote{}, err
 	}

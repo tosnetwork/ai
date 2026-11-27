@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -173,6 +174,8 @@ func TestTokenRecognitionReadsOneCheckpointAndChecksEveryBinding(t *testing.T) {
 		raw["transaction_id"] = map[string]any{"@type": "internal.transactionId", "lt": "10", "hash": base64.StdEncoding.EncodeToString(c.Hash())}
 		txs[account] = raw
 	}
+	// anchors replaces an account's served last-transaction identifier.
+	anchors := map[string]any{}
 	run := func(t *testing.T, change func(*SettlementAssetV1, *TokenAssetPin), fork bool, unknownCount int) error {
 		current, policy := record, pin
 		if change != nil {
@@ -226,6 +229,9 @@ func TestTokenRecognitionReadsOneCheckpointAndChecksEveryBinding(t *testing.T) {
 						code = minterCode
 					}
 					result = map[string]any{"@type": "raw.fullAccountState", "balance": "1000", "code": bocText(code), "data": bocText(accounts[call.Params.Address]), "last_transaction_id": txs[call.Params.Address]["transaction_id"], "block_id": block, "state": "active"}
+					if anchor, ok := anchors[call.Params.Address]; ok {
+						result.(map[string]any)["last_transaction_id"] = anchor
+					}
 				case "getTransactions":
 					_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": call.ID, "error": map[string]any{"code": -32603, "message": "last transaction pruned: lt not in db"}})
 					return
@@ -270,6 +276,28 @@ func TestTokenRecognitionReadsOneCheckpointAndChecksEveryBinding(t *testing.T) {
 	}
 	if err := run(t, nil, true, 0); err == nil {
 		t.Fatal("mixed checkpoint roots accepted")
+	}
+	// A state read keeps the last-transaction anchor strict even though it no
+	// longer fetches that transaction: each malformed anchor is refused at the
+	// bridge read and at the minter read.
+	validHash := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	malformed := map[string]map[string]any{
+		"wrong type":    {"@type": "internal.transactionIdExt", "lt": "10", "hash": validHash},
+		"zero lt":       {"@type": "internal.transactionId", "lt": "0", "hash": validHash},
+		"non-number lt": {"@type": "internal.transactionId", "lt": "ten", "hash": validHash},
+		"short hash":    {"@type": "internal.transactionId", "lt": "10", "hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 31))},
+		"zero hash":     {"@type": "internal.transactionId", "lt": "10", "hash": base64.StdEncoding.EncodeToString(make([]byte, 32))},
+	}
+	for _, target := range []struct{ name, account string }{{"bridge", pin.Bridge}, {"minter", pin.Master}} {
+		for name, anchor := range malformed {
+			t.Run(target.name+" anchor "+name, func(t *testing.T) {
+				anchors[target.account] = anchor
+				defer delete(anchors, target.account)
+				if err := run(t, nil, false, 0); err == nil || !(strings.Contains(err.Error(), "last transaction is malformed") || strings.Contains(err.Error(), "invalid Native transaction")) {
+					t.Fatalf("malformed %s last-transaction anchor accepted: %v", target.name, err)
+				}
+			})
+		}
 	}
 }
 
@@ -453,7 +481,7 @@ func TestTokenWalletStateSurvivesPrunedLastTransaction(t *testing.T) {
 				}
 				result = map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "1000", "code": bocText(code), "data": bocText(data), "block_id": block, "last_transaction_id": map[string]any{"@type": "internal.transactionId", "lt": "10", "hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}}
 			case "getTransactions":
-				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "error": map[string]any{"code": -32603, "message": "last transaction pruned"}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "error": map[string]any{"code": -32603, "message": "last transaction pruned: lt not in db"}})
 				return
 			default:
 				t.Error("unexpected wallet RPC", q.Method)
@@ -476,10 +504,13 @@ func TestTokenWalletStateSurvivesPrunedLastTransaction(t *testing.T) {
 	if state.BalanceAtomic.Cmp(big.NewInt(123)) != 0 || state.LastTransaction.LT != 10 {
 		t.Fatal("wallet balance or finalized anchor missing")
 	}
-	// Execution evidence remains unavailable: state does not manufacture a BOC.
-	_, err = readNativeAccountAt(context.Background(), chain.nodes[0], wallet, 42, network, "tvm-cell-sha256:"+hex.EncodeToString(code.Hash()))
-	if err == nil || !strings.Contains(err.Error(), "pruned") {
-		t.Fatalf("execution read ignored missing history: %v", err)
+	// Execution evidence remains unavailable: the state anchor does not
+	// manufacture the executed transaction, and pruned history is an unknown,
+	// never a known absence.
+	session.reader.maxHistory = 1000
+	tx, err := session.TokenWalletTransaction(context.Background(), wallet, state.LastTransaction)
+	if err == nil || tx != nil || !strings.Contains(err.Error(), "lt not in db") || errors.Is(err, ErrHistoryAnchorMissing) {
+		t.Fatalf("execution read ignored missing history: tx=%+v err=%v", tx, err)
 	}
 }
 
