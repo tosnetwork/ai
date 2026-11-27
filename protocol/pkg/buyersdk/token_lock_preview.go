@@ -3,6 +3,7 @@ package buyersdk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/tosnetwork/ai/protocol/pkg/tokenissuer"
@@ -12,15 +13,17 @@ import (
 // The source fee is charged once, at the lock; it is never deducted again from
 // a transfer of already-minted tokens to an actor.
 type TokenLockPreview struct {
-	AssetMaster       string               `json:"asset_master"`
-	Actor             string               `json:"actor"`
-	NominalAtomic     string               `json:"nominal_atomic"`
-	IssuerFeeAtomic   string               `json:"issuer_fee_atomic"`
-	MintedAtomic      string               `json:"minted_atomic"`
-	BudgetDebitAtomic string               `json:"budget_debit_atomic"`
-	ActorPriceAtomic  string               `json:"actor_price_atomic"`
-	Observation       tokenissuer.Snapshot `json:"observation"`
-	Warning           string               `json:"warning,omitempty"`
+	AssetMaster           string               `json:"asset_master"`
+	Actor                 string               `json:"actor"`
+	NominalAtomic         string               `json:"nominal_atomic"`
+	IssuerFeeAtomic       string               `json:"issuer_fee_atomic"`
+	MintedAtomic          string               `json:"minted_atomic"`
+	BudgetDebitAtomic     string               `json:"budget_debit_atomic"`
+	ActorPriceAtomic      string               `json:"actor_price_atomic"`
+	MaxPerCallAtomic      string               `json:"max_per_call_atomic"`
+	RemainingWindowAtomic string               `json:"remaining_window_atomic"`
+	Observation           tokenissuer.Snapshot `json:"observation"`
+	Warning               string               `json:"warning,omitempty"`
 }
 
 func PreviewTokenLock(ctx context.Context, policy tokenissuer.Policy, master, actor string, nominal, actorPrice, reserved *big.Int, limits TokenAssetLimits) (TokenLockPreview, error) {
@@ -54,9 +57,9 @@ func previewTokenLockAt(observation tokenissuer.Snapshot, master, actor string, 
 	if received.Cmp(limits.MaxPerCallAtomic) > 0 || received.Cmp(remaining) > 0 {
 		return result, errors.New("minted amount exceeds this asset's remaining funding budget")
 	}
-	result = TokenLockPreview{AssetMaster: master, Actor: actor, NominalAtomic: nominal.String(), IssuerFeeAtomic: fee.String(), MintedAtomic: received.String(), BudgetDebitAtomic: received.String(), ActorPriceAtomic: actorPrice.String(), Observation: observation}
+	result = TokenLockPreview{AssetMaster: master, Actor: actor, NominalAtomic: nominal.String(), IssuerFeeAtomic: fee.String(), MintedAtomic: received.String(), BudgetDebitAtomic: received.String(), ActorPriceAtomic: actorPrice.String(), Observation: observation, MaxPerCallAtomic: limits.MaxPerCallAtomic.String(), RemainingWindowAtomic: remaining.String()}
 	if fee.Sign() > 0 {
-		result.Warning = "The source lock mints less than its nominal amount. Funding the actor with a different amount than its exact quoted price is refused and returned. TOS token transfers are exact: no issuer fee is deducted again."
+		result.Warning = fmt.Sprintf("The nominal source amount %s mints %s after the issuer fee. If used as actor funding instead of its exact quoted price %s, a differing amount is refused and returned. Funding the nominal price requires sufficient already-minted tokens. TOS transfers are exact: no issuer fee is deducted again.", nominal.String(), received.String(), actorPrice.String())
 	}
 	return result, nil
 }

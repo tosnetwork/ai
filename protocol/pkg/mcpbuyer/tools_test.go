@@ -55,7 +55,7 @@ func (f *fakeAgent) Call(_ context.Context, method string, params, result any) e
 		ProviderDescription: f.provide}
 	switch method {
 	case "token_lock_preview":
-		answer = buyersdk.TokenLockPreview{AssetMaster: "0:" + strings.Repeat("12", 32), Actor: "0:" + strings.Repeat("34", 32), NominalAtomic: "100000000", IssuerFeeAtomic: "190000", MintedAtomic: "99810000", BudgetDebitAtomic: "99810000", ActorPriceAtomic: "100000000", Warning: "A different actor funding amount is refused and returned."}
+		answer = buyersdk.TokenLockPreview{AssetMaster: "0:" + strings.Repeat("12", 32), Actor: "0:" + strings.Repeat("34", 32), NominalAtomic: "100000000", IssuerFeeAtomic: "190000", MintedAtomic: "99810000", BudgetDebitAtomic: "99810000", ActorPriceAtomic: "100000000", MaxPerCallAtomic: "100000000", RemainingWindowAtomic: "200000000", Warning: "A different actor funding amount is refused and returned."}
 	case "search":
 		answer = buyeragent.SearchView{Checkpoint: 41, Offers: []buyeragent.OfferView{offer}, Dropped: 2, FailedSources: 1}
 	case "quote":

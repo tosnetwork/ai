@@ -20,6 +20,6 @@ func (t *Tools) tokenLockPreview(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err := t.agent.Call(ctx, "token_lock_preview", input, &preview); err != nil {
 		return nil, preview, err
 	}
-	text := fmt.Sprintf("Source lock: nominal %s atomic; issuer fee %s; minted %s. Funding budget uses %s minted atomic units for asset %s. Actor %s requires exactly %s already-minted tokens. Nothing signed or sent. %s", preview.NominalAtomic, preview.IssuerFeeAtomic, preview.MintedAtomic, preview.BudgetDebitAtomic, preview.AssetMaster, preview.Actor, preview.ActorPriceAtomic, preview.Warning)
+	text := fmt.Sprintf("Source lock: nominal %s atomic; issuer fee %s; minted %s. Funding budget uses %s minted atomic units for asset %s. Per-call cap %s; remaining window %s. Actor %s requires exactly %s already-minted tokens. Nothing signed or sent. %s", preview.NominalAtomic, preview.IssuerFeeAtomic, preview.MintedAtomic, preview.BudgetDebitAtomic, preview.AssetMaster, preview.MaxPerCallAtomic, preview.RemainingWindowAtomic, preview.Actor, preview.ActorPriceAtomic, preview.Warning)
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, preview, nil
 }
