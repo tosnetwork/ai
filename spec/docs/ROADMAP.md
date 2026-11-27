@@ -728,7 +728,11 @@ gate item.
   relay reads finalized state (read only, no keys, no authority). Until a
   registry change adds a per-Agent authorization epoch and a
   withdraw-delegation action, it is limited to test networks. **Status:
-  ⬜ Design draft.** Nothing is implemented; it supplies no gate evidence.
+  🟡 Delegation boundary implemented; transport not accepted.** The
+  delegation codec and finalized verifier have frozen vectors and synthetic
+  epoch/cache tests (`protocol/pkg/agenttransport`). Production configuration
+  refuses; registry epoch support, the other transport surfaces and live
+  evidence remain absent. It supplies no gate evidence.
 - [Agent Intent Exchange V1](AGENT_INTENT_EXCHANGE_V1.md) defines a generic
   signed bulletin and Agent-to-Agent negotiation layer. A small signed
   Discovery Card exposes coarse category, keyword, approximate value, time,
