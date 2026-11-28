@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -634,26 +635,48 @@ func (l *Lane) Prune(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	names, err := l.disk.names(l.config.OutboxLimit + MaxKeys + 8)
+	index, err := l.inventory()
 	if err != nil {
 		return err
 	}
-	for _, name := range names {
-		if !strings.HasPrefix(name, "out-") {
-			continue
+	expired := make(map[string]bool)
+	for _, name := range index.Deliveries {
+		if ctx.Err() != nil {
+			return ErrUnavailable
 		}
-		r, err := l.readDelivery(name)
+		r, err := l.decodeDelivery(name)
 		if err != nil {
 			return err
 		}
 		if now >= r.Deadline+uint64(KeyRetention/time.Second) {
-			if err = l.index(ctx, name, false); err != nil {
-				return err
-			}
-			if err = l.disk.remove(name); err != nil {
-				return err
-			}
+			expired[name] = true
+		}
+	}
+	if len(expired) == 0 {
+		return nil
+	}
+	if err := l.retireDeliveries(ctx, expired); err != nil {
+		return err
+	}
+	for name := range expired {
+		if err := l.disk.remove(name); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// retireDeliveries saves the current key inventory together with the pruned
+// delivery index before any expired record is unlinked.
+func (l *Lane) retireDeliveries(ctx context.Context, expired map[string]bool) error {
+	if err := l.meta.lock(ctx); err != nil {
+		return err
+	}
+	defer l.meta.unlock()
+	index, err := l.inventory()
+	if err != nil {
+		return err
+	}
+	index.Deliveries = slices.DeleteFunc(index.Deliveries, func(name string) bool { return expired[name] })
+	return l.disk.write("identity", index)
 }

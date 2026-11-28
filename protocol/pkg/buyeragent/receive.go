@@ -89,13 +89,17 @@ func (c *Carrier) RunPoll(ctx context.Context, lookup PurchaseLookup, report fun
 	waiting.Go(func() {
 		ticker := time.NewTicker(PollInterval)
 		defer ticker.Stop()
+		nextPrune := time.Time{}
 		for ctx.Err() == nil {
 			var failures []error
 			if _, err := c.publisher.Publish(ctx); err != nil {
 				failures = append(failures, err)
 			}
-			if err := errors.Join(c.lane.Prune(ctx), c.scheduler.Prune(ctx), c.credentials.Prune(ctx)); err != nil {
-				failures = append(failures, err)
+			if now := c.config.Now(); !now.Before(nextPrune) {
+				if err := errors.Join(c.lane.Prune(ctx), c.scheduler.Prune(ctx), c.credentials.Prune(ctx)); err != nil {
+					failures = append(failures, err)
+				}
+				nextPrune = now.Add(5 * time.Minute)
 			}
 			reportFailures(failures)
 			select {
