@@ -44,6 +44,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/internal/ids"
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
+	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 )
 
 const (
@@ -62,7 +63,7 @@ const (
 	MaxRoomApplicationSends = 4096
 	// MaxRoomApplicationObjectBytes is the largest application object: it is
 	// never split, so it fits part 0 of the production cut.
-	MaxRoomApplicationObjectBytes = 162_744
+	MaxRoomApplicationObjectBytes = relayframe.FirstPartBytes
 	// maxRoomSealEventBytes bounds the stored Event of an intent: the room
 	// plaintext bound.
 	maxRoomSealEventBytes = 131_072

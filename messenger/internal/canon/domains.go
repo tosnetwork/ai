@@ -179,8 +179,9 @@ const (
 	// DomainHTTPSDeliveryAck authenticates a recipient Endpoint's durable
 	// acceptance of one encrypted device copy.
 	DomainHTTPSDeliveryAck = "tos.messaging.https-delivery-ack.v1\x00"
-	// DomainRelayFrame prefixes one padded relay carriage frame.
-	DomainRelayFrame = "tos.messaging.relay-frame.v1\x00"
+	// DomainRelayFrame prefixes one padded relay carriage frame, version 2:
+	// the version with the contact credential field. No other version decodes.
+	DomainRelayFrame = "tos.messaging.relay-frame.v2\x00"
 	// DomainRelayObject derives the digest of the object a relay frame
 	// carries, so the parts of one object share one commitment.
 	DomainRelayObject = "tos.messaging.relay-object.v1\x00"
