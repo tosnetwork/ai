@@ -57,12 +57,14 @@ and clear its live and withdrawn sets at each epoch bump; those changes are
 outside this package.
 
 `Snapshot` is one immutable result, including the outer native state. The
-resolver must authenticate its proof and finality, honor its context deadline,
-and bound its response. `CheckState`, shared with Messaging Endpoint identity,
+resolver must authenticate state and finality under its declared trust model,
+honor its context deadline, and bound its response. The transport spec section 3
+selects the protocol's strict-majority finalized reader; that is independent
+corroboration, not a claim of cryptographic account-proof verification. `CheckState`, shared with Messaging Endpoint identity,
 checks the network tuple, accepted registry code, deterministic account,
 finalized checkpoint, typed state and Agent identity/liveness again. Policy
 hashes are rebuilt as TVM policy-cell representation hashes, not JSON hashes.
-The verifier does not turn an unverified RPC response into finalized evidence.
+The verifier does not turn a single unchecked RPC response into finalized evidence.
 
 Only `ErrUnavailable` permits the stale-pass fallback. An absent Agent is a
 successful read with nil state; invalid proofs, contradictions and all other
