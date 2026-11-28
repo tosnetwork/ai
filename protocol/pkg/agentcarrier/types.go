@@ -3,9 +3,12 @@
 package agentcarrier
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
@@ -62,9 +65,31 @@ type Relay interface {
 var _ Relay = (*agentpacketrelay.V2Client)(nil)
 
 type Credential struct {
-	Wire   []byte
-	Holder ed25519.PrivateKey
+	wire   []byte
+	holder ed25519.PrivateKey
 }
+
+func NewCredential(wire []byte, holder ed25519.PrivateKey) (Credential, error) {
+	c, err := agenttransport.DecodeCredential(wire)
+	if err != nil || c.VerifyChain() != nil || len(holder) != ed25519.PrivateKeySize {
+		return Credential{}, ErrRefused
+	}
+	public, err := c.HolderKey()
+	if err != nil || !bytes.Equal(public[:], holder[32:]) || !bytes.Equal(ed25519.NewKeyFromSeed(holder[:32]), holder) {
+		return Credential{}, ErrRefused
+	}
+	return Credential{bytes.Clone(wire), bytes.Clone(holder)}, nil
+}
+func (Credential) Format(s fmt.State, _ rune) {
+	if _, err := s.Write([]byte("[carrier credential]")); err != nil {
+		return
+	}
+}
+func (Credential) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("carrier credentials require private credential storage")
+}
+
+var _ json.Marshaler = Credential{}
 
 // Credentials are supplied by the credential manager. Part 1 does not issue,
 // persist or refresh them. A missing contact credential means stranger deposit.
@@ -120,9 +145,10 @@ type DeliveryView struct {
 	Generations int
 }
 type AttemptResult struct {
-	Accepted        bool
-	RelayTTLSeconds uint64
-	Code            string
+	Accepted          bool
+	RelayTTLSeconds   uint64
+	Code              string
+	RetryAfterSeconds uint32
 }
 type PollView struct {
 	Listed, Stored, Refused, Acknowledged int

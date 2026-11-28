@@ -206,6 +206,7 @@ func (d *disk) remove(name string) error {
 		return ErrStorage
 	}
 	if err := d.root.Remove(name); err != nil {
+		d.poisoned = true
 		return ErrStorage
 	}
 	dir, err := d.root.Open(".")

@@ -8,7 +8,6 @@ import (
 	"math"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
@@ -43,7 +42,8 @@ func (l *Lane) readKey(name string) (keyRecord, error) {
 	return r, nil
 }
 func (l *Lane) heldKeys() (map[[32]byte]agentpacketseal.PrivateKey, []keyRecord, error) {
-	names, err := l.disk.names(l.config.OutboxLimit + MaxKeys + 8)
+	inventory, err := l.inventory()
+	names := inventory.Keys
 	if err != nil {
 		return nil, nil, err
 	}
@@ -54,9 +54,6 @@ func (l *Lane) heldKeys() (map[[32]byte]agentpacketseal.PrivateKey, []keyRecord,
 	held := map[[32]byte]agentpacketseal.PrivateKey{}
 	records := []keyRecord{}
 	for _, name := range names {
-		if !strings.HasPrefix(name, "key-") {
-			continue
-		}
 		r, err := l.readKey(name)
 		if err != nil {
 			return nil, nil, err
@@ -73,6 +70,9 @@ func (l *Lane) heldKeys() (map[[32]byte]agentpacketseal.PrivateKey, []keyRecord,
 		}
 		if now >= card.NotAfterUnix+uint64(KeyRetention/time.Second) {
 			clear(r.Seed)
+			if err = l.index(context.Background(), name, false); err != nil {
+				return nil, nil, err
+			}
 			if err = l.disk.remove(name); err != nil {
 				return nil, nil, err
 			}
@@ -142,7 +142,7 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 		if !slices.Equal(r.card.Relays, relays) || r.card.NotAfterUnix <= now+uint64(SuccessorLead/time.Second) {
 			continue
 		}
-		_, card, err := l.config.VerifyCard(ctx, r.packet, l.config.Now())
+		_, card, err := l.verifyCard(ctx, r.packet)
 		if err != nil {
 			if !errors.Is(err, ErrRefused) {
 				return OwnCard{}, ErrUnavailable
@@ -175,11 +175,17 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 	if err != nil {
 		return OwnCard{}, ErrUnavailable
 	}
-	recipient, verified, err := l.config.VerifyCard(ctx, packet, l.config.Now())
+	recipient, verified, err := l.verifyCard(ctx, packet)
 	if err != nil || recipient.AgentID != l.config.AgentID || recipient.KeyID != card.KeyID || !bytes.Equal(recipient.PublicKey, card.PublicKey) || !slices.Equal(verified.Relays, card.Relays) || verified.NotBeforeUnix != card.NotBeforeUnix || verified.NotAfterUnix != card.NotAfterUnix {
 		return OwnCard{}, ErrRefused
 	}
+	if exists, err := l.indexed(keyName(key.KeyID)); err != nil || exists {
+		return OwnCard{}, ErrStorage
+	}
 	if err = l.disk.write(keyName(key.KeyID), keyRecord{l.identity(), seed, packet}); err != nil {
+		return OwnCard{}, err
+	}
+	if err = l.index(ctx, keyName(key.KeyID), true); err != nil {
 		return OwnCard{}, err
 	}
 	if err = l.trackRelaysLocked(l.config.Relays, card.NotAfterUnix+uint64(KeyRetention/time.Second)); err != nil {

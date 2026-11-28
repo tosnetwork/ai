@@ -31,6 +31,7 @@ func (g gate) lock(ctx context.Context) error {
 func (g gate) unlock() { <-g }
 
 type Lane struct {
+	meta             gate
 	wait             gate
 	notice           string
 	config           Config
@@ -101,11 +102,14 @@ func Open(ctx context.Context, c Config) (l *Lane, err error) {
 	if !filepath.IsAbs(c.StateDir) || filepath.Clean(c.StateDir) != c.StateDir {
 		return nil, ErrConfig
 	}
+	if err = privateRoot(c.StateDir); err != nil {
+		return nil, err
+	}
 	disk, err := openDisk(filepath.Join(c.StateDir, string(c.Kind)))
 	if err != nil {
 		return nil, err
 	}
-	l = &Lane{config: c, disk: disk, out: make(gate, 1), keys: make(gate, 1), poll: make(gate, 1), wait: make(gate, 1), settled: map[string]memory{}, refused: map[string]memory{}}
+	l = &Lane{config: c, disk: disk, out: make(gate, 1), keys: make(gate, 1), poll: make(gate, 1), wait: make(gate, 1), meta: make(gate, 1), settled: map[string]memory{}, refused: map[string]memory{}}
 	defer func() {
 		if err != nil {
 			if closeErr := disk.close(); closeErr != nil {
@@ -138,7 +142,7 @@ func Open(ctx context.Context, c Config) (l *Lane, err error) {
 			}
 		}
 	}
-	var saved identity
+	var saved inventory
 	err = disk.read("identity", &saved)
 	if errors.Is(err, os.ErrNotExist) {
 		names, err = disk.names(c.OutboxLimit + MaxKeys + 8)
@@ -148,10 +152,10 @@ func Open(ctx context.Context, c Config) (l *Lane, err error) {
 		if len(names) != 1 || names[0] != "lock" {
 			return l, ErrStorage
 		}
-		if err = disk.write("identity", l.identity()); err != nil {
+		if err = disk.write("identity", inventory{Identity: l.identity(), Keys: []string{}, Deliveries: []string{}}); err != nil {
 			return l, err
 		}
-	} else if err != nil || saved != l.identity() {
+	} else if err != nil || saved.Identity != l.identity() {
 		return l, ErrStorage
 	}
 	if err = l.audit(); err != nil {
@@ -194,30 +198,43 @@ func (l *Lane) OwnNotice(ctx context.Context) string {
 	return ""
 }
 func (l *Lane) audit() error {
+	index, err := l.inventory()
+	if err != nil {
+		return err
+	}
+	expected := map[string]bool{}
+	for _, name := range append(append([]string(nil), index.Keys...), index.Deliveries...) {
+		expected[name] = true
+	}
 	names, err := l.disk.names(l.config.OutboxLimit + MaxKeys + 8)
 	if err != nil {
 		return err
 	}
-	keys, deliveries := 0, 0
 	for _, name := range names {
 		switch {
 		case name == "identity" || name == "lock" || name == "relays":
+			continue
 		case strings.HasPrefix(name, "key-"):
-			keys++
-			if _, err = l.readKey(name); err != nil {
+			r, err := l.readKey(name)
+			clear(r.Seed)
+			if err != nil {
 				return err
 			}
 		case strings.HasPrefix(name, "out-"):
-			deliveries++
-			if _, err = l.readDelivery(name); err != nil {
+			if _, err := l.decodeDelivery(name); err != nil {
 				return err
 			}
 		default:
 			return ErrStorage
 		}
+		if expected[name] {
+			delete(expected, name)
+		} else if err := l.disk.remove(name); err != nil {
+			return err
+		}
 	}
-	if keys > MaxKeys || deliveries > l.config.OutboxLimit {
-		return ErrCapacity
+	if len(expected) != 0 {
+		return ErrStorage
 	}
 	return nil
 }

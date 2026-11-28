@@ -63,6 +63,13 @@ func packet(raw []byte) (agentpacket.Packet, error) {
 	return p, nil
 }
 func (l *Lane) readDelivery(name string) (delivery, error) {
+	indexed, err := l.indexed(name)
+	if err != nil || !indexed {
+		return delivery{}, ErrStorage
+	}
+	return l.decodeDelivery(name)
+}
+func (l *Lane) decodeDelivery(name string) (delivery, error) {
 	var r delivery
 	if l.disk.read(name, &r) != nil || r.Identity != l.identity() || r.ID == "" || len(r.ID) > 128 || name != deliveryName(r.ID) || len(r.Generations) > MaxGenerations || r.Deadline == 0 || r.Deadline > math.MaxInt64-uint64(KeyRetention/time.Second) {
 		return r, ErrStorage
@@ -126,6 +133,10 @@ func (l *Lane) Queue(ctx context.Context, id string, raw []byte, deadline uint64
 		}
 		return view(old), nil
 	}
+	indexed, indexErr := l.indexed(deliveryName(id))
+	if indexErr != nil || indexed {
+		return DeliveryView{}, ErrStorage
+	}
 	// A corrupt existing record is never treated as an absent delivery.
 	if _, statErr := l.disk.root.Lstat(deliveryName(id)); statErr == nil || !errors.Is(statErr, os.ErrNotExist) {
 		return DeliveryView{}, ErrStorage
@@ -150,7 +161,17 @@ func (l *Lane) Queue(ctx context.Context, id string, raw []byte, deadline uint64
 		return DeliveryView{}, ErrCapacity
 	}
 	r := delivery{Identity: l.identity(), ID: id, Packet: bytes.Clone(raw), Deadline: deadline, State: "pending", Code: "no-route", Generations: []generation{}}
+	fresh, timeErr := l.now()
+	if timeErr != nil {
+		return DeliveryView{}, timeErr
+	}
+	if deadline <= fresh {
+		return DeliveryView{}, ErrExpired
+	}
 	if err = l.disk.write(deliveryName(id), r); err != nil {
+		return DeliveryView{}, err
+	}
+	if err = l.index(ctx, deliveryName(id), true); err != nil {
 		return DeliveryView{}, err
 	}
 	return view(r), nil
@@ -175,7 +196,7 @@ func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route)
 		if kind != agenttransport.RailCard && kind != agenttransport.ChatCard {
 			return "", ErrRefused
 		}
-		key, _, err := l.config.VerifyCard(ctx, raw, l.config.Now())
+		key, _, err := l.verifyCard(ctx, raw)
 		return key.AgentID, err
 	}
 	verified, err := l.config.Verifier.VerifyConsumerHint(ctx, route.HintRecord, l.config.HintPolicy, objectCheck)
@@ -188,8 +209,14 @@ func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route)
 	if verified.Record.Hint.Delegation.AgentID() != recipient {
 		return agentpacketseal.RecipientKey{}, nil, ErrRefused
 	}
-	key, card, err := l.config.VerifyCard(ctx, route.CardPacket, l.config.Now())
-	if err != nil || key.AgentID != recipient || key.KeyID != card.KeyID || agentpacketseal.CheckKeyCardTime(card, l.config.Now()) != nil {
+	key, card, err := l.verifyCard(ctx, route.CardPacket)
+	if err != nil {
+		if !errors.Is(err, ErrRefused) {
+			return key, nil, ErrUnavailable
+		}
+		return key, nil, ErrPeerRevoked
+	}
+	if key.AgentID != recipient || key.KeyID != card.KeyID || agentpacketseal.CheckKeyCardTime(card, l.config.Now()) != nil {
 		return key, nil, ErrPeerRevoked
 	}
 	return key, append([]string(nil), verified.Record.Hint.Relays...), nil
@@ -235,6 +262,8 @@ func (l *Lane) seal(r *delivery, route Route, key agentpacketseal.RecipientKey, 
 // resolve hints, schedule no-route retries, or run two-copy fanout. PR9 composes
 // this primitive. Every attempt, including an ambiguous retry, uses disk bytes.
 func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (AttemptResult, error) {
+	route.HintRecord = bytes.Clone(route.HintRecord)
+	route.CardPacket = bytes.Clone(route.CardPacket)
 	if err := l.out.lock(ctx); err != nil {
 		return AttemptResult{}, err
 	}
@@ -276,7 +305,7 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 	if err != nil {
 		return AttemptResult{}, ErrStorage
 	}
-	oldKey, oldCard, oldErr := l.config.VerifyCard(call, g.Card, l.config.Now())
+	oldKey, oldCard, oldErr := l.verifyCard(call, g.Card)
 	if oldErr != nil && !errors.Is(oldErr, ErrRefused) {
 		return AttemptResult{}, ErrUnavailable
 	}
@@ -323,7 +352,7 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 	}
 	t := &g.Targets[position]
 	if t.State == "accepted" {
-		return AttemptResult{true, description.MaxTTLSeconds, ""}, nil
+		return AttemptResult{Accepted: true, RelayTTLSeconds: description.MaxTTLSeconds}, nil
 	}
 	if t.State == "abandoned" || t.State == "conflict" {
 		return AttemptResult{}, ErrRefused
@@ -350,7 +379,14 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 	if err = l.disk.write(deliveryName(id), r); err != nil {
 		return AttemptResult{}, err
 	}
-	err = client.Deposit(call, bytes.Clone(g.Envelope), auth.Wire, auth.Holder)
+	if contact && l.own(call) != nil {
+		auth = Credential{}
+		contact = false
+	}
+	if err = l.sendGuard(call, r, *g, route, auth, contact, url); err != nil {
+		return AttemptResult{}, err
+	}
+	err = client.Deposit(call, bytes.Clone(g.Envelope), auth.wire, auth.holder)
 	if contact && fallback(err) {
 		if status(err, 403, "credential_revoked") {
 			if dropErr := l.config.Credentials.DropContact(call, p.RecipientAgentID, url); dropErr != nil {
@@ -364,9 +400,21 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 		if writeErr := l.disk.write(deliveryName(id), r); writeErr != nil {
 			return AttemptResult{}, writeErr
 		}
+		if guardErr := l.sendGuard(call, r, *g, route, Credential{}, false, url); guardErr != nil {
+			return AttemptResult{}, guardErr
+		}
 		err = client.Deposit(call, bytes.Clone(g.Envelope), nil, nil)
 	}
 	result := AttemptResult{RelayTTLSeconds: description.MaxTTLSeconds, Code: "carrier-unavailable"}
+	if delay, ok := agentpacketrelay.RetryAfter(err); ok && delay > 0 {
+		result.RetryAfterSeconds = uint32(min(delay, time.Hour) / time.Second)
+		if result.RetryAfterSeconds == 0 {
+			result.RetryAfterSeconds = 1
+		}
+	}
+	if status(err, 507, "") {
+		result.Code = "peer-cap"
+	}
 	if err == nil || status(err, 410, "") {
 		t.State = "accepted"
 		r.State = "carried"
@@ -387,13 +435,56 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 	}
 	return result, nil
 }
+
+// Recheck after local persistence too: filesystem delay must not extend a
+// hint, card, credential or business deadline. The exact wire remains unchanged.
+func (l *Lane) sendGuard(ctx context.Context, r delivery, g generation, route Route, auth Credential, contact bool, url string) error {
+	p, err := packet(r.Packet)
+	if err != nil {
+		return ErrStorage
+	}
+	if _, _, err = l.verifiedRoute(ctx, p.RecipientAgentID, route); err != nil {
+		return err
+	}
+	if _, _, err = l.verifyCard(ctx, g.Card); err != nil {
+		if errors.Is(err, ErrRefused) {
+			return ErrPeerRevoked
+		}
+		return ErrUnavailable
+	}
+	h, err := agentpacketseal.ParseEnvelope(g.Envelope)
+	if err != nil {
+		return ErrStorage
+	}
+	hint, err := agenttransport.DecodeHintRecord(route.HintRecord)
+	if err != nil {
+		return ErrNoRoute
+	}
+	now, err := l.now()
+	if err != nil {
+		return err
+	}
+	if now >= r.Deadline || h.ExpiresAtUnix <= now {
+		return ErrExpired
+	}
+	if hint.Hint.ExpiresAt <= now {
+		return ErrNoRoute
+	}
+	if ctx.Err() != nil {
+		return ErrUnavailable
+	}
+	if contact {
+		return checkCredential(auth, p.RecipientAgentID, url, agenttransport.OperationDeposit, now, nil)
+	}
+	return nil
+}
 func status(err error, n int, code string) bool {
 	var e *agentpacketrelay.StatusError
 	return errors.As(err, &e) && e.StatusCode == n && (code == "" || e.Code == code)
 }
 func fallback(err error) bool { return status(err, 507, "") || status(err, 403, "credential_revoked") }
 func checkCredential(auth Credential, agent, relay string, op agenttransport.Operation, now uint64, own []byte) error {
-	c, err := agenttransport.DecodeCredential(auth.Wire)
+	c, err := agenttransport.DecodeCredential(auth.wire)
 	if err != nil || c.VerifyChain() != nil {
 		return ErrRefused
 	}
@@ -407,7 +498,7 @@ func checkCredential(auth Credential, agent, relay string, op agenttransport.Ope
 			return ErrRefused
 		}
 	}
-	if len(auth.Holder) != 64 || c.CheckScope(now, relay, op) != nil {
+	if len(auth.holder) != 64 || c.CheckScope(now, relay, op) != nil {
 		return ErrRefused
 	}
 	return nil
@@ -450,6 +541,9 @@ func (l *Lane) Prune(ctx context.Context) error {
 			return err
 		}
 		if now >= r.Deadline+uint64(KeyRetention/time.Second) {
+			if err = l.index(ctx, name, false); err != nil {
+				return err
+			}
 			if err = l.disk.remove(name); err != nil {
 				return err
 			}

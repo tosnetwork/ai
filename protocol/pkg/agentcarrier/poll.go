@@ -166,9 +166,9 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 	}
 	var entries []agentpacketrelay.V2MailboxEntry
 	if wait > 0 {
-		entries, err = client.ListWait(ctx, l.config.AgentID, auth.Wire, auth.Holder, wait)
+		entries, err = client.ListWait(ctx, l.config.AgentID, auth.wire, auth.holder, wait)
 	} else {
-		entries, err = client.List(ctx, l.config.AgentID, auth.Wire, auth.Holder)
+		entries, err = client.List(ctx, l.config.AgentID, auth.wire, auth.holder)
 	}
 	if err != nil || len(entries) > 256 {
 		return total, ErrUnavailable
@@ -215,7 +215,7 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 			break
 		}
 		downloads++
-		raw, err := client.Fetch(ctx, l.config.AgentID, entry.EnvelopeID, auth.Wire, auth.Holder)
+		raw, err := client.Fetch(ctx, l.config.AgentID, entry.EnvelopeID, auth.wire, auth.holder)
 		if err != nil {
 			total.Code = ErrUnavailable.Error()
 			continue
