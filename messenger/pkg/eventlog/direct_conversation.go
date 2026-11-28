@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/ids"
@@ -123,6 +124,66 @@ func (j *Journal) DirectConversation(localAgentID, remoteAgentID string) (Direct
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 	return j.readDirectConversation(localAgentID, remoteAgentID)
+}
+
+// MaxDirectConversationsPerPage bounds one page of ListDirectConversations.
+const MaxDirectConversationsPerPage = 64
+
+// ListDirectConversations returns at most limit direct conversations of the
+// local Agent, newest first by update time and then by conversation ID
+// descending. A page continues strictly after the cursor (before, beforeID):
+// the update time and ID of the last entry of the previous page, or zero and
+// empty for the first page. It reads one directory of at most
+// MaxDirectConversations records under the journal lock, so a page is one
+// snapshot.
+func (j *Journal) ListDirectConversations(localAgentID string, before uint64, beforeID string,
+	limit int) ([]DirectConversationRecord, error) {
+	if err := j.usable(); err != nil {
+		return nil, err
+	}
+	if !ids.Agent.MatchString(localAgentID) || limit < 1 || limit > MaxDirectConversationsPerPage ||
+		(before == 0) != (beforeID == "") || beforeID != "" && !ids.Conversation.MatchString(beforeID) {
+		return nil, errors.New("invalid direct conversation listing")
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	entries, err := os.ReadDir(filepath.Join(j.root, directConversationDir))
+	if err != nil {
+		return nil, errors.New("read direct conversations")
+	}
+	if len(entries) > MaxDirectConversations {
+		return nil, errors.New("direct conversation ledger exceeds its bound")
+	}
+	records := make([]DirectConversationRecord, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.Type().IsRegular() || filepath.Ext(name) != ".json" {
+			return nil, errors.New("direct conversation ledger holds an unexpected entry")
+		}
+		remote := "agent_" + name[:len(name)-len(".json")]
+		if !ids.Agent.MatchString(remote) {
+			return nil, errors.New("direct conversation ledger holds an unexpected entry")
+		}
+		record, found, err := j.readDirectConversation(localAgentID, remote)
+		if err != nil || !found {
+			return nil, errors.New("read direct conversation")
+		}
+		if before != 0 && (record.UpdatedAtUnix > before ||
+			record.UpdatedAtUnix == before && record.ConversationID >= beforeID) {
+			continue
+		}
+		records = append(records, record)
+	}
+	sort.Slice(records, func(a, b int) bool {
+		if records[a].UpdatedAtUnix != records[b].UpdatedAtUnix {
+			return records[a].UpdatedAtUnix > records[b].UpdatedAtUnix
+		}
+		return records[a].ConversationID > records[b].ConversationID
+	})
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	return records, nil
 }
 
 func (j *Journal) writeDirectConversation(record DirectConversationRecord) error {

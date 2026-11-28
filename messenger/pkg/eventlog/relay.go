@@ -162,7 +162,10 @@ type RelayPull struct {
 	ResponseDescriptor string `json:"response_descriptor_digest,omitempty"`
 	ResponseAtUnix     uint64 `json:"response_at_unix,omitempty"`
 	AckedCardDigest    string `json:"acked_card_digest,omitempty"`
-	UpdatedAtUnix      uint64 `json:"updated_at_unix"`
+	// AckedCredentialDigest is the contact credential the peer acknowledged
+	// a frame of; later frames to it no longer carry that credential.
+	AckedCredentialDigest string `json:"acked_credential_digest,omitempty"`
+	UpdatedAtUnix         uint64 `json:"updated_at_unix"`
 }
 
 // LoadRelayPull returns a peer's pull state, or a fresh empty record.
@@ -220,7 +223,8 @@ func (j *Journal) PutRelayPull(pull RelayPull, now time.Time) error {
 		return errors.New("an outstanding relay pull needs a schedule")
 	}
 	if pull.ResponseDescriptor != "" && !canon.ValidDigest(pull.ResponseDescriptor) ||
-		pull.AckedCardDigest != "" && !canon.ValidDigest(pull.AckedCardDigest) {
+		pull.AckedCardDigest != "" && !canon.ValidDigest(pull.AckedCardDigest) ||
+		pull.AckedCredentialDigest != "" && !canon.ValidDigest(pull.AckedCredentialDigest) {
 		return errors.New("invalid relay pull digest")
 	}
 	pull.Schema = RelayPullSchema

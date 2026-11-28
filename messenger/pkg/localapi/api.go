@@ -219,7 +219,13 @@ const (
 	OpListRooms Operation = "rooms.list"
 	// OpRoomGaps reads the room.gap records of one room, newest first.
 	OpRoomGaps Operation = "rooms.gaps"
+	// OpListConversations lists the direct conversations held here, newest
+	// first, at most MaxConversationsPerPage per page.
+	OpListConversations Operation = "conversations.list"
 )
+
+// MaxConversationsPerPage bounds one conversations.list page.
+const MaxConversationsPerPage = 64
 
 // Principal is which side of the boundary a connection speaks for.
 //
@@ -246,7 +252,7 @@ var permitted = map[Principal]map[Operation]struct{}{
 		OpPendingAttachments: {}, OpClaimAttachment: {},
 		OpBeginOutboundAttachment: {}, OpAppendOutboundAttachment: {}, OpCommitOutboundAttachment: {},
 		OpRequestAction: {}, OpActionStatus: {}, OpClaimAction: {},
-		OpListRooms: {}, OpRoomGaps: {},
+		OpListRooms: {}, OpRoomGaps: {}, OpListConversations: {},
 	},
 	PrincipalOwner: {
 		OpAwaitingAdmission: {}, OpAdmit: {}, OpRefuse: {},
@@ -305,6 +311,7 @@ var operations = map[Operation]struct{}{
 	OpJoinRoom:              {},
 	OpListRooms:             {},
 	OpRoomGaps:              {},
+	OpListConversations:     {},
 }
 
 var (
@@ -335,6 +342,11 @@ type Request struct {
 	LeaseSeconds uint64     `json:"lease_seconds,omitempty"`
 	Code         fault.Code `json:"code,omitempty"`
 	Limit        int        `json:"limit,omitempty"`
+	// BeforeUpdatedAtUnix and BeforeConversationID continue a
+	// conversations.list page strictly after the last entry of the previous
+	// one; both are unset for the first page.
+	BeforeUpdatedAtUnix  uint64 `json:"before_updated_at_unix,omitempty"`
+	BeforeConversationID string `json:"before_conversation_id,omitempty"`
 	// Recipient is a human input accepted only by contacts.resolve and
 	// conversations.ensure-direct. It is either a canonical AgentID or a
 	// canonical .tos alias and never carries endpoint, device, session, route,
@@ -558,8 +570,20 @@ type Response struct {
 	RoomID string `json:"room_id,omitempty"`
 	// Rooms lists the private rooms held here and the pending joins.
 	Rooms []RoomSummary `json:"rooms,omitempty"`
+	// Conversations is one conversations.list page, newest first; a short
+	// page is the last.
+	Conversations []ConversationSummary `json:"conversations,omitempty"`
 	// RoomGaps lists one room's gap records, newest first.
 	RoomGaps []RoomGap `json:"room_gaps,omitempty"`
+}
+
+// ConversationSummary is one direct conversation: its ID, the remote Agent
+// and when its directory evidence was last verified.
+type ConversationSummary struct {
+	ConversationID string `json:"conversation_id"`
+	RemoteAgentID  string `json:"remote_agent_id"`
+	CreatedAtUnix  uint64 `json:"created_at_unix"`
+	UpdatedAtUnix  uint64 `json:"updated_at_unix"`
 }
 
 // RoomSummary is one private room, joined or pending.
@@ -1062,6 +1086,14 @@ func ValidateRequest(request Request) error {
 		}
 		return requireEmpty(request, "a room listing", request.EventID, request.LeaseID, request.SessionID,
 			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason)
+	case OpListConversations:
+		if request.Limit < 0 || request.Limit > MaxConversationsPerPage ||
+			(request.BeforeUpdatedAtUnix == 0) != (request.BeforeConversationID == "") ||
+			request.BeforeConversationID != "" && !conversationPattern.MatchString(request.BeforeConversationID) {
+			return errors.New("a conversation listing needs a bounded limit and a whole cursor")
+		}
+		return requireEmpty(request, "a conversation listing", request.EventID, request.LeaseID, request.SessionID,
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason, request.RoomID)
 	case OpRoomGaps:
 		if !roomPattern.MatchString(request.RoomID) || request.Limit < 0 || request.Limit > MaxRoomGapsPerResponse {
 			return errors.New("a room gap listing needs a canonical room and a bounded limit")

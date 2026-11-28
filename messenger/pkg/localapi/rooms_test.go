@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -371,5 +372,80 @@ func TestComposeIsRefusedInARoomThisInstallationWasRemovedFrom(t *testing.T) {
 	second.IdempotencyKey = "idem_" + strings.Repeat("f", 64)
 	if response := h.call(t, second); response.OK || response.Code != fault.CodeNotARoomMember {
 		t.Fatalf("after the removal: %+v", response)
+	}
+}
+
+// The runtime lists direct conversations newest first, in bounded pages that
+// continue strictly after a cursor.
+func TestRuntimeListsConversationsNewestFirstInPages(t *testing.T) {
+	h := newHarness(t)
+	local := h.call(t, Request{Op: OpListConversations})
+	if !local.OK || len(local.Conversations) != 0 {
+		t.Fatalf("empty listing: %+v", local)
+	}
+	self := h.server.config.Dispatcher.LocalIdentity().AgentID
+	for index := 0; index < 70; index++ {
+		remote := fmt.Sprintf("agent_%064x", index+1)
+		if remote == self {
+			continue
+		}
+		var entropy [32]byte
+		entropy[0], entropy[1] = byte(index), 1
+		at := h.clock.Add(time.Duration(index%35) * time.Second)
+		if _, _, err := h.journal.EnsureDirectConversation(self, remote, fmt.Sprintf("mep_%064x", index+1), 10, at, entropy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []ConversationSummary
+	request := Request{Op: OpListConversations}
+	for pages := 0; ; pages++ {
+		page := h.call(t, request)
+		if !page.OK || len(page.Conversations) > MaxConversationsPerPage || pages > 3 {
+			t.Fatalf("page %d: %+v", pages, page)
+		}
+		for index := 1; index < len(page.Conversations); index++ {
+			entry, previous := page.Conversations[index], page.Conversations[index-1]
+			if entry.UpdatedAtUnix > previous.UpdatedAtUnix {
+				t.Fatalf("not newest first on page %d: %+v after %+v", pages, entry, previous)
+			}
+		}
+		seen = append(seen, page.Conversations...)
+		if len(page.Conversations) < MaxConversationsPerPage {
+			break
+		}
+		last := page.Conversations[len(page.Conversations)-1]
+		request = Request{Op: OpListConversations, BeforeUpdatedAtUnix: last.UpdatedAtUnix, BeforeConversationID: last.ConversationID}
+	}
+	if len(seen) != 70 {
+		t.Fatalf("listed %d conversations", len(seen))
+	}
+	unique := map[string]bool{}
+	for index, entry := range seen {
+		unique[entry.ConversationID] = true
+		if index > 0 {
+			previous := seen[index-1]
+			if entry.UpdatedAtUnix > previous.UpdatedAtUnix ||
+				entry.UpdatedAtUnix == previous.UpdatedAtUnix && entry.ConversationID >= previous.ConversationID {
+				t.Fatalf("not newest first at %d: %+v after %+v", index, entry, previous)
+			}
+		}
+	}
+	if len(unique) != 70 {
+		t.Fatal("a conversation was listed twice")
+	}
+	small := h.call(t, Request{Op: OpListConversations, Limit: 3})
+	if !small.OK || len(small.Conversations) != 3 || small.Conversations[0] != seen[0] {
+		t.Fatalf("limited page: %+v", small)
+	}
+	for name, bad := range map[string]Request{
+		"over the page bound": {Op: OpListConversations, Limit: MaxConversationsPerPage + 1},
+		"half a cursor":       {Op: OpListConversations, BeforeUpdatedAtUnix: 5},
+		"other half":          {Op: OpListConversations, BeforeConversationID: seen[0].ConversationID},
+		"non-canonical id":    {Op: OpListConversations, BeforeUpdatedAtUnix: 5, BeforeConversationID: "conv_x"},
+		"with a room":         {Op: OpListConversations, RoomID: otherRoomID},
+	} {
+		if ValidateRequest(bad) == nil {
+			t.Fatalf("%s accepted", name)
+		}
 	}
 }

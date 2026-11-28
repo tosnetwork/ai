@@ -979,7 +979,7 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 		}
 		prekeys.listener = device
 	}
-	if instance.relay != nil {
+	if instance.relay != nil && instance.relay.builtin == nil {
 		carrier, err := carrierapi.Listen(config.RelayCarriage.ListenSocketPath)
 		if err != nil {
 			if prekeys != nil && prekeys.listener != nil {
@@ -1326,11 +1326,15 @@ func (d *Daemon) Close() error {
 			_ = d.relay.listener.Close()
 			_ = os.Remove(d.config.RelayCarriage.ListenSocketPath)
 		}
+		var laneErr error
+		if d.relay != nil && d.relay.builtin != nil {
+			laneErr = d.relay.builtin.Close()
+		}
 		_ = d.discovery.Close()
 		if d.contactDNS != nil {
 			_ = d.contactDNS.Close()
 		}
-		err = d.journal.Close()
+		err = errors.Join(laneErr, d.journal.Close())
 	})
 	return err
 }

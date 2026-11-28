@@ -198,6 +198,9 @@ const (
 	// DomainRelayIdempotency derives the carrier idempotency key of one
 	// relay deposit generation.
 	DomainRelayIdempotency = "tos.messaging.relay-idempotency.v1\x00"
+	// DomainBuiltinAckKey derives the carrier key of the acknowledgement the
+	// builtin chat lane deposits for one received packet, from its nonce.
+	DomainBuiltinAckKey = "tos.messaging.builtin-ack-key.v1\x00"
 	// DomainRelayRoomObject prefixes one room object a kind-3 relay frame
 	// carries: a Commit, Welcome, application message or roster.
 	DomainRelayRoomObject = "tos.messaging.relay-room-object.v1\x00"
@@ -286,6 +289,7 @@ var Domains = []string{
 	DomainRelayDelivery,
 	DomainRelayDeliveryAck,
 	DomainRelayIdempotency,
+	DomainBuiltinAckKey,
 	DomainRelayRoomObject,
 	DomainRoomAAD,
 	DomainRelayRoomAck,

@@ -702,8 +702,15 @@ const (
 	MaxRelayPeerEnvelopes = 24
 )
 
-// RelayCarriageConfig wires the daemon to its local carrier process.
+// RelayCarriageConfig wires the daemon to its carrier: the chat lane it runs
+// itself (carrier "builtin") or a local carrier process on carry_socket_path.
 type RelayCarriageConfig struct {
+	// Carrier is "builtin" for the in-process chat lane, or empty for the
+	// external carrier on the two sockets below.
+	Carrier string `json:"carrier,omitempty"`
+	// Builtin configures the in-process lane; required with carrier builtin
+	// and refused otherwise.
+	Builtin *BuiltinCarrierConfig `json:"builtin,omitempty"`
 	// CarrySocketPath is the carrier's socket; the daemon calls carrier.carry
 	// on it.
 	CarrySocketPath string `json:"carry_socket_path"`
@@ -879,6 +886,25 @@ func (r RelayCarriageConfig) RedepositInterval() time.Duration {
 // Validate checks paths and bounds; others are the daemon's other sockets.
 func (r RelayCarriageConfig) Validate(stateDir, contactDir string, others []string) error {
 	paths := []string{r.CarrySocketPath, r.ListenSocketPath, r.CardPath, r.EvidenceExportDir}
+	switch r.Carrier {
+	case "":
+		if r.Builtin != nil {
+			return errors.New("relay_carriage.builtin needs carrier builtin")
+		}
+	case CarrierBuiltin:
+		if r.Builtin == nil {
+			return errors.New("relay_carriage carrier builtin needs its builtin section")
+		}
+		if r.CarrySocketPath != "" || r.ListenSocketPath != "" {
+			return errors.New("relay_carriage carrier builtin takes no carrier sockets")
+		}
+		if err := r.Builtin.Validate(stateDir); err != nil {
+			return err
+		}
+		paths = []string{r.CardPath, r.EvidenceExportDir}
+	default:
+		return errors.New("relay_carriage carrier must be builtin or unset")
+	}
 	for _, path := range paths {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return errors.New("relay_carriage paths must be absolute and clean")
@@ -887,7 +913,7 @@ func (r RelayCarriageConfig) Validate(stateDir, contactDir string, others []stri
 			return errors.New("relay_carriage paths must not live inside state_dir")
 		}
 	}
-	if r.CarrySocketPath == r.ListenSocketPath {
+	if r.Carrier == "" && r.CarrySocketPath == r.ListenSocketPath {
 		return errors.New("relay carry and listen sockets must be different")
 	}
 	for _, other := range others {
