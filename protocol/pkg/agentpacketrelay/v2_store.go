@@ -149,6 +149,7 @@ type V2Store struct {
 	strangers         map[netip.Addr]int
 	sites             map[netip.Addr]int
 	stranger, contact v2Usage
+	policies          map[string]v2PolicyRecord
 	closed, poisoned  bool
 }
 
@@ -199,11 +200,9 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 		d.release()
 		return nil, err
 	}
-	// Control records are introduced by the HTTP/policy layer in its own change.
-	controls, err := boundedV2Dir(filepath.Join(path, "controls"), 1)
-	if err != nil || len(controls) != 0 {
+	if err = s.loadPolicies(unixNow(now)); err != nil {
 		d.release()
-		return nil, errors.New("unknown V2 control record")
+		return nil, err
 	}
 	entries, err := boundedV2Dir(filepath.Join(path, "records"), limits.Base.GlobalMaxEntries)
 	if err != nil {
@@ -237,7 +236,7 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 	return s, nil
 }
 func newV2Store(limits V2Limits) *V2Store {
-	return &V2Store{mu: v2Gate{make(chan struct{}, 1)}, limits: limits, records: map[entryKey]v2Record{}, memory: map[entryKey][]byte{}, mailboxes: map[agentDigest]*v2MailboxUsage{}, lanes: map[v2LaneSlot]v2Usage{}, strangers: map[netip.Addr]int{}, sites: map[netip.Addr]int{}}
+	return &V2Store{mu: v2Gate{make(chan struct{}, 1)}, limits: limits, records: map[entryKey]v2Record{}, memory: map[entryKey][]byte{}, mailboxes: map[agentDigest]*v2MailboxUsage{}, lanes: map[v2LaneSlot]v2Usage{}, strangers: map[netip.Addr]int{}, sites: map[netip.Addr]int{}, policies: map[string]v2PolicyRecord{}}
 }
 func boundedV2Dir(path string, limit int) ([]os.DirEntry, error) {
 	f, err := os.Open(path)
@@ -617,8 +616,11 @@ func (s *V2Store) ack(ctx context.Context, agent agentDigest, id [32]byte, now u
 }
 
 type V2MailboxEntry struct {
-	MailboxEntry
-	Lane string
+	EnvelopeID                    [32]byte
+	RecipientKeyID                [agentpacketseal.KeyIDSize]byte
+	Size                          uint32
+	ReceivedAtUnix, ExpiresAtUnix uint64
+	Lane                          string
 }
 
 func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64) ([]V2MailboxEntry, error) {
@@ -647,7 +649,7 @@ func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64) ([]V2
 		if rec.Contact {
 			class = "contact"
 		}
-		out = append(out, V2MailboxEntry{MailboxEntry{EnvelopeID: rec.ID, RecipientKeyID: rec.KeyID, Size: uint32(rec.Size), ReceivedAtUnix: rec.Received, ExpiresAtUnix: rec.Expires}, class})
+		out = append(out, V2MailboxEntry{EnvelopeID: rec.ID, RecipientKeyID: rec.KeyID, Size: uint32(rec.Size), ReceivedAtUnix: rec.Received, ExpiresAtUnix: rec.Expires, Lane: class})
 	}
 	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].EnvelopeID[:], out[j].EnvelopeID[:]) < 0 })
 	return out, nil

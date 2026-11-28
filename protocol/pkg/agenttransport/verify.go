@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -182,7 +183,7 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 			return d, nil
 		}
 		delete(v.passes, digest)
-		return d, errors.New("finalized Agent state unavailable and no usable cached pass")
+		return d, fmt.Errorf("%w: no usable cached pass", ErrUnavailable)
 	}
 	// A revoking or malformed answer invalidates the previous pass immediately.
 	delete(v.passes, digest)
