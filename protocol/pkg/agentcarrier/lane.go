@@ -43,6 +43,7 @@ type Lane struct {
 	mu               sync.Mutex
 	settled, refused map[string]memory
 	preferred        string
+	pollRetries      map[string]pollRetry
 }
 type memory struct {
 	Secret [32]byte

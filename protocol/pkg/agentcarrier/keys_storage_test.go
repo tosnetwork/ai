@@ -373,3 +373,23 @@ func TestStateNeverMovesBetweenApprovedNetworks(t *testing.T) {
 		t.Fatal("a different approved genesis opened this lane")
 	}
 }
+
+func TestOwnCardCoversPurchaseWindow(t *testing.T) {
+	f := newFixture(t)
+	ordinary, err := f.lane.CurrentCard(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := start + uint64(agentpacketseal.MaxKeyCardLifetime/time.Second)
+	card, err := f.lane.CurrentCardThrough(t.Context(), deadline)
+	if err != nil || card.Card.NotAfterUnix != deadline || card.Card.KeyID == ordinary.Card.KeyID {
+		t.Fatalf("card did not cover the purchase window: expiry %d, want %d, err %v", card.Card.NotAfterUnix, deadline, err)
+	}
+	again, err := f.lane.CurrentCardThrough(t.Context(), deadline)
+	if err != nil || !bytes.Equal(again.Packet, card.Packet) {
+		t.Fatalf("covering card was not reused: %v", err)
+	}
+	if _, err := f.lane.CurrentCardThrough(t.Context(), deadline+1); !errors.Is(err, ErrRefused) {
+		t.Fatalf("window beyond the wire lifetime: %v", err)
+	}
+}

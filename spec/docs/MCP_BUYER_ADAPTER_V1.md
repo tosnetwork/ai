@@ -206,6 +206,21 @@ built for Linux), so V1 of the adapter runs on Linux.
 
 ### 2.4 `tos-service-buyer agent`
 
+The buyer daemon uses the shared V2 rail carrier. On the pinned test network,
+configure `relay_directories` with two to four canonical directory base URLs,
+and add absolute paths in `transport_delegation_file` and
+`transport_seed_file`. Both must be regular files owned by the custody account, mode `0600`.
+The first holds the raw finalized Relay and Hints delegation bytes. The
+second holds its matching raw 32-byte Ed25519 seed. The existing proven
+registry tuple, mailbox `relays` and CA pin remain applicable. Add these
+fields to the generated configuration after provisioning the delegation.
+
+A provider needs a verified V2 hint as well as its verified card before a
+new purchase can be funded. Pending packets wait for a verified hint.
+The shared scheduler reuses signed packets and targets two relay copies,
+retrying under its V2 backoff and relay TTL rules. Buyer outbox entries are
+created in a separate V2 journal from the admitted purchase's durable state.
+
 `tos-service-buyer agent --config <file>` runs the agent in the custody
 account. The configuration (schema `tos.service.mcp-buyer.agent-config.v1`)
 must be a regular file owned by that account, mode `0600` or stricter. It is

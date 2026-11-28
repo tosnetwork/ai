@@ -28,6 +28,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactor"
 	"github.com/tosnetwork/ai/protocol/pkg/serviceactorindex"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 // AgentConfigSchema names the agent's configuration file.
@@ -66,9 +67,12 @@ type agentConfig struct {
 		Wallet     string `json:"wallet"`
 		Controller string `json:"packet_controller"`
 	} `json:"tosctl"`
-	PacketControllerKeyID string   `json:"packet_controller_key_id"`
-	Relays                []string `json:"relays"`
-	RelayCAFile           string   `json:"relay_ca_file"`
+	PacketControllerKeyID   string   `json:"packet_controller_key_id"`
+	Relays                  []string `json:"relays"`
+	RelayCAFile             string   `json:"relay_ca_file"`
+	RelayDirectories        []string `json:"relay_directories,omitempty"`
+	TransportDelegationFile string   `json:"transport_delegation_file,omitempty"`
+	TransportSeedFile       string   `json:"transport_seed_file,omitempty"`
 	// GatewayURL, when set, names a gateway used as a search hint source
 	// and for gateway Quotes (sections 4.3 and 4.4). An https gateway is
 	// verified against GatewayCAFile only; the bearer token is read from
@@ -145,7 +149,7 @@ func readAgentConfig(path string) (agentConfig, error) {
 	// An HTTPS relay is verified against the pinned CA only; without one
 	// pinned, no HTTPS relay could ever be reached, so the agent refuses to
 	// start rather than poll nothing.
-	for _, relay := range config.Relays {
+	for _, relay := range append(append([]string(nil), config.Relays...), config.RelayDirectories...) {
 		if strings.HasPrefix(relay, "https://") && config.RelayCAFile == "" {
 			return config, errors.New("an https relay is configured but relay_ca_file pins no CA")
 		}
@@ -207,17 +211,16 @@ func relayTransport(caFile string) (*http.Transport, error) {
 type relayClients struct {
 	mu        sync.Mutex
 	transport http.RoundTripper
-	clients   map[string]buyeragent.RelayClient
+	clients   map[string]*agentpacketrelay.V2Client
 }
 
-func (r *relayClients) client(base string) (buyeragent.RelayClient, error) {
+func (r *relayClients) client(base string) (*agentpacketrelay.V2Client, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if client, ok := r.clients[base]; ok {
 		return client, nil
 	}
-	client, err := agentpacketrelay.NewClient(agentpacketrelay.ClientConfig{BaseURL: base, Transport: r.transport,
-		Timeout: buyeragent.RelayCallTimeout})
+	client, err := agentpacketrelay.NewV2Client(base, r.transport, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -244,10 +247,11 @@ func (m manifestSources) Manifest(ctx context.Context, digest string) ([]byte, e
 // agentRuntime is everything the agent subcommand opened: the agent with
 // its duty round, the carrier's relay poller and the socket server.
 type agentRuntime struct {
-	agent   dutyAgent
-	carrier relayPoller
-	server  socketServer
-	config  agentConfig
+	agent        dutyAgent
+	carrier      relayPoller
+	server       socketServer
+	config       agentConfig
+	closeCarrier func() error
 }
 
 // dutyAgent is the part of buyeragent.Agent the runtime drives.
@@ -283,7 +287,7 @@ func privateSubdir(stateDir, name string) (string, error) {
 
 // openAgent opens the buyer, the carrier, the agent and its socket from a
 // configuration. Nothing runs yet.
-func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
+func openAgent(ctx context.Context, config agentConfig, vaultURL string) (_ *agentRuntime, err error) {
 	if vaultURL == "" {
 		return nil, errors.New("VAULT_URL must name the tosctl vault")
 	}
@@ -296,8 +300,13 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	reader, err := openReader(network, config.Endpoints, config.Quorum, config.RegistryCodeFile, config.RegistryCodeHash,
-		config.RegistryWorkchain, config.ActorCodeHash, chainDir)
+	chain, locator, registry, err := openRegistry(network, config.Endpoints, config.Quorum, config.RegistryCodeFile,
+		config.RegistryCodeHash, config.RegistryWorkchain, chainDir)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := toschain.NewServiceActorReader(toschain.ServiceActorReaderConfig{Chain: chain, Network: network,
+		ActorCodeHash: config.ActorCodeHash, Registry: registry, CheckpointPath: filepath.Join(chainDir, "service-actor.checkpoint")})
 	if err != nil {
 		return nil, err
 	}
@@ -367,17 +376,27 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	relays := &relayClients{transport: transport, clients: map[string]buyeragent.RelayClient{}}
+	relays := &relayClients{transport: transport, clients: map[string]*agentpacketrelay.V2Client{}}
 	carrierDir, err := privateSubdir(config.StateDir, "carrier")
 	if err != nil {
 		return nil, err
 	}
-	carrier, err := buyeragent.NewCarrier(buyeragent.CarrierConfig{StateDir: carrierDir, BuyerAgentID: config.BuyerAgentID,
-		Network: network, Controller: config.Tosctl.Controller, ControllerKeyID: controllerKeyID, Signer: custody,
-		Verifier: custody, Cards: buyer, Relays: config.Relays, RelayClient: relays.client})
+	transportConfig, err := buyerTransport(config, network, locator, registry, relays)
 	if err != nil {
 		return nil, err
 	}
+	defer clear(transportConfig.Key)
+	carrier, err := buyeragent.NewCarrier(ctx, buyeragent.CarrierConfig{StateDir: carrierDir, BuyerAgentID: config.BuyerAgentID,
+		Network: network, Controller: config.Tosctl.Controller, ControllerKeyID: controllerKeyID, Signer: custody,
+		Verifier: custody, Cards: buyer, Relays: config.Relays, Transport: transportConfig})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = carrier.Close()
+		}
+	}()
 	// Search by capability_id and local Quotes need no hint source: every
 	// fact is read from finalized state. A configured gateway and catalog
 	// add search hints, and the gateway serves gateway Quotes.
@@ -421,7 +440,7 @@ func openAgent(config agentConfig, vaultURL string) (*agentRuntime, error) {
 		agent.Close()
 		return nil, err
 	}
-	return &agentRuntime{agent: agent, carrier: carrier, server: server, config: config}, nil
+	return &agentRuntime{agent: agent, carrier: carrier, server: server, config: config, closeCarrier: carrier.Close}, nil
 }
 
 // run serves the socket and runs the duty round and the relay poller until
@@ -445,6 +464,9 @@ func (r *agentRuntime) run(parent context.Context, report func(string, []error))
 	cancel()
 	wait.Wait()
 	r.agent.Close()
+	if r.closeCarrier != nil {
+		err = errors.Join(err, r.closeCarrier())
+	}
 	if parent.Err() != nil {
 		return nil
 	}
@@ -470,12 +492,12 @@ func runAgent(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	runtime, err := openAgent(config, os.Getenv("VAULT_URL"))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	runtime, err := openAgent(ctx, config, os.Getenv("VAULT_URL"))
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	return runtime.run(ctx, func(round string, failures []error) {
 		for _, failure := range failures {
 			fmt.Fprintf(os.Stderr, "tos-service-buyer agent: %s: %v\n", round, failure)

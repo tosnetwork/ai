@@ -149,7 +149,10 @@ type AttemptResult struct {
 	Code              string
 	RetryAfterSeconds uint32
 }
+
 type PollView struct {
 	Listed, Stored, Refused, Acknowledged int
+	Next                                  time.Time
+	retryAfter                            time.Duration
 	Code                                  string
 }

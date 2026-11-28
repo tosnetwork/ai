@@ -96,6 +96,12 @@ func (l *Lane) heldKeys() (map[[32]byte]agentpacketseal.PrivateKey, []keyRecord,
 // CurrentCard issues a successor 48 hours before expiry. Private keys are not
 // returned; they remain in this lane's private, single-writer state directory.
 func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
+	return l.CurrentCardThrough(ctx, 0)
+}
+
+// CurrentCardThrough returns an own card covering the given Unix time.
+// A zero deadline uses the ordinary rotation window.
+func (l *Lane) CurrentCardThrough(ctx context.Context, through uint64) (OwnCard, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
 	if err := l.own(ctx); err != nil {
@@ -116,6 +122,9 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 	now, err := l.now()
 	if err != nil {
 		return OwnCard{}, err
+	}
+	if through > now && through-now > uint64(agentpacketseal.MaxKeyCardLifetime/time.Second) {
+		return OwnCard{}, ErrRefused
 	}
 	type candidate struct {
 		packet []byte
@@ -144,6 +153,9 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 	sort.Strings(relays)
 	for _, r := range candidates {
 		if !slices.Equal(r.card.Relays, relays) || r.card.NotAfterUnix <= now+uint64(SuccessorLead/time.Second) {
+			continue
+		}
+		if r.card.NotAfterUnix < through {
 			continue
 		}
 		_, card, err := l.verifyCard(ctx, r.packet)
@@ -185,6 +197,7 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 		return OwnCard{}, ErrUnavailable
 	}
 	card := agentpacketseal.KeyCard{PublicKey: public, KeyID: key.KeyID, NotBeforeUnix: now, NotAfterUnix: now + uint64(KeyLifetime/time.Second), Relays: relays}
+	card.NotAfterUnix = max(card.NotAfterUnix, through)
 	packet, err := l.config.SignCard(ctx, card)
 	if err != nil {
 		return OwnCard{}, ErrUnavailable

@@ -298,27 +298,35 @@ func (c *commonFlags) open() (*environment, error) {
 // Native Registry located from its code, and checkpoints kept in stateDir.
 func openReader(network *nativev1.NetworkDomain, endpoints []string, quorum int, registryCodePath, registryCodeHash string,
 	registryWorkchain int32, actorCodeHash, stateDir string) (*toschain.ServiceActorReader, error) {
-	if quorum == 0 {
-		quorum = len(endpoints)/2 + 1
-	}
-	chain, err := toschain.New(toschain.Config{Network: network.NetworkId, Endpoints: endpoints, Quorum: quorum})
-	if err != nil {
-		return nil, err
-	}
-	code, err := readBounded(registryCodePath, 1<<20)
-	if err != nil {
-		return nil, err
-	}
-	locator, err := nativecore.NewLocator(network, registryWorkchain, strings.Join(strings.Fields(string(code)), ""), registryCodeHash)
-	if err != nil {
-		return nil, err
-	}
-	registry, err := toschain.NewSimplifiedNativeResolver(chain, locator, filepath.Join(stateDir, "registry.checkpoint"))
+	chain, _, registry, err := openRegistry(network, endpoints, quorum, registryCodePath, registryCodeHash, registryWorkchain, stateDir)
 	if err != nil {
 		return nil, err
 	}
 	return toschain.NewServiceActorReader(toschain.ServiceActorReaderConfig{Chain: chain, Network: network,
 		ActorCodeHash: actorCodeHash, Registry: registry, CheckpointPath: filepath.Join(stateDir, "service-actor.checkpoint")})
+}
+func openRegistry(network *nativev1.NetworkDomain, endpoints []string, quorum int, registryCodePath, registryCodeHash string,
+	registryWorkchain int32, stateDir string) (*toschain.Adapter, *nativecore.Locator, *toschain.SimplifiedNativeResolver, error) {
+	if quorum == 0 {
+		quorum = len(endpoints)/2 + 1
+	}
+	chain, err := toschain.New(toschain.Config{Network: network.NetworkId, Endpoints: endpoints, Quorum: quorum})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	code, err := readBounded(registryCodePath, 1<<20)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	locator, err := nativecore.NewLocator(network, registryWorkchain, strings.Join(strings.Fields(string(code)), ""), registryCodeHash)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	registry, err := toschain.NewSimplifiedNativeResolver(chain, locator, filepath.Join(stateDir, "registry.checkpoint"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return chain, locator, registry, nil
 }
 
 func (e *environment) buyer(sender buyersdk.ServiceActorSender) (*buyersdk.ServiceActorBuyer, error) {

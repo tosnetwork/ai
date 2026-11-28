@@ -180,7 +180,7 @@ func (c *Carrier) ReceiveResult(ctx context.Context, round ResultRound) (view Re
 	}
 	if state.AcceptedResponseHash != "" {
 		if state.AckDue {
-			sent, err := c.sendAck(ctx, round, binding, now)
+			sent, err := c.sendAck(ctx, round, binding, now, state.LastAckUnix)
 			if err != nil {
 				return view, err
 			}
@@ -195,7 +195,7 @@ func (c *Carrier) ReceiveResult(ctx context.Context, round ResultRound) (view Re
 	}
 	// With none sent yet the last request is the Unix epoch, long past.
 	if !now.Before(time.Unix(state.LastResultRequestUnix, 0).Add(ResultRequestInterval)) {
-		sent, err := c.sendResultRequest(ctx, round, binding, now, retentionEnd)
+		sent, err := c.sendResultRequest(ctx, round, binding, now, retentionEnd, state.LastResultRequestUnix)
 		if err != nil {
 			return view, err
 		}
@@ -348,22 +348,26 @@ func (c *Carrier) clearInbox(requestHash string) error {
 }
 
 // sendAck sends the ack of the accepted result, carrying the buyer card.
-func (c *Carrier) sendAck(ctx context.Context, round ResultRound, binding railwork.Binding, now time.Time) (bool, error) {
+func (c *Carrier) sendAck(ctx context.Context, round ResultRound, binding railwork.Binding, now time.Time, previous int64) (bool, error) {
 	buyerCard, err := c.roundBuyerCard(ctx, round)
 	if err != nil {
 		return false, err
 	}
-	message, err := railwork.EncodeAck(round.ResponseHash, buyerCard)
+	grant, err := c.issueContact(ctx, round.ProviderAgentID)
 	if err != nil {
 		return false, err
 	}
-	return c.sendMessage(ctx, round, railwork.KindResultAck, binding, message, now, now.Add(AckLifetime))
+	message, err := railwork.EncodeAckWithContact(round.ResponseHash, buyerCard, grant)
+	if err != nil {
+		return false, err
+	}
+	return c.sendMessage(ctx, round, railwork.KindResultAck, binding, message, now, now.Add(AckLifetime), previous)
 }
 
 // sendResultRequest asks the provider for the result again, carrying the
 // buyer card (relay 6.4, "Buyer, after the respond").
 func (c *Carrier) sendResultRequest(ctx context.Context, round ResultRound, binding railwork.Binding, now time.Time,
-	retentionEnd uint64) (bool, error) {
+	retentionEnd uint64, previous int64) (bool, error) {
 	buyerCard, err := c.roundBuyerCard(ctx, round)
 	if err != nil {
 		return false, err
@@ -372,7 +376,7 @@ func (c *Carrier) sendResultRequest(ctx context.Context, round ResultRound, bind
 	if err != nil {
 		return false, err
 	}
-	return c.sendMessage(ctx, round, railwork.KindResultRequest, binding, message, now, time.Unix(int64(retentionEnd), 0))
+	return c.sendMessage(ctx, round, railwork.KindResultRequest, binding, message, now, time.Unix(int64(retentionEnd), 0), previous)
 }
 
 func (c *Carrier) roundBuyerCard(ctx context.Context, round ResultRound) ([]byte, error) {
@@ -383,46 +387,13 @@ func (c *Carrier) roundBuyerCard(ctx context.Context, round ResultRound) ([]byte
 	return c.BuyerCard(ctx, cover)
 }
 
-// sendMessage seals one message to a provider card valid now and deposits
-// it at every relay of the card, re-sealing an envelope a 409 refused once
-// (relay 8.6). It reports whether every envelope is held by a relay. The
-// envelopes are not journaled: a message no relay took is built afresh in
-// the next round.
+// sendMessage delegates carriage of a signed control message to the rail lane.
 func (c *Carrier) sendMessage(ctx context.Context, round ResultRound, kind railwork.Kind, binding railwork.Binding,
-	message []byte, now, deadline time.Time) (bool, error) {
-	record := round.Record
-	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, round.ProviderAgentID, now)
-	if errors.Is(err, ErrNoProviderCard) {
+	message []byte, now, deadline time.Time, previous int64) (bool, error) {
+	_, err := c.sendFrames(ctx, round.Record, round.ProviderAgentID, kind, previous, now, deadline,
+		func() (railwork.Binding, []byte, error) { return binding, message, nil })
+	if errors.Is(err, ErrNoRelayAccepted) {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	frames, err := railwork.EncodeMessageFrames(kind, binding, message)
-	if err != nil {
-		return false, err
-	}
-	expires := envelopeExpiry(deadline, now, providerCard.Card.NotAfterUnix)
-	generation, err := c.sealFrames(ctx, record, providerCard, frames, now, expires)
-	if err != nil {
-		return false, err
-	}
-	c.depositGeneration(ctx, &generation)
-	resealed, err := c.resealConflicts(&generation)
-	if err != nil {
-		return false, err
-	}
-	if resealed {
-		c.depositGeneration(ctx, &generation)
-	}
-	for _, envelope := range generation.Envelopes {
-		accepted := false
-		for _, state := range envelope.Relays {
-			accepted = accepted || state == relayAccepted
-		}
-		if !accepted {
-			return false, nil
-		}
-	}
-	return true, nil
+	return err == nil, err
 }
