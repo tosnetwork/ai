@@ -82,7 +82,11 @@ future transport signing, not a replacement label for this command:
 2. The exact delegation and unsigned action (including nonce) are saved before
    controller signing. A declined prompt can be resumed without changing them.
 3. The signed submission is atomically saved and synced before dispatch.
-4. A dispatching marker is synced before calling the relay. Every later rerun
+4. Expiry is checked before and again after the final finalized read, immediately
+   before the dispatch marker. A delegation that has expired by then is never
+   submitted; the journal is marked `expired`, and every rerun refuses without
+   reading, signing, or sending. Start a new operation in a fresh journal.
+5. A dispatching marker is synced before calling the relay. Every later rerun
    only reconciles; it neither signs again nor resubmits. A lost acknowledgement
    can become success only through a fresh finalized read and live-delegation
    verification, never a cached prior success.

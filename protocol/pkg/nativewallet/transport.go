@@ -161,8 +161,13 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		return TransportResult{}, errors.New("invalid transport journal key identity")
 	}
 
-	if r.Phase != "key" && r.Phase != "drafted" && r.Phase != "prepared" && r.Phase != "dispatching" {
+	if r.Phase != "key" && r.Phase != "drafted" && r.Phase != "prepared" && r.Phase != "dispatching" && r.Phase != "expired" {
 		return TransportResult{}, errors.New("invalid transport journal phase")
+	}
+	// An expired journal is terminal: nothing was dispatched, so a rerun must
+	// neither reconcile it as in flight nor read, sign, or submit again.
+	if r.Phase == "expired" {
+		return TransportResult{}, errTransportExpired
 	}
 	if r.Phase == "key" && (len(r.Delegation) != 0 || len(r.Submission) != 0) {
 		return TransportResult{}, errors.New("unexpected key-phase journal payload")
@@ -278,11 +283,17 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 			now = w.Config.Clock.Now()
 		}
 		if now.Unix() < 0 || uint64(now.Unix()) >= d.NotAfter {
-			return TransportResult{}, errors.New("journalled delegation expired before submission")
+			return TransportResult{}, refuseExpiredTransport(path, r)
 		}
 
 		if _, err = verifier.BuildDelegation(ctx, d); err != nil {
 			return TransportResult{}, err
+		}
+		// The finalized read above can outlast a short delegation. Check again
+		// immediately before the dispatch mark so relay fees are never spent on
+		// a delegation that can no longer be used.
+		if transportExpiredAt(w.Config.Clock, d.NotAfter) {
+			return TransportResult{}, refuseExpiredTransport(path, r)
 		}
 		// Persist before crossing the existing relay action boundary. A crash here
 		// is intentionally ambiguous, and a retry may only reconcile.
@@ -322,6 +333,30 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		case <-timer.C:
 		}
 	}
+}
+
+var errTransportExpired = errors.New("journalled delegation expired before submission; nothing was submitted, start a new operation in a fresh journal directory")
+
+// transportExpiredAt reports whether a delegation ending at notAfter can no
+// longer be dispatched at the issuer's current clock reading.
+func transportExpiredAt(clock agenttransport.Clock, notAfter uint64) bool {
+	now := time.Now()
+	if clock != nil {
+		now = clock.Now()
+	}
+	return now.Unix() < 0 || uint64(now.Unix()) >= notAfter
+}
+
+// refuseExpiredTransport records a pre-dispatch expiry so that a rerun reports
+// the refusal instead of treating the operation as in flight. If the record
+// cannot be written the journal stays prepared, and a rerun refuses again on
+// its own expiry check.
+func refuseExpiredTransport(path string, r transportRecord) error {
+	r.Phase = "expired"
+	if err := saveTransport(path, r); err != nil {
+		return errors.Join(errTransportExpired, err)
+	}
+	return errTransportExpired
 }
 
 func firstPurpose(p agenttransport.Purpose) agenttransport.Purpose {

@@ -69,6 +69,22 @@ MUTANTS = [
         "TestTransportExpiryBeforeDispatchRefuses",
     ),
     (
+        "expiry-after-final-read",
+        "nativewallet/transport.go",
+        "if transportExpiredAt(w.Config.Clock, d.NotAfter) {",
+        "if false && transportExpiredAt(w.Config.Clock, d.NotAfter) {",
+        WALLET,
+        "TestTransportExpiryDuringFinalReadRefuses",
+    ),
+    (
+        "expired-terminal",
+        "nativewallet/transport.go",
+        'if r.Phase == "expired" {',
+        'if false && r.Phase == "expired" {',
+        WALLET,
+        "TestTransportExpiryDuringFinalReadRefuses",
+    ),
+    (
         "request-binding",
         "nativewallet/transport.go",
         "!bytes.Equal(expected, actual)",

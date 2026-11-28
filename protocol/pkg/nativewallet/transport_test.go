@@ -63,6 +63,8 @@ type transportHarness struct {
 	lost         bool
 	directory    string
 	beforeSubmit func()
+	onRead       func()
+	reads        int
 }
 
 func (h *transportHarness) ResolveFinalizedAgent(ctx context.Context, _ string) (agenttransport.Snapshot, error) {
@@ -70,6 +72,10 @@ func (h *transportHarness) ResolveFinalizedAgent(ctx context.Context, _ string) 
 	defer h.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return agenttransport.Snapshot{}, err
+	}
+	h.reads++
+	if h.onRead != nil {
+		h.onRead()
 	}
 	if h.readErr != nil {
 		return agenttransport.Snapshot{}, h.readErr
@@ -472,12 +478,62 @@ func TestTransportExpiryBeforeDispatchRefuses(t *testing.T) {
 	w, h, _, r := transportFixture(t)
 	clock := &transportMutableClock{time.Unix(1800000000, 0)}
 	w.Config.Clock = clock
+	reads := -1
 	w.Confirm = func(context.Context, Review) error {
 		clock.at = clock.at.Add(time.Duration(r.Lifetime) * time.Second)
+		reads = h.reads
 		return nil
 	}
 	if _, err := issueTest(t, w, h, r); err == nil || h.submits != 0 {
 		t.Fatal("expired delegation dispatched")
+	}
+	// An already expired journal is refused before another finalized read.
+	if h.reads != reads || transportJournalPhase(t, h.directory) != "expired" {
+		t.Fatalf("expired journal was read again or not recorded: reads %d/%d", h.reads, reads)
+	}
+}
+
+func transportJournalPhase(t *testing.T, directory string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(directory, "transport.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Phase string `json:"phase"`
+	}
+	if err = json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	return record.Phase
+}
+
+// The final finalized read before dispatch can outlast a short delegation. The
+// clock advances past not_after during that read, so the issuer must refuse
+// after the read, record the refusal, and never cross the relay boundary.
+func TestTransportExpiryDuringFinalReadRefuses(t *testing.T) {
+	w, h, _, r := transportFixture(t)
+	r.Lifetime, r.CredentialLifetime = 1, 1
+	clock := &transportMutableClock{time.Unix(1800000000, 0)}
+	w.Config.Clock = clock
+	h.onRead = func() {
+		if transportJournalPhase(t, h.directory) == "prepared" {
+			clock.at = clock.at.Add(2 * time.Second)
+		}
+	}
+	_, err := issueTest(t, w, h, r)
+	if err == nil || !strings.Contains(err.Error(), "expired before submission") || h.submits != 0 {
+		t.Fatalf("delegation expired during the final read was dispatched: %v submits=%d", err, h.submits)
+	}
+	if phase := transportJournalPhase(t, h.directory); phase != "expired" {
+		t.Fatalf("refusal not recorded: phase %q", phase)
+	}
+	calls, reads := w.Signer.(*mldsa44test.Fake).Calls(), h.reads
+	h.onRead = nil
+	clock.at = time.Unix(1800000000, 0)
+	_, err = issueTest(t, w, h, r)
+	if err == nil || !strings.Contains(err.Error(), "expired before submission") || h.submits != 0 || h.reads != reads || w.Signer.(*mldsa44test.Fake).Calls() != calls {
+		t.Fatalf("expired journal rerun was treated as in flight: %v submits=%d reads=%d/%d", err, h.submits, h.reads, reads)
 	}
 }
 func TestTransportIssuerLimits(t *testing.T) {
