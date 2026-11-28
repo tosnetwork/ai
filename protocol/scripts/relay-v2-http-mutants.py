@@ -3,9 +3,9 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RELAY = "./protocol/pkg/agentpacketrelay"
@@ -277,7 +277,7 @@ CONTROLS = [
     (
         "policy-void",
         "agentpacketrelay/v2_policy.go",
-        "!errors.Is(err, agenttransport.ErrDelegationRevoked)",
+        "!errors.Is(readErr, agenttransport.ErrDelegationRevoked)",
         "true",
         RELAY,
         "TestV2RotatedOwnerCanReplaceFuturePolicyWithEarlierTimestamp",
@@ -285,8 +285,8 @@ CONTROLS = [
     (
         "policy-integrity-does-not-open",
         "agentpacketrelay/v2_policy.go",
-        "!errors.Is(err, agenttransport.ErrDelegationRevoked)",
-        "errors.Is(err, agenttransport.ErrUnavailable)",
+        "!errors.Is(readErr, agenttransport.ErrDelegationRevoked)",
+        "errors.Is(readErr, agenttransport.ErrUnavailable)",
         RELAY,
         "TestV2HTTPPolicyReadFailureDoesNotOpenClosedMailbox",
     ),
@@ -332,14 +332,93 @@ CONTROLS = [
     ),
 ]
 
+CONTROLS.extend(
+    [
+        (
+            "inconsistent-presence-refused",
+            "agenttransport/legacy.go",
+            "if found && state == nil {",
+            "if false && found && state == nil {",
+            "./protocol/pkg/agenttransport",
+            "TestFinalizedPresenceCannotBeInconsistent",
+        ),
+        (
+            "tombstone-policy-revocation",
+            "agenttransport/chain.go",
+            "if agent.Tombstoned {",
+            "if false && agent.Tombstoned {",
+            RELAY,
+            "TestV2PolicyTombstoneRevertsToDefaults",
+        ),
+        (
+            "policy-no-network-under-lock",
+            "agentpacketrelay/v2_policy.go",
+            "_, readErr := s.verifier.VerifyDelegation(ctx, p.Delegation, agenttransport.Relay)",
+            "if err := s.store.mu.lock(ctx); err != nil {return nil,err}; _, readErr := s.verifier.VerifyDelegation(ctx, p.Delegation, agenttransport.Relay); s.store.mu.Unlock()",
+            RELAY,
+            "TestV2StalledPolicyRefreshDoesNotLockOtherMailboxes",
+        ),
+        (
+            "policy-refresh-snapshot",
+            "agentpacketrelay/v2_policy.go",
+            "if !s.store.samePolicyLocked(agent, p) {",
+            "if false && !s.store.samePolicyLocked(agent, p) {",
+            RELAY,
+            "TestV2PolicyRefreshDiscardsAReplacedSnapshot",
+        ),
+        (
+            "policy-snapshot-digest",
+            "agentpacketrelay/v2_policy.go",
+            "sha256.Sum256(current.Delegation) == sha256.Sum256(expected.Delegation)",
+            "(true || sha256.Sum256(current.Delegation) == sha256.Sum256(expected.Delegation))",
+            RELAY,
+            "TestV2PolicyRefreshDiscardsAReplacedSnapshot/digest",
+        ),
+        (
+            "policy-snapshot-issued-at",
+            "agentpacketrelay/v2_policy.go",
+            "current.Policy == expected.Policy",
+            "current.Policy.StrangerCount == expected.Policy.StrangerCount && current.Policy.StrangerBytes == expected.Policy.StrangerBytes",
+            RELAY,
+            "TestV2PolicySnapshotIdentityIncludesIssuedAt",
+        ),
+        (
+            "policy-unavailable-refusal",
+            "agentpacketrelay/v2_policy.go",
+            "if readErr != nil {",
+            "if false && readErr != nil {",
+            RELAY,
+            "TestV2PolicyOutageUsesOnlyTheBoundedVerifierPass",
+        ),
+        (
+            "finalized-epoch-revocation",
+            "agenttransport/verify.go",
+            "if *s.CurrentEpoch > d.AuthorizationEpoch {",
+            "if false && *s.CurrentEpoch > d.AuthorizationEpoch {",
+            "./protocol/pkg/agenttransport",
+            "TestAuthenticatedRevocationIsDistinctFromMalformedState/epoch-advanced",
+        ),
+        (
+            "malformed-epoch-not-revocation",
+            "agenttransport/verify.go",
+            'errors.New("missing or inconsistent finalized authorization epoch")',
+            'fmt.Errorf("%w: missing epoch", ErrDelegationRevoked)',
+            "./protocol/pkg/agenttransport",
+            "TestAuthenticatedRevocationIsDistinctFromMalformedState/epoch-missing",
+        ),
+    ]
+)
+
 
 def execute(args):
     result = subprocess.run(
         args,
+        check=False,
         cwd=ROOT,
         env={**os.environ, "GOWORK": "off"},
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=180,
     )
     return result.returncode, result.stdout + result.stderr
@@ -352,7 +431,7 @@ def main():
                 "go",
                 "test",
                 "-run",
-                "TestV2HTTP|TestV2Client|TestV2Maximal|TestV2Policy|TestV2Rotated|TestV2Config|TestV2Configured|TestV2Expired|TestEndpointOutage|TestCheckNetworkGenesis",
+                "TestV2|TestEndpointOutage|TestCheckNetworkGenesis|TestAuthenticatedRevocation|TestFinalizedPresence",
                 "-count=1",
                 package,
             ]

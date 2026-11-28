@@ -208,6 +208,9 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 }
 
 func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admitted bool) error {
+	if s.State == nil {
+		return fmt.Errorf("%w: Agent absent", ErrDelegationRevoked)
+	}
 	agent, err := CheckState(v.config.ChainPolicy, v.config.Network, d.AgentID(), s.State)
 	if err != nil {
 		return err
@@ -232,7 +235,13 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 			return errors.New("legacy test network requires epoch zero and no recorded epochs")
 		}
 	} else {
-		if s.CurrentEpoch == nil || *s.CurrentEpoch == 0 || s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint || d.AuthorizationEpoch != *s.CurrentEpoch {
+		if s.CurrentEpoch == nil || *s.CurrentEpoch == 0 || s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint {
+			return errors.New("missing or inconsistent finalized authorization epoch")
+		}
+		if *s.CurrentEpoch > d.AuthorizationEpoch {
+			return fmt.Errorf("%w: finalized authorization epoch advanced", ErrDelegationRevoked)
+		}
+		if d.AuthorizationEpoch != *s.CurrentEpoch {
 			return errors.New("delegation epoch differs from the current finalized authorization epoch")
 		}
 		if admitted {

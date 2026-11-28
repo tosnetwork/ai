@@ -91,8 +91,20 @@ from a valid hint; this library has no key-card or V1 fallback.
 Mailbox policy has one exact domain-separated binary encoding. Its frozen
 positive/negative corpus is generated deliberately and checked by an independent
 Python reproducer. Policies persist atomically with their authorizing delegation.
-An unavailable or malformed read cannot lift a closed policy. Positive finalized
-revocation or expiry voids it; the next owner's earlier timestamp can then win.
+An unavailable or malformed read cannot lift a closed policy. Unavailable reads
+reuse only the verifier's existing pass (under 600 seconds); after that the
+request refuses, while the policy record remains. Malformed evidence refuses
+without cache fallback. A verified tombstone, removed delegation, advanced
+finalized epoch, changed policy, or expiry voids the policy; the next owner's
+earlier timestamp can then win.
+
+Policy refresh snapshots the delegation digest and issuance time under the store
+gate, releases it for the finalized read, then checks the same identity again
+before committing. A replacement discards the stale result and refuses that
+request. Publishing also checks the snapshot after re-taking the gate. Network
+I/O never holds the store gate. Local file reads and synced atomic writes still
+hold it to preserve store consistency. The verifier's own bounded read gate is
+separate; this change does not remove its serialization of finalized checks.
 Expired policy records are reclaimed, including for unvisited mailboxes.
 The policy table is bounded at 4,096 records; admission past it is unavailable.
 
@@ -106,6 +118,9 @@ do not delete them to bypass a refusal.
 `go test -race` covers TLS client/server delivery, closed reads, restart/floor,
 clock rollback, independent proof relay binding, outage/600-second refusal,
 policy timestamp poisoning/revocation, body limits, and A6 floods through HTTP.
+Policy regressions cover tombstones at 300/601 seconds, outage at 599/600,
+stalled refresh with an unrelated deposit, and replacement by either a new
+delegation digest or issuance time.
 `make relay-v2-store-mutants relay-v2-http-mutants` uses overlays and named
 failures; compilation errors and timeouts do not count as red controls.
 `make relay-v2-policy-vectors-check` compares frozen bytes and independently

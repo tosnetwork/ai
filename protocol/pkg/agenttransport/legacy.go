@@ -47,7 +47,10 @@ func (r *LegacyTestNetworkResolver) ResolveFinalizedAgent(ctx context.Context, i
 	if err = ctx.Err(); err != nil {
 		return Snapshot{}, err
 	}
-	if !found || state == nil {
+	if found && state == nil {
+		return Snapshot{}, errors.New("inconsistent finalized presence result")
+	}
+	if !found {
 		return Snapshot{}, nil
 	}
 	n := state.Network
