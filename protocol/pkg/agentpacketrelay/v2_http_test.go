@@ -96,7 +96,7 @@ func newV2HTTP(t testing.TB) *v2HTTPFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, err := agenttransport.IssueCredential(raw, signer, holder.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.NotBeforeCaveat(uint64(testStart.Unix()) - 1), agenttransport.NotAfterCaveat(uint64(testStart.Unix()) + 3600), agenttransport.OperationsCaveat(agenttransport.OperationList | agenttransport.OperationFetch | agenttransport.OperationDeposit | agenttransport.OperationPublish), agenttransport.RelayCaveat(v2TestURL)})
+	wire, err := agenttransport.IssueCredential(raw, signer, holder.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.NotBeforeCaveat(uint64(testStart.Unix()) - 1), agenttransport.NotAfterCaveat(uint64(testStart.Unix()) + 3600), agenttransport.OperationsCaveat(agenttransport.OperationList | agenttransport.OperationFetch | agenttransport.OperationDeposit | agenttransport.OperationPublish | agenttransport.OperationRevoke), agenttransport.RelayCaveat(v2TestURL)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,6 +215,9 @@ func TestV2HTTPFinalizedCacheBoundAndStrangersContinue(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "chain_unavailable") {
 		t.Fatal(w.Body.String())
 	}
+	// Fetch has no listing recheck: the middleware must refuse it before
+	// revealing even whether an envelope exists.
+	f.serve(t, "GET", f.mail()+"/"+strings.Repeat("1", 64), nil, true, 503)
 	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
 	f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false, 201)
 }
@@ -319,7 +322,7 @@ func TestV2ClientAcceptsOnlyListingExceptionAndNoFallback(t *testing.T) {
 		t.Fatal("maximal legal listing refused", len(got), calls, err)
 	}
 	// Every other response retains its smaller bound; no V1 schema is accepted.
-	if _, _, err = client.exchange(t.Context(), "PUT", f.mail()+"/policy", nil, nil, nil); err == nil {
+	if _, _, err = client.exchange(t.Context(), "PUT", "/v2/mailboxes/"+f.r.agentID+"/policy", nil, nil, nil); err == nil {
 		t.Fatal("listing bound leaked into policy")
 	}
 	raw = bytes.Replace(raw, []byte(SchemaV2Mailbox), []byte(SchemaMailbox), 1)
@@ -684,7 +687,7 @@ func TestV2HTTPRechecksCredentialAfterFinalizedRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.source.after = func() { f.clock.at = f.clock.at.Add(10 * time.Second) }
-	f.serve(t, "GET", f.mail(), nil, true, 403)
+	f.serve(t, "GET", f.mail()+"/"+strings.Repeat("1", 64), nil, true, 403)
 }
 
 func TestV2HTTPProofBindsConfiguredRelayWithoutRelayCaveat(t *testing.T) {

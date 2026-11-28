@@ -268,3 +268,11 @@ separately against the finalized verifier's synthetic pinned-network snapshots.
 `make agenttransport-reachability-mutants` selects only this surface. Missing
 anchors, compiler errors and survivors fail the control run. Normal tests never
 regenerate frozen files. No live transport or first-contact acceptance is claimed.
+
+For a response assembled across several finalized reads, `VerifyDelegationUntil`
+returns the exclusive freshness deadline of that particular pass. A cached or
+outage pass keeps the original successful read's deadline; it is not renewed by
+verification. `VerifiedHint.FreshUntil` carries that deadline into directory
+responses. Consumers check all carried deadlines and object/delegation expiry
+locally at response commit, without another blocking read. Credential scope is
+also checked after reads and immediately before a listing is committed.

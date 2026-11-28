@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"time"
 
 	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
@@ -254,6 +255,7 @@ type HintPolicy struct{ AllowPrivateIPv4 bool }
 type VerifiedHint struct {
 	Record             HintRecord
 	PrivateIPv4Allowed bool
+	FreshUntil         time.Time
 }
 
 var reservedIPv4 = []netip.Prefix{
@@ -295,7 +297,8 @@ func (v *Verifier) VerifyHint(ctx context.Context, raw []byte, policy HintPolicy
 	if err != nil {
 		return result, ErrHint
 	}
-	if _, err = v.VerifyDelegation(ctx, delegation, Hints); err != nil {
+	_, freshUntil, err := v.VerifyDelegationUntil(ctx, delegation, Hints)
+	if err != nil {
 		return result, errors.Join(ErrHint, err)
 	}
 	preimage, err := record.Hint.preimage()
@@ -326,7 +329,7 @@ func (v *Verifier) VerifyHint(ctx context.Context, raw []byte, policy HintPolicy
 			}
 		}
 	}
-	return VerifiedHint{Record: record, PrivateIPv4Allowed: policy.AllowPrivateIPv4}, nil
+	return VerifiedHint{Record: record, PrivateIPv4Allowed: policy.AllowPrivateIPv4, FreshUntil: freshUntil}, nil
 }
 
 // ObjectVerifier must authenticate the complete card/evidence under finalized

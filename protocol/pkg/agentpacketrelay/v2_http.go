@@ -2,7 +2,6 @@ package agentpacketrelay
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -34,6 +33,8 @@ type V2ServerConfig struct {
 	Now                   func() time.Time
 	TrustedProxies        []netip.Prefix
 	DepositRate, ReadRate RateLimit
+	Directory             bool
+	HintPolicy            agenttransport.HintPolicy
 }
 type V2Server struct {
 	store           *V2Store
@@ -46,6 +47,10 @@ type V2Server struct {
 	mu              sync.Mutex
 	clients         map[netip.Addr]int
 	sites           map[netip.Addr]int
+	directory       bool
+	hintPolicy      agenttransport.HintPolicy
+	lookups         *rateLimiter
+	waitTimer       func(time.Duration) (<-chan time.Time, func())
 }
 
 func NewV2Server(c V2ServerConfig) (*V2Server, error) {
@@ -74,7 +79,7 @@ func NewV2Server(c V2ServerConfig) (*V2Server, error) {
 	if err := c.ReadRate.validate(); err != nil {
 		return nil, err
 	}
-	return &V2Server{store: c.Store, verifier: c.Verifier, base: u.EscapedPath(), relay: c.URL, now: c.Now, trusted: append([]netip.Prefix(nil), c.TrustedProxies...), deposits: newRateLimiter(c.DepositRate, DefaultMaxRateClients, DefaultMaxRateClientsPer48), reads: newRateLimiter(c.ReadRate, DefaultMaxRateClients, DefaultMaxRateClientsPer48), bodies: make(chan struct{}, DefaultMaxConcurrentDeposits), clients: map[netip.Addr]int{}, sites: map[netip.Addr]int{}}, nil
+	return &V2Server{store: c.Store, verifier: c.Verifier, base: u.EscapedPath(), relay: c.URL, now: c.Now, trusted: append([]netip.Prefix(nil), c.TrustedProxies...), deposits: newRateLimiter(c.DepositRate, DefaultMaxRateClients, DefaultMaxRateClientsPer48), reads: newRateLimiter(c.ReadRate, DefaultMaxRateClients, DefaultMaxRateClientsPer48), bodies: make(chan struct{}, DefaultMaxConcurrentDeposits), clients: map[netip.Addr]int{}, sites: map[netip.Addr]int{}, directory: c.Directory, hintPolicy: c.HintPolicy, lookups: newRateLimiter(RateLimit{PerMinute: 60, Burst: 60}, DefaultMaxRateClients, DefaultMaxRateClientsPer48), waitTimer: realWaitTimer}, nil
 }
 
 // NewV2FinalizedVerifier uses the existing finalized reader; production and
@@ -133,6 +138,26 @@ func v2Empty(w http.ResponseWriter, status int) {
 }
 func (s *V2Server) route(path string) (string, string, [32]byte) {
 	var zero [32]byte
+	if path == s.base+"/v2/relay" {
+		return "description", "", zero
+	}
+	if rest, ok := strings.CutPrefix(path, s.base+"/v2/hints/"); ok {
+		parts := strings.Split(rest, "/")
+		if len(parts) < 1 || len(parts) > 2 {
+			return "", "", zero
+		}
+		if _, ok := parseAgentText(parts[0]); !ok {
+			return "", "", zero
+		}
+		if len(parts) == 1 {
+			return "hints", parts[0], zero
+		}
+		digest, ok := parseEnvelopeIDText(parts[1])
+		if !ok {
+			return "", "", zero
+		}
+		return "hint-record", parts[0], digest
+	}
 	rest, ok := strings.CutPrefix(path, s.base+"/v2/mailboxes/")
 	if !ok {
 		return "", "", zero
@@ -143,6 +168,9 @@ func (s *V2Server) route(path string) (string, string, [32]byte) {
 	}
 	if _, ok := parseAgentText(p[0]); !ok {
 		return "", "", zero
+	}
+	if len(p) == 2 && p[1] == "revocations" {
+		return "revocations", p[0], zero
 	}
 	if len(p) == 2 && p[1] == "policy" {
 		return "policy", p[0], zero
@@ -257,6 +285,14 @@ func (s *V2Server) authorize(w http.ResponseWriter, r *http.Request, agent strin
 		}
 		return nil, false
 	}
+	if err = s.store.checkRevoked(r.Context(), agent, checked, unixNow(s.now())); err != nil {
+		if errors.Is(err, ErrCredentialRevoked) {
+			v2Fail(w, 403, "credential_revoked")
+		} else {
+			v2Fail(w, 503, CodeUnavailable)
+		}
+		return nil, false
+	}
 	raw, err := checked.Credential.DelegationBytes()
 	if err == nil {
 		_, err = s.verifier.VerifyDelegation(r.Context(), raw, agenttransport.Relay)
@@ -280,7 +316,7 @@ func (s *V2Server) authorize(w http.ResponseWriter, r *http.Request, agent strin
 	return &checked, true
 }
 func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), requestBudget(r))
 	defer cancel()
 	r = r.WithContext(ctx)
 	client, ok := clientAddress(r, s.trusted)
@@ -289,8 +325,11 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limiter := s.reads
-	if r.Method == http.MethodPut {
+	if r.Method == http.MethodPut || r.Method == http.MethodPost {
 		limiter = s.deposits
+	}
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.EscapedPath(), s.base+"/v2/hints/") {
+		limiter = s.lookups
 	}
 	if allowed, wait := limiter.allow(client, s.now()); !allowed {
 		w.Header().Set("Retry-After", strconv.FormatInt(max(1, int64(wait/time.Second)+1), 10))
@@ -303,7 +342,7 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	kind, agent, id := s.route(r.URL.EscapedPath())
 	method := r.Method
-	allowed := (kind == "list" && method == "GET") || (kind == "envelope" && (method == "GET" || method == "PUT")) || (kind == "ack" && method == "POST") || (kind == "policy" && method == "PUT")
+	allowed := (kind == "list" && method == "GET") || (kind == "envelope" && (method == "GET" || method == "PUT")) || (kind == "ack" && method == "POST") || (kind == "policy" && method == "PUT") || (kind == "revocations" && method == "POST") || (kind == "description" && method == "GET") || (kind == "hints" && (method == "GET" || method == "PUT")) || (kind == "hint-record" && method == "GET")
 	if kind == "" {
 		v2Fail(w, 404, CodeNotFound)
 		return
@@ -315,17 +354,24 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			allow = "GET, PUT"
 		case "policy":
 			allow = "PUT"
-		case "ack":
+		case "ack", "revocations":
 			allow = "POST"
+		case "hints":
+			allow = "GET, PUT"
 		}
 		w.Header().Set("Allow", allow)
 		v2Fail(w, 405, CodeMethodNotAllowed)
 		return
 	}
-	if r.Header.Get("TOS-Relay-Wait") != "" {
+	wait, err := parseWait(r, kind)
+	if err != nil {
 		v2Fail(w, 400, CodeInvalidRequest)
 		return
-	} // Long polling is the next relay change.
+	}
+	if kind == "description" {
+		s.describeV2(w)
+		return
+	}
 	var body []byte
 	if method == "PUT" || method == "POST" {
 		if kind != "ack" && (r.Header.Get("Content-Length") == "" || r.ContentLength < 0 || len(r.TransferEncoding) > 0 || r.ContentLength > MaxEnvelopeBytes) {
@@ -349,6 +395,12 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if kind == "policy" {
 			limit = maxV2PolicyBytes
 		}
+		if kind == "revocations" {
+			limit = MaxRevocationRequestBytes
+		}
+		if kind == "hints" {
+			limit = agenttransport.MaxHintRecordSize
+		}
 		var ok bool
 		body, ok = s.readBody(w, r, limit)
 		if !ok {
@@ -362,8 +414,14 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.ackV2(w, r, agent, id, body)
 		return
 	}
+	if kind == "hints" || kind == "hint-record" {
+		s.serveHints(w, r, kind, agent, id, body)
+		return
+	}
 	op := agenttransport.OperationList
-	if kind == "policy" {
+	if kind == "revocations" {
+		op = agenttransport.OperationRevoke
+	} else if kind == "policy" {
 		op = agenttransport.OperationPublish
 	} else if kind == "envelope" {
 		if method == "GET" {
@@ -379,27 +437,28 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	digest, _ := parseAgentText(agent)
 	now := unixNow(s.now())
 	switch {
+	case kind == "revocations":
+		entries, err := DecodeRevocations(body)
+		if err == nil {
+			err = s.store.revoke(r.Context(), agent, entries, *checked, unixNow(s.now()))
+		}
+		s.controlAnswer(w, err)
 	case kind == "policy":
 		s.setPolicy(w, r, agent, body, *checked)
 	case kind == "list":
-		entries, err := s.store.list(r.Context(), digest, now)
-		if err != nil {
-			v2Fail(w, 503, CodeUnavailable)
-			return
-		}
-		listing := v2WireMailbox{SchemaV2Mailbox, agent, make([]v2WireEntry, 0, len(entries))}
-		for _, e := range entries {
-			listing.Envelopes = append(listing.Envelopes, v2WireEntry{hex.EncodeToString(e.EnvelopeID[:]), agentpacketseal.KeyIDText(e.RecipientKeyID), e.Size, e.ReceivedAtUnix, e.ExpiresAtUnix, e.Lane})
-		}
-		v2WriteJSON(w, 200, listing, MaxV2ListingBytes)
+		s.listV2(w, r, digest, agent, *checked, wait)
 	case method == "GET":
-		raw, err := s.store.get(r.Context(), digest, id, now)
+		raw, err := s.store.get(r.Context(), digest, id, now, *checked)
 		if errors.Is(err, errEnvelopeAbsent) {
 			v2Fail(w, 404, CodeNotFound)
 			return
 		}
 		if err != nil {
-			v2Fail(w, 503, CodeUnavailable)
+			if errors.Is(err, ErrCredentialRevoked) {
+				v2Fail(w, 403, "credential_revoked")
+			} else {
+				v2Fail(w, 503, CodeUnavailable)
+			}
 			return
 		}
 		setCommonHeaders(w.Header())
@@ -428,7 +487,9 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		status, err := s.store.deposit(r.Context(), depositInput{header, body, client, now, min(header.ExpiresAtUnix, now+uint64(s.store.limits.Base.TTL/time.Second))}, checked, stranger)
 		if err != nil {
-			if errors.Is(err, agenttransport.ErrCredentialScope) {
+			if errors.Is(err, ErrCredentialRevoked) {
+				v2Fail(w, 403, "credential_revoked")
+			} else if errors.Is(err, agenttransport.ErrCredentialScope) {
 				v2Fail(w, 403, "credential_scope")
 			} else {
 				v2Fail(w, 503, CodeUnavailable)
