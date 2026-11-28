@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/tosnetwork/ai/messenger/internal/securefile"
@@ -34,8 +35,36 @@ func buildContactFileDiscovery(config Config, journal *eventlog.Journal, observe
 		Judge: devices, Admitter: devices, Store: journal, LocalAgentID: config.AgentID, Contacts: contacts}
 	importer := &contactImporter{dir: config.Discovery.ContactDir, verifier: verifier, observer: observer,
 		localAgentID: config.AgentID, now: time.Now}
-	return &discoveryRuntime{runner: importer, contacts: relayDirectory{verifier: verifier, now: time.Now},
+	return &discoveryRuntime{runner: importer, contacts: relayDirectory{verifier: verifier, now: time.Now, public: &publicSlot{}},
 		chain: chain, resolver: resolver, devices: devices, relay: verifier}, nil
+}
+
+// publicContact resolves a peer by Agent ID through hint directories: the
+// builtin lane.
+type publicContact interface {
+	ResolvePublicContact(ctx context.Context, peer string) (card, evidence []byte, err error)
+	LearnCard(ctx context.Context, peer string, card []byte) error
+}
+
+// publicSlot holds the lane once it is open; the directory exists earlier.
+type publicSlot struct {
+	mu     sync.Mutex
+	source publicContact
+}
+
+func (s *publicSlot) set(source publicContact) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.source = source
+}
+
+func (s *publicSlot) get() publicContact {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.source
 }
 
 // relayDirectory answers the daemon's contact lookups from committed relay
@@ -45,6 +74,9 @@ func buildContactFileDiscovery(config Config, journal *eventlog.Journal, observe
 type relayDirectory struct {
 	verifier *directory.RelayVerifier
 	now      func() time.Time
+	// public resolves a peer without stored evidence by its Agent ID alone,
+	// from the contact its hint discloses; empty with an external carrier.
+	public *publicSlot
 }
 
 func (r relayDirectory) Ensure(ctx context.Context, agentID string) (directory.RefreshResult, error) {
@@ -53,11 +85,42 @@ func (r relayDirectory) Ensure(ctx context.Context, agentID string) (directory.R
 	}
 	now := r.now()
 	peer, err := r.verifier.CheckStoredContact(agentID, now)
+	if err != nil && errors.Is(err, directory.ErrRelayEvidenceUnknown) {
+		if source := r.public.get(); source != nil {
+			if publicErr := r.resolvePublic(ctx, source, agentID, now); publicErr != nil {
+				return directory.RefreshResult{}, publicErr
+			}
+			peer, err = r.verifier.CheckStoredContact(agentID, now)
+		}
+	}
 	if err != nil {
 		return directory.RefreshResult{}, err
 	}
 	return directory.RefreshResult{Delegation: peer.Delegation, Descriptor: peer.Descriptor, Bundles: peer.Bundles,
 		FinalizedCheckpoint: peer.FinalizedCheckpoint, RefreshedAt: now}, nil
+}
+
+// resolvePublic commits the relay evidence a peer's verified hint discloses,
+// after the same checks a contact file gets: the card is the peer's, the
+// evidence verifies against finalized state and names the peer. Resolving a
+// peer to write to it is this installation's decision to contact it, as
+// importing its contact file is.
+func (r relayDirectory) resolvePublic(ctx context.Context, source publicContact, agentID string, now time.Time) error {
+	card, evidence, err := source.ResolvePublicContact(ctx, agentID)
+	if err != nil {
+		return errors.New("resolve the peer through its hint: " + err.Error())
+	}
+	if err := checkCardShape(card, agentID); err != nil {
+		return err
+	}
+	peer, err := r.verifier.CheckContact(agentID, evidence, now)
+	if err != nil {
+		return err
+	}
+	if _, err := r.verifier.CommitPeer(peer, now); err != nil {
+		return err
+	}
+	return source.LearnCard(ctx, agentID, card)
 }
 
 // contactImporter commits the relay evidence of every valid contact file in

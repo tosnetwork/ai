@@ -28,6 +28,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/agentcarrier"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
 // Lifetimes of the packets the lane signs. A copy lives at most a day less
@@ -75,6 +76,11 @@ type Config struct {
 	// CardPath receives the lane's current chat card packet, which the
 	// daemon's relay evidence sink reads for the frames it builds.
 	CardPath string
+	// Evidence returns this installation's current relay identity evidence.
+	// With Publication.PublicContact the hint discloses it and the chat card,
+	// the owner's consent to first contact by Agent ID (MESSENGER_TRANSPORT_V2
+	// 5.5); the publication follows the evidence as it is renewed.
+	Evidence func() ([]byte, error)
 	// Report receives background failures (publication, polling, deliveries
 	// and acknowledgements), which have no caller to return them to.
 	Report func(what string, err error)
@@ -84,6 +90,8 @@ type Config struct {
 var (
 	ErrConfig      = errors.New("messenger transport configuration is invalid")
 	ErrNotAttached = errors.New("messenger transport has no inbound handler yet")
+	// ErrNoPublicContact: the peer's verified hint discloses no contact.
+	ErrNoPublicContact = errors.New("the peer publishes no public contact")
 )
 
 // Builtin is one open chat lane.
@@ -102,6 +110,7 @@ type Builtin struct {
 	drivers  map[string]context.CancelFunc
 	runCtx   context.Context
 	lastCard []byte
+	evidence []byte
 	// taken counts the contact credentials this lane accepted and refused,
 	// for the owner surface and tests.
 	taken, refused int
@@ -145,10 +154,84 @@ func Open(ctx context.Context, c Config) (b *Builtin, err error) {
 	if b.scheduler, err = agentcarrier.OpenScheduler(b.lane, b.resolver); err != nil {
 		return nil, err
 	}
-	if b.publisher, err = agentcarrier.OpenPublisher(b.lane, b.credentials, c.Publication); err != nil {
+	if err = b.openPublisher(); err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// openPublisher opens the publisher with the current evidence when the hint
+// discloses public contact objects.
+func (b *Builtin) openPublisher() error {
+	publication := b.config.Publication
+	if publication.PublicContact {
+		if b.config.Evidence == nil || publication.VerifyEvidence == nil {
+			return ErrConfig
+		}
+		evidence, err := b.config.Evidence()
+		if err != nil {
+			return err
+		}
+		publication.Evidence = evidence
+		b.evidence = bytes.Clone(evidence)
+	}
+	publisher, err := agentcarrier.OpenPublisher(b.lane, b.credentials, publication)
+	if err != nil {
+		return err
+	}
+	b.publisher = publisher
+	return nil
+}
+
+// followEvidence reopens the publisher when the disclosed evidence was
+// renewed, so the next publication carries the current evidence.
+func (b *Builtin) followEvidence() error {
+	if !b.config.Publication.PublicContact {
+		return nil
+	}
+	evidence, err := b.config.Evidence()
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(evidence, b.evidence) {
+		return nil
+	}
+	if err := b.publisher.Close(); err != nil {
+		return err
+	}
+	b.publisher = nil
+	return b.openPublisher()
+}
+
+// ResolvePublicContact resolves a peer by Agent ID alone through the hint
+// directories: the verified hint's disclosed chat card and relay identity
+// evidence, when the peer published them. The card is kept for routing; the
+// evidence is the daemon's to verify and commit. ErrNoPublicContact means the
+// peer's hint discloses none.
+func (b *Builtin) ResolvePublicContact(ctx context.Context, peer string) (card, evidence []byte, err error) {
+	route, err := b.resolver.Resolve(ctx, peer, b.contact(peer))
+	if err != nil {
+		return nil, nil, err
+	}
+	record, err := agenttransport.DecodeHintRecord(route.HintRecord)
+	if err != nil {
+		return nil, nil, agentcarrier.ErrRefused
+	}
+	for _, object := range record.Objects {
+		switch object.Kind {
+		case agenttransport.ChatCard:
+			card = bytes.Clone(object.Bytes)
+		case agenttransport.MessengerEvidence:
+			evidence = bytes.Clone(object.Bytes)
+		}
+	}
+	if len(evidence) == 0 {
+		return nil, nil, ErrNoPublicContact
+	}
+	if len(card) == 0 {
+		card = route.CardPacket
+	}
+	return card, evidence, nil
 }
 
 // Close stops every driver and closes the lane's stores.
@@ -752,6 +835,10 @@ func (b *Builtin) waitLoop(ctx context.Context) {
 // refresh republishes the hint when due and writes the current card for the
 // daemon's frames.
 func (b *Builtin) refresh(ctx context.Context) {
+	if err := b.followEvidence(); err != nil {
+		b.report("follow the relay evidence", err)
+		return
+	}
 	if _, err := b.publisher.Publish(ctx); err != nil {
 		if ctx.Err() != nil {
 			return

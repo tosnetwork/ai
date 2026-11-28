@@ -1303,8 +1303,11 @@ repeated in it.
 `tos-messengerd` runs the chat lane in process (`carrier: builtin`). Its
 owner and runtime sockets keep their current form: mode-0600 Unix sockets in
 a private directory, one single-writer daemon per state directory
-(`messenger/pkg/localapi`). The runtime socket gains one operation,
-`conversations.list` (bounded, newest first, at most 64 per page). The daemon
+(`messenger/pkg/localapi`). The runtime socket gains three read operations:
+`conversations.list` (bounded, newest first by creation, at most 64 per page,
+with unread counts), `contacts.state` (the contact state and route of 13.2
+for one Agent) and `messages.status` (the delivery state of one outbound
+message across its copies). The daemon
 signs packets through `tosctl` as OpenFox does today; it holds the transport
 key and HPKE keys of its lane, never wallet keys.
 
@@ -1337,6 +1340,13 @@ Rules:
 - A first message to a stranger is sent on the stranger lane and is held at
   the recipient under its admission policy; the tool reports `held` only
   when the recipient's signed ack says so.
+- Contact state: `held` when the recipient's signed ack of the latest
+  acknowledged message from this installation said held; `contact` when the
+  local admission policy or an invite admits the Agent, or its signed ack
+  accepted a message from here; `stranger` otherwise. The route is known
+  when verified relay identity evidence of the Agent is held. A message is
+  `held` only when every copy was delivered and a recipient's signed ack said
+  held; a copy held by the sender's own owner policy is still `pending`.
 
 ## 14. OpenFox migration
 

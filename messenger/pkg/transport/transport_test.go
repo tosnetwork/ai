@@ -104,6 +104,9 @@ type world struct {
 	// a key's read and its record, as a slow signing helper does.
 	signs     atomic.Int64
 	signDelay time.Duration
+	// public holds, per person, the relay identity evidence its hint
+	// discloses as public contact; a person absent publishes none.
+	public map[string]*atomic.Pointer[[]byte]
 }
 
 func privateDir(t *testing.T) string {
@@ -264,6 +267,19 @@ func (w *world) open(name string, handler Inbound) *Builtin {
 		}
 		return client, nil
 	}
+	publication := agentcarrier.PublicationConfig{Directories: w.relays,
+		Directory: func(url string) (agentcarrier.Directory, error) { return relay(url) }}
+	var evidence func() ([]byte, error)
+	if current, ok := w.public[name]; ok {
+		publication.PublicContact = true
+		publication.VerifyEvidence = func(_ context.Context, kind agenttransport.HintObjectKind, raw []byte) (string, error) {
+			if kind != agenttransport.MessengerEvidence || !bytes.HasPrefix(raw, []byte("evidence of ")) {
+				return "", agentcarrier.ErrRefused
+			}
+			return p.agent, nil
+		}
+		evidence = func() ([]byte, error) { return bytes.Clone(*current.Load()), nil }
+	}
 	b, err := Open(w.t.Context(), Config{
 		Lane: agentcarrier.Config{StateDir: stateDir, AgentID: p.agent, Relays: w.relays, Delegation: p.wire,
 			Verifier: w.verifier, Now: w.clock.Now,
@@ -296,9 +312,9 @@ func (w *world) open(name string, handler Inbound) *Builtin {
 		},
 		Resolver: agentcarrier.ResolverConfig{Directories: w.relays,
 			Directory: func(url string) (agentcarrier.Directory, error) { return relay(url) }},
-		Publication: agentcarrier.PublicationConfig{Directories: w.relays,
-			Directory: func(url string) (agentcarrier.Directory, error) { return relay(url) }},
-		CardPath: filepath.Join(stateDir, "card.json"),
+		Publication: publication,
+		CardPath:    filepath.Join(stateDir, "card.json"),
+		Evidence:    evidence,
 	})
 	if err != nil {
 		w.t.Fatal(err)
@@ -888,5 +904,36 @@ func TestARecordFoundOnDiskIsCounted(t *testing.T) {
 	}
 	if len(j.index) != 1 || j.strangers != 1 {
 		t.Fatalf("the found record is not counted: %d records, %d strangers", len(j.index), j.strangers)
+	}
+}
+
+// An Agent that consents to public contact discloses its chat card and relay
+// identity evidence in its hint: a sender resolves it by Agent ID alone, with
+// no contact file, and the publication follows renewed evidence. An Agent
+// without that consent discloses neither.
+func TestAPublicContactIsResolvedByAgentIDAlone(t *testing.T) {
+	w := newWorld(t, "alice", "bob")
+	current := &atomic.Pointer[[]byte]{}
+	first := []byte("evidence of alice, first")
+	current.Store(&first)
+	w.public = map[string]*atomic.Pointer[[]byte]{"alice": current}
+	alice := w.open("alice", &inbound{response: answer("accepted", ackFrame(t))})
+	bob := w.open("bob", &inbound{response: answer("accepted", ackFrame(t))})
+	cardPacket, evidence, err := bob.ResolvePublicContact(t.Context(), w.people["alice"].agent)
+	if err != nil || !bytes.Equal(evidence, first) || !bytes.Equal(cardPacket, card(t, alice)) {
+		t.Fatalf("resolve alice by Agent ID: %q %v", evidence, err)
+	}
+	// Without bob's card or evidence his hint gives no route at all.
+	if _, evidence, err := alice.ResolvePublicContact(t.Context(), w.people["bob"].agent); err == nil || evidence != nil {
+		t.Fatalf("bob published a contact without consent: %q %v", evidence, err)
+	}
+	renewed := []byte("evidence of alice, renewed")
+	current.Store(&renewed)
+	w.clock.n.Add(int64(publishInterval / time.Second))
+	alice.Refresh(t.Context())
+	other := w.open("bob", &inbound{response: answer("accepted", ackFrame(t))})
+	if _, evidence, err := other.ResolvePublicContact(t.Context(), w.people["alice"].agent); err != nil ||
+		!bytes.Equal(evidence, renewed) {
+		t.Fatalf("the publication did not follow the renewed evidence: %q %v", evidence, err)
 	}
 }

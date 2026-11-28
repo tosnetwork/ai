@@ -614,10 +614,19 @@ carrier sockets and names its own lane:
 - **Journal bounds.** A key is signed once: a retry carries the journaled
   frame, and the daemon records the card, credential and evidence of the
   frame actually carried. Acknowledgements to peers that are not admitted
-  share at most 512 journal records, 8 per peer, so they never take the
-  capacity of this installation's own sends. A copy the recipient rejected
+  share at most 512 journal records, and at most 8 in flight per peer, so
+  they never take the capacity of this installation's own sends. A copy the recipient rejected
   for good, or held for its owner, is settled and not deposited again.
 - **Directories.** Two to four, as the lane accepts.
+- **First contact by Agent ID.** With `"public_contact": true` in `builtin`
+  (the owner's consent; off by default) the lane's hint discloses its chat
+  card and this installation's relay identity evidence, and follows the
+  evidence as it is renewed. A sender with no contact file for an Agent
+  resolves it by Agent ID through the directories: the disclosed evidence is
+  verified against finalized state like a contact file, committed, and the
+  card is kept for routing. Resolving an Agent to write to it is this
+  installation's decision to contact it, as importing its file is; its
+  messages are still admitted at the recipient under the recipient's policy.
 - **Test networks only.** Transport verification needs a registry with
   authorization epochs for production; until then only the named
   test-network modes start.
@@ -702,11 +711,38 @@ sealed packets. The `relay_carriage` block enables rooms with:
   as the other decisions above. The runtime principal is refused all of
   them. The runtime may send (`outbox.compose` with the `room_id` of a room
   held here takes the kind-3 path) and read (`rooms.list`, `rooms.gaps`).
+- `contacts.state` on the runtime socket reports, without writing, how this
+  installation stands with one Agent (`recipient_agent_id`): `held` when the
+  recipient's signed ack of the latest acknowledged message from here said
+  held, `contact` when this installation's policy or an invite admits the
+  Agent or its signed ack accepted a message from here, `stranger` otherwise,
+  and whether verified relay evidence of it is held (`route_known`).
+- `messages.status` on the runtime socket reports one outbound message
+  (`event_id`) across its copies: `pending`, `carried`, `delivered`, `held`
+  (every copy delivered and a recipient's signed ack said held) or `rejected`
+  with its fixed code. A message held here by this installation's own owner
+  policy is still `pending`.
 - `conversations.list` on the runtime socket returns the direct conversations
   held here, newest first by creation, at most 64 per page; a page continues
   after the `before_created_at_unix` and `before_conversation_id` of the
   previous page's last entry. Creation order does not change when a
-  conversation is updated, so a walk lists each conversation once.
+  conversation is updated, so a walk lists each conversation once. Each entry
+  counts its `unread` events, those `inbox.pending` offers the runtime.
+
+### MCP clients (`tos-messenger-mcp`)
+
+`tos-messenger-mcp --runtime-socket /run/tos-messengerd/runtime.sock` is a
+stdio MCP server an MCP client starts as a child process. It holds no key or
+credential and opens no relay connection: every tool is a call on the
+runtime socket, and it refuses to start on a socket that does not serve the
+runtime (the owner's). Its tools are `tos_messenger_resolve`,
+`tos_messenger_send`, `tos_messenger_receive`, `tos_messenger_conversations`
+and `tos_messenger_status` (MESSENGER_TRANSPORT_V2.md 13.2). No tool takes or
+returns a relay, address, Endpoint, device, session, key or credential, and
+no owner operation is offered. Received text is returned only in an
+`untrusted_text` field and, in the text result, inside a frame whose marker
+is fresh randomness; a `send` is `held` only when the recipient's signed ack
+says so.
   OpenFox's `openfox chat room` and `openfox chat invite present` commands
   are the intended clients.
 - **Joining.** `rooms.add` sends the Agent a `room.invite` over the 1:1
