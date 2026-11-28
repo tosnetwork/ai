@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -80,7 +81,7 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 		return 0, nil, errors.New("V2 relay exchange failed")
 	}
 	defer res.Body.Close()
-	if res.StatusCode != 204 {
+	if res.StatusCode >= 300 || (res.StatusCode == 200 && method == "GET") {
 		want := ContentTypeJSON
 		if res.StatusCode == 200 && method == "GET" {
 			kind, _, _ := (&V2Server{base: c.path}).route(path)
@@ -176,6 +177,53 @@ func (c *V2Client) PublishPolicy(ctx context.Context, agent string, p MailboxPol
 	}
 	if status != 200 && status != 204 {
 		return errors.New("unexpected policy status")
+	}
+	return nil
+}
+
+func (c *V2Client) Deposit(ctx context.Context, envelope, credential []byte, holder ed25519.PrivateKey) error {
+	header, err := agentpacketseal.ParseEnvelope(envelope)
+	if err != nil {
+		return err
+	}
+	path := c.path + "/v2/mailboxes/" + header.RecipientAgentID + "/envelopes/" + hex.EncodeToString(header.EnvelopeID[:])
+	status, body, err := c.exchange(ctx, "PUT", path, envelope, credential, holder)
+	if err != nil {
+		return err
+	}
+	if (status != 200 && status != 201) || len(body) != 0 {
+		return errors.New("invalid V2 deposit response")
+	}
+	return nil
+}
+func (c *V2Client) Fetch(ctx context.Context, agent string, id [32]byte, credential []byte, holder ed25519.PrivateKey) ([]byte, error) {
+	if _, ok := parseAgentText(agent); !ok {
+		return nil, errors.New("invalid Agent")
+	}
+	status, body, err := c.exchange(ctx, "GET", c.path+"/v2/mailboxes/"+agent+"/envelopes/"+hex.EncodeToString(id[:]), nil, credential, holder)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, errors.New("invalid V2 fetch status")
+	}
+	header, err := agentpacketseal.ParseEnvelope(body)
+	if err != nil || header.RecipientAgentID != agent || header.EnvelopeID != id {
+		return nil, errors.New("invalid V2 fetched envelope")
+	}
+	return body, nil
+}
+func (c *V2Client) Acknowledge(ctx context.Context, agent string, secret [32]byte) error {
+	if _, ok := parseAgentText(agent); !ok {
+		return errors.New("invalid Agent")
+	}
+	id := agentpacketseal.AckHash(secret)
+	status, body, err := c.exchange(ctx, "POST", c.path+"/v2/mailboxes/"+agent+"/envelopes/"+hex.EncodeToString(id[:])+"/ack", secret[:], nil, nil)
+	if err != nil {
+		return err
+	}
+	if status != 204 || len(body) != 0 {
+		return errors.New("invalid V2 acknowledgement response")
 	}
 	return nil
 }

@@ -277,6 +277,9 @@ func (s *V2Server) authorize(w http.ResponseWriter, r *http.Request, agent strin
 	return &checked, true
 }
 func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	client, ok := clientAddress(r, s.trusted)
 	if !ok {
 		v2Fail(w, 400, CodeInvalidRequest)

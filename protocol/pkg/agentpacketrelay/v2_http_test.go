@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -374,5 +375,179 @@ func TestV2HTTPRestartSecondRelayAndClockRollback(t *testing.T) {
 	f.s.ServeHTTP(w, req.Clone(t.Context()))
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "proof_floor") || w.Header().Get("Retry-After") != "141" {
 		t.Fatal(w.Code, w.Body.String(), w.Header())
+	}
+}
+
+func TestV2HTTPPolicyReadFailureDoesNotOpenClosedMailbox(t *testing.T) {
+	for _, failure := range []error{agenttransport.ErrUnavailable, errors.New("integrity failure")} {
+		f := newV2HTTP(t)
+		f.serve(t, "PUT", "/v2/mailboxes/"+f.r.agentID+"/policy", (MailboxPolicy{unixNow(f.clock.Now()), 0, 0}).Encode(), true, 204)
+		f.source.err = failure
+		f.clock.at = f.clock.at.Add(601 * time.Second)
+		budget, err := f.s.policyBudget(t.Context(), f.r.agentID)
+		if err != nil || budget.Count != 0 {
+			t.Fatal("read failure lifted a closed policy", budget, err)
+		}
+	}
+}
+func TestV2HTTPReplayFullAndHighWaterStatuses(t *testing.T) {
+	f := newV2HTTP(t)
+	table, err := agenttransport.NewReplayTable(agenttransport.ReplayConfig{Entries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = table.MarkRecorded(unixNow(f.clock.Now()) + 140); err != nil {
+		t.Fatal(err)
+	}
+	f.s.store.replay.table = table
+	f.serve(t, "GET", f.mail(), nil, true, 200)
+	w := f.serve(t, "GET", f.mail(), nil, true, 503)
+	if !strings.Contains(w.Body.String(), "replay_table_full") {
+		t.Fatal(w.Body.String())
+	}
+	f.clock.at = f.clock.at.Add(140 * time.Second)
+	w = f.serve(t, "GET", f.mail(), nil, true, 503)
+	if !strings.Contains(w.Body.String(), "replay_table_full") {
+		t.Fatal("proof beyond durable mark admitted", w.Body.String())
+	}
+}
+
+func TestV2HTTPPolicyBoundAndUncertainWrite(t *testing.T) {
+	t.Run("bound", func(t *testing.T) {
+		f := newV2HTTP(t)
+		for i := range MaxV2Policies {
+			f.s.store.policies[fmt.Sprint(i)] = v2PolicyRecord{}
+		}
+		f.serve(t, "PUT", "/v2/mailboxes/"+f.r.agentID+"/policy", (MailboxPolicy{unixNow(f.clock.Now()), 0, 0}).Encode(), true, 503)
+	})
+	t.Run("uncertain-write", func(t *testing.T) {
+		f := newV2HTTP(t)
+		f.s.store.disk.beforeSync = func(name string) error {
+			if strings.HasPrefix(name, "controls/") {
+				return errors.New("injected directory-sync failure")
+			}
+			return nil
+		}
+		f.serve(t, "PUT", "/v2/mailboxes/"+f.r.agentID+"/policy", (MailboxPolicy{unixNow(f.clock.Now()), 0, 0}).Encode(), true, 503)
+		if !f.s.store.poisoned {
+			t.Fatal("uncertain write left store usable")
+		}
+		v2Close(t, f.s.store)
+		f.s.store = v2Open(t, f.path, DefaultV2Limits(1024, 64<<20), f.clock.Now())
+		budget, err := f.s.policyBudget(t.Context(), f.r.agentID)
+		if err != nil || budget.Count != 0 {
+			t.Fatal("disk-authoritative policy lost after uncertain write", budget, err)
+		}
+	})
+}
+func TestV2PolicyCodecStrictAndLowerOnly(t *testing.T) {
+	p := MailboxPolicy{1800000000, 32, 2 << 20}
+	raw := p.Encode()
+	decoded, err := DecodeMailboxPolicy(raw)
+	if err != nil || decoded != p {
+		t.Fatal(err)
+	}
+	for _, bad := range [][]byte{append(bytes.Clone(raw), 0), raw[:len(raw)-1], bytes.Repeat([]byte{0}, len(raw))} {
+		if _, err := DecodeMailboxPolicy(bad); err == nil {
+			t.Fatal("malformed policy accepted")
+		}
+	}
+	limits := DefaultV2Limits(1024, 64<<20)
+	for _, bad := range []MailboxPolicy{{1800000301, 0, 0}, {math.MaxUint64, 0, 0}, {1800000000, 33, 0}, {1800000000, 0, (2 << 20) + 1}} {
+		if bad.valid(limits, 1800000000) {
+			t.Fatal("policy widens limits", bad)
+		}
+	}
+}
+
+func TestV2RotatedOwnerCanReplaceFuturePolicyWithEarlierTimestamp(t *testing.T) {
+	f := newV2HTTP(t)
+	now := unixNow(f.clock.Now())
+	path := "/v2/mailboxes/" + f.r.agentID + "/policy"
+	f.serve(t, "PUT", path, (MailboxPolicy{now + 300, 0, 0}).Encode(), true, 204)
+	c, err := agenttransport.DecodeCredential(f.wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := c.Delegation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := v2TestKey("rotated-http-transport")
+	copy(d.TransportKey[:], key.Public().(ed25519.PublicKey))
+	raw, err := d.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(raw)
+	f.source.state.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(hash[:])}
+	blocks, err := c.Blocks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.wire, err = agenttransport.IssueCredential(raw, key, f.holder.Public().(ed25519.PublicKey), blocks[0].Caveats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.clock.at = f.clock.at.Add(300 * time.Second)
+	if err = f.s.store.Replay().Record(unixNow(f.clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	f.serve(t, "PUT", path, (MailboxPolicy{now + 299, 16, 1 << 20}).Encode(), true, 204)
+	budget, err := f.s.policyBudget(t.Context(), f.r.agentID)
+	if err != nil || budget.Count != 16 {
+		t.Fatal("revoked timestamp blocked the new owner", budget, err)
+	}
+}
+
+func TestV2TLSClientRoundTripNeverUsesV1(t *testing.T) {
+	f := newV2HTTP(t)
+	server := httptest.NewTLSServer(f.s)
+	defer server.Close()
+	f.s.relay = server.URL
+	c, err := agenttransport.DecodeCredential(f.wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.DelegationBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := c.Blocks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caveats := blocks[0].Caveats
+	for i := range caveats {
+		if caveats[i].Type == agenttransport.CaveatRelay {
+			caveats[i] = agenttransport.RelayCaveat(server.URL)
+		}
+	}
+	f.wire, err = agenttransport.IssueCredential(raw, v2TestKey("http-transport"), f.holder.Public().(ed25519.PublicKey), caveats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewV2Client(server.URL, server.Client().Transport, f.clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+	if err = client.Deposit(t.Context(), e.envelope, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := client.List(t.Context(), f.r.agentID, f.wire, f.holder)
+	if err != nil || len(entries) != 1 {
+		t.Fatal(entries, err)
+	}
+	got, err := client.Fetch(t.Context(), f.r.agentID, e.id, f.wire, f.holder)
+	if err != nil || !bytes.Equal(got, e.envelope) {
+		t.Fatal("fetch mismatch", err)
+	}
+	if err = client.Acknowledge(t.Context(), f.r.agentID, e.secret); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = client.List(t.Context(), f.r.agentID, f.wire, f.holder)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("ACK failed", entries, err)
 	}
 }

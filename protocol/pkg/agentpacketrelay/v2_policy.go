@@ -98,8 +98,13 @@ func (s *V2Server) currentPolicy(ctx context.Context, agent string) (*v2PolicyRe
 	if !ok {
 		return nil, nil
 	}
+	d, decodeErr := agenttransport.DecodeDelegation(p.Delegation)
+	if decodeErr != nil {
+		return nil, ErrStoreUnavailable
+	}
 	_, err := s.verifier.VerifyDelegation(ctx, p.Delegation, agenttransport.Relay)
-	if err == nil || !errors.Is(err, agenttransport.ErrDelegationRevoked) {
+	expired := d.NotAfter <= unixNow(s.now())
+	if !expired && (err == nil || !errors.Is(err, agenttransport.ErrDelegationRevoked)) {
 		return &p, nil
 	}
 	if err = s.store.disk.remove(policyName(agent)); err != nil {
