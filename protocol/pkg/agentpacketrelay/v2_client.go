@@ -37,7 +37,11 @@ func NewV2Client(base string, transport http.RoundTripper, now func() time.Time)
 		now = time.Now
 	}
 	if transport == nil {
-		transport = http.DefaultTransport.(*http.Transport).Clone()
+		standard, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			return nil, errors.New("explicit V2 transport required")
+		}
+		transport = standard.Clone()
 	}
 	return &V2Client{base, u.EscapedPath(), &http.Client{Transport: transport, Timeout: DefaultClientTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, now}, nil
 }
