@@ -829,3 +829,13 @@ func TestV2HTTPRefusesUninterpretedBodyHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestV2StoreFailureIsNotAChainOutage(t *testing.T) {
+	f := newV2HTTP(t)
+	f.s.store.poisoned = true
+	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+	w := f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false, 503)
+	if !strings.Contains(w.Body.String(), `"code":"unavailable"`) {
+		t.Fatal("store failure classified as chain outage", w.Body.String())
+	}
+}

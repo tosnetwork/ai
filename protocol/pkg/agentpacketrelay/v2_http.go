@@ -412,7 +412,7 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			stranger, err = s.policyBudget(r.Context(), agent)
 		}
 		if err != nil {
-			v2Fail(w, 503, "chain_unavailable")
+			v2Fail(w, 503, CodeUnavailable)
 			return
 		}
 		status, err := s.store.deposit(r.Context(), depositInput{header, body, client, now, min(header.ExpiresAtUnix, now+uint64(s.store.limits.Base.TTL/time.Second))}, checked, stranger)
