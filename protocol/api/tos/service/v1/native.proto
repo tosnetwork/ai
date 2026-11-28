@@ -77,7 +77,8 @@ message SignatureV1 {
 message CapabilityVersionV1 { string version = 1; string manifest_digest = 2; bool revoked = 3; }
 message RegisterAgentV1 { bytes object_nonce = 1; ControllerPolicyV1 initial_policy = 2; }
 message UpdateAgentPolicyV1 { ControllerPolicyV1 new_policy = 1; }
-message DelegateAgentV1 { string delegation_digest = 1; }
+message DelegateAgentV1 { string delegation_digest = 1; uint64 authorization_epoch = 2; }
+message WithdrawAgentDelegationV1 { string delegation_digest = 1; uint64 authorization_epoch = 2; }
 message InitiateRecoveryV1 { uint64 execute_after_unix_seconds = 1; ControllerPolicyV1 new_policy = 2; }
 message CompleteRecoveryV1 { string initiation_action_hash = 1; }
 message RevokeAgentV1 {}
@@ -94,6 +95,7 @@ message NativeActionV1 {
     InitiateRecoveryV1 initiate_recovery = 23; CompleteRecoveryV1 complete_recovery = 24; RevokeAgentV1 revoke_agent = 25;
     RegisterCapabilityV1 register_capability = 26; AddCapabilityVersionV1 add_capability_version = 27;
     TransferCapabilityV1 transfer_capability = 28; RevokeCapabilityV1 revoke_capability = 29;
+    WithdrawAgentDelegationV1 withdraw_agent_delegation = 31;
   }
 }
 // Each signature list holds at most 8 entries in strictly ascending key_id
