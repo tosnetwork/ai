@@ -481,11 +481,13 @@ func (r *Relayer) preflightTargetTransition(ctx context.Context, action *nativev
 		}
 		switch payload := action.Payload.(type) {
 		case *nativev1.NativeActionV1_DelegateAgent:
-			err := CheckDelegationMutation(agent, payload.DelegateAgent.DelegationDigest, payload.DelegateAgent.AuthorizationEpoch, false)
-			return state, err
+			if err := CheckDelegationMutation(agent, payload.DelegateAgent.DelegationDigest, payload.DelegateAgent.AuthorizationEpoch, false); err != nil {
+				return nil, err
+			}
 		case *nativev1.NativeActionV1_WithdrawAgentDelegation:
-			err := CheckDelegationMutation(agent, payload.WithdrawAgentDelegation.DelegationDigest, payload.WithdrawAgentDelegation.AuthorizationEpoch, true)
-			return state, err
+			if err := CheckDelegationMutation(agent, payload.WithdrawAgentDelegation.DelegationDigest, payload.WithdrawAgentDelegation.AuthorizationEpoch, true); err != nil {
+				return nil, err
+			}
 		case *nativev1.NativeActionV1_InitiateRecovery:
 			chainTime := uint64(finalizedAt.Unix())
 			safetySeconds := uint64(r.RecoverySafety / time.Second)

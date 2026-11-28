@@ -3,6 +3,7 @@
 
 State readers must survive a pruned last transaction, the state anchor must
 stay strict, and execution-time readers must keep the exact transaction.
+Registry v2 readers and both identity encoders are checked independently.
 """
 
 import json
@@ -24,6 +25,12 @@ ANCHORED = "TestAnchoredWalksReachAPrunedAnchorByItsVerifiedLink"
 AGENT_BLOCK = "TestAgentAccountReadsBindToOneBlockOfTheSeqno"
 GIFT_DESTINATION = "TestResolveGiftReadsTheDestinationAtTheStateBlock"
 BRIDGE = "./provider/pkg/servicebridge"
+
+NATIVECORE = "./protocol/pkg/nativecore"
+REFERENCE = "./protocol/internal/referencecodec"
+REGISTRY_STATE = "protocol/pkg/nativecore/state.go"
+STRICT_READER = "TestDelegationStateStrictReader"
+AGENT_TAG = "MustStoreUInt(identityMagic, 32).MustStoreUInt(3, 8)"
 
 # (name, file, unique source anchor, replacement, test that must fail[, package])
 CASES = [
@@ -278,6 +285,111 @@ CASES = [
         ),
         WALLET,
     ),
+    # Strict Registry v2 state reads reject invalid data before returning state.
+    (
+        "registry-state-schema",
+        REGISTRY_STATE,
+        "schema != StateEncodingVersion",
+        "(schema != StateEncodingVersion && schema != 1)",
+        "TestV1TypedStatesAreRefused",
+        NATIVECORE,
+    ),
+    (
+        "agent-epoch-zero",
+        REGISTRY_STATE,
+        "if err != nil || epoch == 0 {",
+        "if err != nil {",
+        "TestAgentStateRefusesZeroEpoch",
+        NATIVECORE,
+    ),
+    (
+        "delegation-dictionary-budget",
+        REGISTRY_STATE,
+        "if *budget <= 0 || node.IsSpecial() {",
+        "if node.IsSpecial() {",
+        "TestDelegationDictionaryBoundsLogicalEdges",
+        NATIVECORE,
+    ),
+    (
+        "delegation-dictionary-budget-debit",
+        REGISTRY_STATE,
+        "*budget -= 1",
+        "",
+        "TestDelegationDictionaryBoundsLogicalEdges",
+        NATIVECORE,
+    ),
+    *(
+        (name, REGISTRY_STATE, old, new, f"{STRICT_READER}/{test}", NATIVECORE)
+        for name, old, new, test in [
+            (
+                "delegation-admission-epoch",
+                "err != nil || admission != epoch",
+                "err != nil",
+                "admission-epoch",
+            ),
+            (
+                "delegation-live-bound",
+                " || live > MaxLiveDelegations",
+                "",
+                "live-bound",
+            ),
+            (
+                "delegation-total-bound",
+                " || total > MaxDelegationAdmissions",
+                "",
+                "total-bound",
+            ),
+            (
+                "delegation-live-count",
+                "if liveEntries != live {",
+                "if false && liveEntries != live {",
+                "live-count",
+            ),
+            (
+                "delegation-total-count",
+                " || uint64(len(items)) != total",
+                "",
+                "total-count",
+            ),
+            (
+                "delegation-leaf-size",
+                "item.Value.BitsLeft() != 65",
+                "item.Value.BitsLeft() < 65",
+                "long-leaf",
+            ),
+            (
+                "delegation-zero-digest",
+                "equalBytes(key, make([]byte, 32)) || ",
+                "",
+                "zero-digest",
+            ),
+        ]
+    ),
+    *(
+        (
+            f"{name}-agent-tag-3-to-{tag}",
+            source,
+            AGENT_TAG,
+            AGENT_TAG.replace("StoreUInt(3, 8)", f"StoreUInt({tag}, 8)"),
+            test,
+            package,
+        )
+        for name, source, test, package in [
+            (
+                "locator",
+                "protocol/pkg/nativecore/locator.go",
+                "TestIdentityObjectKindTags",
+                NATIVECORE,
+            ),
+            (
+                "reference",
+                "protocol/internal/referencecodec/reference.go",
+                "TestIndependentRegistrationVectors",
+                REFERENCE,
+            ),
+        ]
+        for tag in (1, 2)
+    ),
 ]
 
 
@@ -300,7 +412,9 @@ def package_of(case):
 
 def main():
     for package in sorted({package_of(c) for c in CASES}):
-        tests = sorted({c[4] for c in CASES if package_of(c) == package})
+        tests = sorted(
+            {c[4].split("/", 1)[0] for c in CASES if package_of(c) == package}
+        )
         code, output = execute(
             ["go", "test", "-count=1", "-run", "^(" + "|".join(tests) + ")$", package]
         )
@@ -309,7 +423,7 @@ def main():
     for case in CASES:
         name, file, old, new, test = case[:5]
         package = package_of(case)
-        source = ROOT / (TOSCHAIN + file)
+        source = ROOT / (file if "/" in file else TOSCHAIN + file)
         original = source.read_text()
         if original.count(old) != 1:
             raise RuntimeError("non-unique anchor: " + name)

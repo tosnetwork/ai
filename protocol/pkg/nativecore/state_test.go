@@ -139,6 +139,51 @@ func TestV1TypedStatesAreRefused(t *testing.T) {
 	}
 }
 
+func TestAgentStateRefusesZeroEpoch(t *testing.T) {
+	policy, _ := testPolicy(t)
+	policyCell, err := PolicyCell(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegations := cell.BeginCell().MustStoreUInt(0, 16).MustStoreUInt(0, 16).MustStoreDict(nil).EndCell()
+	recovery := cell.BeginCell().MustStoreBoolBit(false).EndCell()
+	for _, epoch := range []uint64{1, 0} {
+		state := cell.BeginCell().MustStoreUInt(stateMagic, 32).MustStoreUInt(2, 16).MustStoreUInt(1, 8).
+			MustStoreBoolBit(false).MustStoreUInt(1, 64).MustStoreUInt(1, 64).MustStoreSlice(bytes32(0x33), 256).
+			MustStoreUInt(epoch, 64).MustStoreRef(policyCell).MustStoreRef(delegations).MustStoreRef(recovery).EndCell()
+		decoded, err := decodeState(state, "agent_"+strings.Repeat("11", 32), 1)
+		if epoch == 1 {
+			if err != nil || decoded.GetAgent().GetAuthorizationEpoch() != epoch {
+				t.Fatalf("valid Agent state: %v, %v", decoded, err)
+			}
+			continue
+		}
+		if decoded != nil || err == nil || !strings.Contains(err.Error(), "invalid Native authorization epoch") {
+			t.Fatalf("epoch-zero Agent state: %v, %v", decoded, err)
+		}
+	}
+}
+
+func TestDelegationDictionaryBoundsLogicalEdges(t *testing.T) {
+	// The empty-prefix fork reuses the same leaf under both edges. The
+	// remaining 255 key bits are all ones and both entries are live at epoch 7.
+	leaf := cell.BeginCell().MustStoreUInt(0b111, 3).MustStoreUInt(255, 8).
+		MustStoreUInt(7, 64).MustStoreBoolBit(false).EndCell()
+	root := cell.BeginCell().MustStoreUInt(0, 2).MustStoreRef(leaf).MustStoreRef(leaf).EndCell()
+	wrapper := func(count uint64) *cell.Cell {
+		return cell.BeginCell().MustStoreUInt(count, 16).MustStoreUInt(count, 16).
+			MustStoreBoolBit(true).MustStoreRef(root).EndCell()
+	}
+	entries, err := decodeDelegations(wrapper(2), 7)
+	if err != nil || len(entries) != 2 || entries[0].Digest == entries[1].Digest {
+		t.Fatalf("valid shared-leaf dictionary: %v, %v", entries, err)
+	}
+	entries, err = decodeDelegations(wrapper(1), 7)
+	if entries != nil || err == nil || !strings.Contains(err.Error(), "dictionary exceeds its shape bound") {
+		t.Fatalf("expected the edge budget to refuse before dictionary expansion: %v, %v", entries, err)
+	}
+}
+
 func TestDelegationStateStrictReader(t *testing.T) {
 	for _, tc := range []struct {
 		name                         string

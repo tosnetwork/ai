@@ -468,6 +468,9 @@ func TestDelegationRelayPreflight(t *testing.T) {
 			if code, _ := ErrorCodeOf(err); code != tc.want || (tc.want == 0 && err != nil) {
 				t.Fatalf("preflight: %v, want code %d", err, tc.want)
 			}
+			if err != nil && resolved != nil {
+				t.Fatal("refused delegation returned finalized state")
+			}
 			if tc.want == 0 {
 				authority, err := relay.resolveAuthority(t.Context(), action, built, resolved)
 				if err != nil || authority.purpose != PurposeDelegation {

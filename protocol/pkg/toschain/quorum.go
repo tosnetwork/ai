@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
-	"time"
 )
 
 type consensusObservation struct {
