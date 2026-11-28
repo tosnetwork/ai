@@ -384,6 +384,12 @@ func buildPayload(action *nativev1.NativeActionV1, targetKind uint8) (Kind, *cel
 		if targetKind != 1 || payload.DelegateAgent == nil {
 			return 0, nil, errors.New("invalid delegation")
 		}
+		// This encoder builds the v1 registry payload, which signs no epoch. An
+		// epoch here would be silently dropped from the signed bytes, so it is
+		// refused until the v2 encoding lands.
+		if payload.DelegateAgent.AuthorizationEpoch != 0 {
+			return 0, nil, errors.New("delegation authorization_epoch is not supported by this registry encoding")
+		}
 		digest, err := digestBytes(payload.DelegateAgent.DelegationDigest, "sha256:", false)
 		if err != nil {
 			return 0, nil, err
@@ -479,6 +485,8 @@ func buildPayload(action *nativev1.NativeActionV1, targetKind uint8) (Kind, *cel
 			h := sha256.Sum256([]byte(payload.RevokeCapability.Version))
 			b.MustStoreBoolBit(true).MustStoreSlice(h[:], 256).MustStoreRef(stringCell(payload.RevokeCapability.Version))
 		}
+	case *nativev1.NativeActionV1_WithdrawAgentDelegation:
+		return 0, nil, errors.New("withdraw-agent-delegation is not supported by this registry encoding")
 	default:
 		return 0, nil, errors.New("missing Native action payload")
 	}

@@ -135,6 +135,15 @@ message UpdateAgentPolicyV1 {
 
 message DelegateAgentV1 {
   string delegation_digest = 1;
+  // The Agent's current authorization epoch, strictly positive; the registry
+  // refuses any other value (2216).
+  uint64 authorization_epoch = 2;
+}
+
+// Withdraws one live delegation digest of the current authorization epoch.
+message WithdrawAgentDelegationV1 {
+  string delegation_digest = 1;
+  uint64 authorization_epoch = 2;
 }
 
 message InitiateRecoveryV1 {
@@ -193,6 +202,7 @@ message NativeActionV1 {
     AddCapabilityVersionV1 add_capability_version = 27;
     TransferCapabilityV1 transfer_capability = 28;
     RevokeCapabilityV1 revoke_capability = 29;
+    WithdrawAgentDelegationV1 withdraw_agent_delegation = 31;
   }
 }
 
