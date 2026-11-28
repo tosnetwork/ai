@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 )
 
 type config struct {
+	TTLSeconds     *uint64                    `json:"ttl_seconds,omitempty"`
 	TrustedProxies []string                   `json:"trusted_proxies,omitempty"`
 	StrangerCount  *int                       `json:"stranger_max_envelopes,omitempty"`
 	StrangerBytes  *int64                     `json:"stranger_max_bytes,omitempty"`
@@ -66,6 +68,10 @@ func readConfig(path string) (config, error) {
 	}
 	if c.Listen == "" || c.Network == nil || !filepath.IsAbs(c.StateDir) || !filepath.IsAbs(c.Checkpoint) || c.StateDir == c.Checkpoint {
 		return c, errors.New("explicit listen, network, state directory and checkpoint required")
+	}
+	relative, err := filepath.Rel(c.StateDir, c.Checkpoint)
+	if err != nil || filepath.Clean(c.StateDir) != c.StateDir || filepath.Clean(c.Checkpoint) != c.Checkpoint || relative == "." || (!strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && relative != "..") {
+		return c, errors.New("checkpoint must be outside the V2 store")
 	}
 	return c, nil
 }
@@ -111,6 +117,10 @@ func serve(ctx context.Context, c config, ready func(net.Addr)) error {
 		}
 		proxies = append(proxies, prefix)
 	}
+	limits, err := c.limits()
+	if err != nil {
+		return err
+	}
 	v, err := verifier(c)
 	if err != nil {
 		return err
@@ -131,16 +141,6 @@ func serve(ctx context.Context, c config, ready func(net.Addr)) error {
 		if err != nil || !addr.IsLoopback() {
 			return errors.New("plaintext listener must be numeric loopback behind a TLS proxy")
 		}
-	}
-	limits := agentpacketrelay.DefaultV2Limits(c.GlobalEntries, c.GlobalBytes)
-	if c.StrangerCount != nil {
-		limits.StrangerMaxEnvelopes = *c.StrangerCount
-	}
-	if c.StrangerBytes != nil {
-		limits.StrangerMaxBytes = *c.StrangerBytes
-	}
-	if c.StrangerShare != nil {
-		limits.StrangerGlobalPercent = *c.StrangerShare
 	}
 	store, err := agentpacketrelay.OpenV2Store(c.StateDir, limits, time.Now(), agentpacketrelay.V2OpenOptions{})
 	if err != nil {
@@ -233,4 +233,25 @@ func (r pinnedReader) ResolveState(ctx context.Context, id, hash string) (*nativ
 		return nil, false, err
 	}
 	return r.source.ResolveState(ctx, id, hash)
+}
+
+func (c config) limits() (agentpacketrelay.V2Limits, error) {
+	limits := agentpacketrelay.DefaultV2Limits(c.GlobalEntries, c.GlobalBytes)
+	if c.StrangerCount != nil {
+		limits.StrangerMaxEnvelopes = *c.StrangerCount
+	}
+	if c.StrangerBytes != nil {
+		limits.StrangerMaxBytes = *c.StrangerBytes
+	}
+	if c.StrangerShare != nil {
+		limits.StrangerGlobalPercent = *c.StrangerShare
+	}
+
+	if c.TTLSeconds != nil {
+		if *c.TTLSeconds == 0 || *c.TTLSeconds > uint64(agentpacketrelay.MaxTTL/time.Second) {
+			return limits, errors.New("invalid retention seconds")
+		}
+		limits.Base.TTL = time.Duration(*c.TTLSeconds) * time.Second
+	}
+	return limits, limits.Validate()
 }

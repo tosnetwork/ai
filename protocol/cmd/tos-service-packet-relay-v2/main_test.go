@@ -92,3 +92,17 @@ func TestV2CommandServesOnlyV2AndShutsDown(t *testing.T) {
 		t.Fatal("wrong store", string(raw), err)
 	}
 }
+
+func TestV2ConfiguredRetentionIsBoundedBeforeConversion(t *testing.T) {
+	for _, seconds := range []uint64{0, 1, 3600, 10800, 86400, 86401, ^uint64(0)} {
+		c := config{GlobalEntries: 1024, GlobalBytes: 64 << 20, TTLSeconds: &seconds}
+		limits, err := c.limits()
+		valid := seconds > 0 && seconds <= 86400
+		if (err == nil) != valid {
+			t.Fatal(seconds, err)
+		}
+		if valid && limits.Base.TTL != time.Duration(seconds)*time.Second {
+			t.Fatal("retention drift", seconds, limits.Base.TTL)
+		}
+	}
+}

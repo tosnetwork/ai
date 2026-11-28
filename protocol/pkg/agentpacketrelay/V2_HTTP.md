@@ -27,6 +27,10 @@ values refused. Required fields:
 | `network` | Approved `network_id`, bare `genesis_root_hash`, bare `genesis_file_hash` tuple |
 | `code_base64`, `code_hash` | Frozen registry code BOC and its pinned representation hash |
 
+Optional `ttl_seconds` selects retention from 1 to 86,400 seconds (default
+86,400), including the 1-hour test and 3-hour production D10 profiles.
+The checkpoint path must be outside state_dir, whose root inventory is closed.
+
 Optional `stranger_max_envelopes`, `stranger_max_bytes` and
 `stranger_global_share` lower or select the operator limits: defaults 32,
 2 MiB and 25; hard maxima 64, 4 MiB and 25. Zero closes that allowance.
