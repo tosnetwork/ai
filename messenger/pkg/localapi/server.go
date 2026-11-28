@@ -78,6 +78,8 @@ type Config struct {
 	// DirectMessageSender accepts only human recipient intent and message
 	// semantics. It never accepts Endpoint, Device, Session or route authority.
 	DirectMessageSender DirectMessageSender
+	// ContactStates answers contacts.state; nil refuses it as not configured.
+	ContactStates ContactStateReader
 	// EconomicActionAdmitter is a daemon-owned durable writer-generation and
 	// exact-action boundary. When absent, autonomous economic sends fail closed.
 	EconomicActionAdmitter EconomicActionAdmitter
@@ -110,6 +112,12 @@ type EconomicActionAdmitter interface {
 	Submit(string, string) (commerce.ActionResolution, error)
 	Resolve(string, string) (commerce.ActionResolution, error)
 	Accept(string, string, string) (commerce.ActionResolution, error)
+}
+
+// ContactStateReader reports how this installation stands with an Agent,
+// without writing anything.
+type ContactStateReader interface {
+	ContactState(ctx context.Context, agentID string) (ContactStanding, error)
 }
 
 type ContactResolver interface {
@@ -386,7 +394,11 @@ func (s *Server) handle(ctx context.Context, principal Principal, raw []byte) Re
 	case OpListRooms:
 		return s.listRooms(now)
 	case OpListConversations:
-		return s.listConversations(request)
+		return s.listConversations(request, now)
+	case OpMessageStatus:
+		return s.messageStatus(request)
+	case OpContactState:
+		return s.contactState(ctx, request)
 	case OpRoomGaps:
 		return s.roomGaps(request)
 	}
@@ -1162,8 +1174,68 @@ func (s *Server) listRooms(now time.Time) Response {
 	return Response{OK: true, Rooms: rooms}
 }
 
+func (s *Server) contactState(ctx context.Context, request Request) Response {
+	if s.config.ContactStates == nil {
+		return refuse(fault.CodeClassNotDelegated, errors.New("contact state is not configured"))
+	}
+	standing, err := s.config.ContactStates.ContactState(ctx, request.RecipientAgentID)
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	switch standing.State {
+	case ContactKnown, ContactStranger, ContactHeld:
+	default:
+		return refuse(fault.CodeInternal, errors.New("contact state is not canonical"))
+	}
+	return Response{OK: true, AgentID: request.RecipientAgentID, Standing: &standing}
+}
+
+// messageStatus summarizes one outbound message's copies. A copy held by
+// this installation's own policy is still pending here; held is reported only
+// from the recipient's signed acknowledgement.
+func (s *Server) messageStatus(request Request) Response {
+	copies, err := s.config.Journal.EventCopies(request.EventID)
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	if len(copies) == 0 {
+		return refuse(fault.CodeNotAuthentic, errors.New("no outbound message has this event"))
+	}
+	return Response{OK: true, Message: summarizeCopies(request.EventID, copies)}
+}
+
+func summarizeCopies(eventID string, copies []eventlog.Delivery) *MessageStatus {
+	status := &MessageStatus{EventID: eventID, Copies: len(copies)}
+	delivered, held, carried := 0, 0, 0
+	for _, copy := range copies {
+		switch copy.State {
+		case eventlog.StateAbandoned:
+			status.State, status.Code = MessageRejected, copy.LastCode
+			return status
+		case eventlog.StateDelivered:
+			delivered++
+			if copy.RecipientOutcome == eventlog.RecipientHeld {
+				held++
+			}
+		case eventlog.StateCarried:
+			carried++
+		}
+	}
+	switch {
+	case delivered == len(copies) && held > 0:
+		status.State = MessageHeld
+	case delivered == len(copies):
+		status.State = MessageDelivered
+	case carried > 0 || delivered > 0:
+		status.State = MessageCarried
+	default:
+		status.State = MessagePending
+	}
+	return status
+}
+
 // listConversations returns one page of direct conversations, newest first.
-func (s *Server) listConversations(request Request) Response {
+func (s *Server) listConversations(request Request, now time.Time) Response {
 	limit := request.Limit
 	if limit == 0 {
 		limit = MaxConversationsPerPage
@@ -1174,12 +1246,39 @@ func (s *Server) listConversations(request Request) Response {
 	if err != nil {
 		return refuse(fault.CodeInternal, err)
 	}
+	unread, err := s.unreadByConversation(now)
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
 	conversations := make([]ConversationSummary, 0, len(records))
 	for _, record := range records {
 		conversations = append(conversations, ConversationSummary{ConversationID: record.ConversationID,
-			RemoteAgentID: record.RemoteAgentID, CreatedAtUnix: record.CreatedAtUnix, UpdatedAtUnix: record.UpdatedAtUnix})
+			RemoteAgentID: record.RemoteAgentID, CreatedAtUnix: record.CreatedAtUnix, UpdatedAtUnix: record.UpdatedAtUnix,
+			Unread: unread[record.ConversationID]})
 	}
 	return Response{OK: true, Conversations: conversations}
+}
+
+// unreadByConversation counts, per conversation, the pending inbound events
+// the runtime is offered: the inbox.pending view, without its page bound.
+func (s *Server) unreadByConversation(now time.Time) (map[string]int, error) {
+	records, err := s.config.Journal.ListPending(now, 0)
+	if err != nil {
+		return nil, err
+	}
+	unread := map[string]int{}
+	for _, record := range records {
+		event, err := pendingEvent(record)
+		if err != nil {
+			continue
+		}
+		decoded, err := envelope.DecodeEventJSON(event.Event)
+		if err != nil || daemonApplicationKind(decoded.Kind) {
+			continue
+		}
+		unread[event.ConversationID]++
+	}
+	return unread, nil
 }
 
 // roomGaps reads one room's gap records, newest first.

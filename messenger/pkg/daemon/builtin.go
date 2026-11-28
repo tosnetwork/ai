@@ -12,6 +12,9 @@ import (
 
 	"github.com/tosnetwork/ai/messenger/internal/securefile"
 	"github.com/tosnetwork/ai/messenger/pkg/chainagent"
+	"github.com/tosnetwork/ai/messenger/pkg/directory"
+	"github.com/tosnetwork/ai/messenger/pkg/identity"
+	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
 	"github.com/tosnetwork/ai/messenger/pkg/transport"
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agentcarrier"
@@ -50,6 +53,10 @@ type BuiltinCarrierConfig struct {
 	Signer BuiltinSignerConfig `json:"signer"`
 	// HintTTLSeconds is the hint lifetime, at most 86,400; default 21,600.
 	HintTTLSeconds uint64 `json:"hint_ttl_seconds,omitempty"`
+	// PublicContact is the owner's consent to first contact by Agent ID: the
+	// hint discloses this installation's chat card and relay identity
+	// evidence, so a sender needs no contact file. Off by default.
+	PublicContact bool `json:"public_contact,omitempty"`
 }
 
 // BuiltinSignerConfig names the pinned tosctl helper with signing custody and
@@ -118,7 +125,7 @@ func distinctRelays(urls []string) bool {
 
 // openBuiltinCarrier opens the in-process chat lane with the daemon's
 // finalized readers and the pinned signing helper.
-func (d *Daemon) openBuiltinCarrier(ctx context.Context) (*transport.Builtin, error) {
+func (d *Daemon) openBuiltinCarrier(ctx context.Context, sink *directory.RelayEvidenceSink) (*transport.Builtin, error) {
 	relay := d.config.RelayCarriage
 	if relay == nil || relay.Builtin == nil {
 		return nil, errors.New("the builtin carrier is not configured")
@@ -190,10 +197,32 @@ func (d *Daemon) openBuiltinCarrier(ctx context.Context) (*transport.Builtin, er
 		Resolver: agentcarrier.ResolverConfig{Directories: b.Directories, TestSingleRelay: b.TestSingleRelay,
 			Directory: func(url string) (agentcarrier.Directory, error) { return relays(url) }},
 		Publication: agentcarrier.PublicationConfig{Directories: b.Directories, TestSingleRelay: b.TestSingleRelay,
-			TTL: ttl, Directory: func(url string) (agentcarrier.Directory, error) { return relays(url) }},
+			TTL: ttl, Directory: func(url string) (agentcarrier.Directory, error) { return relays(url) },
+			PublicContact: b.PublicContact, VerifyEvidence: d.verifyOwnEvidence},
 		CardPath: relay.CardPath,
-		Report:   d.report,
+		Evidence: func() ([]byte, error) {
+			evidence, _, _, err := sink.Current()
+			return evidence, err
+		},
+		Report: d.report,
 	})
+}
+
+// verifyOwnEvidence checks the relay identity evidence a hint is to
+// disclose: it must verify against finalized state as this Agent's.
+func (d *Daemon) verifyOwnEvidence(_ context.Context, kind agenttransport.HintObjectKind, raw []byte) (string, error) {
+	if kind != agenttransport.MessengerEvidence || d.discovery == nil || d.discovery.resolver == nil {
+		return "", agentcarrier.ErrRefused
+	}
+	evidence, err := relayframe.DecodeEvidence(raw)
+	if err != nil {
+		return "", errors.Join(agentcarrier.ErrRefused, err)
+	}
+	delegation, err := identity.Verify(d.discovery.resolver, d.config.Network(), d.discovery.chain, evidence.Delegation, d.clock())
+	if err != nil || delegation.AgentID != d.config.AgentID {
+		return "", errors.Join(agentcarrier.ErrRefused, err)
+	}
+	return d.config.AgentID, nil
 }
 
 // admittedPeer is the lane's business admission: a peer this installation

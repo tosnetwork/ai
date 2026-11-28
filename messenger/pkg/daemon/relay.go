@@ -198,7 +198,7 @@ func (d *Daemon) configureRelayCarriage(sink *directory.RelayEvidenceSink) error
 	if relay.Carrier == CarrierBuiltin {
 		ctx, cancel := context.WithTimeout(context.Background(), builtinOpenTimeout)
 		defer cancel()
-		opened, err := d.openBuiltinCarrier(ctx)
+		opened, err := d.openBuiltinCarrier(ctx, sink)
 		if err != nil {
 			return errors.New("open the builtin chat lane: " + err.Error())
 		}
@@ -237,6 +237,9 @@ func (d *Daemon) configureRelayCarriage(sink *directory.RelayEvidenceSink) error
 		d.relay.builtin = builtin
 		if importer, ok := d.discovery.runner.(*contactImporter); ok {
 			importer.learner = builtin
+		}
+		if contacts, ok := d.discovery.contacts.(relayDirectory); ok {
+			contacts.public.set(builtin)
 		}
 	}
 	if relay.MLSDriverPath == "" {
@@ -1193,7 +1196,7 @@ func (r *relayRuntime) DeliveryAck(ctx context.Context, sender string, raw []byt
 		return carrierapi.Refusal(carrierapi.CodeFrameMalformed)
 	}
 	match := eventlog.RelayAckMatch{SessionID: ack.SessionID, DeviceID: ack.RecipientDeviceID,
-		CiphertextDigest: ack.CiphertextDigest}
+		CiphertextDigest: ack.CiphertextDigest, Outcome: ack.Outcome}
 	if err := r.applyAck(sender, deliveryID, delivery, ack, match, now); err != nil {
 		if errors.Is(err, eventlog.ErrAckMismatch) {
 			return carrierapi.Refusal(carrierapi.CodeFrameMalformed)

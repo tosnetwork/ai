@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"time"
@@ -147,6 +148,91 @@ type Delivery struct {
 	// AdmissionToken is the invite the owner presented for the recipient
 	// Agent, fixed on the first attempt so every generation carries it.
 	AdmissionToken string `json:"admission_token,omitempty"`
+	// RecipientOutcome is the outcome the recipient Endpoint signed in the ack
+	// that delivered the copy: accepted, duplicate, or held for its owner's
+	// admission decision. Empty for a copy not delivered by a relay ack.
+	RecipientOutcome string `json:"recipient_outcome,omitempty"`
+}
+
+// Recipient outcomes a delivering ack may carry.
+const (
+	RecipientAccepted  = "accepted"
+	RecipientDuplicate = "duplicate"
+	RecipientHeld      = "held"
+)
+
+// MaxEventCopies bounds the device copies EventCopies returns.
+const MaxEventCopies = 256
+
+// EventCopies returns every device copy of one outbound event, in delivery
+// ID order. It reads the outbound directory under the journal lock, so the
+// copies are one snapshot.
+func (j *Journal) EventCopies(eventID string) ([]Delivery, error) {
+	if err := j.usable(); err != nil {
+		return nil, err
+	}
+	if !eventPattern.MatchString(eventID) {
+		return nil, errors.New("invalid event identifier")
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	entries, err := os.ReadDir(j.outboundRoot())
+	if err != nil {
+		return nil, errors.New("read outbound deliveries")
+	}
+	var copies []Delivery
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		delivery, err := readDelivery(j.deliveryPathForFile(entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if delivery.EventID != eventID {
+			continue
+		}
+		if len(copies) == MaxEventCopies {
+			return nil, errors.New("an event has more copies than a status reads")
+		}
+		copies = append(copies, delivery)
+	}
+	sort.Slice(copies, func(a, b int) bool { return copies[a].DeliveryID < copies[b].DeliveryID })
+	return copies, nil
+}
+
+// LatestRecipientOutcome returns the recipient outcome of the outbound copy of
+// a conversation settled last by a relay ack, or empty when none was. It
+// reads the outbound directory under the journal lock.
+func (j *Journal) LatestRecipientOutcome(conversationID string) (string, error) {
+	if err := j.usable(); err != nil {
+		return "", err
+	}
+	if !convPattern.MatchString(conversationID) {
+		return "", errors.New("invalid conversation identifier")
+	}
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	entries, err := os.ReadDir(j.outboundRoot())
+	if err != nil {
+		return "", errors.New("read outbound deliveries")
+	}
+	outcome, settled := "", uint64(0)
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		delivery, err := readDelivery(j.deliveryPathForFile(entry.Name()))
+		if err != nil {
+			return "", err
+		}
+		if delivery.ConversationID != conversationID || delivery.State != StateDelivered ||
+			delivery.RecipientOutcome == "" || delivery.SettledAtUnix < settled {
+			continue
+		}
+		outcome, settled = delivery.RecipientOutcome, delivery.SettledAtUnix
+	}
+	return outcome, nil
 }
 
 // Outbound is a request to deliver one event.

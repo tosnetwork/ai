@@ -222,7 +222,51 @@ const (
 	// OpListConversations lists the direct conversations held here, newest
 	// first, at most MaxConversationsPerPage per page.
 	OpListConversations Operation = "conversations.list"
+	// OpMessageStatus reports the delivery state of one outbound message.
+	OpMessageStatus Operation = "messages.status"
+	// OpContactState reports, read-only, how this installation stands with
+	// one Agent: contact, stranger or held, and whether a route is known.
+	OpContactState Operation = "contacts.state"
 )
+
+// Contact states contacts.state reports.
+//
+//   - held: the recipient's signed acknowledgement of the latest message
+//     acknowledged from here says it waits for its owner's admission;
+//   - contact: the Agent is a contact of this installation (its admission
+//     policy or an invite admits it), or its signed acknowledgement accepted a
+//     message from here;
+//   - stranger: neither.
+const (
+	ContactKnown    = "contact"
+	ContactStranger = "stranger"
+	ContactHeld     = "held"
+)
+
+// ContactStanding is the contacts.state answer.
+type ContactStanding struct {
+	State      string `json:"state"`
+	RouteKnown bool   `json:"route_known"`
+}
+
+// Delivery states messages.status reports. Held is the recipient's: it is
+// reported only when the recipient Endpoint's signed acknowledgement says the
+// message waits for its owner's admission decision.
+const (
+	MessagePending   = "pending"
+	MessageCarried   = "carried"
+	MessageDelivered = "delivered"
+	MessageHeld      = "held"
+	MessageRejected  = "rejected"
+)
+
+// MessageStatus is the state of one outbound message across its copies.
+type MessageStatus struct {
+	EventID string     `json:"event_id"`
+	State   string     `json:"state"`
+	Code    fault.Code `json:"code,omitempty"`
+	Copies  int        `json:"copies"`
+}
 
 // MaxConversationsPerPage bounds one conversations.list page.
 const MaxConversationsPerPage = 64
@@ -252,7 +296,7 @@ var permitted = map[Principal]map[Operation]struct{}{
 		OpPendingAttachments: {}, OpClaimAttachment: {},
 		OpBeginOutboundAttachment: {}, OpAppendOutboundAttachment: {}, OpCommitOutboundAttachment: {},
 		OpRequestAction: {}, OpActionStatus: {}, OpClaimAction: {},
-		OpListRooms: {}, OpRoomGaps: {}, OpListConversations: {},
+		OpListRooms: {}, OpRoomGaps: {}, OpListConversations: {}, OpMessageStatus: {}, OpContactState: {},
 	},
 	PrincipalOwner: {
 		OpAwaitingAdmission: {}, OpAdmit: {}, OpRefuse: {},
@@ -312,6 +356,8 @@ var operations = map[Operation]struct{}{
 	OpListRooms:             {},
 	OpRoomGaps:              {},
 	OpListConversations:     {},
+	OpMessageStatus:         {},
+	OpContactState:          {},
 }
 
 var (
@@ -570,6 +616,10 @@ type Response struct {
 	RoomID string `json:"room_id,omitempty"`
 	// Rooms lists the private rooms held here and the pending joins.
 	Rooms []RoomSummary `json:"rooms,omitempty"`
+	// Standing is the contacts.state answer.
+	Standing *ContactStanding `json:"standing,omitempty"`
+	// Message is the messages.status answer.
+	Message *MessageStatus `json:"message,omitempty"`
 	// Conversations is one conversations.list page, newest first; a short
 	// page is the last.
 	Conversations []ConversationSummary `json:"conversations,omitempty"`
@@ -584,6 +634,9 @@ type ConversationSummary struct {
 	RemoteAgentID  string `json:"remote_agent_id"`
 	CreatedAtUnix  uint64 `json:"created_at_unix"`
 	UpdatedAtUnix  uint64 `json:"updated_at_unix"`
+	// Unread counts the conversation's inbound events inbox.pending offers
+	// the runtime and it has not completed.
+	Unread int `json:"unread"`
 }
 
 // RoomSummary is one private room, joined or pending.
@@ -768,7 +821,7 @@ func ValidateRequest(request Request) error {
 	if request.Op != OpResolveContact && request.Op != OpEnsureDirectConversation && request.Op != OpSendDirect && request.Op != OpSendDirectApplication && request.Recipient != "" {
 		return errors.New("only contact or direct-conversation resolution carries a recipient input")
 	}
-	if request.Op != OpCompose && request.RecipientAgentID != "" {
+	if request.Op != OpCompose && request.Op != OpContactState && request.RecipientAgentID != "" {
 		return errors.New("only message composition carries a recipient Agent assertion")
 	}
 	if request.Op != OpCompose && request.Op != OpSendDirect && request.Op != OpSendDirectApplication && request.Op != OpReplyDirect && request.Op != OpComposeProtocolResult && request.Op != OpBeginOutboundAttachment && request.Op != OpExportDeviceHistory && request.Op != OpListDeviceHistory &&
@@ -1086,6 +1139,18 @@ func ValidateRequest(request Request) error {
 		}
 		return requireEmpty(request, "a room listing", request.EventID, request.LeaseID, request.SessionID,
 			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason)
+	case OpMessageStatus:
+		if !eventPattern.MatchString(request.EventID) || request.Limit != 0 {
+			return errors.New("a message status needs one canonical event")
+		}
+		return requireEmpty(request, "a message status", request.LeaseID, request.SessionID,
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason, request.RoomID)
+	case OpContactState:
+		if !agentPattern.MatchString(request.RecipientAgentID) || request.Limit != 0 {
+			return errors.New("a contact state needs one canonical Agent")
+		}
+		return requireEmpty(request, "a contact state", request.EventID, request.LeaseID, request.SessionID,
+			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason, request.RoomID)
 	case OpListConversations:
 		if request.Limit < 0 || request.Limit > MaxConversationsPerPage ||
 			(request.BeforeCreatedAtUnix == 0) != (request.BeforeConversationID == "") ||

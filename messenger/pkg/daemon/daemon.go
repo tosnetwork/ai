@@ -185,6 +185,51 @@ func (d *Daemon) ResolveContact(ctx context.Context, input string, dns contact.D
 	return resolver.Resolve(ctx, input)
 }
 
+// ContactState reports, without writing, how this installation stands with
+// an Agent (localapi contacts.state). The route is known when verified relay
+// evidence of the Agent is held, which is what a send seals and routes by.
+func (d *Daemon) ContactState(_ context.Context, agentID string) (localapi.ContactStanding, error) {
+	if d == nil || d.journal == nil {
+		return localapi.ContactStanding{}, errors.New("the daemon is not open")
+	}
+	now := d.clock()
+	standing := localapi.ContactStanding{State: localapi.ContactStranger}
+	conversation, found, err := d.journal.DirectConversation(d.config.AgentID, agentID)
+	if err != nil {
+		return localapi.ContactStanding{}, err
+	}
+	outcome := ""
+	if found {
+		if outcome, err = d.journal.LatestRecipientOutcome(conversation.ConversationID); err != nil {
+			return localapi.ContactStanding{}, err
+		}
+	}
+	switch outcome {
+	case eventlog.RecipientHeld:
+		standing.State = localapi.ContactHeld
+	case eventlog.RecipientAccepted, eventlog.RecipientDuplicate:
+		standing.State = localapi.ContactKnown
+	default:
+		policy, err := d.config.AdmissionPolicy()
+		if err != nil {
+			return localapi.ContactStanding{}, err
+		}
+		invited, err := d.journal.IsInvitedContact(agentID)
+		if err != nil {
+			return localapi.ContactStanding{}, err
+		}
+		if invited || policy.Admits(agentID, "text") == admission.AdmitAllow {
+			standing.State = localapi.ContactKnown
+		}
+	}
+	if d.discovery != nil && d.discovery.relay != nil {
+		if _, err := d.discovery.relay.CheckStoredContact(agentID, now); err == nil {
+			standing.RouteKnown = true
+		}
+	}
+	return standing, nil
+}
+
 // EnsureDirectConversation resolves human input to AgentID and atomically
 // creates or reloads the daemon's route-independent direct-conversation record.
 // This first slice records discovery only: it creates no session and claims no
@@ -800,6 +845,7 @@ func openWithDiscoveryAndPublisher(config Config, observer Observer, verifier de
 		},
 	)
 	serverConfig.DirectMessageSender = daemonDirectMessenger{daemon: instance}
+	serverConfig.ContactStates = instance
 	if config.RelayCarriage != nil && config.RelayCarriage.MLSDriverPath != "" {
 		serverConfig.RoomOperator = daemonRoomOperator{daemon: instance}
 	}

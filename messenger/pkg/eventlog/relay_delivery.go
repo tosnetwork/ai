@@ -100,6 +100,9 @@ type RelayAckMatch struct {
 	SessionID        string
 	DeviceID         string
 	CiphertextDigest string
+	// Outcome is the recipient's signed outcome of an ack that settles the
+	// copy (accepted, duplicate or held); DeliveredByAck records it.
+	Outcome string
 }
 
 // DeliveredByAck settles a carried copy on a verified Endpoint-signed ack
@@ -122,7 +125,13 @@ func (j *Journal) DeliveredByAck(deliveryID string, match RelayAckMatch, now tim
 	if delivery.State != StateCarried && delivery.State != StatePending {
 		return Delivery{}, false, ErrNotPending
 	}
+	switch match.Outcome {
+	case "", RecipientAccepted, RecipientDuplicate, RecipientHeld:
+	default:
+		return Delivery{}, false, errors.New("invalid recipient outcome")
+	}
 	delivery.State = StateDelivered
+	delivery.RecipientOutcome = match.Outcome
 	delivery.NextAttemptAtUnix = 0
 	delivery.NextRedepositAtUnix = 0
 	delivery.AttemptID = ""
