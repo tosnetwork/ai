@@ -367,7 +367,10 @@ type agentGiftGlobalIDVote struct {
 func agentGiftGlobalID(ctx context.Context, nodes []*rpcNode, quorum int, seqno uint64, block agentGiftBlock) (int32, error) {
 	vote, _, err := quorumRead(ctx, nodes, quorum, func(ctx context.Context, node *rpcNode) (agentGiftGlobalIDVote, error) {
 		var result tokenConfigResult
-		// with_proof makes the endpoint name the block it read the parameter at.
+		// The node's getConfigParam reports block_id, the block it read the
+		// parameter at, only when with_proof is set; without it the answer
+		// names no block and could not be bound. The proofs that come with it
+		// are not part of the vote.
 		if err := node.client.Call(ctx, "getConfigParam", struct {
 			Param     int    `json:"param"`
 			Seqno     uint64 `json:"seqno"`

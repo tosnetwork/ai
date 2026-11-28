@@ -18,6 +18,14 @@ A second independent implementation of the corpus and the live adversarial
 and quota evidence of section 12 do not exist; section 12 lists what the
 evidence must show.
 
+**Successor: Messenger Transport V2, with no V1 compatibility.**
+[`MESSENGER_TRANSPORT_V2.md`](MESSENGER_TRANSPORT_V2.md) replaces this
+relay API. TOS is pre-launch, so V2 keeps no V1 compatibility: the endpoints
+of this document are deleted in V2 section 17 PR 14, a key card's relay list
+is not a route under V2 (V2 sections 5.5 and 9.2), and the V2 mailbox listing
+is bounded at 80 KiB (V2 section 6). The envelope, seal, card and section 9
+rules of this document stay normative as V2 inherits them.
+
 The key words MUST, MUST NOT, SHOULD and MAY are normative.
 
 ## 1. Authority
@@ -480,7 +488,8 @@ the next packet generation.
 - No cookies, sessions, accounts or bearer tokens are used or required. A relay
   operator MAY add transport authentication for its own resource policy; it
   never becomes authority over envelopes.
-- Every response body is at most 64 KiB except a downloaded envelope.
+- Every response body is at most 64 KiB except a downloaded envelope. (V2
+  adds one exception, its mailbox listing; V2 section 6.)
 
 All paths are below the base URL `B` named in a key card.
 `{agent}` is the strict `agent_<64 hex>` form, `{id}` is the envelope ID as 64
