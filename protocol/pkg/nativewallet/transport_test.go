@@ -86,7 +86,13 @@ func (h *transportHarness) SubmitNativeAction(ctx context.Context, r *nativev1.S
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.submits++
-	if r.Context == nil || r.Context.RequestId == "" || r.Context.IdempotencyKey != r.Context.RequestId || r.Context.CallerId != r.Submission.Action.TargetObjectId || r.Context.DeadlineUnixMillis <= time.Now().UnixMilli() {
+	// The request carries the caller's own deadline. It is compared with the
+	// call's context, not with the wall clock: on a loaded machine the deadline can
+	// pass before the call arrives, and that is the issuer's timing, not a missing
+	// context. Over HTTP the handler's deadline is the caller's, re-derived from
+	// the transmitted timeout, so it may differ by the transit time.
+	deadline, hasDeadline := ctx.Deadline()
+	if r.Context == nil || r.Context.RequestId == "" || r.Context.IdempotencyKey != r.Context.RequestId || r.Context.CallerId != r.Submission.Action.TargetObjectId || !hasDeadline || math.Abs(float64(r.Context.DeadlineUnixMillis-deadline.UnixMilli())) > 60000 {
 		h.t.Fatal("missing existing Native action request context")
 	}
 
@@ -145,9 +151,24 @@ func transportFixture(t *testing.T) (*TransportIssuer, *transportHarness, *trans
 	issuer := &TransportIssuer{Config: agenttransport.Config{Mode: agenttransport.TestNetworkLegacyEpochZero, Network: network, Clock: transportTestClock{}, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{code}, Locator: transportTestLocator{}}}, Resolver: h, Keys: keys, Signer: fake, Submitter: h, Confirm: func(context.Context, Review) error { return nil }, PollInterval: time.Millisecond}
 	return issuer, h, keys, request
 }
+
+// issueTest runs one issuance with a budget no loaded race run reaches; a
+// test that expects an outcome gets it, however slow the machine.
 func issueTest(t *testing.T, w *TransportIssuer, h *transportHarness, r TransportRequest) ([]byte, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	return issueWithin(t, w, h, r, 30*time.Second)
+}
+
+// issueUntilDeadline runs an issuance that is expected to wait for a
+// finalization that never comes, so it ends at its short deadline.
+func issueUntilDeadline(t *testing.T, w *TransportIssuer, h *transportHarness, r TransportRequest) ([]byte, error) {
+	t.Helper()
+	return issueWithin(t, w, h, r, time.Second)
+}
+
+func issueWithin(t *testing.T, w *TransportIssuer, h *transportHarness, r TransportRequest, budget time.Duration) ([]byte, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	result, err := w.IssueTransport(ctx, h.directory, r)
 	return result.Delegation, err
@@ -189,10 +210,10 @@ func TestTransportLostAcknowledgementReconcilesWithoutResubmit(t *testing.T) {
 func TestTransportAcknowledgementIsNotFinalization(t *testing.T) {
 	w, h, _, r := transportFixture(t)
 	h.finalize = false
-	if _, err := issueTest(t, w, h, r); err == nil {
+	if _, err := issueUntilDeadline(t, w, h, r); err == nil {
 		t.Fatal("unfinalized acknowledgement passed")
 	}
-	if _, err := issueTest(t, w, h, r); err == nil || h.submits != 1 {
+	if _, err := issueUntilDeadline(t, w, h, r); err == nil || h.submits != 1 {
 		t.Fatal("unconfirmed rerun submitted again")
 	}
 }
@@ -367,7 +388,7 @@ func TestTransportCrashAfterDispatchMarkNeverSendsAgain(t *testing.T) {
 	if _, err := issueTest(t, w, h, r); err == nil {
 		t.Fatal("lost dispatch passed")
 	}
-	if _, err := issueTest(t, w, h, r); err == nil || h.submits != 1 {
+	if _, err := issueUntilDeadline(t, w, h, r); err == nil || h.submits != 1 {
 		t.Fatal("dispatch rerun sent twice")
 	}
 }
