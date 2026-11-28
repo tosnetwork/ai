@@ -48,7 +48,11 @@ func NewV2Client(base string, transport http.RoundTripper, now func() time.Time)
 	return &V2Client{base, u.EscapedPath(), &http.Client{Transport: transport, Timeout: DefaultClientTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, now}, nil
 }
 func (c *V2Client) exchange(ctx context.Context, method, path string, body, credential []byte, holder ed25519.PrivateKey) (int, []byte, error) {
-	if !strings.HasPrefix(path, c.path+"/v2/mailboxes/") || strings.ContainsAny(path, "?#%") {
+	return c.exchangeWait(ctx, method, path, body, credential, holder, 0)
+}
+func (c *V2Client) exchangeWait(ctx context.Context, method, path string, body, credential []byte, holder ed25519.PrivateKey, wait int) (int, []byte, error) {
+	kind, _, _ := (&V2Server{base: c.path}).route(path)
+	if kind == "" || strings.ContainsAny(path, "?#%") || wait < 0 || wait > 25 || (wait > 0 && (kind != "list" || method != "GET")) {
 		return 0, nil, errors.New("invalid V2 path")
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+strings.TrimPrefix(path, c.path), bytes.NewReader(body))
@@ -56,6 +60,9 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 		return 0, nil, err
 	}
 	req.Header.Set("Accept-Encoding", "identity")
+	if wait > 0 {
+		req.Header.Set("TOS-Relay-Wait", strconv.Itoa(wait))
+	}
 	if method == "PUT" || method == "POST" {
 		req.Header.Set("Content-Type", ContentTypeEnvelope)
 	}
@@ -78,7 +85,11 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 		req.Header.Set("TOS-Relay-Credential", agenttransport.EncodeCredentialHeader(credential))
 		req.Header.Set("TOS-Relay-Proof", proof.Header())
 	}
-	res, err := c.http.Do(req)
+	client := *c.http
+	if wait > 0 {
+		client.Timeout = 40 * time.Second
+	}
+	res, err := client.Do(req)
 	if err != nil {
 		return 0, nil, errors.New("V2 relay exchange failed")
 	}
@@ -90,7 +101,7 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 		want := ContentTypeJSON
 		if res.StatusCode == 200 && method == "GET" {
 			kind, _, _ := (&V2Server{base: c.path}).route(path)
-			if kind == "envelope" {
+			if kind == "envelope" || kind == "hints" || kind == "hint-record" {
 				want = ContentTypeEnvelope
 			}
 		}
@@ -105,6 +116,10 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 			bound = MaxV2ListingBytes
 		} else if kind == "envelope" {
 			bound = MaxEnvelopeBytes
+		} else if kind == "hints" {
+			bound = MaxHintIndexBytes
+		} else if kind == "hint-record" {
+			bound = agenttransport.MaxHintRecordSize
 		}
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, int64(bound)+1))
@@ -123,6 +138,11 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 		if seconds, err := strconv.ParseUint(res.Header.Get("Retry-After"), 10, 64); err == nil {
 			retry = time.Duration(min(seconds, uint64(maxRetryAfter/time.Second))) * time.Second
 		}
+		if res.StatusCode == 507 {
+			if (kind == "envelope" && method == "PUT" && answer.Lane == "") || (!(kind == "envelope" && method == "PUT") && answer.Lane != "") {
+				return 0, nil, errors.New("invalid quota lane")
+			}
+		}
 		return res.StatusCode, nil, &StatusError{StatusCode: res.StatusCode, Code: answer.Code, RetryAfter: retry}
 	}
 	return res.StatusCode, raw, nil
@@ -138,19 +158,30 @@ func v2StatusCode(status int, code, lane string) bool {
 		return code == "credential_invalid" || code == "credential_scope" || code == "credential_revoked" || code == CodeForbidden
 	case 503:
 		return code == "chain_unavailable" || code == "replay_table_full" || code == "proof_floor" || code == CodeUnavailable
+	case 409:
+		return code == CodeConflict || code == "hint_conflict"
 	case 500:
 		return code == "internal_error"
 	case 507:
-		return code == CodeQuotaExhausted && (lane == "stranger" || lane == "contact")
+		return code == CodeQuotaExhausted && (lane == "" || lane == "stranger" || lane == "contact")
 	default:
 		return codeForStatus[status] != "" && codeForStatus[status] == code
 	}
 }
 func (c *V2Client) List(ctx context.Context, agent string, credential []byte, holder ed25519.PrivateKey) ([]V2MailboxEntry, error) {
+	return c.listWait(ctx, agent, credential, holder, 0)
+}
+func (c *V2Client) ListWait(ctx context.Context, agent string, credential []byte, holder ed25519.PrivateKey, seconds int) ([]V2MailboxEntry, error) {
+	if seconds < 1 || seconds > 25 {
+		return nil, errors.New("invalid wait seconds")
+	}
+	return c.listWait(ctx, agent, credential, holder, seconds)
+}
+func (c *V2Client) listWait(ctx context.Context, agent string, credential []byte, holder ed25519.PrivateKey, wait int) ([]V2MailboxEntry, error) {
 	if _, ok := parseAgentText(agent); !ok {
 		return nil, errors.New("invalid Agent")
 	}
-	status, raw, err := c.exchange(ctx, "GET", c.path+"/v2/mailboxes/"+agent+"/envelopes", nil, credential, holder)
+	status, raw, err := c.exchangeWait(ctx, "GET", c.path+"/v2/mailboxes/"+agent+"/envelopes", nil, credential, holder, wait)
 	if err != nil {
 		return nil, err
 	}
