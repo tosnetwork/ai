@@ -1,10 +1,10 @@
 # V2 relay storage foundation
 
-This is the first half of the V2 relay change. It adds no route, does not enable
-V2 in the relay command, and does not claim the HTTP/finalized-reader A4–A6
-acceptance run. V1 handlers, data format and command behaviour are unchanged.
-The follow-on change owns authentication middleware, finalized delegation reads,
-owner mailbox policy and the V2 routes.
+The storage foundation is used by V2Server and the separate V2-only relay
+command. See V2_HTTP.md for authentication, finalized reads, policy and clients.
+The retired V1 API remains isolated for clients not yet moved; it is never a
+V2 data source or fallback. Unit/integration evidence is not a live A4–A6
+acceptance transcript.
 
 ## Ownership and bounds
 

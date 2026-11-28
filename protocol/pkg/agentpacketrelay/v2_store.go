@@ -149,6 +149,7 @@ type V2Store struct {
 	strangers         map[netip.Addr]int
 	sites             map[netip.Addr]int
 	stranger, contact v2Usage
+	policies          map[string]v2PolicyRecord
 	closed, poisoned  bool
 }
 
@@ -199,11 +200,9 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 		d.release()
 		return nil, err
 	}
-	// Control records are introduced by the HTTP/policy layer in its own change.
-	controls, err := boundedV2Dir(filepath.Join(path, "controls"), 1)
-	if err != nil || len(controls) != 0 {
+	if err = s.loadPolicies(unixNow(now)); err != nil {
 		d.release()
-		return nil, errors.New("unknown V2 control record")
+		return nil, err
 	}
 	entries, err := boundedV2Dir(filepath.Join(path, "records"), limits.Base.GlobalMaxEntries)
 	if err != nil {
@@ -237,7 +236,7 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 	return s, nil
 }
 func newV2Store(limits V2Limits) *V2Store {
-	return &V2Store{mu: v2Gate{make(chan struct{}, 1)}, limits: limits, records: map[entryKey]v2Record{}, memory: map[entryKey][]byte{}, mailboxes: map[agentDigest]*v2MailboxUsage{}, lanes: map[v2LaneSlot]v2Usage{}, strangers: map[netip.Addr]int{}, sites: map[netip.Addr]int{}}
+	return &V2Store{mu: v2Gate{make(chan struct{}, 1)}, limits: limits, records: map[entryKey]v2Record{}, memory: map[entryKey][]byte{}, mailboxes: map[agentDigest]*v2MailboxUsage{}, lanes: map[v2LaneSlot]v2Usage{}, strangers: map[netip.Addr]int{}, sites: map[netip.Addr]int{}, policies: map[string]v2PolicyRecord{}}
 }
 func boundedV2Dir(path string, limit int) ([]os.DirEntry, error) {
 	f, err := os.Open(path)
@@ -697,6 +696,9 @@ func (s *V2Store) Sweep(now time.Time) error {
 				return err
 			}
 		}
+	}
+	if err := s.sweepPolicies(unixNow(now)); err != nil {
+		return err
 	}
 	return nil
 }
