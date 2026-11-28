@@ -847,3 +847,43 @@ func TestAFailedListingBacksTheRelayOff(t *testing.T) {
 		t.Fatal("relays are listed every 15 seconds, backing off to 5 minutes")
 	}
 }
+
+func TestAcceptedResultAckKeepsTryingForSecondCopy(t *testing.T) {
+	f := newReceiveFixture(t)
+	const other = "https://another-provider-relay.example"
+	f.relays.directory.relays = []string{providerRelay, other}
+	f.relays.down[other] = true
+	result := f.result(t, "built", nil)
+	f.deliver(t, fxProvider, railwork.KindResult, f.binding, result.message)
+	f.poll(t)
+	chain := fxNow.Add(2 * time.Hour)
+	first, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain))
+	if err != nil || !first.AckSent {
+		t.Fatalf("first copy: %+v %v", first, err)
+	}
+	f.clock.advance(time.Minute)
+	f.relays.down[other] = false
+	second, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain.Add(time.Minute)))
+	if err != nil || second.AckSent || len(f.relays.deposits[other]) != 1 {
+		t.Fatalf("second copy: %+v %v", second, err)
+	}
+}
+
+func TestUncarriedResultAckCanRotateAfterExpiry(t *testing.T) {
+	f := newReceiveFixture(t)
+	result := f.result(t, "built", nil)
+	f.deliver(t, fxProvider, railwork.KindResult, f.binding, result.message)
+	f.poll(t)
+	chain := fxNow.Add(2 * time.Hour)
+	f.relays.down[providerRelay] = true
+	first, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain))
+	if err != nil || !first.Accepted || first.AckSent {
+		t.Fatalf("outage: %+v %v", first, err)
+	}
+	f.relays.down[providerRelay] = false
+	f.clock.advance(AckLifetime + 2*time.Hour)
+	second, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain.Add(AckLifetime+time.Second)))
+	if err != nil || !second.AckSent {
+		t.Fatalf("expired ack retry: %+v %v", second, err)
+	}
+}

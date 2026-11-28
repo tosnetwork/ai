@@ -28,6 +28,8 @@ const (
 	// ProviderCardFromResult is a card carried in a result of the same
 	// purchase.
 	ProviderCardFromResult ProviderCardSource = "result"
+	// ProviderCardFromHint is a card carried by a verified V2 hint.
+	ProviderCardFromHint ProviderCardSource = "hint"
 )
 
 // ProviderCardReverifyAfter is how long a verification lets a card be
@@ -73,7 +75,7 @@ func (c VerifiedProviderCard) UsableAt(now time.Time) error {
 func (b *ServiceActorBuyer) VerifyProviderCard(ctx context.Context, verifier mldsa44.Verifier, source ProviderCardSource,
 	capabilityID string, raw []byte) (VerifiedProviderCard, error) {
 	switch source {
-	case ProviderCardFromOffer, ProviderCardFromQuote, ProviderCardFromResult:
+	case ProviderCardFromOffer, ProviderCardFromQuote, ProviderCardFromResult, ProviderCardFromHint:
 	default:
 		return VerifiedProviderCard{}, fmt.Errorf("%w: unknown card source %q", ErrProviderCard, source)
 	}

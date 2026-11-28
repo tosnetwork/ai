@@ -36,6 +36,7 @@ func (c *Carrier) openTransport(ctx context.Context, transport TransportConfig) 
 		Relays: c.config.Relays, Now: c.config.Now, Delegation: transport.Delegation,
 		Verifier: transport.Verifier, Relay: transport.Relay, SignCard: c.signCard,
 		VerifyCard: c.verifyCard, VerifyPacket: c.verifyPacket, Store: c.storePacket,
+		VerifyDeliveryCard: c.verifyDeliveryCard, OutboxLimit: agentcarrier.MaxOutbox,
 	}
 	c.credentials, err = agentcarrier.OpenCredentialManager(ctx, config, transport.Key, c.admitContact)
 	if err != nil {
@@ -106,6 +107,14 @@ func (c *Carrier) verifyCard(ctx context.Context, raw []byte, _ time.Time) (agen
 		return agentpacketseal.RecipientKey{}, agentpacketseal.KeyCard{}, agentcarrier.ErrRefused
 	}
 	return c.config.Cards.VerifyAgentCard(ctx, c.config.Verifier, packet.SenderAgentID, raw)
+}
+
+func (c *Carrier) verifyDeliveryCard(ctx context.Context, packet agentpacket.Packet, raw []byte) error {
+	card, err := c.config.Cards.VerifyProviderCard(ctx, c.config.Verifier, buyersdk.ProviderCardFromHint, packet.CapabilityID, raw)
+	if errors.Is(err, buyersdk.ErrProviderCard) || (err == nil && card.Key.AgentID != packet.RecipientAgentID) {
+		return agentcarrier.ErrRefused
+	}
+	return err
 }
 
 func (c *Carrier) verifyPacket(ctx context.Context, packet agentpacket.Packet) error {

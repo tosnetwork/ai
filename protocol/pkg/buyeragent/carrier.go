@@ -415,7 +415,8 @@ func (c *Carrier) checkCarriage(ctx context.Context, record buyersdk.CallRecord,
 	// response deadline the call would get.
 	responseDeadline := now.Add(time.Duration(record.ResponseSLASeconds) * time.Second)
 	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, provider, responseDeadline)
-	if err != nil {
+	missingCard := errors.Is(err, ErrNoProviderCard)
+	if err != nil && !missingCard {
 		return err
 	}
 	// Item 5: a relay of each side answered recently.
@@ -424,14 +425,17 @@ func (c *Carrier) checkCarriage(ctx context.Context, record buyersdk.CallRecord,
 	}
 	route, err := c.routes.Resolve(ctx, provider, agentcarrier.Route{CardPacket: providerCard.PacketJSON})
 	if errors.Is(err, agentcarrier.ErrNoRoute) {
+		if missingCard {
+			return ErrNoProviderCard
+		}
 		return fmt.Errorf("%w: %w", ErrRelaysUnavailable, err)
 	}
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(route.CardPacket, providerCard.PacketJSON) {
-		key, card, err := c.verifyCard(ctx, route.CardPacket, now)
-		if err != nil || key.AgentID != provider || card.NotAfterUnix < uint64(responseDeadline.Unix()) {
+		verified, err := c.config.Cards.VerifyProviderCard(ctx, c.config.Verifier, buyersdk.ProviderCardFromHint, record.CapabilityID, route.CardPacket)
+		if err != nil || verified.Key.AgentID != provider || verified.Card.NotAfterUnix < uint64(responseDeadline.Unix()) {
 			return ErrNoProviderCard
 		}
 	}
@@ -455,11 +459,16 @@ func (c *Carrier) checkCarriage(ctx context.Context, record buyersdk.CallRecord,
 	// Item 2 with the card: the task for this purchase encodes, with the
 	// call fields at their widest.
 	widest := ^uint64(0)
-	if _, err := railwork.EncodeTask(railwork.Task{Header: railwork.TaskHeader{BuyerAgentID: c.config.BuyerAgentID,
+	message, err := railwork.EncodeTask(railwork.Task{Header: railwork.TaskHeader{BuyerAgentID: c.config.BuyerAgentID,
 		BuyerWallet: record.BuyerWallet, CapabilityID: record.CapabilityID, CapabilityVersion: record.CapabilityVersion,
 		ExecutionID: record.ExecutionID, ExecutionNonce: strings.Repeat("0", 64), RequestID: widest, CallLT: widest,
-		CallHash: strings.Repeat("0", 64)}, Package: packageBytes, Archive: archive, BuyerKeyCard: buyerCard}); err != nil {
+		CallHash: strings.Repeat("0", 64)}, Package: packageBytes, Archive: archive, BuyerKeyCard: buyerCard})
+	if err != nil {
 		return fmt.Errorf("the task for this purchase does not encode: %w", err)
+	}
+	frames := (len(message) + railwork.MaxChunkData - 1) / railwork.MaxChunkData
+	if err := c.lane.CheckQueueCapacity(ctx, frames+2); err != nil {
+		return fmt.Errorf("the buyer rail outbox cannot fit the purchase: %w", err)
 	}
 	return nil
 }

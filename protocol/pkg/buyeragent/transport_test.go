@@ -44,17 +44,28 @@ type testDirectory struct {
 	delegation agenttransport.Delegation
 	key        ed25519.PrivateKey
 	relays     []string
+	card       []byte
 }
 
 func (d *testDirectory) record() ([]byte, error) {
 	now := uint64(d.clock.Now().Unix())
-	hint, err := agenttransport.SignHint(agenttransport.Hint{
+	hint := agenttransport.Hint{
 		Delegation: d.delegation, IssuedAt: now, ExpiresAt: now + 3600, Relays: d.relays,
-	}, d.key)
+	}
+	var objects []agenttransport.HintObject
+	if len(d.card) != 0 {
+		digest, err := agenttransport.HintObjectDigest(agenttransport.RailCard, d.card)
+		if err != nil {
+			return nil, err
+		}
+		hint.Objects = []agenttransport.HintObjectRef{{Kind: agenttransport.RailCard, Digest: digest, Length: uint32(len(d.card))}}
+		objects = []agenttransport.HintObject{{Kind: agenttransport.RailCard, Bytes: d.card}}
+	}
+	hint, err := agenttransport.SignHint(hint, d.key)
 	if err != nil {
 		return nil, err
 	}
-	return (agenttransport.HintRecord{Hint: hint}).Encode()
+	return (agenttransport.HintRecord{Hint: hint, Objects: objects}).Encode()
 }
 
 func (d *testDirectory) HintIndex(_ context.Context, agent string) ([]agentpacketrelay.HintIndexEntry, error) {

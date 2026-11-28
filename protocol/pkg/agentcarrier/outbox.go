@@ -108,6 +108,27 @@ func (l *Lane) decodeDelivery(name string) (delivery, error) {
 	}
 	return r, nil
 }
+
+// CheckQueueCapacity reports whether the lane can fit count new entries
+// at this instant. Queue repeats the bound when it writes each entry.
+func (l *Lane) CheckQueueCapacity(ctx context.Context, count int) error {
+	if count <= 0 {
+		return ErrConfig
+	}
+	if err := l.out.lock(ctx); err != nil {
+		return err
+	}
+	defer l.out.unlock()
+	index, err := l.inventory()
+	if err != nil {
+		return err
+	}
+	if count > l.config.OutboxLimit-len(index.Deliveries) {
+		return ErrCapacity
+	}
+	return nil
+}
+
 func (l *Lane) Queue(ctx context.Context, id string, raw []byte, deadline uint64) (DeliveryView, error) {
 	if id == "" || len(id) > 128 {
 		return DeliveryView{}, ErrConfig
@@ -503,6 +524,11 @@ func (l *Lane) sendGuard(ctx context.Context, r delivery, g generation, route Ro
 			return ErrPeerRevoked
 		}
 		return ErrUnavailable
+	}
+	if l.config.VerifyDeliveryCard != nil {
+		if err := l.config.VerifyDeliveryCard(ctx, p, g.Card); err != nil {
+			return err
+		}
 	}
 	h, err := agentpacketseal.ParseEnvelope(g.Envelope)
 	if err != nil {

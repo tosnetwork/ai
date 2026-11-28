@@ -216,10 +216,14 @@ registry tuple, mailbox `relays` and CA pin remain applicable. Add these
 fields to the generated configuration after provisioning the delegation.
 
 A provider needs a verified V2 hint as well as its verified card before a
-new purchase can be funded. Pending packets wait for a verified hint.
-The shared scheduler reuses signed packets and targets two relay copies,
-retrying under its V2 backoff and relay TTL rules. Buyer outbox entries are
-created in a separate V2 journal from the admitted purchase's durable state.
+new purchase can be funded. A verified hint can supply a successor card,
+which the buyer checks against the finalized Capability owner. Pending
+packets wait for a verified hint. The shared scheduler reuses signed packets
+and targets two relay copies under its V2 backoff and relay TTL rules. A
+first-copy acknowledgement leaves the second-copy attempt scheduled.
+The buyer checks rail outbox capacity before funding. Buyer outbox entries
+are created in a separate V2 journal from the admitted purchase's durable
+state.
 
 `tos-service-buyer agent --config <file>` runs the agent in the custody
 account. The configuration (schema `tos.service.mcp-buyer.agent-config.v1`)

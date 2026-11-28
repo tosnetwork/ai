@@ -173,12 +173,8 @@ func (c *Carrier) sendFrames(ctx context.Context, record buyersdk.CallRecord, pe
 	if err != nil && !errors.Is(err, ErrNoProviderCard) {
 		return view, err
 	}
-	providerCardHeld := err == nil
 	route := agentcarrier.Route{CardPacket: card.PacketJSON}
 	for index := range plan.FrameCount {
-		if !providerCardHeld {
-			break
-		}
 		id := fmt.Sprintf("%s/%s/%d", record.RequestHash, name, index)
 		carriage, err := c.scheduler.Advance(ctx, id, route)
 		if status, statusErr := c.lane.Status(ctx, id); statusErr == nil {

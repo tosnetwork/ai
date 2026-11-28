@@ -236,3 +236,22 @@ func TestTheDutyRoundDeliversThePendingTask(t *testing.T) {
 		t.Fatalf("a tampered archive was delivered: %v", err)
 	}
 }
+
+func TestCurrentHintCardRecoversMissingPurchaseCard(t *testing.T) {
+	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
+	f.relays.directory.card = providerCardFor(t, fxProvider, providerCardSeed, fxNow.Add(-time.Hour), 7*24*time.Hour)
+	if err := f.carrier.CheckCarriage(t.Context(), f.record, f.archive); err != nil {
+		t.Errorf("carriage should accept the provider card from the verified hint: %v", err)
+	}
+	id := uint64(7)
+	record := f.record
+	record.RequestID, record.CallTransactionLT, record.CallTransactionHex = &id, 4242, strings.Repeat("9a", 32)
+	record.Actor = "0:" + strings.Repeat("77", 32)
+	record.QuoteCommitment = "tvm-cell-sha256:" + strings.Repeat("3c", 32)
+	view, err := f.carrier.DeliverTask(t.Context(), TaskDelivery{Record: record, Archive: f.archive,
+		ExecutionNonce: strings.Repeat("5e", 32), ProviderAgentID: fxProvider,
+		ResponseDeadline: fxNow.Add(time.Hour), RetentionSeconds: 86400, ChainTime: fxNow})
+	if err != nil || view.Delivered == 0 {
+		t.Errorf("delivery with a current hint card: %+v %v", view, err)
+	}
+}
