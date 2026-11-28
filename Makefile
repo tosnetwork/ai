@@ -220,3 +220,7 @@ relay-v2-directory-mutants:
 .PHONY: agentcarrier-mutants
 agentcarrier-mutants:
 	GOWORK=off python3 -I protocol/scripts/agentcarrier-mutants.py
+
+.PHONY: agentcarrier-routing-mutants
+agentcarrier-routing-mutants:
+	GOWORK=off python3 -I protocol/scripts/agentcarrier-routing-mutants.py
