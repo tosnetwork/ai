@@ -305,8 +305,8 @@ MUTANTS = [
     (
         "integrity-fallback",
         "verify.go",
-        "!errors.Is(readErr, ErrUnavailable)",
-        "false",
+        'if !errors.Is(readErr, ErrUnavailable) {\n\t\t\treturn d, errors.New("finalized resolver integrity failure")',
+        'if false {\n\t\t\treturn d, errors.New("finalized resolver integrity failure")',
         "TestFallbackNeverHidesRevocationOrIntegrity",
     ),
     (

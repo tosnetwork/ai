@@ -13,6 +13,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44/mldsa44test"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 // Keys signs and verifies every card this package builds.
@@ -96,7 +97,7 @@ func Sign(t testing.TB, controller string, packet agentpacket.Packet) []byte {
 // Agent returns the live finalized state of an Agent whose one controller is
 // controller.
 func Agent(agentID, controller string) *nativev1.AgentStateV1 {
-	return &nativev1.AgentStateV1{AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1, RecoveryThreshold: 1,
+	return &nativev1.AgentStateV1{EncodingVersion: nativecore.StateEncodingVersion, AuthorizationEpoch: 1, AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1, RecoveryThreshold: 1,
 		Controllers: []*nativev1.ControllerV1{{KeyId: Keys.KeyID(controller),
 			Mldsa44PublicKey: Keys.PublicKey(controller), Weight: 1, PurposeMask: 15, Recovery: true}}}}
 }
