@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -138,11 +139,18 @@ func (s *routingStore) read(name string, value any) error {
 	if at == len(i.Names) || i.Names[at] != name {
 		return os.ErrNotExist
 	}
-	if e = s.disk.read(name, value); e != nil {
+	return s.readIndexed(name, value)
+}
+
+// readIndexed is for a name taken from the validated index under the store's
+// owning lock.
+func (s *routingStore) readIndexed(name string, value any) error {
+	if s.disk.read(name, value) != nil {
 		return ErrStorage
 	}
 	return nil
 }
+
 func (s *routingStore) write(name string, value any) error {
 	i, e := s.index()
 	if e != nil || !validRoutingName(name) {
@@ -178,6 +186,22 @@ func (s *routingStore) remove(name string) error {
 	}
 	return s.disk.remove(name)
 }
+
+// removeIndexed retires a batch from one locked inventory before unlinking
+// any of its files. The startup audit can recover interrupted unlinks.
+func (s *routingStore) removeIndexed(index routingIndex, expired map[string]bool) error {
+	index.Names = slices.DeleteFunc(index.Names, func(name string) bool { return expired[name] })
+	if err := s.disk.write("identity", index); err != nil {
+		return err
+	}
+	for name := range expired {
+		if err := s.disk.remove(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *routingStore) lock(ctx context.Context) error { return s.gate.lock(ctx) }
 func (s *routingStore) unlock()                        { s.gate.unlock() }
 func (s *routingStore) Close() error                   { return s.disk.close() }

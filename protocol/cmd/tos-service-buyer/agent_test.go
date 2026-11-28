@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/buyeragent"
 )
 
@@ -234,7 +235,7 @@ func TestTheAgentRefusesAnExposedVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := openAgent(config, ""); err == nil || !strings.Contains(err.Error(), "VAULT_URL") {
+	if _, err := openAgent(t.Context(), config, ""); err == nil || !strings.Contains(err.Error(), "VAULT_URL") {
 		t.Fatalf("no vault: %v", err)
 	}
 	exposed := filepath.Join(t.TempDir(), "tosctl.json")
@@ -242,7 +243,7 @@ func TestTheAgentRefusesAnExposedVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.Tosctl.ConfigPath = exposed
-	if _, err := openAgent(config, "vault://x"); err == nil || !strings.Contains(err.Error(), "tosctl configuration") {
+	if _, err := openAgent(t.Context(), config, "vault://x"); err == nil || !strings.Contains(err.Error(), "tosctl configuration") {
 		t.Fatalf("a readable tosctl configuration: %v", err)
 	}
 }
@@ -282,7 +283,7 @@ func TestRelayClientsTrustOnlyThePinnedCA(t *testing.T) {
 	if _, err := relayTransport(junk); err == nil {
 		t.Fatal("a CA file without a certificate was accepted")
 	}
-	clients := &relayClients{transport: transport, clients: map[string]buyeragent.RelayClient{}}
+	clients := &relayClients{transport: transport, clients: map[string]*agentpacketrelay.V2Client{}}
 	first, err := clients.client("https://relay.example")
 	if err != nil {
 		t.Fatal(err)
@@ -292,5 +293,50 @@ func TestRelayClientsTrustOnlyThePinnedCA(t *testing.T) {
 	}
 	if _, err := clients.client("http://relay.example"); err == nil {
 		t.Fatal("a plain HTTP relay that is not loopback was accepted")
+	}
+}
+
+func TestBuyerRelayDescriptionUsesOnlyV2(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		name := "v2-refusal"
+		if available {
+			name = "v2-available"
+		}
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				paths = append(paths, r.URL.Path)
+				mu.Unlock()
+				if r.URL.Path != "/v2/relay" || !available {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", agentpacketrelay.ContentTypeJSON)
+				if err := json.NewEncoder(w).Encode(agentpacketrelay.V2Description{
+					Schema: "tos.service.agent-packet-relay.relay.v2", MaxEnvelopeBytes: 262144,
+					MaxTTLSeconds: 3600, PerRecipientMaxEnvelopes: 256, PerRecipientMaxBytes: 8 << 20,
+					StrangerMaxEnvelopes: 32, StrangerMaxBytes: 2 << 20, MaxWaitSeconds: 25, Directory: true,
+				}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			clients := &relayClients{transport: server.Client().Transport, clients: map[string]*agentpacketrelay.V2Client{}}
+			client, err := clients.client(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Describe(t.Context())
+			mu.Lock()
+			defer mu.Unlock()
+			if len(paths) != 1 || paths[0] != "/v2/relay" {
+				t.Fatalf("buyer contacted %v, want only /v2/relay", paths)
+			}
+			if (err == nil) != available {
+				t.Fatalf("V2 description result: %v", err)
+			}
+		})
 	}
 }

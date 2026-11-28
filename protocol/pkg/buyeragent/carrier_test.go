@@ -2,6 +2,7 @@ package buyeragent
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/internal/servicefixture"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcarrier"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
@@ -100,9 +102,10 @@ func (c *fakeChain) VerifyAgentCard(ctx context.Context, verifier mldsa44.Verifi
 // fakeRelay answers its description unless down, and stores deposits
 // unless told to answer a deposit otherwise.
 type fakeRelay struct {
-	mu    sync.Mutex
-	down  map[string]bool
-	asked map[string]int
+	directory *testDirectory
+	mu        sync.Mutex
+	down      map[string]bool
+	asked     map[string]int
 	// deposits are the envelopes each relay accepted, in order; answer
 	// overrides the outcome of a deposit at a relay.
 	deposits map[string][][]byte
@@ -123,11 +126,11 @@ type fakeRelay struct {
 	mailboxes map[string]*fakeMailbox
 }
 
-func (r *fakeRelay) client(base string) (RelayClient, error) {
+func (r *fakeRelay) client(base string) (agentcarrier.Relay, error) {
 	return relayClient{relay: r, base: base}, nil
 }
 
-func (c relayClient) Deposit(_ context.Context, envelope []byte) (agentpacketrelay.DepositOutcome, error) {
+func (c relayClient) Deposit(_ context.Context, envelope []byte, _ []byte, _ ed25519.PrivateKey) error {
 	c.relay.mu.Lock()
 	defer c.relay.mu.Unlock()
 	if c.relay.attempts == nil {
@@ -139,21 +142,26 @@ func (c relayClient) Deposit(_ context.Context, envelope []byte) (agentpacketrel
 		panic("the agent stopped during a deposit")
 	}
 	if _, err := agentpacketseal.ParseEnvelope(envelope); err != nil {
-		return agentpacketrelay.DepositOutcome{}, agentpacketrelay.ErrInvalidArgument
+		return agentpacketrelay.ErrInvalidArgument
 	}
 	if c.relay.conflicts[c.base] > 0 {
 		c.relay.conflicts[c.base]--
 		c.relay.conflicted = append(c.relay.conflicted, append([]byte(nil), envelope...))
-		return agentpacketrelay.DepositOutcome{Result: agentpacketrelay.DepositConflict, StatusCode: 409}, nil
+		return &agentpacketrelay.StatusError{StatusCode: 409}
 	}
 	if result, set := c.relay.answer[c.base]; set {
-		return agentpacketrelay.DepositOutcome{Result: result}, nil
+		switch result {
+		case agentpacketrelay.DepositStored, agentpacketrelay.DepositDuplicate, agentpacketrelay.DepositAcknowledged:
+			return nil
+		default:
+			return &agentpacketrelay.StatusError{StatusCode: 503}
+		}
 	}
 	if c.relay.deposits == nil {
 		c.relay.deposits = map[string][][]byte{}
 	}
 	c.relay.deposits[c.base] = append(c.relay.deposits[c.base], append([]byte(nil), envelope...))
-	return agentpacketrelay.DepositOutcome{Result: agentpacketrelay.DepositStored, StatusCode: 201}, nil
+	return nil
 }
 
 type relayClient struct {
@@ -161,14 +169,14 @@ type relayClient struct {
 	base  string
 }
 
-func (c relayClient) Describe(context.Context) (agentpacketrelay.RelayDescription, error) {
+func (c relayClient) Describe(context.Context) (agentpacketrelay.V2Description, error) {
 	c.relay.mu.Lock()
 	defer c.relay.mu.Unlock()
 	c.relay.asked[c.base]++
 	if c.relay.down[c.base] {
-		return agentpacketrelay.RelayDescription{}, errors.New("relay unavailable")
+		return agentpacketrelay.V2Description{}, errors.New("relay unavailable")
 	}
-	return agentpacketrelay.RelayDescription{MaxTTLSeconds: 86400}, nil
+	return agentpacketrelay.V2Description{Schema: "tos.service.agent-packet-relay.relay.v2", MaxTTLSeconds: 3600}, nil
 }
 
 // fakeMailbox is the buyer's mailbox at one relay: the envelopes held, the
@@ -203,28 +211,28 @@ func (r *fakeRelay) hold(base string, envelope []byte) {
 	box.held = append(box.held, append([]byte(nil), envelope...))
 }
 
-func (c relayClient) List(_ context.Context, agentID string) (agentpacketrelay.Mailbox, error) {
+func (c relayClient) List(_ context.Context, agentID string, _ []byte, _ ed25519.PrivateKey) ([]agentpacketrelay.V2MailboxEntry, error) {
 	c.relay.mu.Lock()
 	defer c.relay.mu.Unlock()
 	box := c.relay.box(c.base)
 	box.lists++
 	if box.listErr != nil {
-		return agentpacketrelay.Mailbox{}, box.listErr
+		return nil, box.listErr
 	}
-	mailbox := agentpacketrelay.Mailbox{AgentID: agentID}
+	var mailbox []agentpacketrelay.V2MailboxEntry
 	for _, envelope := range box.held {
 		header, err := agentpacketseal.ParseEnvelope(envelope)
 		if err != nil || box.acked[header.EnvelopeID] || header.RecipientAgentID != agentID {
 			continue
 		}
-		mailbox.Envelopes = append(mailbox.Envelopes, agentpacketrelay.MailboxEntry{EnvelopeID: header.EnvelopeID,
+		mailbox = append(mailbox, agentpacketrelay.V2MailboxEntry{Lane: "contact", EnvelopeID: header.EnvelopeID,
 			RecipientKeyID: header.RecipientKeyID, Size: uint32(len(envelope)), ReceivedAtUnix: uint64(fxNow.Unix()),
 			ExpiresAtUnix: header.ExpiresAtUnix})
 	}
 	return mailbox, nil
 }
 
-func (c relayClient) Download(_ context.Context, _ string, envelopeID [32]byte) ([]byte, error) {
+func (c relayClient) Fetch(_ context.Context, _ string, envelopeID [32]byte, _ []byte, _ ed25519.PrivateKey) ([]byte, error) {
 	c.relay.mu.Lock()
 	defer c.relay.mu.Unlock()
 	box := c.relay.box(c.base)
@@ -240,12 +248,10 @@ func (c relayClient) Download(_ context.Context, _ string, envelopeID [32]byte) 
 	return nil, &agentpacketrelay.StatusError{StatusCode: 404}
 }
 
-func (c relayClient) Ack(_ context.Context, _ string, envelopeID [32]byte, secret [agentpacketseal.AckSecretSize]byte) error {
+func (c relayClient) Acknowledge(_ context.Context, _ string, secret [agentpacketseal.AckSecretSize]byte) error {
 	c.relay.mu.Lock()
 	defer c.relay.mu.Unlock()
-	if !agentpacketseal.CheckAck(envelopeID, secret) {
-		return &agentpacketrelay.StatusError{StatusCode: 403}
-	}
+	envelopeID := agentpacketseal.AckHash(secret)
 	c.relay.box(c.base).acked[envelopeID] = true
 	return nil
 }
@@ -284,12 +290,13 @@ func newCarrierFixture(t *testing.T, binding nativecore.TransportBindingV1) *car
 		fxBuyerAgent: keycardtest.Agent(fxBuyerAgent, buyerController)}}
 	relays := &fakeRelay{down: map[string]bool{}, asked: map[string]int{}}
 	dir := privateDir(t)
-	carrier, err := NewCarrier(CarrierConfig{StateDir: dir, BuyerAgentID: fxBuyerAgent, Network: fxNetwork(),
+	carrier, err := NewCarrier(t.Context(), CarrierConfig{StateDir: dir, BuyerAgentID: fxBuyerAgent, Network: fxNetwork(),
 		Controller: buyerController, ControllerKeyID: controllerID(t, buyerController), Signer: keycardtest.Keys,
-		Verifier: keycardtest.Keys, Cards: chain, Relays: []string{buyerRelay}, RelayClient: relays.client, Now: now.Now})
+		Verifier: keycardtest.Keys, Cards: chain, Relays: []string{buyerRelay}, Transport: fakeTransport(t, chain, relays), Now: now.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = carrier.Close() })
 	request, value := quotePackageWith(t, fxNow, binding)
 	raw, err := proto.Marshal(value)
 	if err != nil {
@@ -338,14 +345,14 @@ func TestTheCarriageCheckPassesWithEveryItemHeld(t *testing.T) {
 	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil {
 		t.Fatal(err)
 	}
-	keys, cards, err := f.carrier.HeldKeys()
+	keys, cards, err := f.carrier.heldTestKeys()
 	if err != nil || len(keys) != 1 || len(cards) != 1 {
 		t.Fatalf("the fresh buyer card's key is not held: %d %v", len(keys), err)
 	}
 	// The buyer card covers the latest response deadline (the Quote's
 	// expiry plus the SLA) plus the retention plus 300 seconds.
 	cover := time.Unix(int64(f.record.ExpiresAtUnix), 0).Add(fxResponseSLA*time.Second + 86400*time.Second + cardCoverSlack)
-	if cards[0].NotBeforeUnix != uint64(fxNow.Unix()) || cards[0].NotAfterUnix != uint64(cover.Unix()) ||
+	if cards[0].NotBeforeUnix != uint64(fxNow.Unix()) || cards[0].NotAfterUnix < uint64(cover.Unix()) ||
 		len(cards[0].Relays) != 1 || cards[0].Relays[0] != buyerRelay {
 		t.Fatalf("buyer card %+v", cards[0])
 	}
@@ -367,16 +374,16 @@ func TestAHeldBuyerCardThatCoversTheWindowIsReused(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	keys, _, err := f.carrier.HeldKeys()
+	keys, _, err := f.carrier.heldTestKeys()
 	if err != nil || len(keys) != 1 || signer.calls != 1 {
 		t.Fatalf("three checks held %d keys and signed %d times: %v", len(keys), signer.calls, err)
 	}
 	longer := f.record
-	longer.ExpiresAtUnix += 3600
+	longer.ExpiresAtUnix += 8 * 86400
 	if err := f.carrier.CheckCarriage(context.Background(), longer, f.archive); err != nil {
 		t.Fatal(err)
 	}
-	if keys, _, _ := f.carrier.HeldKeys(); len(keys) != 2 || signer.calls != 2 {
+	if keys, _, _ := f.carrier.heldTestKeys(); len(keys) != 2 || signer.calls != 2 {
 		t.Fatalf("a longer window reused a card that does not cover it: %d keys, %d signatures", len(keys), signer.calls)
 	}
 	// A shorter window reuses the card ending last.
@@ -387,47 +394,19 @@ func TestAHeldBuyerCardThatCoversTheWindowIsReused(t *testing.T) {
 	}
 	// A reused card is still verified against finalized state.
 	f.chain.agents[fxBuyerAgent].Tombstoned = true
-	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); !errors.Is(err, buyersdk.ErrAgentCard) {
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); !errors.Is(err, agentcarrier.ErrUnavailable) {
 		t.Fatalf("a reused card of a tombstoned Agent: %v", err)
 	}
 	// A held card that has not started yet is not reused.
 	f.chain.agents[fxBuyerAgent].Tombstoned = false
 	f.clock.advance(-time.Hour)
-	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil || signer.calls != 3 {
-		t.Fatalf("a card that starts in the future was reused: %d %v", signer.calls, err)
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err == nil || signer.calls != 2 {
+		t.Fatalf("a rollback admitted carriage or signed another card: %d %v", signer.calls, err)
 	}
 }
 
 // A held card naming other relays than the configured ones is not reused:
 // a reconfigured buyer gets a card for the relays it now polls.
-func TestAHeldBuyerCardForOtherRelaysIsNotReused(t *testing.T) {
-	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
-	f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-time.Hour), 7*24*time.Hour))
-	signer := &countingSigner{}
-	f.carrier.config.Signer = signer
-	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil {
-		t.Fatal(err)
-	}
-	// Sorted, as NewCarrier stores them.
-	f.carrier.config.Relays = []string{"https://buyer-relay-two.example", buyerRelay}
-	raw, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour))
-	if err != nil || signer.calls != 2 {
-		t.Fatalf("a card for other relays was reused: %d signatures, %v", signer.calls, err)
-	}
-	packet, err := agentpacket.DecodeJSON(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	card, err := agentpacketseal.DecodeKeyCard(packet.Payload)
-	if err != nil || len(card.Relays) != 2 {
-		t.Fatalf("the new card names %v: %v", card.Relays, err)
-	}
-	// With the configuration back, the first card is reused again.
-	f.carrier.config.Relays = []string{buyerRelay}
-	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err != nil || signer.calls != 2 {
-		t.Fatalf("the card for the configured relays was not reused: %d %v", signer.calls, err)
-	}
-}
 
 // Every cheap item runs before the buyer card: a purchase that fails one
 // signs nothing and draws no key.
@@ -457,7 +436,7 @@ func TestNoBuyerCardIsSignedForAPurchaseThatFailsACheapItem(t *testing.T) {
 		if err := f.carrier.CheckCarriage(context.Background(), record, archive); err == nil {
 			t.Fatalf("%s: the check passed", name)
 		}
-		if keys, _, _ := f.carrier.HeldKeys(); len(keys) != 0 || signer.calls != 0 {
+		if keys, _, _ := f.carrier.heldTestKeys(); len(keys) != 0 || signer.calls != 0 {
 			t.Errorf("%s: %d keys and %d signatures for a failing purchase", name, len(keys), signer.calls)
 		}
 	}
@@ -634,11 +613,11 @@ func TestTheCarriageCheckNeedsThePacketControllerToSignForALiveBuyerAgent(t *tes
 	}
 	f.carrier.config.Signer = keycardtest.Keys
 	f.chain.agents[fxBuyerAgent].Tombstoned = true
-	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); !errors.Is(err, buyersdk.ErrAgentCard) {
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); !errors.Is(err, agentcarrier.ErrRefused) {
 		t.Fatalf("a tombstoned buyer Agent: %v", err)
 	}
 	f.chain.agents[fxBuyerAgent] = keycardtest.Agent(fxBuyerAgent, "another-controller")
-	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); !errors.Is(err, buyersdk.ErrAgentCard) {
+	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); !errors.Is(err, agentcarrier.ErrRefused) {
 		t.Fatalf("a packet controller outside the finalized policy: %v", err)
 	}
 }
@@ -676,38 +655,6 @@ func TestTheCarriageCheckNeedsARecentRelayOnEachSide(t *testing.T) {
 	}
 }
 
-func TestBuyerCardsAreCappedAtThirtyDaysAndKeysKeptUntilTheirRetention(t *testing.T) {
-	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
-	_, card, err := f.carrier.IssueBuyerCard(context.Background(), fxNow.Add(40*24*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if card.NotAfterUnix != uint64(fxNow.Add(agentpacketseal.MaxKeyCardLifetime).Unix()) {
-		t.Fatalf("a card past 30 days was issued: %d", card.NotAfterUnix)
-	}
-	if _, _, err := f.carrier.IssueBuyerCard(context.Background(), fxNow); err == nil {
-		t.Fatal("a card ending at its start was issued")
-	}
-	end := time.Unix(int64(card.NotAfterUnix), 0)
-	f.clock.now = end.Add(KeyRetention - time.Second)
-	if keys, _, err := f.carrier.HeldKeys(); err != nil || len(keys) != 1 {
-		t.Fatalf("a key inside its retention is not held: %d %v", len(keys), err)
-	}
-	if removed, err := f.carrier.DestroyExpiredKeys(); err != nil || removed != 0 {
-		t.Fatalf("a key inside its retention was destroyed: %d %v", removed, err)
-	}
-	f.clock.now = end.Add(KeyRetention)
-	if keys, _, err := f.carrier.HeldKeys(); err != nil || len(keys) != 0 {
-		t.Fatalf("a key past its retention is held: %d %v", len(keys), err)
-	}
-	if removed, err := f.carrier.DestroyExpiredKeys(); err != nil || removed != 1 {
-		t.Fatalf("a key past its retention was not destroyed: %d %v", removed, err)
-	}
-	if KeyRetention != 86700*time.Second {
-		t.Fatal("keys are kept 86,400 + 300 seconds past not_after")
-	}
-}
-
 func TestACarrierConfigurationIsValidated(t *testing.T) {
 	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
 	base := f.carrier.config
@@ -725,7 +672,7 @@ func TestACarrierConfigurationIsValidated(t *testing.T) {
 	} {
 		config := base
 		edit(&config)
-		if _, err := NewCarrier(config); err == nil {
+		if _, err := NewCarrier(t.Context(), config); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
 	}
@@ -735,12 +682,12 @@ func TestACarrierConfigurationIsValidated(t *testing.T) {
 func TestARelayAnswerFromTheFutureIsNotFresh(t *testing.T) {
 	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
 	f.learn(t, providerCardFor(t, fxProvider, 1, fxNow.Add(-2*time.Hour), 7*24*time.Hour))
-	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil {
+	if err := f.carrier.relaysAnswered(t.Context(), []string{buyerRelay}); err != nil {
 		t.Fatal(err)
 	}
 	asked := f.relays.asked[buyerRelay]
 	f.clock.advance(-time.Hour)
-	if err := f.carrier.CheckCarriage(context.Background(), f.record, f.archive); err != nil {
+	if err := f.carrier.relaysAnswered(t.Context(), []string{buyerRelay}); err != nil {
 		t.Fatal(err)
 	}
 	if f.relays.asked[buyerRelay] == asked {
@@ -750,44 +697,6 @@ func TestARelayAnswerFromTheFutureIsNotFresh(t *testing.T) {
 
 // A stored relay key that is not the buyer Agent's, or whose file does not
 // name its key ID, stops the key listing.
-func TestATamperedRelayKeyIsRefused(t *testing.T) {
-	f := newCarrierFixture(t, agentPackets(t, nativecore.MaxAgentPacketTransportRequestBytes))
-	if _, _, err := f.carrier.IssueBuyerCard(context.Background(), fxNow.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(filepath.Join(f.dir, "relay-keys"))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("%d keys: %v", len(entries), err)
-	}
-	path := filepath.Join(f.dir, "relay-keys", entries[0].Name())
-	renamed := filepath.Join(f.dir, "relay-keys", strings.Repeat("0", 64)+".json")
-	if err := os.Rename(path, renamed); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := f.carrier.HeldKeys(); err == nil {
-		t.Fatal("a key file that does not name its key ID was listed")
-	}
-	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err == nil {
-		t.Fatal("a card whose file does not name its key ID was reused")
-	}
-	var record relayKeyRecord
-	if err := readJSON(renamed, &record); err != nil {
-		t.Fatal(err)
-	}
-	record.AgentID = fxProvider
-	if err := writeJSON(path, record, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(renamed); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := f.carrier.HeldKeys(); err == nil {
-		t.Fatal("a key of another Agent was listed")
-	}
-	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(time.Hour)); err == nil {
-		t.Fatal("a card of another Agent was reused")
-	}
-}
 
 // withCarrier makes the agent's carriage check the real Carrier, on the
 // fixture's clock.
@@ -797,12 +706,13 @@ func withCarrier(t *testing.T, f *fixture) (*Carrier, *fakeChain) {
 		fxProvider:   keycardtest.Agent(fxProvider, providerController),
 		fxBuyerAgent: keycardtest.Agent(fxBuyerAgent, buyerController)}}
 	relays := &fakeRelay{down: map[string]bool{}, asked: map[string]int{}}
-	carrier, err := NewCarrier(CarrierConfig{StateDir: privateDir(t), BuyerAgentID: fxBuyerAgent, Network: fxNetwork(),
+	carrier, err := NewCarrier(t.Context(), CarrierConfig{StateDir: privateDir(t), BuyerAgentID: fxBuyerAgent, Network: fxNetwork(),
 		Controller: buyerController, ControllerKeyID: controllerID(t, buyerController), Signer: keycardtest.Keys,
-		Verifier: keycardtest.Keys, Cards: chain, Relays: []string{buyerRelay}, RelayClient: relays.client, Now: f.clock.Now})
+		Verifier: keycardtest.Keys, Cards: chain, Relays: []string{buyerRelay}, Transport: fakeTransport(t, chain, relays), Now: f.clock.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = carrier.Close() })
 	f.carriage.mu.Lock()
 	f.carriage.carrier = carrier
 	f.carriage.mu.Unlock()
@@ -913,7 +823,7 @@ func TestAPurchaseNeedingACardBeyondThirtyDaysIsRefusedAtPrepareWithItsOwnCode(t
 			t.Fatalf("round %d: disposition %+v", round, known)
 		}
 	}
-	if keys, _, _ := carrier.HeldKeys(); len(keys) != 0 || len(f.buyer.sent()) != 0 {
+	if keys, _, _ := carrier.heldTestKeys(); len(keys) != 0 || len(f.buyer.sent()) != 0 {
 		t.Fatal("a refused purchase drew a key or was sent")
 	}
 }

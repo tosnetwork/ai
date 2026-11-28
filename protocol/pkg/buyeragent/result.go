@@ -75,7 +75,9 @@ type receivedRecord struct {
 	// redelivery.
 	AckDue                bool  `json:"ack_due,omitempty"`
 	LastAckUnix           int64 `json:"last_ack_unix,omitempty"`
+	AckPlanUnix           int64 `json:"ack_plan_unix,omitempty"`
 	LastResultRequestUnix int64 `json:"last_result_request_unix,omitempty"`
+	ResultRequestPlanUnix int64 `json:"result_request_plan_unix,omitempty"`
 	FailedDeliveries      int   `json:"failed_deliveries,omitempty"`
 }
 
@@ -179,13 +181,22 @@ func (c *Carrier) ReceiveResult(ctx context.Context, round ResultRound) (view Re
 		}
 	}
 	if state.AcceptedResponseHash != "" {
-		if state.AckDue {
-			sent, err := c.sendAck(ctx, round, binding, now)
+		ackExpiry := time.Unix(state.AckPlanUnix, 0).Add(AckLifetime)
+		if state.AckDue && (state.AckPlanUnix == 0 || state.LastAckUnix >= state.AckPlanUnix || !now.Before(ackExpiry)) {
+			state.AckPlanUnix = max(now.Unix(), state.LastAckUnix+1)
+			ackExpiry = time.Unix(state.AckPlanUnix, 0).Add(AckLifetime)
+			if err := writeJSON(c.receivedPath(record.RequestHash), state, false); err != nil {
+				return view, err
+			}
+		}
+		if state.AckPlanUnix != 0 && now.Before(ackExpiry) {
+			deadline := time.Unix(int64(min(retentionEnd, uint64(ackExpiry.Unix()))), 0)
+			sent, err := c.sendAck(ctx, round, binding, now, deadline, state.AckPlanUnix)
 			if err != nil {
 				return view, err
 			}
-			if sent {
-				state.AckDue, state.LastAckUnix, view.AckSent = false, now.Unix(), true
+			if state.AckDue && sent {
+				state.AckDue, state.LastAckUnix, view.AckSent = false, max(now.Unix(), state.AckPlanUnix), true
 				if err := writeJSON(c.receivedPath(record.RequestHash), state, false); err != nil {
 					return view, err
 				}
@@ -193,13 +204,22 @@ func (c *Carrier) ReceiveResult(ctx context.Context, round ResultRound) (view Re
 		}
 		return view, nil
 	}
-	// With none sent yet the last request is the Unix epoch, long past.
-	if !now.Before(time.Unix(state.LastResultRequestUnix, 0).Add(ResultRequestInterval)) {
-		sent, err := c.sendResultRequest(ctx, round, binding, now, retentionEnd)
+
+	// The application asks for a new result at most once per interval.
+	// An existing plan continues carriage even after the first copy lands.
+	if !now.Before(time.Unix(state.LastResultRequestUnix, 0).Add(ResultRequestInterval)) &&
+		state.ResultRequestPlanUnix <= state.LastResultRequestUnix {
+		state.ResultRequestPlanUnix = now.Unix()
+		if err := writeJSON(c.receivedPath(record.RequestHash), state, false); err != nil {
+			return view, err
+		}
+	}
+	if state.ResultRequestPlanUnix != 0 {
+		sent, err := c.sendResultRequest(ctx, round, binding, now, retentionEnd, state.ResultRequestPlanUnix)
 		if err != nil {
 			return view, err
 		}
-		if sent {
+		if sent && state.ResultRequestPlanUnix > state.LastResultRequestUnix {
 			state.LastResultRequestUnix, view.ResultRequested = now.Unix(), true
 			if err := writeJSON(c.receivedPath(record.RequestHash), state, false); err != nil {
 				return view, err
@@ -348,31 +368,32 @@ func (c *Carrier) clearInbox(requestHash string) error {
 }
 
 // sendAck sends the ack of the accepted result, carrying the buyer card.
-func (c *Carrier) sendAck(ctx context.Context, round ResultRound, binding railwork.Binding, now time.Time) (bool, error) {
-	buyerCard, err := c.roundBuyerCard(ctx, round)
-	if err != nil {
-		return false, err
-	}
-	message, err := railwork.EncodeAck(round.ResponseHash, buyerCard)
-	if err != nil {
-		return false, err
-	}
-	return c.sendMessage(ctx, round, railwork.KindResultAck, binding, message, now, now.Add(AckLifetime))
+func (c *Carrier) sendAck(ctx context.Context, round ResultRound, binding railwork.Binding,
+	now, deadline time.Time, attempt int64) (bool, error) {
+	return c.sendMessage(ctx, round, railwork.KindResultAck, binding, now, deadline, attempt, func() ([]byte, error) {
+		buyerCard, err := c.roundBuyerCard(ctx, round)
+		if err != nil {
+			return nil, err
+		}
+		grant, err := c.issueContact(ctx, round.ProviderAgentID)
+		if err != nil {
+			return nil, err
+		}
+		return railwork.EncodeAckWithContact(round.ResponseHash, buyerCard, grant)
+	})
 }
 
-// sendResultRequest asks the provider for the result again, carrying the
-// buyer card (relay 6.4, "Buyer, after the respond").
+// sendResultRequest asks the provider for the result again, carrying the buyer card.
 func (c *Carrier) sendResultRequest(ctx context.Context, round ResultRound, binding railwork.Binding, now time.Time,
-	retentionEnd uint64) (bool, error) {
-	buyerCard, err := c.roundBuyerCard(ctx, round)
-	if err != nil {
-		return false, err
-	}
-	message, err := railwork.EncodeResultRequest(buyerCard)
-	if err != nil {
-		return false, err
-	}
-	return c.sendMessage(ctx, round, railwork.KindResultRequest, binding, message, now, time.Unix(int64(retentionEnd), 0))
+	retentionEnd uint64, attempt int64) (bool, error) {
+	return c.sendMessage(ctx, round, railwork.KindResultRequest, binding, now, time.Unix(int64(retentionEnd), 0), attempt,
+		func() ([]byte, error) {
+			buyerCard, err := c.roundBuyerCard(ctx, round)
+			if err != nil {
+				return nil, err
+			}
+			return railwork.EncodeResultRequest(buyerCard)
+		})
 }
 
 func (c *Carrier) roundBuyerCard(ctx context.Context, round ResultRound) ([]byte, error) {
@@ -383,46 +404,16 @@ func (c *Carrier) roundBuyerCard(ctx context.Context, round ResultRound) ([]byte
 	return c.BuyerCard(ctx, cover)
 }
 
-// sendMessage seals one message to a provider card valid now and deposits
-// it at every relay of the card, re-sealing an envelope a 409 refused once
-// (relay 8.6). It reports whether every envelope is held by a relay. The
-// envelopes are not journaled: a message no relay took is built afresh in
-// the next round.
+// sendMessage delegates carriage of a signed control message to the rail lane.
 func (c *Carrier) sendMessage(ctx context.Context, round ResultRound, kind railwork.Kind, binding railwork.Binding,
-	message []byte, now, deadline time.Time) (bool, error) {
-	record := round.Record
-	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, round.ProviderAgentID, now)
-	if errors.Is(err, ErrNoProviderCard) {
+	now, deadline time.Time, attempt int64, build func() ([]byte, error)) (bool, error) {
+	_, err := c.sendFrames(ctx, round.Record, round.ProviderAgentID, kind, attempt, now, deadline,
+		func() (railwork.Binding, []byte, error) {
+			message, err := build()
+			return binding, message, err
+		})
+	if errors.Is(err, ErrNoRelayAccepted) {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	frames, err := railwork.EncodeMessageFrames(kind, binding, message)
-	if err != nil {
-		return false, err
-	}
-	expires := envelopeExpiry(deadline, now, providerCard.Card.NotAfterUnix)
-	generation, err := c.sealFrames(ctx, record, providerCard, frames, now, expires)
-	if err != nil {
-		return false, err
-	}
-	c.depositGeneration(ctx, &generation)
-	resealed, err := c.resealConflicts(&generation)
-	if err != nil {
-		return false, err
-	}
-	if resealed {
-		c.depositGeneration(ctx, &generation)
-	}
-	for _, envelope := range generation.Envelopes {
-		accepted := false
-		for _, state := range envelope.Relays {
-			accepted = accepted || state == relayAccepted
-		}
-		if !accepted {
-			return false, nil
-		}
-	}
-	return true, nil
+	return err == nil, err
 }

@@ -53,6 +53,24 @@ func (l *Lane) keysForPoll(ctx context.Context) (map[[32]byte]agentpacketseal.Pr
 // calls it every 15 seconds, independently of Wait's one long-poll request.
 // The durable inbox owns packet replay/execution; a lost memory cache costs
 // only another download and durable duplicate admission after restart.
+type pollRetry struct {
+	next    time.Time
+	backoff time.Duration
+}
+
+func (l *Lane) pollNext(url string, failed bool, retryAfter time.Duration) time.Time {
+	now := l.config.Now()
+	if !failed {
+		delete(l.pollRetries, url)
+		return now.Add(PollInterval)
+	}
+	retry := l.pollRetries[url]
+	retry.backoff = min(5*time.Minute, max(2*PollInterval, 2*retry.backoff))
+	retry.next = now.Add(max(retry.backoff, min(time.Hour, retryAfter)))
+	l.pollRetries[url] = retry
+	return retry.next
+}
+
 func (l *Lane) Poll(ctx context.Context) (PollView, error) {
 	if err := l.poll.lock(ctx); err != nil {
 		return PollView{}, err
@@ -73,19 +91,37 @@ func (l *Lane) Poll(ctx context.Context) (PollView, error) {
 	if err != nil {
 		return PollView{}, err
 	}
+	if l.pollRetries == nil {
+		l.pollRetries = make(map[string]pollRetry)
+	}
 	var total PollView
+	next := func(when time.Time) {
+		if total.Next.IsZero() || when.Before(total.Next) {
+			total.Next = when
+		}
+	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, r := range relays {
+		mu.Lock()
 		if r.Until <= now {
+			delete(l.pollRetries, r.URL)
+			mu.Unlock()
 			continue
 		}
+		if retry := l.pollRetries[r.URL]; l.config.Now().Before(retry.next) {
+			next(retry.next)
+			mu.Unlock()
+			continue
+		}
+		mu.Unlock()
 		wg.Add(1)
 		go func(url string) {
 			defer wg.Done()
 			v, e := l.pollRelay(ctx, url, held, 0)
 			mu.Lock()
 			defer mu.Unlock()
+			next(l.pollNext(url, e != nil && v.Listed == 0, v.retryAfter))
 			total.Listed += v.Listed
 			total.Stored += v.Stored
 			total.Refused += v.Refused
@@ -171,6 +207,10 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 		entries, err = client.List(ctx, l.config.AgentID, auth.wire, auth.holder)
 	}
 	if err != nil || len(entries) > 256 {
+		var reply *agentpacketrelay.StatusError
+		if errors.As(err, &reply) {
+			total.retryAfter = reply.RetryAfter
+		}
 		return total, ErrUnavailable
 	}
 	total.Listed = 1

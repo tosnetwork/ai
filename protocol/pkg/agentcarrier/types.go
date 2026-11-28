@@ -123,9 +123,12 @@ type Config struct {
 	SignCard     CardSigner
 	VerifyCard   CardVerifier
 	VerifyPacket PacketVerifier
-	Store        Inbox
-	Now          func() time.Time
-	OutboxLimit  int
+	// VerifyDeliveryCard optionally binds the exact outbound envelope's
+	// card to the application's admission state before deposit.
+	VerifyDeliveryCard func(context.Context, agentpacket.Packet, []byte) error
+	Store              Inbox
+	Now                func() time.Time
+	OutboxLimit        int
 }
 
 type OwnCard struct {
@@ -149,7 +152,10 @@ type AttemptResult struct {
 	Code              string
 	RetryAfterSeconds uint32
 }
+
 type PollView struct {
 	Listed, Stored, Refused, Acknowledged int
+	Next                                  time.Time
+	retryAfter                            time.Duration
 	Code                                  string
 }

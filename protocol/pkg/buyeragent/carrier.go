@@ -1,6 +1,7 @@
 package buyeragent
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -10,16 +11,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/agentcarrier"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
-	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"github.com/tosnetwork/ai/protocol/pkg/buyersdk"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
@@ -35,9 +36,6 @@ const (
 	// RelayFreshness is how recently a relay must have answered its
 	// description for the carriage check to count it.
 	RelayFreshness = 10 * time.Minute
-	// KeyRetention is how long past a card's not_after its private key is
-	// kept: the longest an envelope sealed before expiry can wait.
-	KeyRetention = 86400*time.Second + 300*time.Second
 	// MaxProviderCardsPerCapability bounds the provider cards kept for one
 	// Capability; the one expiring first is dropped.
 	MaxProviderCardsPerCapability = 8
@@ -75,18 +73,6 @@ type CardVerifier interface {
 	VerifyPacket(ctx context.Context, verifier mldsa44.Verifier, packet agentpacket.Packet) error
 }
 
-// RelayClient is the part of a relay client the carrier uses: the
-// description the carriage check reads, the deposit that delivers an
-// envelope, and the listing, download and acknowledgement of the buyer's
-// mailbox. agentpacketrelay.Client implements it.
-type RelayClient interface {
-	Describe(ctx context.Context) (agentpacketrelay.RelayDescription, error)
-	Deposit(ctx context.Context, envelope []byte) (agentpacketrelay.DepositOutcome, error)
-	List(ctx context.Context, agentID string) (agentpacketrelay.Mailbox, error)
-	Download(ctx context.Context, agentID string, envelopeID [32]byte) ([]byte, error)
-	Ack(ctx context.Context, agentID string, envelopeID [32]byte, secret [agentpacketseal.AckSecretSize]byte) error
-}
-
 // CarrierConfig wires a Carrier.
 type CarrierConfig struct {
 	// StateDir is the agent's owner-private state directory; the carrier
@@ -103,11 +89,9 @@ type CarrierConfig struct {
 	Cards           CardVerifier
 	// Relays are the buyer's relay base URLs, 1 to 4 in canonical form;
 	// they go into every buyer card.
-	Relays []string
-	// RelayClient returns the client of a relay base URL, for the buyer's
-	// relays and those a provider card names.
-	RelayClient func(baseURL string) (RelayClient, error)
-	Now         func() time.Time
+	Relays    []string
+	Transport TransportConfig
+	Now       func() time.Time
 	// Random fills packet nonces and acknowledgement secrets; nil is
 	// crypto/rand.
 	Random func([]byte) error
@@ -121,26 +105,15 @@ type Carrier struct {
 	// verified caches provider card verifications by Capability and key ID.
 	verified map[string]map[string]buyersdk.VerifiedProviderCard
 	// answered is when each relay last answered its description.
-	answered map[string]time.Time
-	// poll is the polling state of each relay; settled and refused are the
-	// mailbox memories of relay section 8.6 (receive.go).
-	pollMu  sync.Mutex
-	poll    map[string]*relayPoll
-	settled *envelopeMemory
-	refused *envelopeMemory
-	// deferred remembers envelopes a full inbox could not take, so each
-	// poll does not download and open them again until InboxFullRetry.
-	deferred *envelopeMemory
-}
-
-// relayKeyRecord is one relay key: its seed and the buyer card for it.
-type relayKeyRecord struct {
-	Schema        string `json:"schema"`
-	AgentID       string `json:"agent_id"`
-	SeedBase64    string `json:"seed_base64"`
-	CardBase64    string `json:"card_packet_base64"`
-	NotBeforeUnix uint64 `json:"not_before_unix"`
-	NotAfterUnix  uint64 `json:"not_after_unix"`
+	answered    map[string]time.Time
+	relay       func(string) (agentcarrier.Relay, error)
+	lane        *agentcarrier.Lane
+	routes      *agentcarrier.Resolver
+	scheduler   *agentcarrier.Scheduler
+	publisher   *agentcarrier.Publisher
+	credentials *agentcarrier.CredentialManager
+	deliveryMu  sync.Mutex
+	inboxMu     sync.Mutex
 }
 
 // providerCardRecord is one provider card as learned; it is verified again
@@ -154,16 +127,15 @@ type providerCardRecord struct {
 }
 
 const (
-	relayKeySchema     = "tos.service.mcp-buyer.relay-key.v1"
 	providerCardSchema = "tos.service.mcp-buyer.provider-card.v1"
 )
 
 // NewCarrier checks the configuration and prepares the carrier's state
 // directories.
-func NewCarrier(config CarrierConfig) (*Carrier, error) {
+func NewCarrier(ctx context.Context, config CarrierConfig) (*Carrier, error) {
 	if !agentIDPattern.MatchString(config.BuyerAgentID) || config.Network == nil || config.Controller == "" ||
 		config.ControllerKeyID == ([mldsa44.KeyIDSize]byte{}) || config.Signer == nil || config.Verifier == nil ||
-		config.Cards == nil || config.RelayClient == nil {
+		config.Cards == nil || config.Transport.Relay == nil {
 		return nil, errors.New("invalid buyer carrier configuration")
 	}
 	if len(config.Relays) == 0 || len(config.Relays) > agentpacketseal.MaxRelays {
@@ -183,7 +155,7 @@ func NewCarrier(config CarrierConfig) (*Carrier, error) {
 	if err := checkPrivateDir(config.StateDir); err != nil {
 		return nil, err
 	}
-	for _, name := range []string{"relay-keys", "provider-cards", "outbox", "inbox", "received"} {
+	for _, name := range []string{"provider-cards", "outbox-v2", "inbox", "received"} {
 		path := filepath.Join(config.StateDir, name)
 		if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
@@ -198,13 +170,16 @@ func NewCarrier(config CarrierConfig) (*Carrier, error) {
 	if config.Random == nil {
 		config.Random = func(value []byte) error { _, err := rand.Read(value); return err }
 	}
-	return &Carrier{config: config, verified: map[string]map[string]buyersdk.VerifiedProviderCard{},
-		answered: map[string]time.Time{}, poll: map[string]*relayPoll{},
-		settled: newEnvelopeMemory(MaxEnvelopeMemory), refused: newEnvelopeMemory(MaxEnvelopeMemory),
-		deferred: newEnvelopeMemory(MaxEnvelopeMemory)}, nil
+	transport := config.Transport
+	config.Transport = TransportConfig{}
+	carrier := &Carrier{config: config, relay: transport.Relay,
+		verified: map[string]map[string]buyersdk.VerifiedProviderCard{}, answered: map[string]time.Time{}}
+	if err := carrier.openTransport(ctx, transport); err != nil {
+		return nil, err
+	}
+	return carrier, nil
 }
 
-func (c *Carrier) keyDir() string  { return filepath.Join(c.config.StateDir, "relay-keys") }
 func (c *Carrier) cardDir() string { return filepath.Join(c.config.StateDir, "provider-cards") }
 
 // LearnProviderCard verifies a provider card from any source and keeps it
@@ -346,141 +321,6 @@ func preferCard(a, b buyersdk.VerifiedProviderCard) bool {
 	return string(a.Key.KeyID[:]) > string(b.Key.KeyID[:])
 }
 
-// IssueBuyerCard draws a fresh relay key, signs a buyer card for it valid
-// from now until notAfter (at most 30 days) naming the buyer's relays,
-// stores the key and card, and verifies the card against finalized state.
-// The verification proves that the buyer Agent is finalized and live and
-// that the packet controller can sign for it (section 7.1 item 4).
-func (c *Carrier) IssueBuyerCard(ctx context.Context, notAfter time.Time) ([]byte, agentpacketseal.KeyCard, error) {
-	now := c.config.Now()
-	start := uint64(now.Unix())
-	end := uint64(notAfter.Unix())
-	if limit := start + uint64(agentpacketseal.MaxKeyCardLifetime/time.Second); end > limit {
-		end = limit
-	}
-	if end <= start {
-		return nil, agentpacketseal.KeyCard{}, errors.New("a buyer card must end after it starts")
-	}
-	seed, err := agentpacketseal.GenerateSeed()
-	if err != nil {
-		return nil, agentpacketseal.KeyCard{}, err
-	}
-	private, err := agentpacketseal.NewPrivateKey(c.config.BuyerAgentID, seed)
-	if err != nil {
-		return nil, agentpacketseal.KeyCard{}, err
-	}
-	public, err := private.PublicKey()
-	if err != nil {
-		return nil, agentpacketseal.KeyCard{}, err
-	}
-	card := agentpacketseal.KeyCard{PublicKey: public, KeyID: private.KeyID, NotBeforeUnix: start, NotAfterUnix: end,
-		Relays: append([]string(nil), c.config.Relays...)}
-	var nonce [32]byte
-	copy(nonce[:], private.KeyID[:])
-	packet, err := agentpacketseal.KeyCardPacket(c.config.BuyerAgentID, c.config.ControllerKeyID, start, nonce, start, card)
-	if err != nil {
-		return nil, agentpacketseal.KeyCard{}, err
-	}
-	signed, err := agentpacket.Sign(ctx, c.config.Signer, c.config.Controller, packet)
-	if err != nil {
-		return nil, agentpacketseal.KeyCard{}, fmt.Errorf("the packet controller cannot sign a buyer card: %w", err)
-	}
-	raw, err := agentpacket.EncodeJSON(signed)
-	if err != nil {
-		return nil, agentpacketseal.KeyCard{}, err
-	}
-	// The key is stored before the card can reach anyone, so an envelope
-	// sealed to it can always be opened.
-	record := relayKeyRecord{Schema: relayKeySchema, AgentID: c.config.BuyerAgentID, SeedBase64: base64.StdEncoding.EncodeToString(seed),
-		CardBase64: base64.StdEncoding.EncodeToString(raw), NotBeforeUnix: start, NotAfterUnix: end}
-	if err := writeJSON(filepath.Join(c.keyDir(), hex.EncodeToString(private.KeyID[:])+".json"), record, true); err != nil {
-		return nil, agentpacketseal.KeyCard{}, err
-	}
-	if _, _, err := c.config.Cards.VerifyAgentCard(ctx, c.config.Verifier, c.config.BuyerAgentID, raw); err != nil {
-		return nil, agentpacketseal.KeyCard{}, err
-	}
-	return raw, card, nil
-}
-
-// HeldKeys returns every relay private key the buyer must still keep: until
-// its card's not_after plus KeyRetention. The buyer polls every relay of
-// these keys' cards.
-func (c *Carrier) HeldKeys() ([]agentpacketseal.PrivateKey, []agentpacketseal.KeyCard, error) {
-	entries, err := os.ReadDir(c.keyDir())
-	if err != nil {
-		return nil, nil, err
-	}
-	now := uint64(c.config.Now().Unix())
-	var keys []agentpacketseal.PrivateKey
-	var cards []agentpacketseal.KeyCard
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") || strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		var record relayKeyRecord
-		if err := readJSON(filepath.Join(c.keyDir(), entry.Name()), &record); err != nil {
-			return nil, nil, err
-		}
-		if record.Schema != relayKeySchema || record.AgentID != c.config.BuyerAgentID {
-			return nil, nil, errors.New("a stored relay key is not the buyer Agent's")
-		}
-		if now >= record.NotAfterUnix+uint64(KeyRetention/time.Second) {
-			continue
-		}
-		seed, err := base64.StdEncoding.Strict().DecodeString(record.SeedBase64)
-		if err != nil {
-			return nil, nil, errors.New("a stored relay key seed is not Base64")
-		}
-		key, err := agentpacketseal.NewPrivateKey(record.AgentID, seed)
-		if err != nil || hex.EncodeToString(key.KeyID[:])+".json" != entry.Name() {
-			return nil, nil, errors.New("a stored relay key does not derive its key ID")
-		}
-		raw, err := base64.StdEncoding.Strict().DecodeString(record.CardBase64)
-		if err != nil {
-			return nil, nil, errors.New("a stored buyer card is not Base64")
-		}
-		packet, err := agentpacket.DecodeJSON(raw)
-		if err != nil {
-			return nil, nil, err
-		}
-		card, err := agentpacketseal.DecodeKeyCard(packet.Payload)
-		if err != nil || card.KeyID != key.KeyID {
-			return nil, nil, errors.New("a stored buyer card is not for its key")
-		}
-		keys, cards = append(keys, key), append(cards, card)
-	}
-	return keys, cards, nil
-}
-
-// DestroyExpiredKeys removes every relay key past its retention (relay
-// 6.3: the key MUST be destroyed after not_after + 86,400 + 300).
-func (c *Carrier) DestroyExpiredKeys() (int, error) {
-	entries, err := os.ReadDir(c.keyDir())
-	if err != nil {
-		return 0, err
-	}
-	now := uint64(c.config.Now().Unix())
-	removed := 0
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") || strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		path := filepath.Join(c.keyDir(), entry.Name())
-		var record relayKeyRecord
-		if err := readJSON(path, &record); err != nil {
-			return removed, err
-		}
-		if now < record.NotAfterUnix+uint64(KeyRetention/time.Second) {
-			continue
-		}
-		if err := os.Remove(path); err != nil {
-			return removed, err
-		}
-		removed++
-	}
-	return removed, nil
-}
-
 // relaysAnswered requires at least one of relays to have answered its
 // description within RelayFreshness, asking the stale ones now.
 func (c *Carrier) relaysAnswered(ctx context.Context, relays []string) error {
@@ -494,7 +334,7 @@ func (c *Carrier) relaysAnswered(ctx context.Context, relays []string) error {
 		}
 	}
 	for _, relay := range relays {
-		client, err := c.config.RelayClient(relay)
+		client, err := c.relay(relay)
 		if err != nil {
 			continue
 		}
@@ -575,14 +415,35 @@ func (c *Carrier) checkCarriage(ctx context.Context, record buyersdk.CallRecord,
 	// response deadline the call would get.
 	responseDeadline := now.Add(time.Duration(record.ResponseSLASeconds) * time.Second)
 	providerCard, err := c.ProviderCard(ctx, record.CapabilityID, provider, responseDeadline)
-	if err != nil {
+	missingCard := errors.Is(err, ErrNoProviderCard)
+	if err != nil && !missingCard {
 		return err
 	}
 	// Item 5: a relay of each side answered recently.
 	if err := c.relaysAnswered(ctx, c.config.Relays); err != nil {
 		return fmt.Errorf("buyer relays: %w", err)
 	}
-	if err := c.relaysAnswered(ctx, providerCard.Card.Relays); err != nil {
+	route, err := c.routes.Resolve(ctx, provider, agentcarrier.Route{CardPacket: providerCard.PacketJSON})
+	if errors.Is(err, agentcarrier.ErrNoRoute) {
+		if missingCard {
+			return ErrNoProviderCard
+		}
+		return fmt.Errorf("%w: %w", ErrRelaysUnavailable, err)
+	}
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(route.CardPacket, providerCard.PacketJSON) {
+		verified, err := c.config.Cards.VerifyProviderCard(ctx, c.config.Verifier, buyersdk.ProviderCardFromHint, record.CapabilityID, route.CardPacket)
+		if err != nil || verified.Key.AgentID != provider || verified.Card.NotAfterUnix < uint64(responseDeadline.Unix()) {
+			return ErrNoProviderCard
+		}
+	}
+	hint, err := agenttransport.DecodeHintRecord(route.HintRecord)
+	if err != nil {
+		return err
+	}
+	if err := c.relaysAnswered(ctx, hint.Hint.Relays); err != nil {
 		return fmt.Errorf("provider relays: %w", err)
 	}
 	// Item 4, last because it may sign: a buyer card covering the window,
@@ -598,11 +459,16 @@ func (c *Carrier) checkCarriage(ctx context.Context, record buyersdk.CallRecord,
 	// Item 2 with the card: the task for this purchase encodes, with the
 	// call fields at their widest.
 	widest := ^uint64(0)
-	if _, err := railwork.EncodeTask(railwork.Task{Header: railwork.TaskHeader{BuyerAgentID: c.config.BuyerAgentID,
+	message, err := railwork.EncodeTask(railwork.Task{Header: railwork.TaskHeader{BuyerAgentID: c.config.BuyerAgentID,
 		BuyerWallet: record.BuyerWallet, CapabilityID: record.CapabilityID, CapabilityVersion: record.CapabilityVersion,
 		ExecutionID: record.ExecutionID, ExecutionNonce: strings.Repeat("0", 64), RequestID: widest, CallLT: widest,
-		CallHash: strings.Repeat("0", 64)}, Package: packageBytes, Archive: archive, BuyerKeyCard: buyerCard}); err != nil {
+		CallHash: strings.Repeat("0", 64)}, Package: packageBytes, Archive: archive, BuyerKeyCard: buyerCard})
+	if err != nil {
 		return fmt.Errorf("the task for this purchase does not encode: %w", err)
+	}
+	frames := (len(message) + railwork.MaxChunkData - 1) / railwork.MaxChunkData
+	if err := c.lane.CheckQueueCapacity(ctx, frames+2); err != nil {
+		return fmt.Errorf("the buyer rail outbox cannot fit the purchase: %w", err)
 	}
 	return nil
 }
@@ -633,71 +499,9 @@ func buyerCardWindow(record buyersdk.CallRecord, retentionSeconds uint64) (time.
 // relays than the configured ones is not reused: the provider would seal
 // results to relays the buyer no longer polls.
 func (c *Carrier) BuyerCard(ctx context.Context, notAfter time.Time) ([]byte, error) {
-	held, err := c.heldBuyerCards()
-	if err != nil {
-		return nil, err
+	if notAfter.Unix() <= 0 {
+		return nil, ErrCardWindowTooLong
 	}
-	now := uint64(c.config.Now().Unix())
-	var best *heldBuyerCard
-	for index := range held {
-		card := held[index].card
-		if card.NotBeforeUnix > now || card.NotAfterUnix < uint64(notAfter.Unix()) {
-			continue
-		}
-		if !slices.Equal(card.Relays, c.config.Relays) {
-			continue
-		}
-		if best == nil || card.NotAfterUnix > best.card.NotAfterUnix {
-			best = &held[index]
-		}
-	}
-	if best != nil {
-		if _, _, err := c.config.Cards.VerifyAgentCard(ctx, c.config.Verifier, c.config.BuyerAgentID, best.raw); err != nil {
-			return nil, err
-		}
-		return best.raw, nil
-	}
-	raw, _, err := c.IssueBuyerCard(ctx, notAfter)
-	return raw, err
-}
-
-type heldBuyerCard struct {
-	raw  []byte
-	card agentpacketseal.KeyCard
-}
-
-// heldBuyerCards lists the buyer cards of the stored relay keys, with their
-// packet JSON.
-func (c *Carrier) heldBuyerCards() ([]heldBuyerCard, error) {
-	entries, err := os.ReadDir(c.keyDir())
-	if err != nil {
-		return nil, err
-	}
-	var cards []heldBuyerCard
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") || strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		var record relayKeyRecord
-		if err := readJSON(filepath.Join(c.keyDir(), entry.Name()), &record); err != nil {
-			return nil, err
-		}
-		if record.Schema != relayKeySchema || record.AgentID != c.config.BuyerAgentID {
-			return nil, errors.New("a stored relay key is not the buyer Agent's")
-		}
-		raw, err := base64.StdEncoding.Strict().DecodeString(record.CardBase64)
-		if err != nil {
-			return nil, errors.New("a stored buyer card is not Base64")
-		}
-		packet, err := agentpacket.DecodeJSON(raw)
-		if err != nil {
-			return nil, err
-		}
-		card, err := agentpacketseal.DecodeKeyCard(packet.Payload)
-		if err != nil || hex.EncodeToString(card.KeyID[:])+".json" != entry.Name() {
-			return nil, errors.New("a stored buyer card is not for its key")
-		}
-		cards = append(cards, heldBuyerCard{raw: raw, card: card})
-	}
-	return cards, nil
+	card, err := c.lane.CurrentCardThrough(ctx, uint64(notAfter.Unix()))
+	return card.Packet, err
 }

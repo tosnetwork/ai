@@ -188,7 +188,7 @@ func (f *receiveFixture) sealPacket(t *testing.T, edit func(*agentpacket.Packet)
 
 func (f *receiveFixture) sealRaw(t *testing.T, raw []byte) []byte {
 	t.Helper()
-	keys, _, err := f.carrier.HeldKeys()
+	keys, _, err := f.carrier.heldTestKeys()
 	if err != nil || len(keys) == 0 {
 		t.Fatalf("no held buyer key: %v", err)
 	}
@@ -355,12 +355,12 @@ func TestFramesThatDoNotJoinFailTheDelivery(t *testing.T) {
 
 // A message a 409 refused is re-sealed once in the round (relay 8.6), and
 // without a provider card the round sends nothing and fails nothing.
-func TestAResultRequestIsResealedOnConflictAndWaitsForACard(t *testing.T) {
+func TestAResultRequestWaitsForItsNextGenerationAfterConflict(t *testing.T) {
 	f := newReceiveFixture(t)
 	hash := f.result(t, "built", nil).responseHash
 	f.relays.conflicts = map[string]int{providerRelay: 1}
 	chain := fxNow.Add(2 * time.Hour)
-	if out, err := f.carrier.ReceiveResult(context.Background(), f.round(hash, chain)); err != nil || !out.ResultRequested {
+	if out, err := f.carrier.ReceiveResult(t.Context(), f.round(hash, chain)); err != nil || out.ResultRequested {
 		t.Fatalf("a conflicted request: %+v %v", out, err)
 	}
 	g := newReceiveFixture(t)
@@ -472,7 +472,7 @@ func TestAResultRequestIsSentAtOnceThenEverySixHours(t *testing.T) {
 	// It expires at the retention end, which is before signing + 86,100 s.
 	end := f.task.ResponseDeadline.Add(86400 * time.Second)
 	parsed, err := agentpacketseal.ParseEnvelope(f.relays.deposits[providerRelay][0])
-	if err != nil || parsed.ExpiresAtUnix != uint64(end.Unix()) {
+	if err != nil || parsed.ExpiresAtUnix > uint64(end.Unix()) || parsed.ExpiresAtUnix > uint64(f.clock.Now().Add(24*time.Hour).Unix()) {
 		t.Fatalf("result-request expiry %d %v", parsed.ExpiresAtUnix, err)
 	}
 	out, err = f.carrier.ReceiveResult(context.Background(), f.round(hash, chain.Add(ResultRequestInterval-time.Second)))
@@ -498,6 +498,7 @@ func TestAnUndeliveredResultRequestIsRetried(t *testing.T) {
 		t.Fatalf("%+v %v", out, err)
 	}
 	delete(f.relays.answer, providerRelay)
+	f.clock.advance(time.Minute)
 	if out, err := f.carrier.ReceiveResult(context.Background(), f.round(hash, chain.Add(time.Minute))); err != nil ||
 		!out.ResultRequested {
 		t.Fatalf("the retry: %+v %v", out, err)
@@ -591,11 +592,6 @@ func TestAPacketRefusedForGoodIsAcknowledgedUnstored(t *testing.T) {
 			f.relays.hold(buyerRelay, envelope)
 			return [][]byte{envelope}
 		},
-		"over the bound": func(f *receiveFixture, t *testing.T) [][]byte {
-			envelope := f.sealRaw(t, bytes.Repeat([]byte{' '}, MaxInboundPacketJSON+1))
-			f.relays.hold(buyerRelay, envelope)
-			return [][]byte{envelope}
-		},
 	} {
 		f := newReceiveFixture(t)
 		envelopes := deliver(f, t)
@@ -636,6 +632,8 @@ func TestALookupFailureIsRetried(t *testing.T) {
 	}
 }
 
+const secondRelay = "https://second-buyer-relay.example"
+
 // An envelope that does not open, or other bytes than the listed ID, is
 // never acknowledged and is not downloaded again from that relay; an
 // envelope for a key not held is not downloaded at all.
@@ -674,8 +672,7 @@ func TestAnEnvelopeThatDoesNotOpenIsRememberedPerRelay(t *testing.T) {
 // lists it too.
 func (f *receiveFixture) learnBuyerRelay(t *testing.T, relay string) {
 	t.Helper()
-	f.carrier.config.Relays = []string{relay}
-	if _, err := f.carrier.BuyerCard(context.Background(), fxNow.Add(49*time.Hour)); err != nil {
+	if err := f.carrier.lane.TrackRelays(t.Context(), []string{relay}, uint64(fxNow.Add(49*time.Hour).Unix())); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -748,19 +745,9 @@ func TestAFullInboxLeavesTheEnvelopeAtTheRelay(t *testing.T) {
 	if err := f.carrier.clearInbox(requestHash); err != nil {
 		t.Fatal(err)
 	}
-	// Until InboxFullRetry has passed it is not downloaded again, even with
-	// room in the inbox.
-	downloads := box.downloads
-	f.clock.advance(PollInterval + PollInterval/5)
-	if view := f.poll(t); view.Stored != 0 || box.downloads != downloads {
-		t.Fatalf("a deferred envelope was taken again early: %+v, %d downloads", view, box.downloads-downloads)
-	}
-	f.clock.advance(InboxFullRetry)
+	f.clock.advance(PollInterval)
 	if view := f.poll(t); view.Stored != 1 || !box.acked[idOf(t, envelope)] {
 		t.Fatalf("the later pass: %+v", view)
-	}
-	if InboxFullRetry != 5*time.Minute {
-		t.Fatal("a full inbox defers an envelope for 5 minutes")
 	}
 }
 
@@ -828,6 +815,7 @@ func TestTheInboxDeduplicatesAndIsBounded(t *testing.T) {
 // A failed listing backs the relay off from 30 s doubling to 5 minutes,
 // and at least the relay's Retry-After; a good listing returns to 15 s
 // with at most 20 % jitter.
+
 func TestAFailedListingBacksTheRelayOff(t *testing.T) {
 	f := newReceiveFixture(t)
 	box := f.relays.box(buyerRelay)
@@ -855,25 +843,47 @@ func TestAFailedListingBacksTheRelayOff(t *testing.T) {
 	if wait := view.Next.Sub(f.clock.Now()); wait < PollInterval || wait > PollInterval+PollInterval/5 {
 		t.Fatalf("the interval after a good listing is %v", wait)
 	}
-	if PollInterval != 15*time.Second || MaxPollBackoff != 5*time.Minute {
+	if PollInterval != 15*time.Second {
 		t.Fatal("relays are listed every 15 seconds, backing off to 5 minutes")
 	}
 }
 
-func TestEnvelopeMemoryForgetsAtExpiryAndWhenFull(t *testing.T) {
-	memory := newEnvelopeMemory(2)
-	var secret [agentpacketseal.AckSecretSize]byte
-	memory.put("a", secret, fxNow.Add(time.Minute), fxNow)
-	memory.put("b", secret, fxNow.Add(time.Hour), fxNow)
-	if _, ok := memory.get("a", fxNow.Add(time.Minute)); ok {
-		t.Fatal("an entry outlived its expiry")
+func TestAcceptedResultAckKeepsTryingForSecondCopy(t *testing.T) {
+	f := newReceiveFixture(t)
+	const other = "https://another-provider-relay.example"
+	f.relays.directory.relays = []string{providerRelay, other}
+	f.relays.down[other] = true
+	result := f.result(t, "built", nil)
+	f.deliver(t, fxProvider, railwork.KindResult, f.binding, result.message)
+	f.poll(t)
+	chain := fxNow.Add(2 * time.Hour)
+	first, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain))
+	if err != nil || !first.AckSent {
+		t.Fatalf("first copy: %+v %v", first, err)
 	}
-	memory.put("a", secret, fxNow.Add(2*time.Hour), fxNow)
-	memory.put("c", secret, fxNow.Add(3*time.Hour), fxNow)
-	if _, ok := memory.get("b", fxNow); ok {
-		t.Fatal("a full memory did not forget the entry expiring first")
+	f.clock.advance(time.Minute)
+	f.relays.down[other] = false
+	second, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain.Add(time.Minute)))
+	if err != nil || second.AckSent || len(f.relays.deposits[other]) != 1 {
+		t.Fatalf("second copy: %+v %v", second, err)
 	}
-	if _, ok := memory.get("c", fxNow); !ok {
-		t.Fatal("the new entry was not kept")
+}
+
+func TestUncarriedResultAckCanRotateAfterExpiry(t *testing.T) {
+	f := newReceiveFixture(t)
+	result := f.result(t, "built", nil)
+	f.deliver(t, fxProvider, railwork.KindResult, f.binding, result.message)
+	f.poll(t)
+	chain := fxNow.Add(2 * time.Hour)
+	f.relays.down[providerRelay] = true
+	first, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain))
+	if err != nil || !first.Accepted || first.AckSent {
+		t.Fatalf("outage: %+v %v", first, err)
+	}
+	f.relays.down[providerRelay] = false
+	f.clock.advance(AckLifetime + 2*time.Hour)
+	second, err := f.carrier.ReceiveResult(t.Context(), f.round(result.responseHash, chain.Add(AckLifetime+time.Second)))
+	if err != nil || !second.AckSent {
+		t.Fatalf("expired ack retry: %+v %v", second, err)
 	}
 }

@@ -96,14 +96,14 @@ func (s *Scheduler) load(r delivery) (schedule, error) {
 func (s *Scheduler) save(m schedule) error {
 	e := s.store.write(routingName(m.ID), m)
 	if errors.Is(e, ErrCapacity) {
-		if e = s.prune(); e != nil {
+		if e = s.prune(context.Background()); e != nil {
 			return e
 		}
 		return s.store.write(routingName(m.ID), m)
 	}
 	return e
 }
-func (s *Scheduler) prune() error {
+func (s *Scheduler) prune(ctx context.Context) error {
 	now, e := s.lane.now()
 	if e != nil {
 		return e
@@ -112,25 +112,30 @@ func (s *Scheduler) prune() error {
 	if e != nil {
 		return e
 	}
+	expired := make(map[string]bool)
 	for _, name := range index.Names {
+		if ctx.Err() != nil {
+			return ErrUnavailable
+		}
 		var m schedule
-		if e = s.store.read(name, &m); e != nil || m.Deadline == 0 || m.Deadline > uint64(^uint64(0)>>1)-uint64(KeyRetention/time.Second) || routingName(m.ID) != name {
+		if e = s.store.readIndexed(name, &m); e != nil || m.Deadline == 0 || m.Deadline > uint64(^uint64(0)>>1)-uint64(KeyRetention/time.Second) || routingName(m.ID) != name {
 			return ErrStorage
 		}
 		if now >= m.Deadline+uint64(KeyRetention/time.Second) {
-			if e = s.store.remove(name); e != nil {
-				return e
-			}
+			expired[name] = true
 		}
 	}
-	return nil
+	if len(expired) == 0 {
+		return nil
+	}
+	return s.store.removeIndexed(index, expired)
 }
 func (s *Scheduler) Prune(ctx context.Context) error {
 	if e := s.gate.lock(ctx); e != nil {
 		return e
 	}
 	defer s.gate.unlock()
-	return s.prune()
+	return s.prune(ctx)
 }
 
 func (s *Scheduler) snapshot(ctx context.Context, id string) (delivery, error) {

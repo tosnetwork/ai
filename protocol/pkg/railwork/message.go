@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
 )
@@ -57,20 +58,46 @@ var (
 
 // TaskHeader is the canonical header of a task (section 5.1). Every field
 // is a claim the provider proves again from finalized state.
+// ContactGrant travels only inside a signed, sealed rail message.
+type ContactGrant string
+
+func NewContactGrant(wire, seed []byte) ContactGrant {
+	combined := append(bytes.Clone(wire), seed...)
+	defer clear(combined)
+	return ContactGrant(base64.StdEncoding.EncodeToString(combined))
+}
+
+func (g ContactGrant) Bytes() (wire, seed []byte, err error) {
+	if g == "" {
+		return nil, nil, nil
+	}
+	raw, ok := strictBase64(string(g))
+	if !ok || len(raw) <= 32 || len(raw) > 2048+32 {
+		clear(raw)
+		return nil, nil, invalidMessage("invalid rail contact grant")
+	}
+	return raw[:len(raw)-32], raw[len(raw)-32:], nil
+}
+
+func (ContactGrant) Format(s fmt.State, _ rune) {
+	_, _ = s.Write([]byte("[rail contact grant]"))
+}
+
 type TaskHeader struct {
-	Schema            string `json:"schema"`
-	BuyerAgentID      string `json:"buyer_agent_id"`
-	BuyerWallet       string `json:"buyer_wallet"`
-	CapabilityID      string `json:"capability_id"`
-	CapabilityVersion string `json:"capability_version"`
-	PackageBase64     string `json:"package_base64"`
-	ExecutionID       string `json:"execution_id"`
-	ExecutionNonce    string `json:"execution_nonce"`
-	SourceDigest      string `json:"source_digest"`
-	RequestID         uint64 `json:"request_id"`
-	CallLT            uint64 `json:"call_lt"`
-	CallHash          string `json:"call_hash"`
-	BuyerKeyCard      string `json:"buyer_key_card_base64,omitempty"`
+	Schema            string       `json:"schema"`
+	BuyerAgentID      string       `json:"buyer_agent_id"`
+	BuyerWallet       string       `json:"buyer_wallet"`
+	CapabilityID      string       `json:"capability_id"`
+	CapabilityVersion string       `json:"capability_version"`
+	PackageBase64     string       `json:"package_base64"`
+	ExecutionID       string       `json:"execution_id"`
+	ExecutionNonce    string       `json:"execution_nonce"`
+	SourceDigest      string       `json:"source_digest"`
+	RequestID         uint64       `json:"request_id"`
+	CallLT            uint64       `json:"call_lt"`
+	CallHash          string       `json:"call_hash"`
+	BuyerKeyCard      string       `json:"buyer_key_card_base64,omitempty"`
+	Contact           ContactGrant `json:"contact_base64,omitempty"`
 }
 
 // Task is a task message: its header, the serialized Quote package, the
@@ -84,10 +111,11 @@ type Task struct {
 
 // ResultHeader is the canonical header of a result (section 5.2).
 type ResultHeader struct {
-	Schema           string `json:"schema"`
-	ResponseHash     string `json:"response_hash"`
-	ReceiptBOCBase64 string `json:"receipt_boc_base64"`
-	ProviderKeyCard  string `json:"provider_key_card_base64,omitempty"`
+	Schema           string       `json:"schema"`
+	ResponseHash     string       `json:"response_hash"`
+	ReceiptBOCBase64 string       `json:"receipt_boc_base64"`
+	ProviderKeyCard  string       `json:"provider_key_card_base64,omitempty"`
+	Contact          ContactGrant `json:"contact_base64,omitempty"`
 }
 
 // Result is a result message: the Receipt BOC, the artifact, and the
@@ -101,9 +129,10 @@ type Result struct {
 
 // AckHeader is the canonical header of a result acknowledgement (5.3).
 type AckHeader struct {
-	Schema       string `json:"schema"`
-	ResponseHash string `json:"response_hash"`
-	BuyerKeyCard string `json:"buyer_key_card_base64,omitempty"`
+	Schema       string       `json:"schema"`
+	ResponseHash string       `json:"response_hash"`
+	BuyerKeyCard string       `json:"buyer_key_card_base64,omitempty"`
+	Contact      ContactGrant `json:"contact_base64,omitempty"`
 }
 
 // Ack is a result acknowledgement.
@@ -366,6 +395,10 @@ func DecodeResult(raw []byte) (Result, error) {
 
 // EncodeAck builds a result acknowledgement; buyerKeyCard may be empty.
 func EncodeAck(responseHash [32]byte, buyerKeyCard []byte) ([]byte, error) {
+	return EncodeAckWithContact(responseHash, buyerKeyCard, "")
+}
+
+func EncodeAckWithContact(responseHash [32]byte, buyerKeyCard []byte, contact ContactGrant) ([]byte, error) {
 	if responseHash == ([32]byte{}) {
 		return nil, invalidMessage("the response hash is zero")
 	}
@@ -373,7 +406,7 @@ func EncodeAck(responseHash [32]byte, buyerKeyCard []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	header := AckHeader{Schema: AckSchema, ResponseHash: hex.EncodeToString(responseHash[:]), BuyerKeyCard: card}
+	header := AckHeader{Schema: AckSchema, ResponseHash: hex.EncodeToString(responseHash[:]), BuyerKeyCard: card, Contact: contact}
 	return encodeMessage(header, nil, MaxAckMessageBytes)
 }
 

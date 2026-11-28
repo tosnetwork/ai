@@ -55,6 +55,19 @@ func TestInventoryAdmitsQueueBeforeItReturns(t *testing.T) {
 		t.Fatal("queue returned before inventory admission", yes, err)
 	}
 }
+func TestQueueCapacityCountsJournaledFrames(t *testing.T) {
+	f := newFixture(t)
+	if err := f.lane.CheckQueueCapacity(t.Context(), DefaultOutbox); err != nil {
+		t.Fatalf("empty outbox: %v", err)
+	}
+	if _, err := f.lane.Queue(t.Context(), "one-frame", f.message(f.alice, f.bob), start+7200); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.lane.CheckQueueCapacity(t.Context(), DefaultOutbox); !errors.Is(err, ErrCapacity) {
+		t.Fatalf("capacity check ignored a journaled frame: %v", err)
+	}
+}
+
 func TestStateDirectoryMustBePrivate(t *testing.T) {
 	f := newFixture(t)
 	c := f.config
