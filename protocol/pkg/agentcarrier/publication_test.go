@@ -217,3 +217,28 @@ func TestNewDelegationRepublishesEvenAnUnchangedReducedHint(t *testing.T) {
 		t.Fatal("hint was signed under the retired delegation", e)
 	}
 }
+
+func TestPublicationOrdersSameSecondChangesAndPolicyAcrossDelegations(t *testing.T) {
+	f := newFixture(t)
+	p, dirs := publisherFixture(t, f, PublicationConfig{})
+	if _, e := p.Publish(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	p.config.PublishRailCard = true
+	if _, e := p.Publish(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	if len(dirs[relayOne].published) != 2 {
+		t.Fatal("same-second configuration change was lost")
+	}
+	h, e := agenttransport.DecodeHintRecord(dirs[relayOne].published[1])
+	if e != nil || h.Hint.IssuedAt != start+1 {
+		t.Fatal("same-delegation hint conflicts at its old issued_at", h.Hint.IssuedAt, e)
+	}
+	if policies := f.relays[relayOne].policies; len(policies) != 2 || policies[1].IssuedAt != start+1 {
+		t.Fatal("equal-time policy would be ignored", policies)
+	}
+	if _, e = p.Publish(t.Context()); e != nil {
+		t.Fatal("permitted future stamp is not corrupt storage", e)
+	}
+}

@@ -130,10 +130,17 @@ func hintNewer(a, b []byte) bool {
 	if ea != nil || eb != nil {
 		return false
 	}
-	if aa.Hint.IssuedAt != bb.Hint.IssuedAt {
-		return aa.Hint.IssuedAt > bb.Hint.IssuedAt
+	if order, err := agenttransport.CompareHints(aa.Hint, bb.Hint); err == nil {
+		return order > 0
 	}
-	ah, bh := sha256.Sum256(a), sha256.Sum256(b)
+	// Independent delegations have no freshness ordering. Digest order is only
+	// deterministic iteration; the needed lane and card are verified separately.
+	ad, ea := aa.Hint.Delegation.Encode()
+	bd, eb := bb.Hint.Delegation.Encode()
+	if ea != nil || eb != nil {
+		return false
+	}
+	ah, bh := sha256.Sum256(ad), sha256.Sum256(bd)
 	return bytes.Compare(ah[:], bh[:]) > 0
 }
 func cacheKey(raw []byte) string { h := sha256.Sum256(raw); return hex.EncodeToString(h[:]) }
@@ -174,7 +181,7 @@ func (r *Resolver) remember(ctx context.Context, agent string, route Route) erro
 		}
 		kept = append(kept, old)
 	}
-	sort.Slice(kept, func(i, j int) bool { return hintNewer(kept[i], kept[j]) })
+	// Admit the selected delegation first; unrelated stale slots cannot evict it.
 	if len(kept) > 4 {
 		kept = kept[:4]
 	}

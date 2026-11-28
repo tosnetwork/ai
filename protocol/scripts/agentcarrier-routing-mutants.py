@@ -77,7 +77,7 @@ add(
 add(
     "owner-credential-journal",
     "credential_manager.go",
-    "if e = m.store.write(name, record); e != nil {",
+    "if e = m.writeCredential(ctx, name, record); e != nil {",
     "if e = error(nil); e != nil {",
     "TestOwnerCredentialRefreshAndPrivateCustody",
 )
@@ -192,6 +192,109 @@ add(
     block,
     block.replace("if e = s.save(m); e != nil {", "if e = error(nil); e != nil {"),
     "TestTwoCopiesStopBeforeAThirdRelayAndJournalBeforeTransport",
+)
+
+
+add(
+    "rotation-finalized-admission",
+    "credential_manager.go",
+    "if _, _, err := c.Verifier.VerifyDelegationUntil(ctx, c.Delegation, agenttransport.Relay); err != nil {",
+    "if err := error(nil); err != nil {",
+    "TestTransportRotationRequiresFinalizedAdmissionAndKeepsTheLane",
+)
+add(
+    "rotation-refresh-grants",
+    "credential_manager.go",
+    "bytes.Equal(previousDelegation, m.config.Delegation) && previous.Until > seconds",
+    "previous.Until > seconds",
+    "TestTransportRotationRequiresFinalizedAdmissionAndKeepsTheLane",
+)
+add(
+    "rotation-republish-hint",
+    "publication.go",
+    "sha256.Sum256(append(fingerprintBytes, p.lane.config.Delegation...))",
+    "sha256.Sum256(fingerprintBytes)",
+    "TestNewDelegationRepublishesEvenAnUnchangedReducedHint",
+)
+add(
+    "cache-private-card",
+    "resolution.go",
+    "cards[key] = bytes.Clone(route.CardPacket)",
+    "cards[key] = nil",
+    "TestPrivateContactHintKeepsItsVerifiedCardAcrossResolution",
+)
+add(
+    "accepted-ttl-cannot-grow",
+    "scheduler.go",
+    "m.TTL = min(m.TTL, ttl)",
+    "m.TTL = ttl",
+    "TestTTLIncreaseCannotExtendCopiesAlreadyAccepted",
+)
+add(
+    "generation-minimum-interval",
+    "scheduler.go",
+    "max(uint64(600), ttl*4/5)",
+    "(ttl*4/5)",
+    "TestTinyTTLNeverForcesGenerationsMoreOftenThanTenMinutes",
+)
+add(
+    "generation-eighty-percent",
+    "scheduler.go",
+    "ttl*4/5",
+    "ttl",
+    "TestTTLIncreaseCannotExtendCopiesAlreadyAccepted",
+)
+add(
+    "schedule-retention",
+    "scheduler.go",
+    "now >= m.Deadline+uint64(KeyRetention/time.Second)",
+    "now >= m.Deadline",
+    "TestSchedulePruningWaitsForTheFullRetentionHorizon",
+)
+source = (ROOT / "protocol/pkg/agentcarrier/scheduler.go").read_text()
+add(
+    "driver-deadline-wake",
+    "scheduler.go",
+    source,
+    source.replace(
+        "min(r.Deadline, m.ResolveAfter, m.NextGeneration)",
+        "min(m.ResolveAfter,m.NextGeneration)",
+    ).replace("min(m.NextGeneration, r.Deadline)", "m.NextGeneration"),
+    "TestDriverKeepsResolvingNoRouteUntilHintOrDeadline",
+)
+
+
+add(
+    "issued-credential-retention",
+    "credential_manager.go",
+    "retire += 86400 + 300",
+    "retire += 0",
+    "TestCredentialPruningKeepsIssuedLanesThroughRelayRetention",
+)
+
+
+add(
+    "same-second-hint-order",
+    "publication.go",
+    "issued = old.Hint.IssuedAt + 1",
+    "issued = now",
+    "TestPublicationOrdersSameSecondChangesAndPolicyAcrossDelegations",
+)
+add(
+    "same-second-policy-order",
+    "publication.go",
+    "policyIssued = previous.Policy.IssuedAt + 1",
+    "policyIssued = now",
+    "TestPublicationOrdersSameSecondChangesAndPolicyAcrossDelegations",
+)
+
+
+add(
+    "holder-seed-length",
+    "credential_manager.go",
+    "len(seed) != ed25519.SeedSize",
+    "(false && len(seed) != ed25519.SeedSize)",
+    "TestContactImportVerifiesPacketIssuerAdmissionAndRoute",
 )
 
 

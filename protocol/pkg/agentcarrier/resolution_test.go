@@ -255,3 +255,41 @@ func TestPrivateContactHintKeepsItsVerifiedCardAcrossResolution(t *testing.T) {
 		t.Fatal("private contact card disappeared from verified cache", e)
 	}
 }
+
+func TestSameDelegationHintTiesUseTheFrozenHintOrdering(t *testing.T) {
+	f := newFixture(t)
+	d, e := agenttransport.DecodeDelegation(f.bob.wire)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var base []byte
+	var first agenttransport.Hint
+	for i := uint64(0); i < 128; i++ {
+		h, e := agenttransport.SignHint(agenttransport.Hint{Delegation: d, IssuedAt: start, ExpiresAt: start + 21600 - i, Relays: []string{relayOne, relayTwo}}, f.bob.transport)
+		if e != nil {
+			t.Fatal(e)
+		}
+		raw, e := (agenttransport.HintRecord{Hint: h, Objects: []agenttransport.HintObject{}}).Encode()
+		if e != nil {
+			t.Fatal(e)
+		}
+		if i == 0 {
+			base = raw
+			first = h
+			continue
+		}
+		order, e := agenttransport.CompareHints(h, first)
+		if e != nil {
+			t.Fatal(e)
+		}
+		a, b := sha256.Sum256(raw), sha256.Sum256(base)
+		rawGreater := bytes.Compare(a[:], b[:]) > 0
+		if rawGreater != (order > 0) {
+			if hintNewer(raw, base) != (order > 0) {
+				t.Fatal("record hash overrode the canonical hint order")
+			}
+			return
+		}
+	}
+	t.Fatal("tie fixture did not distinguish hint bytes from record bytes")
+}

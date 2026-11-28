@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strconv"
 	"testing"
@@ -341,5 +342,67 @@ func TestTTLIncreaseCannotExtendCopiesAlreadyAccepted(t *testing.T) {
 	view, e = s.Advance(t.Context(), "ttl", Route{})
 	if e != nil || view.Copies != 2 || view.TTLSeconds != 10800 || view.NextAttempt != start+2880+8640 {
 		t.Fatal("new generation did not adopt its new retention", view, e)
+	}
+}
+
+func TestTinyTTLNeverForcesGenerationsMoreOftenThanTenMinutes(t *testing.T) {
+	f := newFixture(t)
+	s, _, _ := schedulerFixture(t, f)
+	defer func() {
+		if e := s.Close(); e != nil {
+			t.Error(e)
+		}
+	}()
+	f.relays[relayOne].ttl = 1
+	f.relays[relayTwo].ttl = 1
+	if _, e := f.lane.Queue(t.Context(), "tiny", f.message(f.alice, f.bob), start+7200); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Advance(t.Context(), "tiny", Route{}); e != nil {
+		t.Fatal(e)
+	}
+	f.clock.n.Store(int64(start + 599))
+	if _, e := s.Advance(t.Context(), "tiny", Route{}); e != nil {
+		t.Fatal(e)
+	}
+	if len(f.relays[relayOne].deposits) != 1 {
+		t.Fatal("tiny relay TTL caused a generation flood")
+	}
+	f.clock.n.Store(int64(start + 600))
+	if _, e := s.Advance(t.Context(), "tiny", Route{}); e != nil {
+		t.Fatal(e)
+	}
+	if len(f.relays[relayOne].deposits) != 2 {
+		t.Fatal("ten-minute generation did not run")
+	}
+}
+func TestSchedulePruningWaitsForTheFullRetentionHorizon(t *testing.T) {
+	f := newFixture(t)
+	s, _, _ := schedulerFixture(t, f)
+	defer func() {
+		if e := s.Close(); e != nil {
+			t.Error(e)
+		}
+	}()
+	if _, e := f.lane.Queue(t.Context(), "prune", f.message(f.alice, f.bob), start+7200); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Advance(t.Context(), "prune", Route{}); e != nil {
+		t.Fatal(e)
+	}
+	f.clock.n.Store(int64(start + 7200))
+	if e := s.Prune(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	var saved schedule
+	if e := s.store.read(routingName("prune"), &saved); e != nil {
+		t.Fatal("metadata retired before retention", e)
+	}
+	f.clock.n.Store(int64(start + 7200 + uint64(KeyRetention/time.Second)))
+	if e := s.Prune(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.store.read(routingName("prune"), &saved); !errors.Is(e, os.ErrNotExist) {
+		t.Fatal("expired metadata retained forever", e)
 	}
 }

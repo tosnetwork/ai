@@ -3,20 +3,24 @@ package agentcarrier
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
-	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
 type restartRelay struct {
+	deposits        atomic.Int64
 	f               *fixture
 	root, addr, url string
 	server          *httptest.Server
@@ -31,7 +35,12 @@ func (r *restartRelay) start(t *testing.T) {
 		t.Fatal(e)
 	}
 	var handler *agentpacketrelay.V2Server
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { handler.ServeHTTP(w, req) }))
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "PUT" && strings.Contains(req.URL.Path, "/envelopes/") {
+			r.deposits.Add(1)
+		}
+		handler.ServeHTTP(w, req)
+	}))
 	if r.addr != "" {
 		if e = server.Listener.Close(); e != nil {
 			t.Fatal(e)
@@ -128,23 +137,17 @@ func TestTwoRealV2RelaysRecoverTheirSecondCopyAndAdmitOnce(t *testing.T) {
 			t.Error(e)
 		}
 	}()
-	card, e := bob.CurrentCard(t.Context())
+	publisher, e := OpenPublisher(bob, manager, PublicationConfig{Directories: bc.Relays, Directory: func(url string) (Directory, error) { return clients[url], nil }, PublishRailCard: true})
 	if e != nil {
 		t.Fatal(e)
 	}
-	d, e := agenttransport.DecodeDelegation(f.bob.wire)
-	if e != nil {
-		t.Fatal(e)
-	}
-	raw, e := f.verifier.BuildHintRecord(t.Context(), agenttransport.Hint{Delegation: d, IssuedAt: start, ExpiresAt: start + 21600, Relays: bc.Relays}, []agenttransport.HintObject{{Kind: agenttransport.RailCard, Bytes: card.Packet}}, f.bob.transport, agenttransport.PublishOptions{})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if e = one.client.PublishHint(t.Context(), raw); e != nil {
-		t.Fatal(e)
-	}
-	if e = two.client.PublishHint(t.Context(), raw); e != nil {
-		t.Fatal(e)
+	defer func() {
+		if e := publisher.Close(); e != nil {
+			t.Error(e)
+		}
+	}()
+	if view, e := publisher.Publish(t.Context()); e != nil || view.HintTargets != 2 || view.PolicyTargets != 2 {
+		t.Fatal("real V2 publication failed", view, e)
 	}
 	routes, e := OpenResolver(f.lane, ResolverConfig{Directories: bc.Relays, Directory: func(url string) (Directory, error) {
 		c, ok := clients[url]
@@ -214,6 +217,49 @@ func TestTwoRealV2RelaysRecoverTheirSecondCopyAndAdmitOnce(t *testing.T) {
 			}
 		}
 	}
+	// A separately acknowledged delivery must not get its second copy when the
+	// failed relay returns. Count HTTP PUTs, not just the visible mailbox.
+	two.stop(t)
+	f.clock.n.Store(int64(start + 150))
+	p, e := packet(f.message(f.alice, f.bob))
+	if e != nil {
+		t.Fatal(e)
+	}
+	p.Sequence = 2
+	p.Nonce[0] = 2
+	next, e := agentpacket.EncodeJSON(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = f.lane.Queue(t.Context(), "real-ack", next, start+7200); e != nil {
+		t.Fatal(e)
+	}
+	view, e = scheduler.Advance(t.Context(), "real-ack", Route{})
+	if e != nil || view.Copies != 1 {
+		t.Fatal(view, e)
+	}
+	received, e = bob.Poll(t.Context())
+	if e != nil && !errors.Is(e, ErrUnavailable) {
+		t.Fatal(e)
+	}
+	if received.Stored != 1 || received.Acknowledged != 1 || executions != 2 {
+		t.Fatal("surviving copy did not reach the inbox", received, executions)
+	}
+	// The business lane authenticated its receipt; transport does not invent it.
+	if e = f.lane.Complete(t.Context(), "real-ack"); e != nil {
+		t.Fatal(e)
+	}
+	before := two.deposits.Load()
+	f.clock.n.Store(int64(start + 300))
+	two.start(t)
+	if e = one.store.Replay().Record(uint64(f.clock.Now().Unix())); e != nil {
+		t.Fatal(e)
+	}
+	view, e = scheduler.Advance(t.Context(), "real-ack", Route{})
+	if e != nil || view.State != "complete" || two.deposits.Load() != before {
+		t.Fatal("acknowledged delivery was deposited again", view, e)
+	}
+
 }
 func clientURL(c *agentpacketrelay.V2Client, one, two *restartRelay) string {
 	if c == one.client {

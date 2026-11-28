@@ -138,6 +138,8 @@ func (m *CredentialManager) current(record credentialRecord) (Credential, error)
 	return c, nil
 }
 func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) (Credential, error) {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
 	d, fresh, e := m.authority(ctx)
 	if e != nil {
 		return Credential{}, e
@@ -241,7 +243,7 @@ func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) 
 	if !m.config.Now().Before(fresh) {
 		return Credential{}, ErrTransportRevoked
 	}
-	if e = m.store.write(name, record); e != nil {
+	if e = m.writeCredential(ctx, name, record); e != nil {
 		return Credential{}, e
 	}
 	return NewCredential(raw, holder)
@@ -337,7 +339,7 @@ func (m *CredentialManager) ReceiveContact(ctx context.Context, packetBytes []by
 	if !m.config.Now().Before(fresh) || uint64(m.config.Now().Unix()) >= until {
 		return ErrRefused
 	}
-	return m.store.write(routingName("held/"+p.SenderAgentID), record)
+	return m.writeCredential(ctx, routingName("held/"+p.SenderAgentID), record)
 }
 func (m *CredentialManager) Contact(ctx context.Context, peer, relay string) (Credential, bool, error) {
 	if e := m.store.lock(ctx); e != nil {
@@ -395,3 +397,69 @@ func (m *CredentialManager) DropContact(ctx context.Context, peer, _ string) err
 
 var _ Credentials = (*CredentialManager)(nil)
 var _ json.Marshaler = (*CredentialManager)(nil)
+
+func (m *CredentialManager) writeCredential(ctx context.Context, name string, record credentialRecord) error {
+	e := m.store.write(name, record)
+	if errors.Is(e, ErrCapacity) {
+		if e = m.pruneLocked(ctx); e != nil {
+			return e
+		}
+		return m.store.write(name, record)
+	}
+	return e
+}
+func (m *CredentialManager) pruneLocked(ctx context.Context) error {
+	now := m.config.Now()
+	if now.Unix() < 0 {
+		return ErrConfig
+	}
+	index, e := m.store.index()
+	if e != nil {
+		return e
+	}
+	for _, name := range index.Names {
+		if e := ctx.Err(); e != nil {
+			return ErrUnavailable
+		}
+		if name == routingName("authority") {
+			continue
+		}
+		var record credentialRecord
+		if e = m.store.read(name, &record); e != nil {
+			return e
+		}
+		credential, e := agenttransport.DecodeCredential(record.Wire)
+		if e != nil {
+			return ErrStorage
+		}
+		until, e := credential.NotAfter()
+		if e != nil || until != record.Until || until > ^uint64(0)-86400-300 || record.Issued >= until || len(record.Seed) != 32 {
+			return ErrStorage
+		}
+		clear(record.Seed)
+		retire := until
+		switch name {
+		case routingName("issued/" + record.Peer):
+			retire += 86400 + 300
+		case routingName("owner/" + record.Peer), routingName("held/" + record.Peer):
+		default:
+			return ErrStorage
+		}
+		if uint64(now.Unix()) >= retire {
+			if e = m.store.remove(name); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+
+// Prune keeps issued lane IDs through the last possible relay retention after
+// credential expiry, then allows the bounded store to admit new counterparties.
+func (m *CredentialManager) Prune(ctx context.Context) error {
+	if e := m.store.lock(ctx); e != nil {
+		return e
+	}
+	defer m.store.unlock()
+	return m.pruneLocked(ctx)
+}

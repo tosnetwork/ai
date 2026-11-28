@@ -213,6 +213,21 @@ func TestContactImportVerifiesPacketIssuerAdmissionAndRoute(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	p.Payload, e = json.Marshal(fields{wire, seed[:31]})
+	if e != nil {
+		t.Fatal(e)
+	}
+	malformed, e := agentpacket.EncodeJSON(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = alice.ReceiveContact(t.Context(), malformed, extract, r); !errors.Is(e, ErrRefused) {
+		t.Fatal("short holder seed accepted", e)
+	}
+	p.Payload, e = json.Marshal(fields{wire, seed})
+	if e != nil {
+		t.Fatal(e)
+	}
 	p.Signature[0] ^= 1
 	wrong, e = agentpacket.EncodeJSON(p)
 	if e != nil {
@@ -332,5 +347,38 @@ func TestTransportRotationRequiresFinalizedAdmissionAndKeepsTheLane(t *testing.T
 	lane, _, e := decoded.Lane()
 	if e != nil || lane != oldLane {
 		t.Fatal("rotation reset the contact lane", e)
+	}
+}
+
+func TestCredentialPruningKeepsIssuedLanesThroughRelayRetention(t *testing.T) {
+	f := newFixture(t)
+	m := credentialManager(t, f, f.alice, func(context.Context, string) error { return nil })
+	if _, e := m.Owner(t.Context(), relayOne); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := m.IssueContact(t.Context(), f.bob.agent); e != nil {
+		t.Fatal(e)
+	}
+	f.clock.n.Store(int64(start + 3600))
+	if e := m.Prune(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	var record credentialRecord
+	if e := m.store.read(routingName("owner/"+relayOne), &record); !errors.Is(e, os.ErrNotExist) {
+		t.Fatal("expired owner holder retained", e)
+	}
+	f.clock.n.Store(int64(start + uint64(ContactLifetime/time.Second)))
+	if e := m.Prune(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	if e := m.store.read(routingName("issued/"+f.bob.agent), &record); e != nil {
+		t.Fatal("contact lane disappeared before old deposits expire", e)
+	}
+	f.clock.n.Add(86400 + 300)
+	if e := m.Prune(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	if e := m.store.read(routingName("issued/"+f.bob.agent), &record); !errors.Is(e, os.ErrNotExist) {
+		t.Fatal("expired contact lane retained forever", e)
 	}
 }

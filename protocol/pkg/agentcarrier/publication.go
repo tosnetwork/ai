@@ -135,7 +135,7 @@ func (p *Publisher) Publish(ctx context.Context) (PublicationView, error) {
 	}
 	if exists && len(previous.Raw) > 0 {
 		h, decodeErr := agenttransport.DecodeHintRecord(previous.Raw)
-		if decodeErr != nil || h.Hint.Delegation.AgentID() != p.lane.config.AgentID || h.Hint.IssuedAt > now {
+		if decodeErr != nil || h.Hint.Delegation.AgentID() != p.lane.config.AgentID || (h.Hint.IssuedAt > now && h.Hint.IssuedAt-now > 300) || (previous.Policy.IssuedAt > now && previous.Policy.IssuedAt-now > 300) {
 			return PublicationView{}, ErrStorage
 		}
 		reuse = previous.Fingerprint == fingerprint && now < h.Hint.IssuedAt+(h.Hint.ExpiresAt-h.Hint.IssuedAt)/2
@@ -153,11 +153,32 @@ func (p *Publisher) Publish(ctx context.Context) (PublicationView, error) {
 				}
 			}
 		}
-		expires := min(now+uint64(p.config.TTL/time.Second), d.NotAfter)
-		if expires <= now {
+		issued := now
+		policyIssued := now
+		if exists {
+			old, e := agenttransport.DecodeHintRecord(previous.Raw)
+			if e != nil {
+				return PublicationView{}, ErrStorage
+			}
+			oldAuthority, e := old.Hint.Delegation.Encode()
+			if e != nil {
+				return PublicationView{}, ErrStorage
+			}
+			if bytes.Equal(oldAuthority, p.lane.config.Delegation) && old.Hint.IssuedAt >= issued {
+				issued = old.Hint.IssuedAt + 1
+			}
+			if previous.Policy.IssuedAt >= policyIssued {
+				policyIssued = previous.Policy.IssuedAt + 1
+			}
+		}
+		if issued-now > 300 || policyIssued-now > 300 {
+			return PublicationView{}, ErrUnavailable
+		}
+		expires := min(issued+uint64(p.config.TTL/time.Second), d.NotAfter)
+		if expires <= issued {
 			return PublicationView{}, ErrTransportRevoked
 		}
-		raw, e := p.lane.config.Verifier.BuildHintRecord(ctx, agenttransport.Hint{Delegation: d, IssuedAt: now, ExpiresAt: expires, Relays: append([]string(nil), p.lane.config.Relays...)}, objects, p.credentials.key, agenttransport.PublishOptions{PublicContact: p.config.PublicContact, HintPolicy: p.lane.config.HintPolicy})
+		raw, e := p.lane.config.Verifier.BuildHintRecord(ctx, agenttransport.Hint{Delegation: d, IssuedAt: issued, ExpiresAt: expires, Relays: append([]string(nil), p.lane.config.Relays...)}, objects, p.credentials.key, agenttransport.PublishOptions{PublicContact: p.config.PublicContact, HintPolicy: p.lane.config.HintPolicy})
 		if e != nil {
 			return PublicationView{}, ErrRefused
 		}
@@ -165,7 +186,7 @@ func (p *Publisher) Publish(ctx context.Context) (PublicationView, error) {
 			return PublicationView{}, ErrTransportRevoked
 		}
 		current = publication{Raw: raw, Fingerprint: fingerprint, Policy: p.config.Policy, Hints: []string{}, Policies: []string{}}
-		current.Policy.IssuedAt = now
+		current.Policy.IssuedAt = policyIssued
 		if e = p.lane.TrackRelays(ctx, p.lane.config.Relays, expires+86400+300); e != nil {
 			return PublicationView{}, e
 		}
