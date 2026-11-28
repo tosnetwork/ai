@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -12,45 +14,77 @@ import (
 )
 
 func TestV2LongPollCredentialExpiresDuringFinalRead(t *testing.T) {
-	f := newV2HTTP(t)
-	base := f.clock.Now()
-	c, err := agenttransport.DecodeCredential(f.wire)
-	if err != nil {
-		t.Fatal(err)
+	for _, delay := range []int{0, 2} {
+		t.Run(strconv.Itoa(delay), func(t *testing.T) {
+			f := newV2HTTP(t)
+			base := f.clock.Now()
+			c, err := agenttransport.DecodeCredential(f.wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.wire, err = agenttransport.IssueCredential(mustDelegation(t, c), v2TestKey("http-transport"), f.holder.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.NotBeforeCaveat(unixNow(base) - 1), agenttransport.NotAfterCaveat(unixNow(base) + 301), agenttransport.OperationsCaveat(agenttransport.OperationList), agenttransport.RelayCaveat(f.s.relay)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.s.verifier.VerifyDelegation(t.Context(), mustDelegation(t, c), agenttransport.Relay); err != nil {
+				t.Fatal(err)
+			}
+			f.clock.at = base.Add(299 * time.Second)
+			if err := f.s.store.Replay().Record(unixNow(f.clock.Now())); err != nil {
+				t.Fatal(err)
+			}
+			before := f.source.reads
+			f.s.waitTimer = func(d time.Duration) (<-chan time.Time, func()) {
+				if d != 25*time.Second {
+					t.Fatal(d)
+				}
+				// The wake brings a real entry; the final refresh then crosses expiry.
+				e := f.r.seal(t, testPacket(1), unixNow(base)+3600)
+				f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false, 201)
+				f.clock.at = base.Add(300 * time.Second)
+				f.source.after = func() { f.clock.at = base.Add(time.Duration(300+delay) * time.Second) }
+				ticks := make(chan time.Time, 1)
+				ticks <- f.clock.Now()
+				return ticks, func() {}
+			}
+			request, w := fWaitRequest(t, f, context.Background(), "25")
+			f.s.ServeHTTP(v2DeadlineWriter{w}, request)
+			if f.source.reads <= before {
+				t.Fatal("no final refresh", w.Code, w.Body.String(), f.clock.Now())
+			}
+			if delay == 0 {
+				if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(`"lane":"stranger"`)) {
+					t.Fatal(w.Code, w.Body.String())
+				}
+			} else if w.Code != 403 || !bytes.Contains(w.Body.Bytes(), []byte("credential_scope")) || bytes.Contains(w.Body.Bytes(), []byte("envelopes")) {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		})
 	}
-	f.wire, err = agenttransport.IssueCredential(mustDelegation(t, c), v2TestKey("http-transport"), f.holder.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.NotBeforeCaveat(unixNow(base) - 1), agenttransport.NotAfterCaveat(unixNow(base) + 301), agenttransport.OperationsCaveat(agenttransport.OperationList), agenttransport.RelayCaveat(f.s.relay)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = f.s.verifier.VerifyDelegation(t.Context(), mustDelegation(t, c), agenttransport.Relay); err != nil {
-		t.Fatal(err)
-	}
-	f.clock.at = base.Add(299 * time.Second)
-	if err := f.s.store.Replay().Record(unixNow(f.clock.Now())); err != nil {
-		t.Fatal(err)
-	}
-	before := f.source.reads
-	f.s.waitTimer = func(d time.Duration) (<-chan time.Time, func()) {
-		if d != 25*time.Second {
-			t.Fatal(d)
+	t.Run("final_read", func(t *testing.T) {
+		f := newV2HTTP(t)
+		base := f.clock.Now()
+		c, err := agenttransport.DecodeCredential(f.wire)
+		if err != nil {
+			t.Fatal(err)
 		}
-		// The wake brings a real entry; the final refresh then crosses expiry.
-		e := f.r.seal(t, testPacket(1), unixNow(base)+3600)
-		f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false, 201)
-		f.clock.at = base.Add(300 * time.Second)
-		f.source.after = func() { f.clock.at = base.Add(302 * time.Second) }
-		ticks := make(chan time.Time, 1)
-		ticks <- f.clock.Now()
-		return ticks, func() {}
-	}
-	request, w := fWaitRequest(t, f, context.Background(), "25")
-	f.s.ServeHTTP(v2DeadlineWriter{w}, request)
-	if f.source.reads <= before {
-		t.Fatal("no final refresh", w.Code, w.Body.String(), f.clock.Now())
-	}
-	if w.Code != 403 || !bytes.Contains(w.Body.Bytes(), []byte("credential_scope")) || bytes.Contains(w.Body.Bytes(), []byte("envelopes")) {
-		t.Fatal(w.Code, w.Body.String())
-	}
+		if _, err = f.s.verifier.VerifyDelegation(t.Context(), mustDelegation(t, c), agenttransport.Relay); err != nil {
+			t.Fatal(err)
+		}
+		f.clock.at = base.Add(3599 * time.Second)
+		checked := v2Checked(t, f.wire, f.holder, f.r.agentID, unixNow(f.clock.Now()), 1)
+		before := f.source.reads
+		f.source.after = func() { f.clock.at = base.Add(3601 * time.Second) }
+		// Pin the post-read check separately: another pre-check in the HTTP path
+		// must not mask removal of this check at the asynchronous boundary.
+		if _, err = f.s.recheckUntil(t.Context(), f.r.agentID, checked); !errors.Is(err, agenttransport.ErrCredentialScope) {
+			t.Fatal("expiry crossed during the read", err)
+		}
+		if f.source.reads != before+1 {
+			t.Fatal("no final read", f.source.reads-before)
+		}
+	})
+
 }
 
 func TestV2HintIndexCommitRefusesEarlierStalePass(t *testing.T) {

@@ -184,18 +184,25 @@ add(
     "false",
     "TestV2LongPollHeadersAreStrict",
 )
+scope_source = (ROOT / "protocol/pkg/agentpacketrelay/v2_directory_http.go").read_text()
+scope_start = scope_source.index("func (s *V2Server) recheckUntil(")
+scope_end = scope_source.index("func (s *V2Server) authorityFailure", scope_start)
+scope_block = scope_source[scope_start:scope_end]
 add(
     "wait-credential-expiry",
     "agentpacketrelay/v2_directory_http.go",
-    "if err := checked.Credential.CheckScope(unixNow(s.now()), s.relay, agenttransport.OperationList); err != nil {",
-    "if err := error(nil); err != nil {",
+    scope_block,
+    scope_block.replace(
+        "checked.Credential.CheckScope(unixNow(s.now()), s.relay, agenttransport.OperationList)",
+        "error(nil)",
+    ),
     "TestV2LongPollWakeTimeoutAndSingleWaiter/expiry",
 )
 add(
     "wait-native-withdrawal",
     "agentpacketrelay/v2_directory_http.go",
-    "_, err = s.verifier.VerifyDelegation(ctx, raw, agenttransport.Relay)",
-    "_ = raw; err = nil",
+    "_, until, err := s.verifier.VerifyDelegationUntil(ctx, raw, agenttransport.Relay)",
+    "_ = raw; until, err := s.now().Add(agenttransport.RefuseAfter), error(nil)",
     "TestV2LongPollRechecksNativeWithdrawal",
 )
 add(

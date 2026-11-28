@@ -604,8 +604,10 @@ func TestVerificationDeadlineStaysAtTheOriginalRead(t *testing.T) {
 		t.Fatal("stale boundary accepted", err)
 	}
 	f.r.err = nil
+	readAt := f.clock.Now()
+	f.r.after = func() { f.clock.advance(2 * time.Second) }
 	_, fresh, err := v.VerifyDelegationUntil(t.Context(), f.wire, Relay)
-	if err != nil || !fresh.Equal(f.clock.Now().Add(RefuseAfter)) {
+	if err != nil || !fresh.Equal(readAt.Add(RefuseAfter)) {
 		t.Fatal(fresh, err)
 	}
 }
