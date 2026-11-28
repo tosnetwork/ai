@@ -58,35 +58,32 @@ func hexAgent(a agentDigest) string {
 	}
 	return string(out)
 }
-func (s *V2Store) loadPolicies(now uint64) error {
-	entries, err := boundedV2Dir(filepath.Join(s.disk.root, "controls"), MaxV2Policies)
+func (s *V2Store) loadPolicy(name string, now uint64) error {
+	raw, err := readV2File(filepath.Join(s.disk.root, "controls", name), 4096)
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		raw, err := readV2File(filepath.Join(s.disk.root, "controls", entry.Name()), 4096)
-		if err != nil {
-			return err
-		}
-		var record v2PolicyRecord
-		if err = decodeV2(raw, &record); err != nil {
-			return err
-		}
-		if _, ok := parseAgentText(record.Agent); !ok || record.Version != "tos.service.relay-policy-record.v2" || policyName(record.Agent) != "controls/"+entry.Name() {
-			return errors.New("invalid policy record identity")
-		}
-		d, err := agenttransport.DecodeDelegation(record.Delegation)
-		if err != nil || d.AgentID() != record.Agent || !record.Policy.valid(s.limits, record.Policy.IssuedAt) {
-			return errors.New("invalid stored mailbox policy")
-		}
-		if d.NotAfter <= now {
-			if err = s.disk.remove(policyName(record.Agent)); err != nil {
-				return err
-			}
-			continue
-		}
-		s.policies[record.Agent] = record
+	var record v2PolicyRecord
+	if err = decodeV2(raw, &record); err != nil {
+		return err
 	}
+	if _, ok := parseAgentText(record.Agent); !ok || record.Version != "tos.service.relay-policy-record.v2" || policyName(record.Agent) != "controls/"+name {
+		return errors.New("invalid policy record identity")
+	}
+	d, err := agenttransport.DecodeDelegation(record.Delegation)
+	if err != nil || d.AgentID() != record.Agent || !record.Policy.valid(s.limits, record.Policy.IssuedAt) {
+		return errors.New("invalid stored mailbox policy")
+	}
+	if d.NotAfter <= now {
+		if err = s.disk.remove(policyName(record.Agent)); err != nil {
+			return err
+		}
+		return nil
+	}
+	if len(s.policies) >= MaxV2Policies {
+		return ErrStoreUnavailable
+	}
+	s.policies[record.Agent] = record
 	return nil
 }
 
@@ -144,6 +141,15 @@ func (s *V2Server) setPolicy(w http.ResponseWriter, r *http.Request, agent strin
 	defer s.store.mu.Unlock()
 	if err = s.store.available(); err != nil {
 		v2Fail(w, 503, CodeUnavailable)
+		return
+	}
+	chains, err := checkedChains(checked)
+	if err != nil {
+		v2Fail(w, 403, "credential_invalid")
+		return
+	}
+	if s.store.revokedLocked(agent, chains, unixNow(s.now())) {
+		v2Fail(w, 403, "credential_revoked")
 		return
 	}
 	old, err := s.currentPolicy(r.Context(), agent)
