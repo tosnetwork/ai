@@ -617,8 +617,11 @@ func (s *V2Store) ack(ctx context.Context, agent agentDigest, id [32]byte, now u
 }
 
 type V2MailboxEntry struct {
-	MailboxEntry
-	Lane string
+	EnvelopeID                    [32]byte
+	RecipientKeyID                [agentpacketseal.KeyIDSize]byte
+	Size                          uint32
+	ReceivedAtUnix, ExpiresAtUnix uint64
+	Lane                          string
 }
 
 func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64) ([]V2MailboxEntry, error) {
@@ -647,7 +650,7 @@ func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64) ([]V2
 		if rec.Contact {
 			class = "contact"
 		}
-		out = append(out, V2MailboxEntry{MailboxEntry{EnvelopeID: rec.ID, RecipientKeyID: rec.KeyID, Size: uint32(rec.Size), ReceivedAtUnix: rec.Received, ExpiresAtUnix: rec.Expires}, class})
+		out = append(out, V2MailboxEntry{EnvelopeID: rec.ID, RecipientKeyID: rec.KeyID, Size: uint32(rec.Size), ReceivedAtUnix: rec.Received, ExpiresAtUnix: rec.Expires, Lane: class})
 	}
 	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].EnvelopeID[:], out[j].EnvelopeID[:]) < 0 })
 	return out, nil
