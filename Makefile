@@ -177,6 +177,10 @@ token-issuer-mutants:
 native-read-mutants:
 	GOWORK=off python3 -I protocol/scripts/native-read-mutants.py
 
+.PHONY: transport-wallet-mutants
+transport-wallet-mutants:
+	GOWORK=off python3 protocol/scripts/transport-wallet-mutants.py
+
 # Reachability has a separate frozen corpus; the delegation corpus stays fixed.
 .PHONY: reachability-vectors-check agenttransport-reachability-mutants
 spec-check: reachability-vectors-check

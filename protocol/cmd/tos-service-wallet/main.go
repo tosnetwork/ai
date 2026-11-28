@@ -1,4 +1,5 @@
-// Command tos-service-wallet reviews and signs tos_service_v1 action JSON.
+// Command tos-service-wallet reviews and signs tos_service_v1 action JSON,
+// and journals test-network transport-delegation issuance through the relay.
 // Controller keys are ML-DSA-44 keys held in tosctl custody; the command
 // names controllers and never sees private key material.
 package main
@@ -29,6 +30,15 @@ func (p *namesFlag) Set(value string) error {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "transport-delegate" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		if err := transportCommand(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr); err != nil && !errors.Is(err, flag.ErrHelp) {
+			fail(err)
+		}
+		return
+	}
+
 	var authority, counterparty namesFlag
 	actionPath := flag.String("action", "", "absolute path to NativeActionV1 JSON")
 	outputPath := flag.String("output", "", "optional output path; stdout when empty")
