@@ -38,7 +38,7 @@ func guardSource(raw []byte) bool {
 		aliases[name] = true
 	}
 	valid := true
-	allowed := map[string]bool{"HintIndexEntry": true, "V2Client": true, "NewV2Client": true, "V2Description": true, "V2MailboxEntry": true, "StatusError": true, "RetryAfter": true, "MinEnvelopeBytes": true}
+	allowed := map[string]bool{"MailboxPolicy": true, "HintIndexEntry": true, "V2Client": true, "NewV2Client": true, "V2Description": true, "V2MailboxEntry": true, "StatusError": true, "RetryAfter": true, "MinEnvelopeBytes": true}
 	ast.Inspect(f, func(n ast.Node) bool {
 		if s, ok := n.(*ast.SelectorExpr); ok {
 			if id, ok := s.X.(*ast.Ident); ok && aliases[id.Name] && !allowed[s.Sel.Name] {

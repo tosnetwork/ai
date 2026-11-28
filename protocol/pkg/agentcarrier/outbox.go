@@ -43,9 +43,10 @@ type delivery struct {
 	State    string   `json:"state"`
 	Code     string   `json:"code"`
 	// Reserved for PR9's no-route schedule. Part 1 never advances these fields.
-	ResolveAfter   uint64       `json:"resolve_after"`
-	ResolveBackoff uint16       `json:"resolve_backoff"`
-	Generations    []generation `json:"generations"`
+	GenerationCounter uint32       `json:"generation_counter"`
+	ResolveAfter      uint64       `json:"resolve_after"`
+	ResolveBackoff    uint16       `json:"resolve_backoff"`
+	Generations       []generation `json:"generations"`
 }
 
 func packet(raw []byte) (agentpacket.Packet, error) {
@@ -257,7 +258,7 @@ func accepted(g generation) bool {
 }
 func (l *Lane) seal(r *delivery, route Route, key agentpacketseal.RecipientKey, now uint64) error {
 	kept := []generation{}
-	var number uint32
+	number := r.GenerationCounter
 	for _, g := range r.Generations {
 		number = max(number, g.Number)
 		h, err := agentpacketseal.ParseEnvelope(g.Envelope)
@@ -279,6 +280,7 @@ func (l *Lane) seal(r *delivery, route Route, key agentpacketseal.RecipientKey, 
 	if err != nil {
 		return ErrRefused
 	}
+	r.GenerationCounter = number + 1
 	r.Generations = append(kept, generation{Number: number + 1, Created: now, Envelope: raw, Secret: secret, Card: bytes.Clone(route.CardPacket), Hint: bytes.Clone(route.HintRecord), Targets: []target{}})
 	r.Code = ""
 	return l.disk.write(deliveryName(r.ID), *r)

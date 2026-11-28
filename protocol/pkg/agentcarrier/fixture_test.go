@@ -87,6 +87,8 @@ func (c *credentials) DropContact(context.Context, string, string) error {
 }
 
 type fakeRelay struct {
+	policies    []agentpacketrelay.MailboxPolicy
+	policyError error
 	afterList   func()
 	afterFetch  func()
 	waitEntered chan struct{}
@@ -112,6 +114,15 @@ type fakeRelay struct {
 
 func newRelay() *fakeRelay {
 	return &fakeRelay{envelopes: map[[32]byte][]byte{}, acked: map[[32]byte]bool{}}
+}
+func (r *fakeRelay) PublishPolicy(_ context.Context, _ string, p agentpacketrelay.MailboxPolicy, _ []byte, _ ed25519.PrivateKey) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.policyError != nil {
+		return r.policyError
+	}
+	r.policies = append(r.policies, p)
+	return nil
 }
 func (r *fakeRelay) Describe(context.Context) (agentpacketrelay.V2Description, error) {
 	return agentpacketrelay.V2Description{Schema: "tos.service.agent-packet-relay.relay.v2", MaxTTLSeconds: 3600}, nil

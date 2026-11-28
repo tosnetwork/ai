@@ -16,9 +16,11 @@ import (
 )
 
 type fakeDirectory struct {
-	records map[[32]byte][]byte
-	reads   int
-	failure error
+	published     [][]byte
+	beforePublish func([]byte)
+	records       map[[32]byte][]byte
+	reads         int
+	failure       error
 }
 
 func (d *fakeDirectory) HintIndex(context.Context, string) ([]agentpacketrelay.HintIndexEntry, error) {
@@ -43,7 +45,13 @@ func (d *fakeDirectory) HintRecord(_ context.Context, _ string, h [32]byte) ([]b
 	}
 	return bytes.Clone(raw), nil
 }
-func (d *fakeDirectory) PublishHint(context.Context, []byte) error { return d.failure }
+func (d *fakeDirectory) PublishHint(_ context.Context, raw []byte) error {
+	if d.beforePublish != nil {
+		d.beforePublish(raw)
+	}
+	d.published = append(d.published, bytes.Clone(raw))
+	return d.failure
+}
 func directoryRecord(t *testing.T, f *fixture, route Route) []byte {
 	t.Helper()
 	h, e := agenttransport.DecodeHintRecord(route.HintRecord)

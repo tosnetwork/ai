@@ -64,7 +64,8 @@ func (r *Resolver) verify(ctx context.Context, agent string, raw []byte, card []
 		return Route{}, ErrNoRoute
 	}
 	route := Route{bytes.Clone(raw), bytes.Clone(card)}
-	if _, e = r.lane.verifiedRoute(ctx, agent, route); e != nil {
+	resolved, e := r.lane.verifiedRoute(ctx, agent, route)
+	if e != nil {
 		return Route{}, e
 	}
 	// Card verification can block. Do not renew the hint pass from its return time.
@@ -72,6 +73,7 @@ func (r *Resolver) verify(ctx context.Context, agent string, raw []byte, card []
 	if !now.Before(hint.FreshUntil) || uint64(now.Unix()) >= hint.Record.Hint.ExpiresAt || uint64(now.Unix()) >= hint.Record.Hint.Delegation.NotAfter {
 		return Route{}, ErrNoRoute
 	}
+	route.CardPacket = bytes.Clone(resolved.Card)
 	return route, nil
 }
 func (r *Resolver) load(agent string) (peerHints, error) {
