@@ -59,3 +59,8 @@ two-copy fanout, no-route retries (30 seconds doubling to ten minutes), and the
 D10 generation schedule. The journal already has pending no-route state and
 reserved resolution timing fields. This PR does not start that scheduler,
 migrate an existing client or store, add direct transport, or claim live A8.
+
+Validation: run `GOWORK=off go test -race ./protocol/pkg/agentcarrier` and
+`GOWORK=off make agentcarrier-mutants`. The controls use isolated source
+overlays, require the named test to fail, and do not count compile errors or
+timeouts as a successful control. No live endpoint or wallet is needed.
