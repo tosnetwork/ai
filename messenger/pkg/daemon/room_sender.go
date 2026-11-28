@@ -365,13 +365,19 @@ func (r *roomRuntime) depositApplicationTo(ctx context.Context, send eventlog.Ro
 	if err != nil {
 		return err
 	}
-	response, err := r.relay.carrier.Carry(ctx, member, key, "", send.AbandonAtUnix, frames[0])
+	// A retry of the key carries the frame first journaled for it, which
+	// may hold an older card or evidence; what is recorded is what was sent.
+	response, sent, err := r.relay.carry(ctx, member, key, "", send.AbandonAtUnix, frames[0])
 	if err != nil {
 		return later(now.Add(roomApplicationRetry))
 	}
 	switch response.Result {
 	case carrierapi.ResultCarried:
-		_, err := journal.RoomApplicationCarried(send.RoomID, send.IdempotencyKey, member, canon.Digest(evidence), now)
+		sentEvidence, err := frameEvidence(sent)
+		if err != nil {
+			return err
+		}
+		_, err = journal.RoomApplicationCarried(send.RoomID, send.IdempotencyKey, member, canon.Digest(sentEvidence), now)
 		return err
 	case carrierapi.ResultRetry:
 		// A relay mailbox that is full (507) answers retry, as does an

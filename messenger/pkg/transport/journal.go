@@ -72,7 +72,9 @@ type journal struct {
 	lastSequence uint64
 	index        map[string]indexed
 	strangers    int
-	perPeer      map[string]int
+	// perPeer holds, per stranger, the deadlines of its acknowledgement
+	// records by record name.
+	perPeer map[string]map[string]uint64
 	// keys serializes get, sign and create of one key.
 	keys keyLocks
 }
@@ -83,7 +85,7 @@ func openJournal(stateDir string) (*journal, error) {
 	}
 	base := filepath.Join(stateDir, journalDir)
 	j := &journal{root: filepath.Join(base, "records"), cards: filepath.Join(base, cardsDir),
-		sequencePath: filepath.Join(base, "sequence"), index: map[string]indexed{}, perPeer: map[string]int{}}
+		sequencePath: filepath.Join(base, "sequence"), index: map[string]indexed{}, perPeer: map[string]map[string]uint64{}}
 	for _, dir := range []string{base, j.root, j.cards} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
@@ -91,6 +93,12 @@ func openJournal(stateDir string) (*journal, error) {
 		info, err := os.Lstat(dir)
 		if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
 			return nil, errors.New("messenger transport journal directory must be private")
+		}
+	}
+	// Temporary files of a write interrupted by a crash are not records.
+	for _, dir := range []string{base, j.root, j.cards} {
+		if err := sweepTemporary(dir); err != nil {
+			return nil, err
 		}
 	}
 	if err := j.loadSequence(); err != nil {
@@ -108,6 +116,24 @@ func openJournal(stateDir string) (*journal, error) {
 
 func (j *journal) close() error { return nil }
 
+// sweepTemporary removes the temporary files writePrivate and writeExclusive
+// leave behind when a process dies mid-write.
+func sweepTemporary(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".tmp-") || !entry.Type().IsRegular() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 func recordName(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:]) + ".json"
@@ -120,8 +146,26 @@ func (j *journal) track(name string, record carried) {
 	j.index[name] = indexed{recipient: record.Recipient, class: record.Class}
 	if record.Class == classStrangerAck {
 		j.strangers++
-		j.perPeer[record.Recipient]++
+		deadlines := j.perPeer[record.Recipient]
+		if deadlines == nil {
+			deadlines = map[string]uint64{}
+			j.perPeer[record.Recipient] = deadlines
+		}
+		deadlines[name] = record.Deadline
 	}
+}
+
+// liveStrangerAcks counts a stranger's acknowledgements not yet past their
+// deadline: the per-peer cap bounds what is in flight to one stranger, while
+// the strangers' share bounds every record the lane still holds.
+func (j *journal) liveStrangerAcks(peer string, now uint64) int {
+	live := 0
+	for _, deadline := range j.perPeer[peer] {
+		if deadline > now {
+			live++
+		}
+	}
+	return live
 }
 
 func (j *journal) untrack(name string) {
@@ -132,7 +176,8 @@ func (j *journal) untrack(name string) {
 	delete(j.index, name)
 	if entry.class == classStrangerAck {
 		j.strangers--
-		if j.perPeer[entry.recipient]--; j.perPeer[entry.recipient] <= 0 {
+		delete(j.perPeer[entry.recipient], name)
+		if len(j.perPeer[entry.recipient]) == 0 {
 			delete(j.perPeer, entry.recipient)
 		}
 	}
@@ -170,7 +215,7 @@ func (j *journal) read(name, key string) (carried, bool, error) {
 
 // create writes a new record unless one exists for its key, and returns the
 // record the journal holds: the new one, or the existing one, whose bytes win.
-func (j *journal) create(record carried) (carried, error) {
+func (j *journal) create(record carried, now uint64) (carried, error) {
 	raw, err := json.Marshal(record)
 	if err != nil || len(raw) > maxCarriedBytes {
 		return carried{}, errors.New("messenger transport journal record exceeds its bound")
@@ -179,17 +224,25 @@ func (j *journal) create(record carried) (carried, error) {
 	defer j.mu.Unlock()
 	name := recordName(record.Key)
 	if existing, found, err := j.read(name, record.Key); err != nil || found {
+		if found {
+			j.track(name, existing)
+		}
 		return existing, err
 	}
 	if len(j.index) >= maxTrackedDelivery {
 		return carried{}, errJournalFull
 	}
 	if record.Class == classStrangerAck &&
-		(j.strangers >= maxStrangerAcks || j.perPeer[record.Recipient] >= maxStrangerAcksPerPeer) {
+		(j.strangers >= maxStrangerAcks || j.liveStrangerAcks(record.Recipient, now) >= maxStrangerAcksPerPeer) {
 		return carried{}, errJournalFull
 	}
 	created, err := writeExclusive(filepath.Join(j.root, name), raw)
 	if err != nil {
+		if created {
+			// The record is in place although its directory sync failed:
+			// it counts, as a reopen would count it.
+			j.track(name, record)
+		}
 		return carried{}, err
 	}
 	if !created {

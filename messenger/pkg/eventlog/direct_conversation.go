@@ -96,7 +96,7 @@ func (j *Journal) EnsureDirectConversation(
 	if err != nil {
 		return DirectConversationRecord{}, false, errors.New("read direct conversations")
 	}
-	if len(entries) >= MaxDirectConversations {
+	if countRecords(entries) >= MaxDirectConversations {
 		return DirectConversationRecord{}, false, errors.New("direct conversation ledger is full")
 	}
 	record := DirectConversationRecord{
@@ -125,6 +125,18 @@ func (j *Journal) DirectConversation(localAgentID, remoteAgentID string) (Direct
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 	return j.readDirectConversation(localAgentID, remoteAgentID)
+}
+
+// countRecords counts the records of a ledger directory: temporary files
+// of an interrupted write are not records.
+func countRecords(entries []os.DirEntry) int {
+	count := 0
+	for _, entry := range entries {
+		if !isTransitionTemp(entry.Name()) && !strings.HasPrefix(entry.Name(), ".tmp-") {
+			count++
+		}
+	}
+	return count
 }
 
 // MaxDirectConversationsPerPage bounds one page of ListDirectConversations.

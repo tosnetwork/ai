@@ -180,3 +180,21 @@ func TestDirectConversationWalkIsStableAcrossAnUpdate(t *testing.T) {
 		}
 	}
 }
+
+// Temporary files do not count toward the ledger's bound when a new
+// conversation is created.
+func TestDirectConversationCountSkipsTemporaryFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{".transition-1", ".tmp-2", "a.json", "b.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countRecords(entries); got != 2 {
+		t.Fatalf("counted %d records", got)
+	}
+}

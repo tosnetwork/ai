@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -684,7 +685,7 @@ func TestStrangerAcksNeverTakeTheCapacityOfOwnSends(t *testing.T) {
 	taken := 0
 	for peer := 0; peer < 2*maxStrangerAcks/maxStrangerAcksPerPeer; peer++ {
 		for index := 0; index < maxStrangerAcksPerPeer+2; index++ {
-			_, err := j.create(record(fmt.Sprintf("ack-%d-%d", peer, index), fmt.Sprintf("stranger-%d", peer), classStrangerAck))
+			_, err := j.create(record(fmt.Sprintf("ack-%d-%d", peer, index), fmt.Sprintf("stranger-%d", peer), classStrangerAck), start)
 			switch {
 			case err == nil:
 				taken++
@@ -692,15 +693,15 @@ func TestStrangerAcksNeverTakeTheCapacityOfOwnSends(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if j.perPeer[fmt.Sprintf("stranger-%d", peer)] > maxStrangerAcksPerPeer {
-			t.Fatalf("a stranger holds %d records", j.perPeer[fmt.Sprintf("stranger-%d", peer)])
+		if held := j.liveStrangerAcks(fmt.Sprintf("stranger-%d", peer), start); held > maxStrangerAcksPerPeer {
+			t.Fatalf("a stranger holds %d records", held)
 		}
 	}
 	if taken != maxStrangerAcks {
 		t.Fatalf("strangers took %d records, their share is %d", taken, maxStrangerAcks)
 	}
 	for index := 0; index < maxTrackedDelivery-maxStrangerAcks; index++ {
-		if _, err := j.create(record(fmt.Sprintf("copy-%d", index), "contact", classOwn)); err != nil {
+		if _, err := j.create(record(fmt.Sprintf("copy-%d", index), "contact", classOwn), start); err != nil {
 			t.Fatalf("own send %d refused after the flood: %v", index, err)
 		}
 	}
@@ -756,12 +757,12 @@ func TestAJournalRecordIsCreatedExclusively(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := carried{Key: "copy-1", Recipient: "peer", Packet: []byte("first signature"), Deadline: start + 60}
-	if kept, err := j.create(first); err != nil || !bytes.Equal(kept.Packet, first.Packet) {
+	if kept, err := j.create(first, start); err != nil || !bytes.Equal(kept.Packet, first.Packet) {
 		t.Fatalf("first create: %v", err)
 	}
 	second := first
 	second.Packet = []byte("second signature")
-	kept, err := j.create(second)
+	kept, err := j.create(second, start)
 	if err != nil || !bytes.Equal(kept.Packet, first.Packet) {
 		t.Fatalf("a second create replaced the first bytes: %q %v", kept.Packet, err)
 	}
@@ -795,5 +796,97 @@ func TestPacketSequencesNeverGoBack(t *testing.T) {
 	}
 	if got, err := reopened.nextSequence(10); err != nil || got != 1002 {
 		t.Fatalf("sequence after a restart: %d %v", got, err)
+	}
+}
+
+// The cap per stranger counts acknowledgements still in flight: once a
+// stranger's acks are past their deadline it is answered again, while every
+// record still counts against the strangers' share until the lane drops it.
+func TestAStrangersCapCountsOnlyLiveAcks(t *testing.T) {
+	j, err := openJournal(privateDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack := func(index int, deadline uint64) carried {
+		return carried{Key: fmt.Sprintf("ack-%d", index), Recipient: "stranger", Packet: []byte("signed"),
+			Deadline: deadline, Class: classStrangerAck}
+	}
+	for index := 0; index < maxStrangerAcksPerPeer; index++ {
+		if _, err := j.create(ack(index, start+3600), start); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := j.create(ack(maxStrangerAcksPerPeer, start+3600), start); !errors.Is(err, errJournalFull) {
+		t.Fatalf("a ninth live ack to one stranger: %v", err)
+	}
+	later := start + 3601
+	if _, err := j.create(ack(maxStrangerAcksPerPeer, later+3600), later); err != nil {
+		t.Fatalf("an ack after the earlier ones expired: %v", err)
+	}
+	if j.strangers != maxStrangerAcksPerPeer+1 {
+		t.Fatalf("expired acks no longer count against the share: %d", j.strangers)
+	}
+}
+
+// Temporary files a crash left behind are removed when the journal opens.
+func TestTheJournalSweepsTemporaryFilesAtOpen(t *testing.T) {
+	dir := privateDir(t)
+	j, err := openJournal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leftovers := []string{filepath.Join(j.root, ".tmp-1"), filepath.Join(j.cards, ".tmp-2"),
+		filepath.Join(filepath.Dir(j.root), ".tmp-3")}
+	for _, path := range leftovers {
+		if err := os.WriteFile(path, []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := openJournal(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range leftovers {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s survived the open: %v", path, err)
+		}
+	}
+}
+
+// The lane's outbox is as large as the journal: own sends beyond the lane's
+// default outbox are queued, not refused at the lane's capacity.
+func TestOwnSendsAreNotCappedBelowTheJournal(t *testing.T) {
+	w := newWorld(t, "alice", "bob")
+	alice := w.open("alice", &inbound{response: answer("accepted", ackFrame(t))})
+	frame := copyFrame(t, card(t, alice), nil, [32]byte{})
+	for index := 0; index < agentcarrier.DefaultOutbox+8; index++ {
+		response, err := alice.Carry(t.Context(), w.people["bob"].agent, fmt.Sprintf("copy-%d", index), "", start+3600, frame)
+		if err != nil || response.Result == carrierapi.ResultRefused {
+			t.Fatalf("own send %d: %+v %v", index, response, err)
+		}
+	}
+}
+
+// A record another process wrote is counted once this process meets it, so
+// the in-memory bounds never undercount what is on disk.
+func TestARecordFoundOnDiskIsCounted(t *testing.T) {
+	j, err := openJournal(privateDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := carried{Key: "ack-1", Recipient: "stranger", Packet: []byte("signed elsewhere"), Deadline: start + 60,
+		Class: classStrangerAck}
+	raw, err := json.Marshal(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created, err := writeExclusive(filepath.Join(j.root, recordName(other.Key)), raw); err != nil || !created {
+		t.Fatalf("write the other process's record: %v %v", created, err)
+	}
+	if _, err := j.create(carried{Key: "ack-1", Recipient: "stranger", Packet: []byte("signed here"), Deadline: start + 60,
+		Class: classStrangerAck}, start); err != nil {
+		t.Fatal(err)
+	}
+	if len(j.index) != 1 || j.strangers != 1 {
+		t.Fatalf("the found record is not counted: %d records, %d strangers", len(j.index), j.strangers)
 	}
 }

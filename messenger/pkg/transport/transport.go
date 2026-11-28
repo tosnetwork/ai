@@ -126,6 +126,10 @@ func Open(ctx context.Context, c Config) (b *Builtin, err error) {
 	}()
 	lane := c.Lane
 	lane.Kind = agentcarrier.Chat
+	// The lane's outbox holds every key, settled ones included, for its
+	// retention; it is as large as this journal, so the journal's bounds
+	// (and the strangers' share in it) are the bounds of what the lane holds.
+	lane.OutboxLimit = maxTrackedDelivery
 	lane.VerifyPacket = b.verifyPacket
 	lane.Store = b.store
 	if b.credentials, err = agentcarrier.OpenCredentialManager(ctx, lane, c.TransportKey, c.Admitted); err != nil {
@@ -330,7 +334,7 @@ func (b *Builtin) journaled(ctx context.Context, recipient, key, withdrawKey str
 		// The signed bytes are journaled before the lane sees them, so a retry
 		// after a crash queues these bytes again instead of a new signature.
 		record, err = b.journal.create(carried{Key: key, Recipient: recipient, Packet: packet, Deadline: deadline,
-			Withdraw: withdrawKey, Class: class})
+			Withdraw: withdrawKey, Class: class}, now)
 		if err != nil {
 			if errors.Is(err, errJournalFull) {
 				refusal := carrierapi.Refusal(carrierapi.CodePeerCap)
@@ -782,6 +786,8 @@ func (b *Builtin) prune(ctx context.Context) {
 	now := uint64(b.now().Unix())
 	if records, err := b.journal.list(); err == nil {
 		for _, record := range records {
+			// Every record is kept as long as the lane keeps its key, so the
+			// strangers' share bounds what the lane holds for strangers too.
 			if record.Deadline+uint64(agentcarrier.KeyRetention/time.Second) <= now {
 				if err := b.journal.remove(record.Key); err != nil {
 					continue

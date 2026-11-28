@@ -391,6 +391,10 @@ func (r *roomRuntime) depositHandshake(ctx context.Context, record eventlog.Room
 		return
 	}
 	smallest := uint64(carrierapi.MaxRelayTTLSeconds)
+	// Part 0 carries the card and evidence. A retry of a part key carries
+	// the frame first journaled for it, so the evidence recorded is the
+	// evidence of the part 0 actually sent; the cut does not depend on it.
+	var sentEvidence []byte
 	for index, frame := range frames {
 		partKey, err := relayframe.RoomIdempotencyKey(head.ObjectDigest, member, generation, uint8(index))
 		if err != nil {
@@ -402,7 +406,7 @@ func (r *roomRuntime) depositHandshake(ctx context.Context, record eventlog.Room
 				return
 			}
 		}
-		response, err := r.relay.carrier.Carry(ctx, member, partKey, withdraw, head.RetainUntilUnix, frame)
+		response, sent, err := r.relay.carry(ctx, member, partKey, withdraw, head.RetainUntilUnix, frame)
 		if err != nil || response.Result == carrierapi.ResultRetry ||
 			(response.Result != carrierapi.ResultCarried && response.Code == carrierapi.CodePeerCap) ||
 			(response.Result != carrierapi.ResultCarried && response.Code == carrierapi.CodeNoPeerCard) {
@@ -426,6 +430,12 @@ func (r *roomRuntime) depositHandshake(ctx context.Context, record eventlog.Room
 			}
 			return
 		}
+		if index == 0 {
+			if sentEvidence, err = frameEvidence(sent); err != nil {
+				r.daemon.report("room fan-out "+record.RoomID, err)
+				return
+			}
+		}
 		if carrierapi.ValidateRelayTTL(response.RelayTTLSeconds) == nil && response.RelayTTLSeconds < smallest {
 			smallest = response.RelayTTLSeconds
 		}
@@ -435,7 +445,7 @@ func (r *roomRuntime) depositHandshake(ctx context.Context, record eventlog.Room
 	if err != nil {
 		return
 	}
-	if _, err := r.daemon.journal.RoomOutboxCarried(head.ObjectDigest, member, generation, canon.Digest(evidence),
+	if _, err := r.daemon.journal.RoomOutboxCarried(head.ObjectDigest, member, generation, canon.Digest(sentEvidence),
 		now.Add(delay), now); err != nil {
 		r.daemon.report("room fan-out "+record.RoomID, err)
 	}

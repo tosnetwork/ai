@@ -94,6 +94,18 @@ func (r *relayRuntime) carry(ctx context.Context, peer, key, withdraw string, ex
 	return response, frame, err
 }
 
+// frameEvidence returns the evidence a carried frame holds.
+func frameEvidence(raw []byte) ([]byte, error) {
+	frame, err := relayframe.Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(frame.Evidence) == 0 {
+		return nil, errors.New("a carried frame holds no evidence")
+	}
+	return frame.Evidence, nil
+}
+
 // sentGeneration is what a carried frame proves was sent: its evidence's
 // descriptor, and the digests of the card and credential it carries.
 func sentGeneration(raw []byte) (eventlog.RelayGeneration, error) {
