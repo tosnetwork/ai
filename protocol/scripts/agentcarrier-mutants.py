@@ -483,6 +483,36 @@ add(
 )
 
 
+add(
+    "hint-delegation-expiry",
+    "outbox.go",
+    "if uint64(now.Unix()) >= r.DelegationUntil {",
+    "if false && uint64(now.Unix()) >= r.DelegationUntil {",
+    "TestFinalCardReadCannotExtendHintAuthority/delegation",
+)
+add(
+    "hint-pass-freshness",
+    "outbox.go",
+    "now.Unix() < 0 || !now.Before(r.FreshUntil)",
+    "now.Unix() < 0",
+    "TestFinalCardReadCannotExtendHintAuthority/freshness",
+)
+add(
+    "hint-final-deposit-guard",
+    "outbox.go",
+    "return resolved.validAt(l.config.Now())",
+    "_ = resolved; return nil",
+    "TestFinalCardReadCannotExtendHintAuthority",
+)
+add(
+    "route-return-deadline",
+    "outbox.go",
+    "if err := result.validAt(l.config.Now()); err != nil {",
+    "if err := error(nil); err != nil {",
+    "TestVerifiedRouteRetainsAndEnforcesItsPassDeadline",
+)
+
+
 def execute(arguments):
     result = subprocess.run(
         arguments,

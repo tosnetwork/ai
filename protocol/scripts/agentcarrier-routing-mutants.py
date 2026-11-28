@@ -298,6 +298,36 @@ add(
 )
 
 
+add(
+    "hint-publication-final-deadline",
+    "publication.go",
+    "if e = pass.validAt(p.lane.config.Now()); e != nil {",
+    "_ = pass; if e = error(nil); e != nil {",
+    "TestPublicationEnforcesPassAfterItsLastBlockingStep/hint-freshness",
+)
+add(
+    "hint-publication-object-expiry",
+    "publication.go",
+    "if e = pass.validAt(p.lane.config.Now()); e != nil {",
+    "_ = pass; if e = error(nil); e != nil {",
+    "TestPublicationEnforcesPassAfterItsLastBlockingStep/hint-expiry",
+)
+add(
+    "policy-publication-final-deadline",
+    "publication.go",
+    "if e = pass.check(p.lane.config.Now()); e != nil {",
+    "_ = pass; if e = error(nil); e != nil {",
+    "TestPublicationEnforcesPassAfterItsLastBlockingStep/policy-freshness",
+)
+add(
+    "owner-grant-return-deadline",
+    "credential_manager.go",
+    "if e := pass.check(now); e != nil {",
+    "if e := error(nil); e != nil {",
+    "TestOwnerGrantDoesNotEscapeAfterItsStorageWriteOutlivesAuthority",
+)
+
+
 def execute(arguments):
     result = subprocess.run(
         arguments,

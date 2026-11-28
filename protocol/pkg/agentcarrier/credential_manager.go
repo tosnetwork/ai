@@ -138,12 +138,52 @@ func (m *CredentialManager) current(record credentialRecord) (Credential, error)
 	}
 	return c, nil
 }
-func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) (Credential, error) {
+
+type authorizationDeadline struct {
+	FreshUntil time.Time
+	Until      uint64
+}
+
+func (a authorizationDeadline) check(now time.Time) error {
+	if now.Unix() < 0 || !now.Before(a.FreshUntil) {
+		return ErrUnavailable
+	}
+	if uint64(now.Unix()) >= a.Until {
+		return ErrTransportRevoked
+	}
+	return nil
+}
+func (m *CredentialManager) liveCredential(ctx context.Context, c Credential, pass authorizationDeadline) (Credential, error) {
+	now := m.config.Now()
+	if e := pass.check(now); e != nil {
+		return Credential{}, e
+	}
+	if ctx.Err() != nil {
+		return Credential{}, ErrUnavailable
+	}
+	decoded, e := agenttransport.DecodeCredential(c.wire)
+	if e != nil {
+		return Credential{}, ErrStorage
+	}
+	until, e := decoded.NotAfter()
+	if e != nil {
+		return Credential{}, ErrStorage
+	}
+	if uint64(now.Unix()) >= until {
+		return Credential{}, ErrUnavailable
+	}
+	return c, nil
+}
+func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool, output *authorizationDeadline) (Credential, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
 	d, fresh, e := m.authority(ctx)
 	if e != nil {
 		return Credential{}, e
+	}
+	pass := authorizationDeadline{FreshUntil: fresh, Until: d.NotAfter}
+	if output != nil {
+		*output = pass
 	}
 	if !owner {
 		if _, e = agentpacketseal.AgentDigest(peer); e != nil {
@@ -200,7 +240,7 @@ func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) 
 			threshold = min(threshold, 60)
 		}
 		if bytes.Equal(previousDelegation, m.config.Delegation) && previous.Until > seconds && previous.Until-seconds > threshold {
-			return credential, nil
+			return m.liveCredential(ctx, credential, pass)
 		}
 	} else if !errors.Is(e, os.ErrNotExist) {
 		return Credential{}, e
@@ -250,16 +290,25 @@ func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) 
 	if e = m.writeCredential(ctx, name, record); e != nil {
 		return Credential{}, e
 	}
-	return NewCredential(raw, holder)
+	credential, e := NewCredential(raw, holder)
+	if e != nil {
+		return Credential{}, e
+	}
+	return m.liveCredential(ctx, credential, pass)
+}
+func (m *CredentialManager) ownerAuthorization(ctx context.Context, relay string) (Credential, authorizationDeadline, error) {
+	var pass authorizationDeadline
+	c, e := m.issue(ctx, relay, true, &pass)
+	return c, pass, e
 }
 func (m *CredentialManager) Owner(ctx context.Context, relay string) (Credential, error) {
-	return m.issue(ctx, relay, true)
+	return m.issue(ctx, relay, true, nil)
 }
 
 // IssueContact returns secret material only in an opaque value. The lane exports
 // it solely into its signed, sealed business packet and repeats until admitted.
 func (m *CredentialManager) IssueContact(ctx context.Context, peer string) (Credential, error) {
-	return m.issue(ctx, peer, false)
+	return m.issue(ctx, peer, false, nil)
 }
 func (c Credential) ExportForSealedPacket() ([]byte, []byte, error) {
 	if len(c.holder) != 64 {

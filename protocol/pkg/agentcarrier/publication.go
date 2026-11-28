@@ -205,11 +205,19 @@ func (p *Publisher) Publish(ctx context.Context) (PublicationView, error) {
 			break
 		}
 		if !slices.Contains(current.Hints, url) {
-			if e = p.lane.own(ctx); e != nil {
-				return PublicationView{Code: "transport-revoked"}, e
+			verified, err := p.lane.config.Verifier.VerifyHint(ctx, current.Raw, p.lane.config.HintPolicy)
+			if err != nil {
+				return PublicationView{}, ErrUnavailable
 			}
+			pass := resolvedRoute{FreshUntil: verified.FreshUntil, DelegationUntil: verified.Record.Hint.Delegation.NotAfter, HintUntil: verified.Record.Hint.ExpiresAt}
 			client, err := p.config.Directory(url)
 			if err == nil {
+				if e = pass.validAt(p.lane.config.Now()); e != nil {
+					return PublicationView{}, e
+				}
+				if ctx.Err() != nil {
+					return PublicationView{}, ErrUnavailable
+				}
 				err = client.PublishHint(ctx, bytes.Clone(current.Raw))
 			}
 			if err == nil {
@@ -220,13 +228,26 @@ func (p *Publisher) Publish(ctx context.Context) (PublicationView, error) {
 			}
 		}
 		if slices.Contains(p.lane.config.Relays, url) && !slices.Contains(current.Policies, url) {
-			auth, err := p.credentials.Owner(ctx, url)
+			auth, pass, err := p.credentials.ownerAuthorization(ctx, url)
 			if err != nil {
 				return PublicationView{}, err
 			}
 			client, err := p.lane.config.Relay(url)
 			if err == nil {
 				if writer, ok := client.(policyWriter); ok {
+					now, e := p.lane.now()
+					if e != nil {
+						return PublicationView{}, e
+					}
+					if e = checkCredential(auth, p.lane.config.AgentID, url, agenttransport.OperationPublish, now, nil); e != nil {
+						return PublicationView{}, e
+					}
+					if ctx.Err() != nil {
+						return PublicationView{}, ErrUnavailable
+					}
+					if e = pass.check(p.lane.config.Now()); e != nil {
+						return PublicationView{}, e
+					}
 					err = writer.PublishPolicy(ctx, p.lane.config.AgentID, current.Policy, auth.wire, auth.holder)
 				} else {
 					err = ErrConfig

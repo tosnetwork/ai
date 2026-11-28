@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
@@ -234,13 +235,38 @@ func TestResolutionCarriesFreshnessThroughCardVerification(t *testing.T) {
 	f := newFixture(t)
 	r, _ := resolverFixture(t, f)
 	contact := f.peerRoute()
-	f.lane.config.VerifyCard = func(ctx context.Context, raw []byte, now time.Time) (agentpacketseal.RecipientKey, agentpacketseal.KeyCard, error) {
-		key, card, e := f.verifyCard(ctx, raw, now)
-		f.clock.n.Store(int64(start + 601))
-		return key, card, e
+	// Keep the first candidate as the selected, newer card. A later failed
+	// candidate must not let that earlier pass escape after its deadline.
+	if _, e := r.Resolve(t.Context(), f.bob.agent, contact); e != nil {
+		t.Fatal(e)
 	}
-	if _, e := r.Resolve(t.Context(), f.bob.agent, contact); !errors.Is(e, ErrNoRoute) {
-		t.Fatal("stale hint pass survived blocking card verification", e)
+	packet, e := agentpacket.DecodeJSON(contact.CardPacket)
+	if e != nil {
+		t.Fatal(e)
+	}
+	older, e := agentpacketseal.DecodeKeyCard(packet.Payload)
+	if e != nil {
+		t.Fatal(e)
+	}
+	older.NotBeforeUnix--
+	candidate := f.cardPacket(f.bob, older)
+	f.clock.n.Store(int64(start + 599))
+	f.resolver.mu.Lock()
+	f.resolver.failure = agenttransport.ErrUnavailable
+	f.resolver.mu.Unlock()
+	reads := 0
+	f.lane.config.VerifyCard = func(ctx context.Context, raw []byte, now time.Time) (agentpacketseal.RecipientKey, agentpacketseal.KeyCard, error) {
+		reads++
+		if reads == 2 {
+			f.clock.n.Store(int64(start + 601))
+		}
+		return f.verifyCard(ctx, raw, now)
+	}
+	if _, e := r.Resolve(t.Context(), f.bob.agent, Route{CardPacket: candidate}); !errors.Is(e, ErrNoRoute) {
+		t.Fatal("stale earlier candidate escaped a later read", e)
+	}
+	if reads != 2 {
+		t.Fatal("both candidates were not reached", reads)
 	}
 }
 
