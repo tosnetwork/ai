@@ -22,7 +22,8 @@ import (
 const ContactLifetime = 3 * 24 * time.Hour
 
 // Admission is the lane's business admission decision, not a relay quota or a
-// transport delegation. A refusal never creates a contact credential.
+// transport delegation. ErrRefused denies admission; other errors are transient.
+// A refusal never creates a contact credential.
 type Admission func(context.Context, string) error
 type CredentialManager struct {
 	config   Config
@@ -149,7 +150,10 @@ func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) 
 			return Credential{}, ErrRefused
 		}
 		if e = m.admitted(ctx, peer); e != nil {
-			return Credential{}, ErrRefused
+			if errors.Is(e, ErrRefused) {
+				return Credential{}, ErrRefused
+			}
+			return Credential{}, ErrUnavailable
 		}
 	}
 	name := routingName("issued/" + peer)
@@ -277,10 +281,16 @@ func (m *CredentialManager) ReceiveContact(ctx context.Context, packetBytes []by
 		return ErrRefused
 	}
 	if e = m.config.VerifyPacket(ctx, p); e != nil {
-		return ErrRefused
+		if errors.Is(e, ErrRefused) {
+			return ErrRefused
+		}
+		return ErrUnavailable
 	}
 	if e = m.admitted(ctx, p.SenderAgentID); e != nil {
-		return ErrRefused
+		if errors.Is(e, ErrRefused) {
+			return ErrRefused
+		}
+		return ErrUnavailable
 	}
 	raw, seed, e := extract(p)
 	if e != nil || len(seed) != ed25519.SeedSize {
@@ -305,7 +315,10 @@ func (m *CredentialManager) ReceiveContact(ctx context.Context, packetBytes []by
 	}
 	_, fresh, e := m.config.Verifier.VerifyDelegationUntil(ctx, wire, agenttransport.Relay)
 	if e != nil {
-		return ErrRefused
+		if errors.Is(e, agenttransport.ErrDelegationRevoked) {
+			return ErrRefused
+		}
+		return ErrUnavailable
 	}
 	route, e := routes.Resolve(ctx, p.SenderAgentID, Route{})
 	if e != nil {

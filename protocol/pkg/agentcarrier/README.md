@@ -99,7 +99,10 @@ explicit lane ID. `IssueContact` requires business admission. Export the opaque
 credential only into a signed, sealed business header and repeat it until that
 header is acknowledged. `ReceiveContact` verifies packet/admission/issuer, obtains
 routing independently from the resolver and stores the holder seed privately;
-its extractor cannot supply a route. The business header integration is the
+its extractor cannot supply a route. Transient proof/admission failures remain
+`ErrUnavailable`; the consumer retains the private signed header for later import
+and keeps optional credential processing distinct from business admission. The
+business header integration is the
 consumer migration's responsibility. Received grants are attenuated to the exact
 relay at deposit; revoked grants are dropped before stranger fallback.
 

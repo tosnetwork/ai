@@ -213,6 +213,18 @@ func TestContactImportVerifiesPacketIssuerAdmissionAndRoute(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	originalVerifier := alice.config.VerifyPacket
+	alice.config.VerifyPacket = func(context.Context, agentpacket.Packet) error { return ErrUnavailable }
+	if e = alice.ReceiveContact(t.Context(), rawPacket, extract, r); !errors.Is(e, ErrUnavailable) {
+		t.Fatal("transient packet read became a permanent refusal", e)
+	}
+	alice.config.VerifyPacket = originalVerifier
+	originalAdmission := alice.admitted
+	alice.admitted = func(context.Context, string) error { return ErrUnavailable }
+	if e = alice.ReceiveContact(t.Context(), rawPacket, extract, r); !errors.Is(e, ErrUnavailable) {
+		t.Fatal("transient admission read became a permanent refusal", e)
+	}
+	alice.admitted = originalAdmission
 	p.Payload, e = json.Marshal(fields{wire, seed[:31]})
 	if e != nil {
 		t.Fatal(e)
