@@ -418,6 +418,28 @@ func TestWorstCaseCopyIsCheckedBeforeSealing(t *testing.T) {
 	}
 }
 
+// laterPart returns part 1 of a two-part room object with a credential and
+// holder seed written in by hand, which the encoder would refuse.
+func laterPart(t *testing.T, credential []byte, seed [32]byte) []byte {
+	t.Helper()
+	valid, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2,
+		ObjectDigest: [32]byte{0x3d}, Part: []byte("second part of a room object")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := len(canon.DomainRelayFrame) + 3 + 32 + 2 + 2
+	partLength := int(binary.BigEndian.Uint32(valid[at+2:]))
+	mutated := append([]byte(nil), valid[:at]...)
+	mutated = binary.BigEndian.AppendUint16(mutated, uint16(len(credential)))
+	mutated = append(append(mutated, credential...), seed[:]...)
+	mutated = append(mutated, valid[at+2:at+2+4+partLength]...)
+	bucket, err := relayframe.BucketFor(len(mutated))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(mutated, make([]byte, bucket-len(mutated))...)
+}
+
 // The v2 credential field: a credential of 1..2,048 bytes with a non-zero
 // holder seed, or neither; never in a later room part; and nothing but a v2
 // frame decodes.
@@ -497,6 +519,7 @@ func TestCredentialFieldRoundTripsAndIsBounded(t *testing.T) {
 			copy(b[credentialLength+2+len(credential):], make([]byte, 32))
 			return b
 		}), relayframe.ErrCredentialMalformed},
+		{"credential in a later room part", laterPart(t, credential, seed), relayframe.ErrCredentialMalformed},
 		{"v1 frame domain", mutate(func(b []byte) []byte {
 			// The retired version's separator, derived so no unregistered
 			// separator appears in source.

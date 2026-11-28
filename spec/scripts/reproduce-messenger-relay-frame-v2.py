@@ -5,9 +5,10 @@ It decodes every relay frame in the committed Messenger vectors
 (messenger/internal/vectors/testdata/relay-vectors.json and the frames of
 relay-room-vectors.json) from MESSENGER_RELAY_CARRIAGE_V1.md 1.1 as extended by
 MESSENGER_TRANSPORT_V2.md 9.3, without the Go code, and requires each to decode
-or fail exactly as its vector says. It then derives the frame-dependent bounds
-from the field bounds alone and checks them against the values the
-specification states. No network; run with python3 -I.
+or fail exactly as its vector says; every expected frame vector must be
+present. It then derives the frame-dependent bounds from the field bounds and
+checks them against values written into this script, which repeat the
+specification's numbers. No network; run with python3 -I.
 """
 
 import hashlib
@@ -142,12 +143,24 @@ def decode(raw):
     return {"kind": kind, "credential": credential, "seed": seed, "part": part}
 
 
+# Every relay frame vector this reproducer must see, and the room frames.
+EXPECTED_FRAMES = {
+    "relay-frame-copy", "relay-frame-delivery-ack", "relay-frame-evidence-request",
+    "relay-frame-evidence-response", "relay-frame-copy-credential", "relay-frame-copy-credential-maximal",
+    "relay-frame-credential-over-bound", "relay-frame-credential-zero-holder-seed",
+    "relay-frame-retired-v1-separator", "relay-frame-credential-in-later-room-part",
+}
+EXPECTED_ROOM_FRAMES = 21
+
+
 def check_vectors():
     checked = 0
+    seen = set()
     relay = json.loads((VECTORS / "relay-vectors.json").read_text())
     for vector in relay:
         if not vector["name"].startswith("relay-frame"):
             continue
+        seen.add(vector["name"])
         raw = bytes.fromhex(vector["wire_hex"])
         if len(raw) != vector["bytes"] or "sha256:" + hashlib.sha256(raw).hexdigest() != vector["sha256"]:
             raise SystemExit(f"{vector['name']}: bytes or digest")
@@ -162,6 +175,10 @@ def check_vectors():
         if vector["name"] == "relay-frame-copy-credential-maximal" and len(decoded["credential"]) != MAX_CREDENTIAL:
             raise SystemExit("maximal credential vector is not maximal")
         checked += 1
+    if seen != EXPECTED_FRAMES:
+        raise SystemExit(f"relay frame vectors missing {sorted(EXPECTED_FRAMES - seen)}, "
+                         f"unexpected {sorted(seen - EXPECTED_FRAMES)}")
+    room_frames = 0
     rooms = json.loads((VECTORS / "relay-room-vectors.json").read_text())
     for vector in rooms:
         for frame in vector.get("frames", []):
@@ -174,6 +191,9 @@ def check_vectors():
                 # refuses; every frame still decodes as a frame.
                 raise SystemExit(f"{vector['name']}: frame refused: {error}")
             checked += 1
+            room_frames += 1
+    if room_frames != EXPECTED_ROOM_FRAMES:
+        raise SystemExit(f"{room_frames} room frames, expected {EXPECTED_ROOM_FRAMES}")
     return checked
 
 

@@ -1165,7 +1165,8 @@ the lane already sends to that peer:
 - **chat lane:** a new `credential` field of the relay frame, which becomes
   `tos.messaging.relay-frame.v2`:
   `credential_length u16 (0 or 1 .. 2,048) || credential || holder_seed 32`
-  (the seed present only with a credential) directly after `evidence`,
+  (the seed present only with a credential, and never all zero) directly
+  after `evidence`,
   present until the peer acknowledged a frame that carried it, like the card
   (carriage 2.3). The frame bounds of carriage 1.1, 4 and 11.1 are recomputed
   from a real maximal frame: the frame's fixed part is 74 bytes, the largest
