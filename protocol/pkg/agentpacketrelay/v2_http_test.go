@@ -930,3 +930,15 @@ func TestV2HTTPStoppedEndpointsBecomeUnavailableAt600Seconds(t *testing.T) {
 	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
 	f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false, 201)
 }
+
+func TestV2HTTPMethodRefusalsNameTheSupportedMethod(t *testing.T) {
+	f := newV2HTTP(t)
+	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+	path := f.mail() + "/" + hex.EncodeToString(e.id[:])
+	for route, allow := range map[string]string{f.mail(): "GET", path: "GET, PUT", path + "/ack": "POST", "/v2/mailboxes/" + f.r.agentID + "/policy": "PUT"} {
+		w := f.serve(t, "DELETE", route, nil, false, 405)
+		if w.Header().Get("Allow") != allow {
+			t.Fatal(route, w.Header())
+		}
+	}
+}

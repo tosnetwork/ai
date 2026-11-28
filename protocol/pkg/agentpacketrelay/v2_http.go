@@ -309,6 +309,16 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
+		allow := "GET"
+		switch kind {
+		case "envelope":
+			allow = "GET, PUT"
+		case "policy":
+			allow = "PUT"
+		case "ack":
+			allow = "POST"
+		}
+		w.Header().Set("Allow", allow)
 		v2Fail(w, 405, CodeMethodNotAllowed)
 		return
 	}
