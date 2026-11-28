@@ -217,3 +217,7 @@ relay-v2-directory-vectors-check:
 .PHONY: relay-v2-directory-mutants
 relay-v2-directory-mutants:
 	python3 -I protocol/scripts/relay-v2-directory-mutants.py
+
+.PHONY: agentcarrier-mutants
+agentcarrier-mutants:
+	GOWORK=off python3 -I protocol/scripts/agentcarrier-mutants.py
