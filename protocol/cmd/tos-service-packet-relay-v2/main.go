@@ -29,24 +29,28 @@ import (
 )
 
 type config struct {
-	TTLSeconds     *uint64                    `json:"ttl_seconds,omitempty"`
-	TrustedProxies []string                   `json:"trusted_proxies,omitempty"`
-	StrangerCount  *int                       `json:"stranger_max_envelopes,omitempty"`
-	StrangerBytes  *int64                     `json:"stranger_max_bytes,omitempty"`
-	StrangerShare  *int                       `json:"stranger_global_share,omitempty"`
-	Listen         string                     `json:"listen"`
-	URL            string                     `json:"url"`
-	TLSCert        string                     `json:"tls_cert"`
-	TLSKey         string                     `json:"tls_key"`
-	StateDir       string                     `json:"state_dir"`
-	Checkpoint     string                     `json:"checkpoint"`
-	GlobalEntries  int                        `json:"global_entries"`
-	GlobalBytes    int64                      `json:"global_bytes"`
-	Endpoints      []string                   `json:"endpoints"`
-	Mode           agenttransport.NetworkMode `json:"mode"`
-	Network        *nativev1.NetworkDomain    `json:"network"`
-	CodeBase64     string                     `json:"code_base64"`
-	CodeHash       string                     `json:"code_hash"`
+	Directory         bool                       `json:"directory"`
+	DirectoryAgents   int                        `json:"directory_agents,omitempty"`
+	RevocationEntries int                        `json:"revocation_entries,omitempty"`
+	MaxWaiters        int                        `json:"max_waiters,omitempty"`
+	TTLSeconds        *uint64                    `json:"ttl_seconds,omitempty"`
+	TrustedProxies    []string                   `json:"trusted_proxies,omitempty"`
+	StrangerCount     *int                       `json:"stranger_max_envelopes,omitempty"`
+	StrangerBytes     *int64                     `json:"stranger_max_bytes,omitempty"`
+	StrangerShare     *int                       `json:"stranger_global_share,omitempty"`
+	Listen            string                     `json:"listen"`
+	URL               string                     `json:"url"`
+	TLSCert           string                     `json:"tls_cert"`
+	TLSKey            string                     `json:"tls_key"`
+	StateDir          string                     `json:"state_dir"`
+	Checkpoint        string                     `json:"checkpoint"`
+	GlobalEntries     int                        `json:"global_entries"`
+	GlobalBytes       int64                      `json:"global_bytes"`
+	Endpoints         []string                   `json:"endpoints"`
+	Mode              agenttransport.NetworkMode `json:"mode"`
+	Network           *nativev1.NetworkDomain    `json:"network"`
+	CodeBase64        string                     `json:"code_base64"`
+	CodeHash          string                     `json:"code_hash"`
 }
 
 func readConfig(path string) (config, error) {
@@ -142,12 +146,12 @@ func serve(ctx context.Context, c config, ready func(net.Addr)) error {
 			return errors.New("plaintext listener must be numeric loopback behind a TLS proxy")
 		}
 	}
-	store, err := agentpacketrelay.OpenV2Store(c.StateDir, limits, time.Now(), agentpacketrelay.V2OpenOptions{})
+	store, err := agentpacketrelay.OpenV2Store(c.StateDir, limits, time.Now(), agentpacketrelay.V2OpenOptions{DirectoryAgents: c.DirectoryAgents, RevocationEntries: c.RevocationEntries, MaxWaiters: c.MaxWaiters})
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	handler, err := agentpacketrelay.NewV2Server(agentpacketrelay.V2ServerConfig{Store: store, URL: c.URL, Verifier: v, TrustedProxies: proxies})
+	handler, err := agentpacketrelay.NewV2Server(agentpacketrelay.V2ServerConfig{Store: store, URL: c.URL, Verifier: v, TrustedProxies: proxies, Directory: c.Directory})
 	if err != nil {
 		return err
 	}
@@ -160,7 +164,7 @@ func serve(ctx context.Context, c config, ready func(net.Addr)) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: log.New(io.Discard, "", 0)}
+	server := &http.Server{Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: log.New(io.Discard, "", 0)}
 	maintenance, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
 	defer func() { stop(); <-done }()

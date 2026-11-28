@@ -96,7 +96,7 @@ func newV2HTTP(t testing.TB) *v2HTTPFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, err := agenttransport.IssueCredential(raw, signer, holder.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.NotBeforeCaveat(uint64(testStart.Unix()) - 1), agenttransport.NotAfterCaveat(uint64(testStart.Unix()) + 3600), agenttransport.OperationsCaveat(agenttransport.OperationList | agenttransport.OperationFetch | agenttransport.OperationDeposit | agenttransport.OperationPublish), agenttransport.RelayCaveat(v2TestURL)})
+	wire, err := agenttransport.IssueCredential(raw, signer, holder.Public().(ed25519.PublicKey), []agenttransport.Caveat{agenttransport.NotBeforeCaveat(uint64(testStart.Unix()) - 1), agenttransport.NotAfterCaveat(uint64(testStart.Unix()) + 3600), agenttransport.OperationsCaveat(agenttransport.OperationList | agenttransport.OperationFetch | agenttransport.OperationDeposit | agenttransport.OperationPublish | agenttransport.OperationRevoke), agenttransport.RelayCaveat(v2TestURL)})
 	if err != nil {
 		t.Fatal(err)
 	}

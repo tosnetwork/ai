@@ -208,6 +208,9 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 }
 
 func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admitted bool) error {
+	if s.State == nil {
+		return fmt.Errorf("%w: Agent absent", ErrDelegationRevoked)
+	}
 	agent, err := CheckState(v.config.ChainPolicy, v.config.Network, d.AgentID(), s.State)
 	if err != nil {
 		return err

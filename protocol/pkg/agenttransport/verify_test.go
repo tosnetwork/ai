@@ -551,3 +551,31 @@ func BenchmarkVerifyCached(b *testing.B) {
 		}
 	}
 }
+
+func TestPresenceAndTombstoneAreDistinctFromReadFailure(t *testing.T) {
+	f := newFixture(t)
+	adapter, err := NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, legacySource{found: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = adapter.ResolveFinalizedAgent(t.Context(), f.d.AgentID()); err == nil || errors.Is(err, ErrUnavailable) {
+		t.Fatal("nil present state treated as absence/outage", err)
+	}
+	for _, kind := range []string{"absent", "tombstone", "malformed"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newFixture(t)
+			switch kind {
+			case "absent":
+				f.r.snapshot.State = nil
+			case "tombstone":
+				f.r.snapshot.State.GetAgent().Tombstoned = true
+			case "malformed":
+				f.r.snapshot.State.GetAgent().Policy = nil
+			}
+			_, err := f.verifier(t).VerifyDelegation(t.Context(), f.wire, Relay)
+			if err == nil || errors.Is(err, ErrDelegationRevoked) != (kind != "malformed") {
+				t.Fatal(kind, err)
+			}
+		})
+	}
+}

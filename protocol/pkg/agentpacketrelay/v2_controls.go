@@ -3,6 +3,7 @@ package agentpacketrelay
 import (
 	"bytes"
 	"errors"
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"path/filepath"
 	"strings"
 )
@@ -75,7 +76,11 @@ func (s *V2Store) loadHint(name string, now uint64) error {
 	if err != nil || record.Version != "tos.service.relay-hint.v2" || hintName(record.Agent, meta.Digest) != "controls/"+name {
 		return errors.New("invalid hint record")
 	}
-	if meta.ExpiresAt <= now {
+	d, decodeErr := agenttransport.DecodeDelegation(meta.Delegation)
+	if decodeErr != nil {
+		return decodeErr
+	}
+	if meta.ExpiresAt <= now || d.NotAfter <= now {
 		return s.disk.remove("controls/" + name)
 	}
 	if len(s.hints[record.Agent]) >= 4 || (len(s.hints[record.Agent]) == 0 && len(s.hints) >= s.controlLimits.DirectoryAgents) {
