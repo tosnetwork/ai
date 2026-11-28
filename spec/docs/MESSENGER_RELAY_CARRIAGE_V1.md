@@ -19,7 +19,12 @@ moves the carrier described here out of OpenFox into this repository
 credentialed mailboxes, lanes and signed reachability hints, and adds an
 optional direct path. The frames, double encryption, relay identity evidence,
 acknowledgements and rooms of this document stay; the relay frame gains one
-field (V2 section 9.3). Until V2 is implemented this document describes the
+field (V2 section 9.3). V2 keeps no V1 compatibility: under V2 a key card's
+relay list is not a route; section 4's `relay_ttl_seconds`, re-deposit
+schedule and generation bound use the relays of the recipient's hint, not of
+its chat card; and a contact file (D4) supplies a route only through a valid
+hint record it carries, otherwise the route comes from a directory lookup
+(V2 section 9.2). Until V2 is implemented this document describes the
 running system.
 
 **Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
