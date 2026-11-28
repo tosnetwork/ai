@@ -31,6 +31,9 @@ Optional `stranger_max_envelopes`, `stranger_max_bytes` and
 `stranger_global_share` lower or select the operator limits: defaults 32,
 2 MiB and 25; hard maxima 64, 4 MiB and 25. Zero closes that allowance.
 The owner can lower its mailbox further, never enlarge the operator's limits.
+Optional trusted_proxies lists at most 16 canonical CIDR prefixes whose
+forwarded client addresses are trusted. Leave it empty for direct TLS; enable
+it only for controlled proxies, never for arbitrary peers.
 
 Copy the network tuple and registry release from the reviewed deployment
 manifest, not from a responding endpoint. The transport constructors additionally

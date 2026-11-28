@@ -28,22 +28,23 @@ import (
 )
 
 type config struct {
-	StrangerCount *int                       `json:"stranger_max_envelopes,omitempty"`
-	StrangerBytes *int64                     `json:"stranger_max_bytes,omitempty"`
-	StrangerShare *int                       `json:"stranger_global_share,omitempty"`
-	Listen        string                     `json:"listen"`
-	URL           string                     `json:"url"`
-	TLSCert       string                     `json:"tls_cert"`
-	TLSKey        string                     `json:"tls_key"`
-	StateDir      string                     `json:"state_dir"`
-	Checkpoint    string                     `json:"checkpoint"`
-	GlobalEntries int                        `json:"global_entries"`
-	GlobalBytes   int64                      `json:"global_bytes"`
-	Endpoints     []string                   `json:"endpoints"`
-	Mode          agenttransport.NetworkMode `json:"mode"`
-	Network       *nativev1.NetworkDomain    `json:"network"`
-	CodeBase64    string                     `json:"code_base64"`
-	CodeHash      string                     `json:"code_hash"`
+	TrustedProxies []string                   `json:"trusted_proxies,omitempty"`
+	StrangerCount  *int                       `json:"stranger_max_envelopes,omitempty"`
+	StrangerBytes  *int64                     `json:"stranger_max_bytes,omitempty"`
+	StrangerShare  *int                       `json:"stranger_global_share,omitempty"`
+	Listen         string                     `json:"listen"`
+	URL            string                     `json:"url"`
+	TLSCert        string                     `json:"tls_cert"`
+	TLSKey         string                     `json:"tls_key"`
+	StateDir       string                     `json:"state_dir"`
+	Checkpoint     string                     `json:"checkpoint"`
+	GlobalEntries  int                        `json:"global_entries"`
+	GlobalBytes    int64                      `json:"global_bytes"`
+	Endpoints      []string                   `json:"endpoints"`
+	Mode           agenttransport.NetworkMode `json:"mode"`
+	Network        *nativev1.NetworkDomain    `json:"network"`
+	CodeBase64     string                     `json:"code_base64"`
+	CodeHash       string                     `json:"code_hash"`
 }
 
 func readConfig(path string) (config, error) {
@@ -99,6 +100,17 @@ func (l registryLocator) Locate(code, id string) (string, error) {
 	return identity.Address, err
 }
 func serve(ctx context.Context, c config, ready func(net.Addr)) error {
+	if len(c.TrustedProxies) > 16 {
+		return errors.New("too many trusted proxy prefixes")
+	}
+	var proxies []netip.Prefix
+	for _, text := range c.TrustedProxies {
+		prefix, err := netip.ParsePrefix(text)
+		if err != nil || prefix != prefix.Masked() {
+			return errors.New("invalid trusted proxy prefix")
+		}
+		proxies = append(proxies, prefix)
+	}
 	v, err := verifier(c)
 	if err != nil {
 		return err
@@ -135,7 +147,7 @@ func serve(ctx context.Context, c config, ready func(net.Addr)) error {
 		return err
 	}
 	defer store.Close()
-	handler, err := agentpacketrelay.NewV2Server(agentpacketrelay.V2ServerConfig{Store: store, URL: c.URL, Verifier: v})
+	handler, err := agentpacketrelay.NewV2Server(agentpacketrelay.V2ServerConfig{Store: store, URL: c.URL, Verifier: v, TrustedProxies: proxies})
 	if err != nil {
 		return err
 	}
@@ -144,7 +156,7 @@ func serve(ctx context.Context, c config, ready func(net.Addr)) error {
 		return err
 	}
 	defer inner.Close()
-	listener, err := agentpacketrelay.NewLimitListener(inner, agentpacketrelay.ListenerLimits{})
+	listener, err := agentpacketrelay.NewLimitListener(inner, agentpacketrelay.ListenerLimits{TrustedProxies: proxies})
 	if err != nil {
 		return err
 	}
