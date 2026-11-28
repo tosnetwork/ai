@@ -28,7 +28,7 @@ func prekeyFixture(t *testing.T) (identity.Delegation, ed25519.PrivateKey) {
 	if err != nil {
 		t.Fatalf("derive endpoint: %v", err)
 	}
-	delegation := identity.Delegation{
+	delegation := identity.Delegation{AuthorizationEpoch: 1,
 		Network: network, AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"message.text"}, NotBeforeUnix: 1_799_999_000,

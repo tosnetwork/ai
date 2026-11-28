@@ -272,6 +272,9 @@ func (o tosctlOps) domain(ctx context.Context) (RegistryDomain, error) {
 		return RegistryDomain{}, errors.New("servicebridge: tosctl returned a domain that does not answer for the " +
 			"network label")
 	}
+	if "tvm-cell-sha256:"+answer.CodeHash != nativecore.RegistryV2CodeHash {
+		return RegistryDomain{}, errors.New("servicebridge: tosctl must select the Registry v2 code")
+	}
 	return RegistryDomain{
 		GenesisRootHash: "sha256:" + answer.GenesisRoot, GenesisFileHash: "sha256:" + answer.GenesisFile,
 		CodeHash: "tvm-cell-sha256:" + answer.CodeHash,

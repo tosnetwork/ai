@@ -89,7 +89,7 @@ func DeriveAgentID(network *nativev1.NetworkDomain, nonce []byte, policy *native
 	if err != nil {
 		return "", err
 	}
-	identity := cell.BeginCell().MustStoreUInt(identityMagic, 32).MustStoreUInt(1, 8).
+	identity := cell.BeginCell().MustStoreUInt(identityMagic, 32).MustStoreUInt(3, 8).
 		MustStoreSlice(nonce, 256).MustStoreSlice(policyCell.Hash(), 256).MustStoreRef(domain).EndCell()
 	return "agent_" + hex.EncodeToString(identity.Hash()), nil
 }

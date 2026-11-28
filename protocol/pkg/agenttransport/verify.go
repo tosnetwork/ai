@@ -13,18 +13,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// NetworkMode is explicit because the deployed registry has no epochs yet.
-type NetworkMode string
-
 const (
-	Production                 NetworkMode = "production"
-	TestNetworkLegacyEpochZero NetworkMode = "test-network-legacy-epoch-zero"
-	// TestNetworkEpochAware exercises the future boundary with synthetic snapshots;
-	// it is not a production registry adapter or evidence of registry support.
-	TestNetworkEpochAware NetworkMode = "test-network-epoch-aware"
-	MaxCacheEntries                   = 1024
-	RefreshAfter                      = 300 * time.Second
-	RefuseAfter                       = 600 * time.Second
+	MaxCacheEntries = 1024
+	RefreshAfter    = 300 * time.Second
+	RefuseAfter     = 600 * time.Second
 )
 
 // Snapshot is one atomic finalized read. Epochs are explicit metadata from the
@@ -46,7 +38,7 @@ type FinalizedResolver interface {
 
 // ErrUnavailable alone permits stale-pass fallback. Proof and integrity errors
 // must not wrap it.
-var ErrUnavailable = errors.New("finalized read unavailable")
+var ErrUnavailable = nativecore.ErrFinalizedReadUnavailable
 
 type Clock interface{ Now() time.Time }
 type systemClock struct{}
@@ -54,7 +46,6 @@ type systemClock struct{}
 func (systemClock) Now() time.Time { return time.Now() }
 
 type Config struct {
-	Mode         NetworkMode
 	Network      *nativev1.NetworkDomain
 	ChainPolicy  ChainPolicy
 	Clock        Clock
@@ -71,14 +62,14 @@ type Verifier struct {
 }
 
 func NewVerifier(c Config, r FinalizedResolver) (*Verifier, error) {
-	if err := validateApprovedTestNetwork(c.Network); err != nil {
+	if err := validateNetwork(c.Network); err != nil {
 		return nil, err
-	}
-	if c.Mode != TestNetworkLegacyEpochZero && c.Mode != TestNetworkEpochAware {
-		return nil, errors.New("production transport requires a finalized registry with authorization epochs; only explicitly named test-network modes are available")
 	}
 	if err := c.ChainPolicy.Validate(); err != nil {
 		return nil, err
+	}
+	if len(c.ChainPolicy.RegistryCodeHashes) != 1 || c.ChainPolicy.RegistryCodeHashes[0] != nativecore.RegistryV2CodeHash {
+		return nil, errors.New("transport verification requires the frozen Registry v2 code hash")
 	}
 	if r == nil {
 		return nil, errors.New("finalized resolver required")
@@ -208,34 +199,28 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 	if err != nil {
 		return err
 	}
-	if len(agent.DelegationDigests) > 128 || len(s.AdmissionEpochs) > 128 {
+	if len(agent.DelegationAdmissions) > nativecore.MaxDelegationAdmissions || len(s.AdmissionEpochs) > nativecore.MaxLiveDelegations {
 		return errors.New("finalized delegation set exceeds its bound")
 	}
+	if s.CurrentEpoch == nil || *s.CurrentEpoch == 0 ||
+		agent.AuthorizationEpoch != *s.CurrentEpoch ||
+		s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint || d.AuthorizationEpoch != *s.CurrentEpoch {
+		return errors.New("delegation epoch differs from the current finalized authorization epoch")
+	}
 	if admitted {
+		epoch, present := s.AdmissionEpochs[digest]
+		if !present || epoch != d.AuthorizationEpoch {
+			return errors.New("delegation epoch differs from its recorded admission epoch")
+		}
 		found := false
-		for _, entry := range agent.DelegationDigests {
-			if entry == "sha256:"+hex.EncodeToString(digest[:]) {
+		for _, entry := range agent.DelegationAdmissions {
+			if entry.GetDigest() == "sha256:"+hex.EncodeToString(digest[:]) && !entry.Withdrawn && entry.AdmissionEpoch == d.AuthorizationEpoch {
 				found = true
 				break
 			}
 		}
 		if !found {
 			return errors.New("delegation is not in the finalized live set")
-		}
-	}
-	if v.config.Mode == TestNetworkLegacyEpochZero {
-		if d.AuthorizationEpoch != 0 || s.CurrentEpoch != nil || s.AdmissionEpochs != nil || s.EpochCheckpoint != 0 {
-			return errors.New("legacy test network requires epoch zero and no recorded epochs")
-		}
-	} else {
-		if s.CurrentEpoch == nil || *s.CurrentEpoch == 0 || s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint || d.AuthorizationEpoch != *s.CurrentEpoch {
-			return errors.New("delegation epoch differs from the current finalized authorization epoch")
-		}
-		if admitted {
-			epoch, present := s.AdmissionEpochs[digest]
-			if !present || epoch != d.AuthorizationEpoch {
-				return errors.New("delegation epoch differs from its recorded admission epoch")
-			}
 		}
 	}
 	policy, err := nativecore.PolicyCell(agent.Policy)
@@ -246,36 +231,4 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 		return errors.New("delegation policy differs from finalized policy")
 	}
 	return nil
-}
-
-// BuildDelegation refuses issuance for a future/stale epoch or another policy.
-// It does not require membership: committing the resulting digest is a later
-// native action, authorized by the Agent's controllers.
-func (v *Verifier) BuildDelegation(ctx context.Context, d Delegation) ([]byte, error) {
-	b, err := d.Encode()
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, v.config.ReadTimeout)
-	defer cancel()
-	select {
-	case v.gate <- struct{}{}:
-		defer func() { <-v.gate }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s, err := v.resolver.ResolveFinalizedAgent(ctx, d.AgentID())
-	if expired := ctx.Err(); expired != nil {
-		return nil, expired
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err = v.checkSnapshot(d, sha256.Sum256(b), s, false); err != nil {
-		return nil, err
-	}
-	return b, nil
 }

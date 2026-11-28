@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -123,7 +124,7 @@ func TestRelayerMirrorsContractCounterpartySignatureShape(t *testing.T) {
 			t.Fatalf("empty required counterparty shape accepted for kind %d", kind)
 		}
 	}
-	for _, kind := range []Kind{KindRegisterAgent, KindDelegateAgent, KindCompleteRecovery, KindRevokeAgent,
+	for _, kind := range []Kind{KindRegisterAgent, KindDelegateAgent, KindWithdrawAgentDelegation, KindCompleteRecovery, KindRevokeAgent,
 		KindRegisterCapability, KindAddCapabilityVersion, KindRevokeCapability} {
 		if err := validateSignatureShape(kind, nil); err != nil {
 			t.Fatalf("empty counterparty shape rejected for kind %d: %v", kind, err)
@@ -420,5 +421,89 @@ func TestRecoveryCompletionUsesFinalizedChainTime(t *testing.T) {
 	relay.Resolver = resolverStub{states: map[string]*nativev1.NativeStateV1{agentID: state}, finalizedAt: time.Unix(int64(executeAfter), 0)}
 	if _, err := relay.preflightTargetTransition(context.Background(), action, built); err != nil {
 		t.Fatalf("recovery completion at finalized chain time: %v", err)
+	}
+}
+
+func TestDelegationRelayPreflight(t *testing.T) {
+	locator := testLocator(t)
+	id := "agent_" + strings.Repeat("aa", 32)
+	predecessor := "tvm-cell-sha256:" + strings.Repeat("bb", 32)
+	live := "sha256:" + strings.Repeat("11", 32)
+	retired := "sha256:" + strings.Repeat("22", 32)
+	absent := "sha256:" + strings.Repeat("33", 32)
+	for _, tc := range []struct {
+		name, digest string
+		epoch        uint64
+		withdraw     bool
+		want         ErrorCode
+	}{
+		{"add", absent, 2, false, 0},
+		{"withdraw", live, 2, true, 0},
+		{"stale-add", absent, 1, false, ErrEpochMismatch},
+		{"future-withdraw", live, 3, true, ErrEpochMismatch},
+		{"duplicate-live", live, 2, false, ErrBadTransition},
+		{"retired-add", retired, 2, false, ErrWithdrawnDigest},
+		{"retired-withdraw", retired, 2, true, ErrWithdrawnDigest},
+		{"absent-withdraw", absent, 2, true, ErrDigestNotLive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := &nativev1.ControllerPolicyV1{Threshold: 1, RecoveryThreshold: 1, Controllers: []*nativev1.ControllerV1{fakeController("delegate", PurposeDelegation, true)}}
+			state := &nativev1.NativeStateV1{TvmStateHash: predecessor, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{
+				AgentId: id, Generation: 1, Sequence: 3, Policy: policy, EncodingVersion: 2, AuthorizationEpoch: 2,
+				DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: live, AdmissionEpoch: 2}, {Digest: retired, AdmissionEpoch: 2, Withdrawn: true}},
+			}}}
+			action := &nativev1.NativeActionV1{Protocol: Protocol, Network: locator.Network, TargetObjectId: id, TargetContractCodeHash: locator.CodeHash,
+				Generation: 1, Sequence: 4, PredecessorTvmStateHash: predecessor, Nonce: bytes32('z'),
+				Payload: &nativev1.NativeActionV1_DelegateAgent{DelegateAgent: &nativev1.DelegateAgentV1{DelegationDigest: tc.digest, AuthorizationEpoch: tc.epoch}}}
+			if tc.withdraw {
+				action.Payload = &nativev1.NativeActionV1_WithdrawAgentDelegation{WithdrawAgentDelegation: &nativev1.WithdrawAgentDelegationV1{DelegationDigest: tc.digest, AuthorizationEpoch: tc.epoch}}
+			}
+			built, err := BuildAction(action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sender := &senderStub{}
+			relay := testRelayer(t, locator, sender, resolverStub{states: map[string]*nativev1.NativeStateV1{id: state}})
+			resolved, err := relay.preflightTargetTransition(t.Context(), action, built)
+			if code, _ := ErrorCodeOf(err); code != tc.want || (tc.want == 0 && err != nil) {
+				t.Fatalf("preflight: %v, want code %d", err, tc.want)
+			}
+			if tc.want == 0 {
+				authority, err := relay.resolveAuthority(t.Context(), action, built, resolved)
+				if err != nil || authority.purpose != PurposeDelegation {
+					t.Fatalf("delegation authority: %v, %v", authority, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDelegationPreflightCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		live, total int
+	}{
+		{"live-full", 128, 128},
+		{"total-full", 127, 384},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := &nativev1.AgentStateV1{EncodingVersion: 2, AuthorizationEpoch: 1}
+			for i := 0; i < tc.total; i++ {
+				agent.DelegationAdmissions = append(agent.DelegationAdmissions, &nativev1.DelegationAdmissionV1{
+					Digest: fmt.Sprintf("sha256:%064x", i+1), AdmissionEpoch: 1, Withdrawn: i >= tc.live,
+				})
+			}
+			add := "sha256:" + strings.Repeat("ff", 32)
+			if code, _ := ErrorCodeOf(CheckDelegationMutation(agent, add, 1, false)); code != ErrCapacityFull {
+				t.Fatalf("full capacity refused with %v", code)
+			}
+			if err := CheckDelegationMutation(agent, agent.DelegationAdmissions[0].Digest, 1, true); err != nil {
+				t.Fatalf("full capacity prevented withdrawal: %v", err)
+			}
+			agent.DelegationAdmissions[0].Withdrawn = true
+			if err := CheckDelegationMutation(agent, add, 1, false); (err == nil) != (tc.total < 384) {
+				t.Fatalf("replacement after withdrawal: %v", err)
+			}
+		})
 	}
 }

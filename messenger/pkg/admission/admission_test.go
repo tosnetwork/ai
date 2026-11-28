@@ -94,7 +94,7 @@ func testDelegation(t *testing.T) (identity.Delegation, []byte) {
 	if err != nil {
 		t.Fatalf("derive endpoint: %v", err)
 	}
-	delegation := identity.Delegation{
+	delegation := identity.Delegation{AuthorizationEpoch: 1,
 		Network:                       network,
 		AgentID:                       senderID,
 		EndpointID:                    endpointID,
@@ -162,7 +162,7 @@ func testLocalDelegation(t *testing.T, policy ContactPolicy) identity.Delegation
 	if err != nil {
 		t.Fatalf("derive endpoint: %v", err)
 	}
-	return identity.Delegation{
+	return identity.Delegation{AuthorizationEpoch: 1,
 		Network:                       network,
 		AgentID:                       localID,
 		EndpointID:                    endpointID,
@@ -190,10 +190,10 @@ func localState(t *testing.T, policy ContactPolicy) (identity.Delegation, []byte
 	if err != nil {
 		t.Fatalf("digest: %v", err)
 	}
-	return delegation, encoded, nativeState(&nativev1.AgentStateV1{
-		AgentId:           localID,
-		Policy:            &nativev1.ControllerPolicyV1{Threshold: 1},
-		DelegationDigests: []string{digest},
+	return delegation, encoded, nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
+		AgentId:              localID,
+		Policy:               &nativev1.ControllerPolicyV1{Threshold: 1},
+		DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}},
 	})
 }
 
@@ -233,10 +233,10 @@ func newTestGate(t *testing.T, policy ContactPolicy, seed func(*testing.T, *even
 		Network: testNetwork(),
 		Chain:   testChain(),
 		Resolver: stubResolver{states: map[string]*nativev1.NativeStateV1{
-			senderID: nativeState(&nativev1.AgentStateV1{
-				AgentId:           senderID,
-				Policy:            &nativev1.ControllerPolicyV1{Threshold: 1},
-				DelegationDigests: []string{digest},
+			senderID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
+				AgentId:              senderID,
+				Policy:               &nativev1.ControllerPolicyV1{Threshold: 1},
+				DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}},
 			}),
 			localID: localAgentState,
 		}},
@@ -291,7 +291,7 @@ func seedRoom(members ...string) func(*testing.T, *eventlog.RoomLedger) {
 		if err != nil {
 			t.Fatalf("derive room authority: %v", err)
 		}
-		delegation := identity.Delegation{Network: testNetwork(), AgentID: membership.Members[0], EndpointID: endpointID,
+		delegation := identity.Delegation{AuthorizationEpoch: 1, Network: testNetwork(), AgentID: membership.Members[0], EndpointID: endpointID,
 			IdentityPublicKey: key.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 			AllowedOutboundEventClasses: []string{"room"}, NotBeforeUnix: baseUnix, ExpiresAtUnix: baseUnix + 100,
 			MaximumSessionLifetimeSeconds: 60, ContactDescriptorPolicyDigest: "sha256:" + strings.Repeat("c", 64),
@@ -425,8 +425,8 @@ func TestAdmissionAppliesAuthorizedRoomModerationBeforeQueueing(t *testing.T) {
 	local, localRaw, localState := localState(t, policy)
 	gate, err := New(Config{Network: testNetwork(), Chain: testChain(),
 		Resolver: stubResolver{states: map[string]*nativev1.NativeStateV1{
-			senderID: nativeState(&nativev1.AgentStateV1{AgentId: senderID,
-				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{senderDigest}}),
+			senderID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: senderID,
+				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: senderDigest, AdmissionEpoch: 1}}}),
 			localID: localState}}, Journal: journal, Devices: mustDevices(t, journal), Rooms: rooms,
 		Policy: policy, LocalDelegationJSON: localRaw, LocalAgentID: local.AgentID,
 		LocalEndpointID: local.EndpointID, Now: func() time.Time { return now },
@@ -815,8 +815,8 @@ func TestContentAboveThePublishedBoundIsRefused(t *testing.T) {
 		Network: testNetwork(),
 		Chain:   testChain(),
 		Resolver: stubResolver{states: map[string]*nativev1.NativeStateV1{
-			senderID: nativeState(&nativev1.AgentStateV1{AgentId: senderID,
-				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{digest}}),
+			senderID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: senderID,
+				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}}}),
 			localID: localAgentState,
 		}},
 		Journal:             journal,
@@ -947,8 +947,8 @@ func TestGateRequiresEveryDependency(t *testing.T) {
 	defer journal.Close()
 	local, localEncoded, localAgentState := localState(t, OpenInbox())
 	resolver := stubResolver{states: map[string]*nativev1.NativeStateV1{
-		senderID: nativeState(&nativev1.AgentStateV1{AgentId: senderID,
-			Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{digest}}),
+		senderID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: senderID,
+			Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}}}),
 		localID: localAgentState,
 	}}
 	complete := Config{

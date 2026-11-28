@@ -114,6 +114,9 @@ func (r *SimplifiedNativeResolver) readNativeAtCheckpoint(ctx context.Context, a
 		vote.BlockFile != "sha256:"+hex.EncodeToString(checkpoint.FileHash) {
 		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadSequence, "DNS and Native checkpoint hashes differ", nil)
 	}
+	if vote.Frozen {
+		return nil, false, nativecore.NewProtocolError(nativecore.ErrBadTransition, "finalized Native account is frozen", nil)
+	}
 	if !vote.Found {
 		return nil, false, nil
 	}
@@ -172,6 +175,9 @@ func (r *SimplifiedNativeResolver) resolveFinalizedState(ctx context.Context, ob
 	})
 	if err != nil {
 		return nil, false, time.Time{}, err
+	}
+	if vote.Frozen {
+		return nil, false, time.Time{}, nativecore.NewProtocolError(nativecore.ErrBadTransition, "finalized Native account is frozen", nil)
 	}
 	if !vote.Found {
 		if err := r.commitCheckpoint(observation.seqno); err != nil {

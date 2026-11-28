@@ -216,6 +216,14 @@ func generateCorpus(t *testing.T, verifiers map[string]func([]byte) error) []Cor
 			"an empty document is not an object")
 	}
 
+	delegationJSON := string(validDelegationJSON(t))
+	add("endpoint-delegation/epoch-zero", "endpoint-delegation",
+		replaceNumberField(delegationJSON, "authorization_epoch", "0"),
+		"a Registry v2 Endpoint delegation must bind a positive epoch")
+	add("endpoint-delegation/legacy-schema", "endpoint-delegation",
+		setField(delegationJSON, "schema", "tos.messaging.endpoint-delegation.v2"),
+		"the legacy canonical domain cannot authorize a Registry v2 Endpoint")
+
 	// Delegation: an inverted validity window, and a zeroed policy digest.
 	add("endpoint-delegation/window-inverted", "endpoint-delegation",
 		flipUnix(string(validDelegationJSON(t)), "not_before_unix", "expires_at_unix"),

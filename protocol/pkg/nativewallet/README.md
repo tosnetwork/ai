@@ -4,15 +4,16 @@
 existing 167-byte delegation, submits `DelegateAgentV1` with the existing relay
 client and token, then waits for finalized membership before printing a public
 JSON result. It does not introduce a controller authority or a registry opcode.
-The original `--action` review/sign command remains available unchanged.
+The `--action` review/sign command requires `--registry-config` and
+`--registry-checkpoint` for delegation adds and withdrawals. It rechecks the
+finalized predecessor and epoch after confirmation and before custody signs.
 
-This is **test-network-only**. The exact network tuple must be in
-`agenttransport`'s compiled allowlist. The command accepts only explicit
-`test-network-legacy-epoch-zero` mode with `--authorization-epoch 0`, because
-the deployed registry has no epoch field. Policy A -> B -> A remains the known
-test-network revocation gap. Neither a mode string nor a config can enroll a
-production or unknown genesis. The library tests also exercise synthetic
-explicit-epoch snapshots; the command does not offer a fabricated epoch adapter.
+This command requires a reviewed test-network tuple and the frozen Registry v2
+code hash. Pass the positive current finalized epoch with
+`--authorization-epoch`. The wallet checks the epoch before signing, binds it
+in both the delegation and the action, and confirms live admission at that
+epoch using finalized state. Use the separately pinned December release to
+reconcile any outstanding Registry v1 journal.
 
 ## Custody
 
@@ -45,7 +46,6 @@ are never printed.
 
 - `network`: `network_id` (`tos:global-id:2` or `tos:global-id:3`) and the exact
   approved bare-hex `genesis_root_hash` / `genesis_file_hash`;
-- `mode`: `test-network-legacy-epoch-zero`;
 - `rpc`: three to eight independent endpoints, and `quorum`: a strict majority;
 - `registry_code_boc_base64` and independently pinned `registry_code_hash`;
 - `min_finalized_checkpoint`: the operator's known checkpoint floor;

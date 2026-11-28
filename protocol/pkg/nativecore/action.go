@@ -53,6 +53,7 @@ const (
 	KindAddCapabilityVersion
 	KindTransferCapability
 	KindRevokeCapability
+	KindWithdrawAgentDelegation
 )
 
 type BuiltAction struct {
@@ -384,17 +385,9 @@ func buildPayload(action *nativev1.NativeActionV1, targetKind uint8) (Kind, *cel
 		if targetKind != 1 || payload.DelegateAgent == nil {
 			return 0, nil, errors.New("invalid delegation")
 		}
-		// This encoder builds the v1 registry payload, which signs no epoch. An
-		// epoch here would be silently dropped from the signed bytes, so it is
-		// refused until the v2 encoding lands.
-		if payload.DelegateAgent.AuthorizationEpoch != 0 {
-			return 0, nil, errors.New("delegation authorization_epoch is not supported by this registry encoding")
-		}
-		digest, err := digestBytes(payload.DelegateAgent.DelegationDigest, "sha256:", false)
-		if err != nil {
+		if err := storeDelegationPayload(b, payload.DelegateAgent.DelegationDigest, payload.DelegateAgent.AuthorizationEpoch); err != nil {
 			return 0, nil, err
 		}
-		b.MustStoreSlice(digest, 256)
 	case *nativev1.NativeActionV1_InitiateRecovery:
 		kind = KindInitiateRecovery
 		if targetKind != 1 || payload.InitiateRecovery == nil {
@@ -486,11 +479,29 @@ func buildPayload(action *nativev1.NativeActionV1, targetKind uint8) (Kind, *cel
 			b.MustStoreBoolBit(true).MustStoreSlice(h[:], 256).MustStoreRef(stringCell(payload.RevokeCapability.Version))
 		}
 	case *nativev1.NativeActionV1_WithdrawAgentDelegation:
-		return 0, nil, errors.New("withdraw-agent-delegation is not supported by this registry encoding")
+		kind = KindWithdrawAgentDelegation
+		if targetKind != 1 || payload.WithdrawAgentDelegation == nil {
+			return 0, nil, errors.New("invalid delegation withdrawal")
+		}
+		if err := storeDelegationPayload(b, payload.WithdrawAgentDelegation.DelegationDigest, payload.WithdrawAgentDelegation.AuthorizationEpoch); err != nil {
+			return 0, nil, err
+		}
 	default:
 		return 0, nil, errors.New("missing Native action payload")
 	}
 	return kind, b.EndCell(), nil
+}
+
+func storeDelegationPayload(b *cell.Builder, value string, epoch uint64) error {
+	digest, err := digestBytes(value, "sha256:", false)
+	if err != nil {
+		return err
+	}
+	if epoch == 0 {
+		return errors.New("delegation authorization epoch must be positive")
+	}
+	b.MustStoreSlice(digest, 256).MustStoreUInt(epoch, 64)
+	return nil
 }
 
 func validatePolicy(policy *nativev1.ControllerPolicyV1) (map[string]*nativev1.ControllerV1, error) {

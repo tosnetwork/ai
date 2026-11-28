@@ -110,7 +110,7 @@ type frozenNegativeMutation struct {
 
 func TestFrozenRegistrationVectors(t *testing.T) {
 	vectors := loadFrozenVectors(t)
-	if vectors.ContractCodeHash != "tvm-cell-sha256:d3bb66d0011a1f362dd0be8408ed688f4e740d096a0e2dc2a79fc0ffc628b28a" {
+	if vectors.ContractCodeHash != RegistryV2CodeHash {
 		t.Fatalf("frozen vectors pin another Registry code: %s", vectors.ContractCodeHash)
 	}
 	if vectors.Signature.Suite != "ML-DSA-44" || vectors.Signature.Context != "TOS-NATIVE-REGISTRY" {

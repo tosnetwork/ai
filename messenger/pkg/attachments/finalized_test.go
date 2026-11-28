@@ -44,7 +44,7 @@ func finalizedAttachmentFixture(t *testing.T) (*FinalizedAuthority, CapabilityGr
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := identity.Delegation{Network: network, AgentID: agentID, EndpointID: endpointID,
+	delegation := identity.Delegation{AuthorizationEpoch: 1, Network: network, AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), ADNLID: "adnl:" + strings.Repeat("2", 64),
 		AllowedProtocolVersions: []uint32{1}, AllowedOutboundEventClasses: []string{"artifact"},
 		NotBeforeUnix: 1_799_999_000, ExpiresAtUnix: 1_800_010_000, MaximumSessionLifetimeSeconds: 3600,
@@ -60,8 +60,8 @@ func finalizedAttachmentFixture(t *testing.T) (*FinalizedAuthority, CapabilityGr
 	resolver := &attachmentResolver{state: &nativev1.NativeStateV1{Network: network,
 		TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("5", 64),
 		Reference:    &nativev1.ChainReference{Account: attachmentAccount, TransactionHash: "sha256:" + strings.Repeat("6", 64), ContractCodeHash: attachmentRegistry, FinalizedCheckpoint: 100},
-		State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: agentID,
-			Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{digest}}}}}
+		State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: agentID,
+			Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}}}}}}
 	policy := identity.ChainPolicy{RegistryCodeHashes: []string{attachmentRegistry}, Locator: attachmentLocator{}}
 	authority, err := NewFinalizedAuthority(resolver, network, policy, attachmentDelegationSource{raw: raw})
 	if err != nil {
@@ -89,7 +89,7 @@ func TestFinalizedAttachmentAuthorityRechecksEveryOperation(t *testing.T) {
 		t.Fatal("cross-network attachment grant accepted")
 	}
 	grant.GenesisFileHash = delegation.Network.GenesisFileHash
-	resolver.state.GetAgent().DelegationDigests = []string{"sha256:" + strings.Repeat("8", 64)}
+	resolver.state.GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + strings.Repeat("8", 64), AdmissionEpoch: 1}}
 	if _, err := authority.ResolveAttachmentEndpoint(context.Background(), grant, now); err == nil {
 		t.Fatal("revoked attachment delegation remained usable")
 	}

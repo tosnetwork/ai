@@ -89,7 +89,7 @@ func testDelegation(t *testing.T) Delegation {
 	if err != nil {
 		t.Fatalf("derive endpoint: %v", err)
 	}
-	return Delegation{
+	return Delegation{AuthorizationEpoch: 1,
 		Network:                       network,
 		AgentID:                       agentID,
 		EndpointID:                    endpointID,
@@ -112,10 +112,10 @@ func liveAgent(t *testing.T, delegation Delegation) stubResolver {
 		t.Fatalf("digest: %v", err)
 	}
 	return stubResolver{states: map[string]*nativev1.NativeStateV1{
-		delegation.AgentID: nativeState(&nativev1.AgentStateV1{
-			AgentId:           delegation.AgentID,
-			Policy:            &nativev1.ControllerPolicyV1{Threshold: 1},
-			DelegationDigests: []string{"sha256:" + strings.Repeat("9", 64), digest},
+		delegation.AgentID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
+			AgentId:              delegation.AgentID,
+			Policy:               &nativev1.ControllerPolicyV1{Threshold: 1},
+			DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + strings.Repeat("9", 64), AdmissionEpoch: 1}, {Digest: digest, AdmissionEpoch: 1}},
 		}),
 	}}
 }
@@ -149,7 +149,7 @@ func TestRoundTripPreservesDigest(t *testing.T) {
 func TestDigestIsStable(t *testing.T) {
 	// A fixed vector. A change here is a wire-format change and must be a
 	// deliberate decision, not an accident of refactoring.
-	const expected = "sha256:f992d179ee370b57c2f7f9d94f5f7ba499132914ea4821d7db15b672e95fd680"
+	const expected = "sha256:58f3852818e237f1c6d523afed190f94b28c1c415f56ed2b7f26ca6b2f35438e"
 	digest, err := Digest(testDelegation(t))
 	if err != nil {
 		t.Fatalf("digest: %v", err)
@@ -168,15 +168,16 @@ func TestEveryFieldChangesTheDigest(t *testing.T) {
 	otherKey := make(ed25519.PublicKey, ed25519.PublicKeySize)
 	otherKey[0] = 0x2f
 	mutations := map[string]func(*Delegation){
-		"network id":       func(d *Delegation) { d.Network.NetworkId = "tos-other" },
-		"genesis root":     func(d *Delegation) { d.Network.GenesisRootHash = strings.Repeat("c", 64) },
-		"genesis file":     func(d *Delegation) { d.Network.GenesisFileHash = strings.Repeat("d", 64) },
-		"adnl id":          func(d *Delegation) { d.ADNLID = "adnl:" + strings.Repeat("3e", 32) },
-		"protocol version": func(d *Delegation) { d.AllowedProtocolVersions = []uint32{1, 3} },
-		"event class":      func(d *Delegation) { d.AllowedOutboundEventClasses = []string{"approval", "text"} },
-		"not before":       func(d *Delegation) { d.NotBeforeUnix = base.NotBeforeUnix + 1 },
-		"expires at":       func(d *Delegation) { d.ExpiresAtUnix = base.ExpiresAtUnix + 1 },
-		"session lifetime": func(d *Delegation) { d.MaximumSessionLifetimeSeconds = 7200 },
+		"authorization epoch": func(d *Delegation) { d.AuthorizationEpoch++ },
+		"network id":          func(d *Delegation) { d.Network.NetworkId = "tos-other" },
+		"genesis root":        func(d *Delegation) { d.Network.GenesisRootHash = strings.Repeat("c", 64) },
+		"genesis file":        func(d *Delegation) { d.Network.GenesisFileHash = strings.Repeat("d", 64) },
+		"adnl id":             func(d *Delegation) { d.ADNLID = "adnl:" + strings.Repeat("3e", 32) },
+		"protocol version":    func(d *Delegation) { d.AllowedProtocolVersions = []uint32{1, 3} },
+		"event class":         func(d *Delegation) { d.AllowedOutboundEventClasses = []string{"approval", "text"} },
+		"not before":          func(d *Delegation) { d.NotBeforeUnix = base.NotBeforeUnix + 1 },
+		"expires at":          func(d *Delegation) { d.ExpiresAtUnix = base.ExpiresAtUnix + 1 },
+		"session lifetime":    func(d *Delegation) { d.MaximumSessionLifetimeSeconds = 7200 },
 		"descriptor policy": func(d *Delegation) {
 			d.ContactDescriptorPolicyDigest = "sha256:" + strings.Repeat("5b", 32)
 		},
@@ -344,7 +345,7 @@ func TestVerifyRejectsUnauthorizedDelegations(t *testing.T) {
 	tombstoned.states[delegation.AgentID].GetAgent().Tombstoned = true
 
 	uncommitted := liveAgent(t, delegation)
-	uncommitted.states[delegation.AgentID].GetAgent().DelegationDigests = []string{"sha256:" + strings.Repeat("9", 64)}
+	uncommitted.states[delegation.AgentID].GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + strings.Repeat("9", 64), AdmissionEpoch: 1}}
 
 	noPolicy := liveAgent(t, delegation)
 	noPolicy.states[delegation.AgentID].GetAgent().Policy = nil
@@ -459,10 +460,10 @@ func TestVerifyRefusesStateForAnotherAgent(t *testing.T) {
 		t.Fatalf("digest: %v", err)
 	}
 	confused := stubResolver{states: map[string]*nativev1.NativeStateV1{
-		delegation.AgentID: nativeState(&nativev1.AgentStateV1{
-			AgentId:           "agent_" + strings.Repeat("e", 64),
-			Policy:            &nativev1.ControllerPolicyV1{Threshold: 1},
-			DelegationDigests: []string{digest},
+		delegation.AgentID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
+			AgentId:              "agent_" + strings.Repeat("e", 64),
+			Policy:               &nativev1.ControllerPolicyV1{Threshold: 1},
+			DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}},
 		}),
 	}}
 	if _, err := Verify(confused, testNetwork(), testChain(), raw, time.Unix(int64(delegation.NotBeforeUnix)+1, 0)); err == nil {
@@ -474,7 +475,7 @@ func TestVerifyRefusesStateForAnotherAgent(t *testing.T) {
 // point is what happens when the resolver is not correct.
 func TestChainStateIsReVerifiedAtTheBoundary(t *testing.T) {
 	delegation := testDelegation(t)
-	agent := &nativev1.AgentStateV1{
+	agent := &nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
 		AgentId: delegation.AgentID,
 		Policy:  &nativev1.ControllerPolicyV1{Threshold: 1},
 	}
@@ -507,7 +508,7 @@ func TestChainStateIsReVerifiedAtTheBoundary(t *testing.T) {
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			state := nativeState(&nativev1.AgentStateV1{
+			state := nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
 				AgentId: delegation.AgentID,
 				Policy:  &nativev1.ControllerPolicyV1{Threshold: 1},
 			})
@@ -528,7 +529,7 @@ func TestStateOlderThanAKnownCheckpointIsRefused(t *testing.T) {
 	delegation := testDelegation(t)
 	policy := testChain()
 	policy.MinFinalizedCheckpoint = 500
-	state := nativeState(&nativev1.AgentStateV1{
+	state := nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
 		AgentId: delegation.AgentID,
 		Policy:  &nativev1.ControllerPolicyV1{Threshold: 1},
 	})
@@ -565,7 +566,7 @@ func TestChainPolicyMustNameARegistry(t *testing.T) {
 func TestAgentStateMustComeFromTheAgentAccount(t *testing.T) {
 	delegation := testDelegation(t)
 	agentID := delegation.AgentID
-	agent := &nativev1.AgentStateV1{AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1}}
+	agent := &nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1}}
 	policy := testChain()
 
 	state := nativeState(agent)
@@ -591,5 +592,40 @@ func TestAgentStateMustComeFromTheAgentAccount(t *testing.T) {
 	// A policy with no locator cannot decide anything at all.
 	if err := (ChainPolicy{RegistryCodeHashes: []string{testRegistryCode}}).Validate(); err == nil {
 		t.Fatal("a chain policy with no locator was accepted")
+	}
+}
+
+func TestEndpointDelegationRequiresFinalizedEpoch(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		encoded, current, admitted uint64
+		withdrawn                  bool
+	}{
+		{"stale", 1, 2, 1, false},
+		{"future", 2, 1, 2, false},
+		{"admission-epoch", 1, 1, 2, false},
+		{"withdrawn", 1, 1, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delegation := testDelegation(t)
+			delegation.AuthorizationEpoch = tc.encoded
+			raw, err := EncodeJSON(delegation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolver := liveAgent(t, delegation)
+			agent := resolver.states[delegation.AgentID].GetAgent()
+			agent.AuthorizationEpoch = tc.current
+			agent.DelegationAdmissions[1].AdmissionEpoch = tc.admitted
+			agent.DelegationAdmissions[1].Withdrawn = tc.withdrawn
+			now := time.Unix(int64(delegation.NotBeforeUnix)+1, 0)
+			if _, err = Verify(resolver, testNetwork(), testChain(), raw, now); err == nil {
+				t.Fatal("invalid epoch or withdrawal accepted")
+			}
+			_, err = BuildDelegation(resolver, testChain(), delegation)
+			if (err != nil) != (tc.encoded != tc.current) {
+				t.Fatalf("issuance epoch: %v", err)
+			}
+		})
 	}
 }

@@ -307,7 +307,7 @@ func roomDelegation(t *testing.T, agentID string, seed byte) (identity.Delegatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	return identity.Delegation{Network: network, AgentID: agentID, EndpointID: endpointID,
+	return identity.Delegation{AuthorizationEpoch: 1, Network: network, AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"room"}, NotBeforeUnix: 1, ExpiresAtUnix: 2_000_000_000,
 		MaximumSessionLifetimeSeconds: 3600, ContactDescriptorPolicyDigest: "sha256:" + strings.Repeat("c", 64),

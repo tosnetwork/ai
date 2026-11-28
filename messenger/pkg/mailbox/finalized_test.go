@@ -46,7 +46,7 @@ func finalizedFixture(t *testing.T) (*FinalizedAuthority, CapabilityGrant, *mail
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := identity.Delegation{Network: network, AgentID: agentID, EndpointID: endpointID, IdentityPublicKey: key.Public().(ed25519.PublicKey), ADNLID: "adnl:" + strings.Repeat("2", 64), AllowedProtocolVersions: []uint32{1}, AllowedOutboundEventClasses: []string{"text"}, NotBeforeUnix: 1_799_999_000, ExpiresAtUnix: 1_800_010_000, MaximumSessionLifetimeSeconds: 3600, ContactDescriptorPolicyDigest: "sha256:" + strings.Repeat("3", 64), InboxAdmissionPolicyDigest: "sha256:" + strings.Repeat("4", 64)}
+	delegation := identity.Delegation{AuthorizationEpoch: 1, Network: network, AgentID: agentID, EndpointID: endpointID, IdentityPublicKey: key.Public().(ed25519.PublicKey), ADNLID: "adnl:" + strings.Repeat("2", 64), AllowedProtocolVersions: []uint32{1}, AllowedOutboundEventClasses: []string{"text"}, NotBeforeUnix: 1_799_999_000, ExpiresAtUnix: 1_800_010_000, MaximumSessionLifetimeSeconds: 3600, ContactDescriptorPolicyDigest: "sha256:" + strings.Repeat("3", 64), InboxAdmissionPolicyDigest: "sha256:" + strings.Repeat("4", 64)}
 	raw, err := identity.EncodeJSON(delegation)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func finalizedFixture(t *testing.T) (*FinalizedAuthority, CapabilityGrant, *mail
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := &mailboxResolver{state: &nativev1.NativeStateV1{Network: network, TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("5", 64), Reference: &nativev1.ChainReference{Account: finalizedAccount, TransactionHash: "sha256:" + strings.Repeat("6", 64), ContractCodeHash: finalizedRegistry, FinalizedCheckpoint: 100}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{digest}}}}}
+	resolver := &mailboxResolver{state: &nativev1.NativeStateV1{Network: network, TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("5", 64), Reference: &nativev1.ChainReference{Account: finalizedAccount, TransactionHash: "sha256:" + strings.Repeat("6", 64), ContractCodeHash: finalizedRegistry, FinalizedCheckpoint: 100}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}}}}}}
 	policy := identity.ChainPolicy{RegistryCodeHashes: []string{finalizedRegistry}, Locator: mailboxLocator{}}
 	authority, err := NewFinalizedAuthority(resolver, network, policy, mailboxDelegationSource{raw: raw})
 	if err != nil {
@@ -82,7 +82,7 @@ func TestFinalizedAuthorityRechecksCommitmentAndGrantLifetime(t *testing.T) {
 		t.Fatal("cross-network grant accepted")
 	}
 	grant.GenesisRootHash = delegation.Network.GenesisRootHash
-	resolver.state.GetAgent().DelegationDigests = []string{"sha256:" + strings.Repeat("8", 64)}
+	resolver.state.GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + strings.Repeat("8", 64), AdmissionEpoch: 1}}
 	if _, err := authority.ResolveMailboxEndpoint(context.Background(), grant, now); err == nil {
 		t.Fatal("revoked finalized delegation remained usable")
 	}

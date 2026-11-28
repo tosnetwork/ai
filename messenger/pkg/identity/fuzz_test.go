@@ -12,7 +12,7 @@ type nativeNetwork = nativev1.NetworkDomain
 // Decoders are the only place untrusted bytes enter, so they are the only
 // place a panic turns a malformed message into a crash.
 func FuzzDecodeJSON(f *testing.F) {
-	delegation := Delegation{
+	delegation := Delegation{AuthorizationEpoch: 1,
 		Network:                       testNetworkFuzz(),
 		AgentID:                       "agent_" + repeat("c", 64),
 		IdentityPublicKey:             make([]byte, 32),

@@ -1,10 +1,11 @@
 // Package agenttransport implements the fixed transport delegation boundary.
 // Delegations have no off-chain issuer signature: finalized registry membership
-// authorizes their exact digest. Production use awaits registry epoch support.
+// authorizes their exact digest.
 package agenttransport
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -109,4 +110,36 @@ func DelegationDigest(b []byte) ([32]byte, error) {
 		return [32]byte{}, err
 	}
 	return sha256.Sum256(b), nil
+}
+
+// BuildDelegation refuses issuance for a future/stale epoch or another policy.
+// It does not require membership: committing the resulting digest is a later
+// native action, authorized by the Agent's controllers.
+func (v *Verifier) BuildDelegation(ctx context.Context, d Delegation) ([]byte, error) {
+	b, err := d.Encode()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, v.config.ReadTimeout)
+	defer cancel()
+	select {
+	case v.gate <- struct{}{}:
+		defer func() { <-v.gate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s, err := v.resolver.ResolveFinalizedAgent(ctx, d.AgentID())
+	if expired := ctx.Err(); expired != nil {
+		return nil, expired
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = v.checkSnapshot(d, sha256.Sum256(b), s, false); err != nil {
+		return nil, err
+	}
+	return b, nil
 }

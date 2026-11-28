@@ -35,6 +35,7 @@ func vectorVerifier(t *testing.T, d Delegation, now uint64) *Verifier {
 	f := newFixture(t)
 	f.d = d
 	f.r.snapshot.State.GetAgent().AgentId = d.AgentID()
+	f.r.snapshot.State.GetAgent().AuthorizationEpoch = d.AuthorizationEpoch
 	epoch := d.AuthorizationEpoch
 	f.r.snapshot.CurrentEpoch = &epoch
 	f.clock.at = time.Unix(int64(now), 0)

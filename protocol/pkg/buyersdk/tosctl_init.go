@@ -19,6 +19,7 @@ import (
 
 	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 // The tosctl commands `tos-service-buyer init` drives (MCP_BUYER_ADAPTER_V1
@@ -271,6 +272,9 @@ func (c *TOSCTLInitCustody) Domain(ctx context.Context) (RegistryDomain, error) 
 		!hex64(answer.GenesisRoot) || !hex64(answer.GenesisFile) || !hex64(answer.CodeHash) {
 		return RegistryDomain{}, fmt.Errorf("tosctl %s: the domain does not answer for the network label: %w", label,
 			ErrTOSCTLAnswer)
+	}
+	if "tvm-cell-sha256:"+answer.CodeHash != nativecore.RegistryV2CodeHash {
+		return RegistryDomain{}, fmt.Errorf("tosctl %s: expected Registry v2 code: %w", label, ErrTOSCTLAnswer)
 	}
 	return RegistryDomain{NetworkLabel: c.label, GenesisRootHash: "sha256:" + answer.GenesisRoot,
 		GenesisFileHash: "sha256:" + answer.GenesisFile, CodeHash: "tvm-cell-sha256:" + answer.CodeHash}, nil

@@ -14,13 +14,12 @@ frozen to the captured chain time so the original deadline and monitor guards
 are exercised without modifying transaction cells or bypassing verification.
 The unused custody executable is the test binary; none of these tests signs.
 
-The node wiring test opens the real node, admits the task through its real gate,
-then checks alarm and stale-report refusals without executing a callback. A clear
-report is the positive control. Discarding the safety result must execute the
-callback and fail the test. The provider retry test starts with an admitted slot
-and no provider record: `HandleTask` must call the failing sentinel runner once,
-retain its failure, and refuse a second execution. Inverting the retry branch
-must fail that assertion.
+The Registry v2 compatibility test opens the node against the original
+responses and checks that typed state decoding refuses the historical Registry
+v1 purchase evidence. The monitor wiring and provider retry tests use a
+separate synthetic Registry v2 session. They exercise the same provider gate
+installation, alarm and stale-report refusals, retry of an admitted slot without
+a provider record, and single execution when a record exists.
 
 Upstream comparison: this provider and its token-rail tests have no upstream
 counterpart; inherited validator and VM code is unchanged.

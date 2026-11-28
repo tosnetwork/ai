@@ -12,14 +12,14 @@ import (
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
-	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 func commandTransportConfig() transportConfig {
-	return transportConfig{Mode: agenttransport.TestNetworkLegacyEpochZero, Network: &nativev1.NetworkDomain{NetworkId: "tos:global-id:3", GenesisRootHash: "65735247a371030abe811aeac0afe357301ce90e161450d26f88b4beb5b4c366", GenesisFileHash: "c3860fe196a2a1b5e4e74a9cf9448624a353ce68a8c4c5f6413347586d688769"}}
+	return transportConfig{RegistryCodeHash: nativecore.RegistryV2CodeHash, Network: &nativev1.NetworkDomain{NetworkId: "tos:global-id:3", GenesisRootHash: "65735247a371030abe811aeac0afe357301ce90e161450d26f88b4beb5b4c366", GenesisFileHash: "c3860fe196a2a1b5e4e74a9cf9448624a353ce68a8c4c5f6413347586d688769"}}
 }
 func TestTransportCommandNetworkGatePrecedesSideEffects(t *testing.T) {
-	for _, name := range []string{"production", "unknown", "mode", "epoch"} {
+	for _, name := range []string{"production", "unknown", "v1-code", "epoch"} {
 		t.Run(name, func(t *testing.T) {
 			config := commandTransportConfig()
 			if name == "production" {
@@ -28,8 +28,8 @@ func TestTransportCommandNetworkGatePrecedesSideEffects(t *testing.T) {
 			if name == "unknown" {
 				config.Network.GenesisRootHash = strings.Repeat("9", 64)
 			}
-			if name == "mode" {
-				config.Mode = agenttransport.Production
+			if name == "v1-code" {
+				config.RegistryCodeHash = "tvm-cell-sha256:" + strings.Repeat("9", 64)
 			}
 			dir := t.TempDir()
 			configPath := filepath.Join(dir, "config.json")
@@ -42,7 +42,7 @@ func TestTransportCommandNetworkGatePrecedesSideEffects(t *testing.T) {
 			}
 			journal := filepath.Join(dir, "never-created")
 			args := []string{"--transport-config", configPath, "--journal", journal}
-			if name == "epoch" {
+			if name != "epoch" {
 				args = append(args, "--authorization-epoch", "1")
 			}
 			var out, review bytes.Buffer
@@ -54,7 +54,8 @@ func TestTransportCommandNetworkGatePrecedesSideEffects(t *testing.T) {
 				if !strings.Contains(err.Error(), "allowlist") {
 					t.Fatal("refused for unrelated reason:", err)
 				}
-			} else if !strings.Contains(err.Error(), "test-network-legacy-epoch-zero") {
+			} else if name == "epoch" && !strings.Contains(err.Error(), "positive current authorization epoch") ||
+				name == "v1-code" && !strings.Contains(err.Error(), "Registry v2 code hash") {
 				t.Fatal("refused for unrelated reason:", err)
 			}
 			if _, err = os.Stat(journal); !os.IsNotExist(err) {

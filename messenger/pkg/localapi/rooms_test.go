@@ -64,7 +64,7 @@ func installPrivateRoom(t *testing.T, h *harness, members ...string) eventlog.Ro
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := identity.Delegation{Network: network, AgentID: authorityID, EndpointID: endpointID,
+	delegation := identity.Delegation{AuthorizationEpoch: 1, Network: network, AgentID: authorityID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"room"}, NotBeforeUnix: 1, ExpiresAtUnix: 2_000_000_000,
 		MaximumSessionLifetimeSeconds: 3600, ContactDescriptorPolicyDigest: "sha256:" + strings.Repeat("c", 64),
@@ -317,7 +317,7 @@ func inviteAuthorityBinding(t *testing.T) group.LeafBinding {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := identity.Delegation{Network: network, AgentID: authorityID, EndpointID: endpointID,
+	delegation := identity.Delegation{AuthorizationEpoch: 1, Network: network, AgentID: authorityID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), NotBeforeUnix: 1, ExpiresAtUnix: 2_000_000_000}
 	return roomLeafBinding(t, delegation, key, baseUnix-10, testRoomEnd)
 }

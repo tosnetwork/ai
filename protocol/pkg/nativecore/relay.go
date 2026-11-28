@@ -320,7 +320,7 @@ func (r *Relayer) resolveAuthority(ctx context.Context, action *nativev1.NativeA
 	authorityAgent := action.TargetObjectId
 	resolved := resolvedAuthority{purpose: PurposeAgentControl}
 	switch payload := action.Payload.(type) {
-	case *nativev1.NativeActionV1_DelegateAgent:
+	case *nativev1.NativeActionV1_DelegateAgent, *nativev1.NativeActionV1_WithdrawAgentDelegation:
 		resolved.purpose = PurposeDelegation
 	case *nativev1.NativeActionV1_InitiateRecovery, *nativev1.NativeActionV1_CompleteRecovery:
 		resolved.purpose, resolved.recovery = PurposeRecovery, true
@@ -475,13 +475,17 @@ func (r *Relayer) preflightTargetTransition(ctx context.Context, action *nativev
 		if err := validateOrdering(agent.Generation, agent.Sequence); err != nil {
 			return nil, err
 		}
+		if agent.AuthorizationEpoch == math.MaxUint64 && (built.Kind == KindUpdateAgentPolicy ||
+			built.Kind == KindCompleteRecovery || built.Kind == KindRevokeAgent) {
+			return nil, nativeError(ErrEpochExhausted, "Agent authorization epoch is exhausted")
+		}
 		switch payload := action.Payload.(type) {
 		case *nativev1.NativeActionV1_DelegateAgent:
-			for _, digest := range agent.DelegationDigests {
-				if digest == payload.DelegateAgent.DelegationDigest {
-					return nil, nativeError(ErrBadTransition, "Agent delegation already exists")
-				}
-			}
+			err := CheckDelegationMutation(agent, payload.DelegateAgent.DelegationDigest, payload.DelegateAgent.AuthorizationEpoch, false)
+			return state, err
+		case *nativev1.NativeActionV1_WithdrawAgentDelegation:
+			err := CheckDelegationMutation(agent, payload.WithdrawAgentDelegation.DelegationDigest, payload.WithdrawAgentDelegation.AuthorizationEpoch, true)
+			return state, err
 		case *nativev1.NativeActionV1_InitiateRecovery:
 			chainTime := uint64(finalizedAt.Unix())
 			safetySeconds := uint64(r.RecoverySafety / time.Second)
@@ -552,4 +556,33 @@ func (r *Relayer) preflightTargetTransition(ctx context.Context, action *nativev
 		return nil, nativeError(ErrBadTransition, "Agent action cannot target Capability state")
 	}
 	return state, nil
+}
+
+// CheckDelegationMutation checks an add or withdrawal against one finalized Agent state.
+func CheckDelegationMutation(agent *nativev1.AgentStateV1, digest string, epoch uint64, withdraw bool) error {
+	if agent.GetEncodingVersion() != StateEncodingVersion || epoch == 0 || epoch != agent.GetAuthorizationEpoch() {
+		return nativeError(ErrEpochMismatch, "delegation epoch differs from finalized authorization epoch")
+	}
+	live := 0
+	for _, entry := range agent.DelegationAdmissions {
+		if entry.Digest == digest {
+			if entry.Withdrawn {
+				return nativeError(ErrWithdrawnDigest, "Agent delegation was withdrawn")
+			}
+			if withdraw {
+				return nil
+			}
+			return nativeError(ErrBadTransition, "Agent delegation already exists")
+		}
+		if !entry.Withdrawn {
+			live++
+		}
+	}
+	if withdraw {
+		return nativeError(ErrDigestNotLive, "Agent delegation is absent from the current epoch")
+	}
+	if live >= MaxLiveDelegations || len(agent.DelegationAdmissions) >= MaxDelegationAdmissions {
+		return nativeError(ErrCapacityFull, "Agent delegation capacity is full")
+	}
+	return nil
 }

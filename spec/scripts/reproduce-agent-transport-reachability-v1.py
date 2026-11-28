@@ -501,6 +501,7 @@ def main():
     require(len(corpus["positive"]) == 13 and len(corpus["negative"]) == 57, "coverage")
     bases = {}
     for v in corpus["positive"]:
+        require(integer(v["delegation"]["AuthorizationEpoch"], 64) > 0, "positive Registry epoch")
         require(v["name"] not in bases, "duplicate positive")
         seed = bytes.fromhex(v["test_seed"])
         require(

@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"syscall"
+
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"time"
 )
 
@@ -94,12 +98,15 @@ func quorumRead[T any](
 		nodes []*rpcNode
 	}
 	groups := make(map[string]*group, len(nodes))
-	failures := 0
+	failures, unavailable := 0, 0
 	var firstFailure error
 	for range nodes {
 		result := <-results
 		if result.err != nil {
 			failures++
+			if endpointUnavailable(result.err) {
+				unavailable++
+			}
 			if firstFailure == nil {
 				firstFailure = result.err
 			}
@@ -125,6 +132,9 @@ func quorumRead[T any](
 			return candidate.value, candidate.nodes, nil
 		}
 	}
+	if unavailable == len(nodes) && unavailable != 0 {
+		return zero, nil, nativecore.ErrFinalizedReadUnavailable
+	}
 	if firstFailure != nil {
 		return zero, nil, fmt.Errorf(
 			"quorum not reached: %d value groups and %d endpoint errors (first: %v)",
@@ -135,6 +145,15 @@ func quorumRead[T any](
 		"quorum not reached: %d value groups and %d endpoint errors",
 		len(groups), failures,
 	)
+}
+
+// Only transport failures can justify stale-pass fallback. A TLS trust
+// failure, malformed data, or disputed finalized observation fails closed.
+func endpointUnavailable(err error) bool {
+	var networkError net.Error
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
+		(errors.As(err, &networkError) && networkError.Timeout())
 }
 
 func quorumKey(value any) (string, error) {

@@ -185,10 +185,13 @@ func fakeKey(name string) ControllerKey {
 	return ControllerKey{Name: name, KeyID: id, PublicKey: public}
 }
 
-// fakeRegistryCode is a small code cell standing in for the registry code.
+// fakeRegistryCode keeps the synthetic harness on the same release as setup.
 func fakeRegistryCode() (bocText, codeHash string) {
-	code := cell.BeginCell().MustStoreUInt(0x4e52, 16).MustStoreUInt(0xc0de, 16).EndCell()
-	return base64.StdEncoding.EncodeToString(code.ToBOC()), hex.EncodeToString(code.Hash())
+	code, err := os.ReadFile(filepath.Join("testdata", "native-registry-code.boc.base64"))
+	if err != nil {
+		panic(err)
+	}
+	return strings.Join(strings.Fields(string(code)), ""), strings.TrimPrefix(nativecore.RegistryV2CodeHash, "tvm-cell-sha256:")
 }
 
 func (w *fakeWorld) network() *nativev1.NetworkDomain {

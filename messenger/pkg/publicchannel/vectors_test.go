@@ -221,7 +221,7 @@ func vectorDelegation(t *testing.T, profile Profile, seedHex, agentID, endpointI
 	if err != nil || derived != endpointID {
 		t.Fatal("vector Endpoint identity did not reproduce")
 	}
-	return identity.Delegation{Network: profile.Network, AgentID: agentID, EndpointID: endpointID,
+	return identity.Delegation{AuthorizationEpoch: 1, Network: profile.Network, AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"public.channel"}, NotBeforeUnix: channelNow - 100,
 		ExpiresAtUnix: channelNow + 7200, MaximumSessionLifetimeSeconds: 3600,

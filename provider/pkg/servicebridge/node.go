@@ -469,7 +469,7 @@ func OpenNode(ctx context.Context, config NodeConfig, options NodeOptions) (*Nod
 		return fail(err)
 	}
 	if config.Provider != nil {
-		if err = node.openProvider(ctx, options, lifecycle); err != nil {
+		if err = node.openProvider(ctx, options, lifecycle, railReader{reader: node.Reader}); err != nil {
 			return fail(err)
 		}
 	}
@@ -608,7 +608,7 @@ func sameOffer(a, b Offer) bool {
 		bytes.Equal(a.KeyCard, b.KeyCard)
 }
 
-func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle LifecycleSender) error {
+func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle LifecycleSender, reader railgate.Reader) error {
 	config := n.Config.Provider
 	manifestCBOR, err := os.ReadFile(config.ManifestFile)
 	if err != nil || len(manifestCBOR) == 0 || len(manifestCBOR) > 1<<20 {
@@ -645,7 +645,7 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 		}
 	}
 	verifier, err := railgate.NewVerifier(railgate.VerifierConfig{
-		Reader: railReader{reader: n.Reader}, Now: options.Now,
+		Reader: reader, Now: options.Now,
 		TokenPins: tokenPins, CheckExecution: executionGuard,
 		Manifests:       n.Manifests,
 		Network:         n.Network,
@@ -728,7 +728,7 @@ func (n *Node) openProvider(ctx context.Context, options NodeOptions, lifecycle 
 		Courier:            n.Courier,
 		Cards:              n.Cards,
 		RelayKeys:          n.relayKeys(),
-		History:            railReader{reader: n.Reader},
+		History:            reader,
 		Directory:          filepath.Join(n.Config.StateDir, "provider"),
 		StateDir:           n.Config.StateDir,
 		Limiter:            options.AdmissionLimiter,

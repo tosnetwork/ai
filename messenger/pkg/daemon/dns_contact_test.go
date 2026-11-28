@@ -27,7 +27,7 @@ func (d *daemonContactDirectory) Ensure(_ context.Context, agentID string) (dire
 		return *d.result, nil
 	}
 	return directory.RefreshResult{
-		Delegation:          identity.Delegation{AgentID: agentID},
+		Delegation:          identity.Delegation{AuthorizationEpoch: 1, AgentID: agentID},
 		Descriptor:          directory.Descriptor{AgentID: agentID, EndpointID: "mep_" + strings.Repeat("8", 64)},
 		FinalizedCheckpoint: 73,
 	}, nil
@@ -68,7 +68,7 @@ func TestDaemonEnsuresVerifiedDeviceSessionsWithoutCallerRouteAuthority(t *testi
 		t.Fatalf("sign remote bundle: %v", err)
 	}
 	contacts := &daemonContactDirectory{result: &directory.RefreshResult{
-		Delegation: identity.Delegation{AgentID: remoteAgent},
+		Delegation: identity.Delegation{AuthorizationEpoch: 1, AgentID: remoteAgent},
 		Descriptor: directory.Descriptor{AgentID: remoteAgent, EndpointID: remoteEndpoint},
 		Bundles:    []e2ee.Bundle{remoteBundle}, FinalizedCheckpoint: 73, RefreshedAt: now,
 	}}

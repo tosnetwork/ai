@@ -40,6 +40,7 @@ import (
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativeclient"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
@@ -985,6 +986,9 @@ type RegistryConfig struct {
 // Chain returns the configured acceptance rules for finalized state, including
 // the locator that recomputes account addresses.
 func (c Config) Chain() (identity.ChainPolicy, error) {
+	if err := c.validateRegistryRelease(); err != nil {
+		return identity.ChainPolicy{}, err
+	}
 	hashes := make([]string, 0, len(c.Registries))
 	registries := make([]tosaddr.Registry, 0, len(c.Registries))
 	for _, registry := range c.Registries {
@@ -1011,9 +1015,24 @@ func (c Config) Chain() (identity.ChainPolicy, error) {
 	return policy, nil
 }
 
+func (c Config) validateRegistryRelease() error {
+	if c.NativeRegistryCodeHash != nativecore.RegistryV2CodeHash {
+		return errors.New("native_registry_code_hash must select the Registry v2 release")
+	}
+	for _, registry := range c.Registries {
+		if registry.CodeHash != nativecore.RegistryV2CodeHash {
+			return errors.New("registries must contain only Registry v2 code hashes")
+		}
+	}
+	return nil
+}
+
 // NativeRegistry returns the explicitly selected contract layout used for
 // direct finalized Agent reads.
 func (c Config) NativeRegistry() (RegistryConfig, error) {
+	if err := c.validateRegistryRelease(); err != nil {
+		return RegistryConfig{}, err
+	}
 	for _, registry := range c.Registries {
 		if registry.CodeHash == c.NativeRegistryCodeHash {
 			return registry, nil

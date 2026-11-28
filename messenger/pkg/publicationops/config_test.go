@@ -126,7 +126,7 @@ func validDelegation(t *testing.T) identity.Delegation {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return identity.Delegation{
+	return identity.Delegation{AuthorizationEpoch: 1,
 		Network: network, AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: public, ADNLID: "adnl:" + strings.Repeat("3", 64), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"message"}, NotBeforeUnix: 1, ExpiresAtUnix: 3601,

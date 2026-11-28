@@ -17,8 +17,10 @@ import (
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/ai/protocol/pkg/nativewallet"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 type namesFlag []string
@@ -41,6 +43,8 @@ func main() {
 
 	var authority, counterparty namesFlag
 	actionPath := flag.String("action", "", "absolute path to NativeActionV1 JSON")
+	registryConfig := flag.String("registry-config", "", "owner-private finalized Registry read JSON for delegation mutations")
+	registryCheckpoint := flag.String("registry-checkpoint", "", "absolute Registry checkpoint file for delegation mutations")
 	outputPath := flag.String("output", "", "optional output path; stdout when empty")
 	tosctl := flag.String("tosctl", "", "absolute path of the tosctl binary that holds the controller keys")
 	tosctlSHA256 := flag.String("tosctl-sha256", "", "lowercase hex SHA-256 of that tosctl binary")
@@ -60,6 +64,10 @@ func main() {
 	if len(authority) == 0 {
 		fail(errors.New("at least one authority controller is required"))
 	}
+	delegationMutation := built.Kind == nativecore.KindDelegateAgent || built.Kind == nativecore.KindWithdrawAgentDelegation
+	if delegationMutation && (len(counterparty) != 0 || *registryConfig == "" || !filepath.IsAbs(*registryCheckpoint)) {
+		fail(errors.New("delegation mutations require a finalized Registry configuration and checkpoint, with authority signatures only"))
+	}
 	// The vault URL carries custody credentials, so it is read from the
 	// environment tosctl itself uses rather than from a command-line flag.
 	signer, err := mldsa44.NewTosctl(mldsa44.TosctlConfig{Binary: *tosctl, SHA256: *tosctlSHA256,
@@ -76,6 +84,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if delegationMutation {
+		if err := preflightWalletDelegation(ctx, action, *registryConfig, *registryCheckpoint); err != nil {
+			fail(err)
+		}
+	}
 	authoritySignatures, err := nativewallet.Sign(ctx, signer, built, authority)
 	if err != nil {
 		fail(err)
@@ -114,6 +127,28 @@ func main() {
 	if err := output.Close(); err != nil {
 		fail(err)
 	}
+}
+
+func preflightWalletDelegation(ctx context.Context, action *nativev1.NativeActionV1, configPath, checkpointPath string) error {
+	var config transportConfig
+	if err := loadTransportConfig(configPath, &config); err != nil {
+		return err
+	}
+	resolver, locator, err := openWalletRegistry(config, checkpointPath)
+	if err != nil {
+		return err
+	}
+	if !proto.Equal(action.Network, locator.Network) || action.TargetContractCodeHash != locator.CodeHash {
+		return errors.New("delegation action does not match the configured Registry")
+	}
+	state, found, err := resolver.ResolveState(ctx, action.TargetObjectId, action.PredecessorTvmStateHash)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("delegation Agent has no finalized state")
+	}
+	return nativewallet.CheckDelegationAction(action, state)
 }
 
 func loadAction(path string) (*nativev1.NativeActionV1, error) {

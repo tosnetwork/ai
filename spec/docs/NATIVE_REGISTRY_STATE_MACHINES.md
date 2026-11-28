@@ -32,13 +32,15 @@ ordering position for different content is rejected.
 
 ## 2. Agent state
 
-Canonical Agent state contains only:
+Canonical Agent state uses encoding version 2 and contains:
 
 - Agent ID;
 - generation and sequence;
 - last action hash;
 - current controller policy;
-- delegation digests;
+- positive authorization epoch;
+- current-epoch digest admissions, each with its admission epoch and withdrawn
+  flag, plus live and total counts;
 - optional pending recovery time, initiating action hash, initiating policy
   hash, and new policy; and
 - tombstone flag.
@@ -46,7 +48,8 @@ Canonical Agent state contains only:
 ### Register Agent
 
 The Agent ID is derived from network domain, object nonce, and canonical
-initial policy. The caller-supplied target must equal the derived ID. Every key
+initial policy with identity preimage object-kind tag 3. Registration starts
+at authorization epoch 1 with an empty delegation set. The caller-supplied target must equal the derived ID. Every key
 in the initial policy proves possession by signing the registration action, in
 key-ID order, and each declared key ID must equal the ID derived from the key
 its possession signature verified against.
@@ -55,12 +58,24 @@ its possession signature verified against.
 
 The current policy authorizes the action using the Agent-control purpose.
 Every key in the new policy proves possession. Installation replaces the policy
-atomically and clears pending recovery state.
+atomically, including when the policy bytes are identical. It advances the
+authorization epoch and clears pending recovery and both delegation sets.
 
 ### Add delegation
 
-The current policy authorizes a nonzero delegation digest. Delegation digests
-are immutable and unique within the bounded Agent state.
+The current policy authorizes a nonzero digest and a positive expected epoch
+using its delegation purpose. The expected epoch must match the current epoch.
+A digest must be absent, the live count below 128, and the total below 384.
+Admission records the current epoch and increases both counts.
+
+### Withdraw delegation
+
+Kind 11 authorizes a nonzero digest and its expected epoch under the same
+delegation purpose. Withdrawal marks the live admission as withdrawn and
+decreases the live count. Total admissions and the epoch stay fixed. A digest
+marked withdrawn is refused on add and withdrawal (2218). Withdrawal of an
+absent digest is refused (2220). Full capacity prevents add (2219) and allows
+withdrawal. Epoch mismatch is refused (2216).
 
 ### Initiate recovery
 
@@ -82,6 +97,7 @@ counterparty signature set and installs the stored policy exactly as it was
 admitted and possession-proven at initiation, without re-validating it; it
 clears recovery state, advances generation, and resets sequence while
 retaining the immediately preceding typed-state hash as its predecessor.
+Completion advances the authorization epoch and clears both delegation sets.
 
 Any policy replacement clears pending recovery. Mutations that do not replace
 policy, such as adding a delegation, do not invalidate it: they are committed
@@ -91,7 +107,9 @@ reordered. A later recovery initiation replaces the earlier pending proposal.
 ### Revoke Agent
 
 The current policy authorizes a terminal tombstone. A tombstoned Agent cannot
-authorize Capability operations or later Agent mutations.
+authorize Capability operations or later Agent mutations. Tombstoning advances
+the authorization epoch and clears recovery and both delegation sets. A new
+mutation requiring an epoch increment at u64 maximum refuses atomically (2217).
 
 ## 3. Controller policy
 

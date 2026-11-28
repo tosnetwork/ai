@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -49,6 +50,25 @@ func ReviewAction(action *nativev1.NativeActionV1) (Review, nativecore.BuiltActi
 		TargetObjectID: action.TargetObjectId, TargetContractCodeHash: action.TargetContractCodeHash,
 		Generation: action.Generation, Sequence: action.Sequence, PredecessorStateHash: action.PredecessorTvmStateHash,
 		Action: actionName(action), ActionHash: built.HashString, SignedAction: signedAction}, built, nil
+}
+
+// CheckDelegationAction validates the signed position and mutation against the
+// typed Agent state from one authenticated finalized read.
+func CheckDelegationAction(action *nativev1.NativeActionV1, state *nativev1.NativeStateV1) error {
+	agent := state.GetAgent()
+	if action == nil || agent == nil || agent.Tombstoned || agent.AgentId != action.TargetObjectId ||
+		state.TvmStateHash != action.PredecessorTvmStateHash || state.GetReference().GetContractCodeHash() != action.TargetContractCodeHash ||
+		state.GetReference().GetFinalizedCheckpoint() == 0 || agent.Generation != action.Generation ||
+		agent.Sequence == math.MaxUint64 || action.Sequence != agent.Sequence+1 {
+		return errors.New("delegation action does not match the finalized Agent predecessor")
+	}
+	if add := action.GetDelegateAgent(); add != nil {
+		return nativecore.CheckDelegationMutation(agent, add.DelegationDigest, add.AuthorizationEpoch, false)
+	}
+	if withdraw := action.GetWithdrawAgentDelegation(); withdraw != nil {
+		return nativecore.CheckDelegationMutation(agent, withdraw.DelegationDigest, withdraw.AuthorizationEpoch, true)
+	}
+	return errors.New("expected a delegation add or withdrawal")
 }
 
 // Sign asks custody to sign the reviewed action once with each named
@@ -90,6 +110,8 @@ func actionName(action *nativev1.NativeActionV1) string {
 		return "register_agent"
 	case *nativev1.NativeActionV1_UpdateAgentPolicy:
 		return "update_agent_policy"
+	case *nativev1.NativeActionV1_WithdrawAgentDelegation:
+		return "withdraw_agent_delegation"
 	case *nativev1.NativeActionV1_DelegateAgent:
 		return "delegate_agent"
 	case *nativev1.NativeActionV1_InitiateRecovery:

@@ -22,7 +22,7 @@ func authorityDelegation(t *testing.T, agentID string, seed byte) (identity.Dele
 	if err != nil {
 		t.Fatal(err)
 	}
-	return identity.Delegation{
+	return identity.Delegation{AuthorizationEpoch: 1,
 		Network: authorityNetwork(), AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), NotBeforeUnix: 100, ExpiresAtUnix: 1000,
 	}, key

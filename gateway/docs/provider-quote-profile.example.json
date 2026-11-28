@@ -13,7 +13,7 @@
     "https://rpc-2.example",
     "https://rpc-3.example"
   ],
-  "registry_code_boc_file": "/absolute/private/provider/native-registry.boc.base64",
+  "registry_code_boc_file": "/absolute/private/provider/tos-service-native-registry-v2.boc.base64",
   "service_actor_code_hash": "tvm-cell-sha256:<64 lowercase hex of the pinned Service Actor release>",
   "state_directory": "/absolute/private/provider/quote-state"
 }

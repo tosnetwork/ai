@@ -186,7 +186,7 @@ func testDelegation(t *testing.T) identity.Delegation {
 	if err != nil {
 		t.Fatalf("derive endpoint: %v", err)
 	}
-	return identity.Delegation{
+	return identity.Delegation{AuthorizationEpoch: 1,
 		Network:                       network,
 		AgentID:                       agentID,
 		EndpointID:                    endpointID,

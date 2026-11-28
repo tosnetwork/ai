@@ -360,12 +360,12 @@ func newGateFixture(t *testing.T, start time.Time) *gateFixture {
 		checkpoint: 10, chainTime: start, data: data, history: []toschain.ActorTransaction{call},
 		capability: &nativev1.NativeStateV1{Network: testNetwork, State: &nativev1.NativeStateV1_Capability{
 			Capability: &nativev1.CapabilityStateV1{
-				CapabilityId: gfCapability, OwnerAgentId: testSeller,
+				EncodingVersion: 2, CapabilityId: gfCapability, OwnerAgentId: testSeller,
 				Versions: []*nativev1.CapabilityVersionV1{{Version: "1.0.0", ManifestDigest: digest}},
 			},
 		}},
 		agent: &nativev1.NativeStateV1{Network: testNetwork, State: &nativev1.NativeStateV1_Agent{
-			Agent: &nativev1.AgentStateV1{AgentId: testSeller},
+			Agent: &nativev1.AgentStateV1{EncodingVersion: 2, AuthorizationEpoch: 1, AgentId: testSeller},
 		}},
 	}
 	message, _ := taskMessage(t, pkg, archive, testBuyer)

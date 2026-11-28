@@ -42,7 +42,7 @@ func publicationFixture(t *testing.T, config *Config, now time.Time) (identity.D
 	if err != nil {
 		t.Fatalf("admission policy: %v", err)
 	}
-	delegation := identity.Delegation{
+	delegation := identity.Delegation{AuthorizationEpoch: 1,
 		Network: config.Network(), AgentID: config.AgentID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"agent.gift", "agent.packet", "commerce.profile", "negotiation", "text"}, NotBeforeUnix: uint64(now.Add(-time.Minute).Unix()),
