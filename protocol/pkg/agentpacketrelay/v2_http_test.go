@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
+	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 type v2HTClock struct{ at time.Time }
@@ -142,7 +144,7 @@ func (f *v2HTTPFixture) request(t testing.TB, method, path string, body []byte, 
 func (f *v2HTTPFixture) serve(t testing.TB, method, path string, body []byte, auth bool, want int) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	f.s.ServeHTTP(w, f.request(t, method, path, body, auth))
+	f.s.ServeHTTP(v2DeadlineWriter{w}, f.request(t, method, path, body, auth))
 	if w.Code != want {
 		t.Fatalf("%s %s: %d %s; want %d", method, path, w.Code, w.Body.String(), want)
 	}
@@ -164,12 +166,12 @@ func TestV2HTTPClosedReadsAndNoV1Route(t *testing.T) {
 	f.serve(t, "GET", path, nil, true, 200)
 	req := f.request(t, "GET", f.mail(), nil, true)
 	w = httptest.NewRecorder()
-	f.s.ServeHTTP(w, req)
+	f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 	if w.Code != 200 {
 		t.Fatal(w.Code)
 	}
 	w = httptest.NewRecorder()
-	f.s.ServeHTTP(w, req.Clone(t.Context()))
+	f.s.ServeHTTP(v2DeadlineWriter{w}, req.Clone(t.Context()))
 	if w.Code != 403 {
 		t.Fatal("same proof replayed", w.Code)
 	}
@@ -186,7 +188,7 @@ func TestV2HTTPClosedReadsAndNoV1Route(t *testing.T) {
 		t.Fatal(err)
 	}
 	w = httptest.NewRecorder()
-	v1.ServeHTTP(w, httptest.NewRequest("GET", strings.Replace(f.mail(), "/v2/", "/v1/", 1), nil))
+	v1.ServeHTTP(v2DeadlineWriter{w}, httptest.NewRequest("GET", strings.Replace(f.mail(), "/v2/", "/v1/", 1), nil))
 	if w.Code != 200 || strings.Contains(w.Body.String(), hex.EncodeToString(e.id[:])) {
 		t.Fatal("V1 reached V2")
 	}
@@ -350,7 +352,7 @@ func TestV2HTTPInvalidCredentialsNeverBecomeStrangers(t *testing.T) {
 				req.Body = io.NopCloser(bytes.NewReader(tampered))
 			}
 			w := httptest.NewRecorder()
-			f.s.ServeHTTP(w, req)
+			f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 			if w.Code != 403 || f.s.store.Usage().StrangerEntries != 0 {
 				t.Fatal(w.Code, w.Body.String())
 			}
@@ -361,7 +363,7 @@ func TestV2HTTPRestartSecondRelayAndClockRollback(t *testing.T) {
 	f := newV2HTTP(t)
 	req := f.request(t, "GET", f.mail(), nil, true)
 	w := httptest.NewRecorder()
-	f.s.ServeHTTP(w, req)
+	f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 	if w.Code != 200 {
 		t.Fatal(w.Code)
 	}
@@ -370,7 +372,7 @@ func TestV2HTTPRestartSecondRelayAndClockRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	w = httptest.NewRecorder()
-	other.ServeHTTP(w, req.Clone(t.Context()))
+	other.ServeHTTP(v2DeadlineWriter{w}, req.Clone(t.Context()))
 	if w.Code != 403 {
 		t.Fatal("second relay accepted same proof", w.Code)
 	}
@@ -382,7 +384,7 @@ func TestV2HTTPRestartSecondRelayAndClockRollback(t *testing.T) {
 	f.s.store = v2Open(t, f.path, DefaultV2Limits(1024, 64<<20), f.clock.Now())
 	f.clock.at = testStart
 	w = httptest.NewRecorder()
-	f.s.ServeHTTP(w, req.Clone(t.Context()))
+	f.s.ServeHTTP(v2DeadlineWriter{w}, req.Clone(t.Context()))
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "proof_floor") || w.Header().Get("Retry-After") != "141" {
 		t.Fatal(w.Code, w.Body.String(), w.Header())
 	}
@@ -571,7 +573,7 @@ func TestV2HTTPLaneFloodLeavesContactReservation(t *testing.T) {
 		req := f.request(t, "PUT", path, e.envelope, false)
 		req.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", i+1)
 		w := httptest.NewRecorder()
-		f.s.ServeHTTP(w, req)
+		f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 		want := 201
 		if i >= 32 {
 			want = 507
@@ -599,7 +601,7 @@ func TestV2HTTPLaneFloodLeavesContactReservation(t *testing.T) {
 		req := f.request(t, "PUT", path, body, false)
 		req.RemoteAddr = fmt.Sprintf("127.%d.%d.%d:1234", 1+(i>>16), (i>>8)&255, i&255)
 		w := httptest.NewRecorder()
-		f.s.ServeHTTP(w, req)
+		f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 		want := 201
 		if i >= 224 {
 			want = 507
@@ -623,7 +625,7 @@ func TestV2HTTPTombstoneFloodSurvivesRestart(t *testing.T) {
 		req := f.request(t, "PUT", path, e.envelope, false)
 		req.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", 1+i/64)
 		w := httptest.NewRecorder()
-		f.s.ServeHTTP(w, req)
+		f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 		if w.Code != 201 {
 			t.Fatal(i, w.Code, w.Body.String())
 		}
@@ -638,7 +640,7 @@ func TestV2HTTPTombstoneFloodSurvivesRestart(t *testing.T) {
 		req := f.request(t, "PUT", path, e.envelope, false)
 		req.RemoteAddr = "127.0.0.99:1234"
 		w := httptest.NewRecorder()
-		f.s.ServeHTTP(w, req)
+		f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 		if w.Code != 507 {
 			t.Fatal("tombstones freed stranger share", w.Code)
 		}
@@ -711,7 +713,7 @@ func TestV2HTTPProofBindsConfiguredRelayWithoutRelayCaveat(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
-	second.ServeHTTP(w, req)
+	second.ServeHTTP(v2DeadlineWriter{w}, req)
 	if w.Code != 403 {
 		t.Fatal("proof moved between relays", w.Code, w.Body.String())
 	}
@@ -730,7 +732,7 @@ func TestV2HTTPRejectsOversizeBeforeReadingAndBoundsSlots(t *testing.T) {
 	req.ContentLength = MaxEnvelopeBytes + 1
 	req.Header.Set("Content-Length", strconv.Itoa(MaxEnvelopeBytes+1))
 	w := httptest.NewRecorder()
-	f.s.ServeHTTP(w, req)
+	f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 	if w.Code != 413 || body.reads != 0 {
 		t.Fatal("oversize read started", w.Code, body.reads)
 	}
@@ -822,7 +824,7 @@ func TestV2HTTPRefusesUninterpretedBodyHeaders(t *testing.T) {
 				req.Header.Set("Content-Encoding", "gzip")
 			}
 			w := httptest.NewRecorder()
-			f.s.ServeHTTP(w, req)
+			f.s.ServeHTTP(v2DeadlineWriter{w}, req)
 			if w.Code != 400 || f.s.store.Usage().StrangerEntries != 0 {
 				t.Fatal(kind, w.Code, w.Body.String())
 			}
@@ -838,4 +840,93 @@ func TestV2StoreFailureIsNotAChainOutage(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"code":"unavailable"`) {
 		t.Fatal("store failure classified as chain outage", w.Body.String())
 	}
+}
+
+// In-memory requests have no socket deadline. Explicitly model support in the
+// fixture; a real unsupported writer must fail before reading any body.
+type v2DeadlineWriter struct{ *httptest.ResponseRecorder }
+
+func (v2DeadlineWriter) SetReadDeadline(time.Time) error { return nil }
+func TestV2HTTPRefusesBodiesWithoutAReadDeadline(t *testing.T) {
+	f := newV2HTTP(t)
+	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+	req := f.request(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false)
+	body := &v2CountingBody{}
+	req.Body = body
+	w := httptest.NewRecorder()
+	f.s.ServeHTTP(w, req)
+	if w.Code != 503 || body.reads != 0 {
+		t.Fatal("unsupported read deadline accepted", w.Code, body.reads)
+	}
+}
+
+type v2RPCSource struct {
+	chain   *toschain.Adapter
+	source  *v2Source
+	network *nativev1.NetworkDomain
+}
+
+func (s v2RPCSource) ResolveState(ctx context.Context, id, hash string) (*nativev1.NativeStateV1, bool, error) {
+	if err := s.chain.CheckNetworkGenesis(ctx, "sha256:"+s.network.GenesisRootHash, "sha256:"+s.network.GenesisFileHash); err != nil {
+		return nil, false, err
+	}
+	return s.source.ResolveState(ctx, id, hash)
+}
+func TestV2HTTPStoppedEndpointsBecomeUnavailableAt600Seconds(t *testing.T) {
+	f := newV2HTTP(t)
+	root, err := hex.DecodeString(f.config.Network.GenesisRootHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := hex.DecodeString(f.config.Network.GenesisFileHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var servers []*httptest.Server
+	var endpoints []string
+	for range 3 {
+		peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request struct {
+				ID json.RawMessage `json:"id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"@type": "blocks.masterchainInfo", "init": map[string]any{"root_hash": base64.StdEncoding.EncodeToString(root), "file_hash": base64.StdEncoding.EncodeToString(file)}}}); err != nil {
+				t.Error(err)
+			}
+		}))
+		servers = append(servers, peer)
+		endpoints = append(endpoints, peer.URL)
+		t.Cleanup(peer.Close)
+	}
+	adapter, err := toschain.New(toschain.Config{Network: f.config.Network.NetworkId, Endpoints: endpoints, Quorum: 2, Now: f.clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := NewV2FinalizedVerifier(f.config, v2RPCSource{adapter, f.source, f.config.Network})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.verifier = verifier
+	f.serve(t, "GET", f.mail(), nil, true, 200)
+	for _, peer := range servers {
+		peer.Close()
+	}
+	f.clock.at = f.clock.at.Add(300 * time.Second)
+	if err = f.s.store.Replay().Record(unixNow(f.clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	f.serve(t, "GET", f.mail(), nil, true, 200)
+	f.clock.at = f.clock.at.Add(300 * time.Second)
+	if err = f.s.store.Replay().Record(unixNow(f.clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	w := f.serve(t, "GET", f.mail(), nil, true, 503)
+	if !strings.Contains(w.Body.String(), "chain_unavailable") {
+		t.Fatal(w.Body.String())
+	}
+	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+	f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false, 201)
 }

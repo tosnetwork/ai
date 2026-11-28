@@ -11,6 +11,14 @@ ROOT = Path(__file__).resolve().parents[2]
 RELAY = "./protocol/pkg/agentpacketrelay"
 CONTROLS = [
     (
+        "required-read-deadline",
+        "agentpacketrelay/v2_http.go",
+        "SetReadDeadline(time.Now().Add(deadline)); err != nil {",
+        "SetReadDeadline(time.Now().Add(deadline)); err != nil && !errors.Is(err,http.ErrNotSupported) {",
+        RELAY,
+        "TestV2HTTPRefusesBodiesWithoutAReadDeadline",
+    ),
+    (
         "client-coded-response",
         "agentpacketrelay/v2_client.go",
         'if res.Uncompressed || (res.Header.Get("Content-Encoding") != "" && res.Header.Get("Content-Encoding") != "identity") {',

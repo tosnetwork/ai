@@ -198,7 +198,8 @@ func (s *V2Server) readBody(w http.ResponseWriter, r *http.Request, maxBytes int
 		return nil, false
 	}
 	deadline := DefaultDepositReadBase + time.Duration(max(r.ContentLength, 0))*time.Second/DefaultDepositMinBytesPerSecond
-	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(deadline)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(deadline)); err != nil {
+		w.Header().Set("Connection", "close")
 		v2Fail(w, 503, CodeUnavailable)
 		return nil, false
 	}
