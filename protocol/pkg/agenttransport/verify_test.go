@@ -223,9 +223,16 @@ func TestCacheCapacityAndClockRollback(t *testing.T) {
 	f := newFixture(t)
 	f.c.CacheEntries = 1
 	v := f.verifier(t)
-	verify(t, v, f.wire, Relay, true)
+	first := append([]byte(nil), f.wire...)
+	firstDigest := sha256.Sum256(first)
 	f.d.NotAfter++
 	f.reencode(t)
+	f.r.snapshot.AdmissionEpochs[firstDigest] = f.d.AuthorizationEpoch
+	agent := f.r.snapshot.State.GetAgent()
+	agent.DelegationAdmissions = append(agent.DelegationAdmissions, &nativev1.DelegationAdmissionV1{
+		Digest: "sha256:" + hex.EncodeToString(firstDigest[:]), AdmissionEpoch: f.d.AuthorizationEpoch,
+	})
+	verify(t, v, first, Relay, true)
 	verify(t, v, f.wire, Relay, true)
 	if len(v.passes) != 1 {
 		t.Fatal("unbounded cache")
