@@ -572,6 +572,56 @@ The daemon configuration adds:
 }
 ```
 
+The chat lane can instead run inside the daemon, with no carrier process
+(`"carrier": "builtin"`, MESSENGER_TRANSPORT_V2.md 13.1 and 14.3). It takes no
+carrier sockets and names its own lane:
+
+```json
+"relay_carriage": {
+  "carrier": "builtin",
+  "card_path": "/var/lib/tos-messengerd-lane/chat-card.json",
+  "evidence_export_dir": "/var/lib/tos-messengerd-export",
+  "builtin": {
+    "state_dir": "/var/lib/tos-messengerd-lane",
+    "relays": ["https://relay-one.example", "https://relay-two.example"],
+    "directories": ["https://directory-one.example", "https://directory-two.example"],
+    "network_mode": "test-network-legacy-epoch-zero",
+    "transport_delegation_path": "/etc/tos-messengerd/chat-delegation.bin",
+    "transport_key_path": "/etc/tos-messengerd/chat-transport.seed",
+    "signer": {"binary": "/usr/local/bin/tosctl", "sha256": "<pin>", "config_path": "/etc/tosctl.json",
+               "vault_url": "http://127.0.0.1:8200", "controller": "chat", "key_id": "mldsa44:<id>"}
+  }
+}
+```
+
+- **Its own lane.** The lane commits its own transport delegation and key,
+  keeps its own HPKE keys and cards, and publishes its own hint to the
+  directories, separate from any rail lane of the Agent. It signs packets and
+  cards through the pinned `tosctl` helper and holds no wallet key. Only V2
+  relays and relay frame v2 are used; there is no V1 relay client.
+- **Delivery.** A carried copy is deposited at two relays of the recipient's
+  hint and re-deposited by the lane until the copy's Endpoint-signed ack
+  settles it. Cards are taken only from admitted peers (accepted frames,
+  imported contact files, joined rooms' rosters); a hint is the only route.
+- **Contact credentials.** A frame to an admitted peer carries this lane's
+  contact credential until the peer acknowledged a frame that carried it; on
+  an ack frame it rides on every ack until renewed, since acks are never
+  acknowledged. A received credential is taken only from a frame the daemon
+  admitted (an accepted, held or duplicate copy, an admitted evidence frame,
+  or an ack it verified and applied), from a peer business admission covers,
+  whose delegation names the packet sender; anything else is refused and not
+  stored.
+- **Journal bounds.** A key is signed once: a retry carries the journaled
+  frame, and the daemon records the card, credential and evidence of the
+  frame actually carried. Acknowledgements to peers that are not admitted
+  share at most 512 journal records, 8 per peer, so they never take the
+  capacity of this installation's own sends. A copy the recipient rejected
+  for good, or held for its owner, is settled and not deposited again.
+- **Directories.** Two to four, as the lane accepts.
+- **Test networks only.** Transport verification needs a registry with
+  authorization epochs for production; until then only the named
+  test-network modes start.
+
 - **Sockets.** The daemon calls `carrier.carry` on `carry_socket_path` and
   serves `carrier.deliver` and `carrier.delivery-ack` on the mode-0600
   `listen_socket_path` (`pkg/carrierapi`). Same-user peers only.
@@ -618,7 +668,7 @@ The daemon configuration adds:
   process on the owner surface.
 - **Refusals.** `agent.packet` Events are refused on this route in both
   directions. The relay route's largest Event payload is computed from the
-  worst-case frame before sealing (139,547 bytes); a larger one is refused
+  worst-case frame before sealing (137,465 bytes under relay frame v2); a larger one is refused
   with `content-too-large` and no key is spent.
 
 ### Private rooms over the relay (M-R2)
@@ -652,6 +702,11 @@ sealed packets. The `relay_carriage` block enables rooms with:
   as the other decisions above. The runtime principal is refused all of
   them. The runtime may send (`outbox.compose` with the `room_id` of a room
   held here takes the kind-3 path) and read (`rooms.list`, `rooms.gaps`).
+- `conversations.list` on the runtime socket returns the direct conversations
+  held here, newest first by creation, at most 64 per page; a page continues
+  after the `before_created_at_unix` and `before_conversation_id` of the
+  previous page's last entry. Creation order does not change when a
+  conversation is updated, so a walk lists each conversation once.
   OpenFox's `openfox chat room` and `openfox chat invite present` commands
   are the intended clients.
 - **Joining.** `rooms.add` sends the Agent a `room.invite` over the 1:1
@@ -729,7 +784,7 @@ names any of them, whatever the value:
 
 | Setting | Bounds | Production value |
 |---|---|---|
-| `room_part_bytes` | 1,024..162,744; cuts handshake objects only | production cut |
+| `room_part_bytes` | 1,024..160,662; cuts handshake objects only | production cut |
 | `room_handshake_retention_seconds` | 1 s..7 days | 7 days |
 | `room_authorization_seconds` | 1 min..24 h | 24 h |
 

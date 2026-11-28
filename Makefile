@@ -57,6 +57,7 @@ boundary-lint:
 spec-check:
 	GOWORK=off go run ./protocol/cmd/agenttransport-vectors | cmp - spec/test-vectors/agent-transport-v1.json
 	python3 -I spec/scripts/reproduce-agent-transport-v1.py
+	python3 -I spec/scripts/reproduce-messenger-relay-frame-v2.py
 	GOWORK=off go run ./protocol/cmd/agenttransport-vectors -corpus credential | cmp - spec/test-vectors/agent-transport-credential-v1.json
 	python3 -I spec/scripts/reproduce-agent-transport-credential-v1.py
 	python3 spec/scripts/verify-prediction-market-compatibility.py

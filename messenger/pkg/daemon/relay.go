@@ -23,6 +23,7 @@ import (
 	"github.com/tosnetwork/ai/messenger/pkg/fault"
 	"github.com/tosnetwork/ai/messenger/pkg/group"
 	"github.com/tosnetwork/ai/messenger/pkg/relayframe"
+	"github.com/tosnetwork/ai/messenger/pkg/transport"
 )
 
 const (
@@ -71,6 +72,61 @@ type relayCarrier interface {
 	Withdraw(ctx context.Context, recipientAgentID, idempotencyKey string) (carrierapi.Response, error)
 }
 
+// frameCarrier is a carrier that journals the frame of a key: on a retry it
+// carries the frame first journaled and returns it (the builtin lane).
+type frameCarrier interface {
+	CarryFrame(ctx context.Context, recipientAgentID, idempotencyKey, withdrawKey string,
+		expiresAtUnix uint64, frame []byte) (carrierapi.Response, []byte, error)
+}
+
+// carry deposits one frame and returns the frame actually carried: the
+// journaled one of a frame carrier, else the one given.
+func (r *relayRuntime) carry(ctx context.Context, peer, key, withdraw string, expires uint64,
+	frame []byte) (carrierapi.Response, []byte, error) {
+	if journaling, ok := r.carrier.(frameCarrier); ok {
+		response, sent, err := journaling.CarryFrame(ctx, peer, key, withdraw, expires, frame)
+		if sent == nil {
+			sent = frame
+		}
+		return response, sent, err
+	}
+	response, err := r.carrier.Carry(ctx, peer, key, withdraw, expires, frame)
+	return response, frame, err
+}
+
+// frameEvidence returns the evidence a carried frame holds.
+func frameEvidence(raw []byte) ([]byte, error) {
+	frame, err := relayframe.Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(frame.Evidence) == 0 {
+		return nil, errors.New("a carried frame holds no evidence")
+	}
+	return frame.Evidence, nil
+}
+
+// sentGeneration is what a carried frame proves was sent: its evidence's
+// descriptor, and the digests of the card and credential it carries.
+func sentGeneration(raw []byte) (eventlog.RelayGeneration, error) {
+	frame, err := relayframe.Decode(raw)
+	if err != nil {
+		return eventlog.RelayGeneration{}, err
+	}
+	digest, issued, err := directory.EvidenceDescriptor(frame.Evidence)
+	if err != nil {
+		return eventlog.RelayGeneration{}, err
+	}
+	generation := eventlog.RelayGeneration{DescriptorDigest: digest, DescriptorIssuedAtUnix: issued}
+	if len(frame.Card) > 0 {
+		generation.CardDigest = canon.Digest(frame.Card)
+	}
+	if len(frame.Credential) > 0 {
+		generation.CredentialDigest = canon.Digest(frame.Credential)
+	}
+	return generation, nil
+}
+
 // relayRuntime is the daemon half of relay carriage.
 type relayRuntime struct {
 	daemon   *Daemon
@@ -104,6 +160,30 @@ type relayRuntime struct {
 	// rooms receives kind-3 room objects; nil when private rooms over the
 	// relay are not configured, and then kind 3 is not carried.
 	rooms *roomRuntime
+
+	// builtin is the in-process chat lane, or nil with an external carrier
+	// (then server and listener carry the carrier socket).
+	builtin *transport.Builtin
+}
+
+// builtinOpenTimeout bounds opening the in-process lane at startup.
+const builtinOpenTimeout = 2 * time.Minute
+
+// credentialCarrier is a carrier that issues this installation's contact
+// credentials to admitted peers, for the credential field of its frames.
+type credentialCarrier interface {
+	ContactCredential(ctx context.Context, peer string) ([]byte, [relayframe.HolderSeedBytes]byte, bool, error)
+}
+
+// settlingCarrier is a carrier that keeps depositing a copy until told the
+// recipient acknowledged it.
+type settlingCarrier interface {
+	Settled(ctx context.Context, recipient string, keys []string) error
+}
+
+// cardLearner is a carrier that keeps admitted peers' cards for sealing.
+type cardLearner interface {
+	LearnCard(ctx context.Context, peer string, card []byte) error
 }
 
 // configureRelayCarriage installs the relay route: the carrier client, the
@@ -114,27 +194,56 @@ func (d *Daemon) configureRelayCarriage(sink *directory.RelayEvidenceSink) error
 		d.prekeys == nil || d.prekeys.signer == nil || d.admission == nil || sink == nil {
 		return errors.New("relay carriage dependencies are incomplete")
 	}
-	// OpenFox and this installation must be one Agent: the local chat card is
-	// the carrier's, and it must name this daemon's Agent.
+	var builtin *transport.Builtin
+	if relay.Carrier == CarrierBuiltin {
+		ctx, cancel := context.WithTimeout(context.Background(), builtinOpenTimeout)
+		defer cancel()
+		opened, err := d.openBuiltinCarrier(ctx)
+		if err != nil {
+			return errors.New("open the builtin chat lane: " + err.Error())
+		}
+		// The lane writes its current chat card for the frames built below.
+		opened.Refresh(ctx)
+		builtin = opened
+	}
+	// The carrier and this installation must be one Agent: the local chat
+	// card is the carrier's, and it must name this daemon's Agent.
 	card, err := securefile.ReadBoundedRegular(relay.CardPath, relayframe.MaxCardBytes)
 	if err != nil {
 		return errors.New("read local chat card: " + err.Error())
 	}
 	if err := checkCardShape(card, d.config.AgentID); err != nil {
-		return errors.New("local chat card does not belong to this installation's Agent: " + err.Error())
+		return errors.Join(errors.New("local chat card does not belong to this installation's Agent: "+err.Error()),
+			builtin.Close())
 	}
-	client, err := carrierapi.NewClient(relay.CarrySocketPath, relay.Timeout())
-	if err != nil {
-		return err
+	var carrier interface {
+		relayCarrier
+		roomCarrier
 	}
-	if err := d.installRelayRuntime(sink, client, relay.RedepositInterval(), relay.Timeout()); err != nil {
-		return err
+	if builtin != nil {
+		carrier = builtin
+	} else {
+		client, err := carrierapi.NewClient(relay.CarrySocketPath, relay.Timeout())
+		if err != nil {
+			return err
+		}
+		carrier = client
+	}
+	if err := d.installRelayRuntime(sink, carrier, relay.RedepositInterval(), relay.Timeout()); err != nil {
+		return errors.Join(err, builtin.Close())
+	}
+	if builtin != nil {
+		builtin.Attach(d.relay)
+		d.relay.builtin = builtin
+		if importer, ok := d.discovery.runner.(*contactImporter); ok {
+			importer.learner = builtin
+		}
 	}
 	if relay.MLSDriverPath == "" {
 		return nil
 	}
 	driver := &group.OpenMLSSidecar{Command: []string{relay.MLSDriverPath}, Timeout: relay.MLSDriverTimeout()}
-	settings, err := d.configuredRoomSettings(driver, client)
+	settings, err := d.configuredRoomSettings(driver, carrier)
 	if err != nil {
 		return err
 	}
@@ -236,25 +345,59 @@ func (r *relayRuntime) ownFrame(kind uint8, peer string, part []byte, requireCar
 	if cardErr != nil && requireCard {
 		return nil, eventlog.RelayGeneration{}, errors.New("the local chat card is unavailable")
 	}
+	pull, _, err := r.daemon.journal.LoadRelayPull(peer)
+	if err != nil {
+		return nil, eventlog.RelayGeneration{}, err
+	}
 	var include []byte
 	if cardErr == nil {
-		pull, _, err := r.daemon.journal.LoadRelayPull(peer)
-		if err != nil {
-			return nil, eventlog.RelayGeneration{}, err
-		}
 		digest := canon.Digest(card)
 		if requireCard || pull.AckedCardDigest != digest {
 			include = card
 			generation.CardDigest = digest
 		}
 	}
+	credential, seed := r.contactCredential(peer, pull, &generation)
 	frame, err := relayframe.Encode(relayframe.Frame{Kind: kind, PartIndex: 0, PartCount: 1,
-		Card: include, Evidence: evidence, Part: part})
+		Card: include, Evidence: evidence, Credential: credential, HolderSeed: seed, Part: part})
 	if err != nil {
 		return nil, eventlog.RelayGeneration{}, err
 	}
 	return frame, generation, nil
 }
+
+// contactCredential is the contact credential a frame to the peer carries:
+// the carrier's credential for an admitted peer, until the peer acknowledged a
+// frame that carried it (transport 9.3, like the card). A carrier without
+// credentials, a peer that is not admitted, or a failure to issue one leaves
+// the frame without a credential; the peer then deposits on the stranger lane.
+func (r *relayRuntime) contactCredential(peer string, pull eventlog.RelayPull,
+	generation *eventlog.RelayGeneration) ([]byte, [relayframe.HolderSeedBytes]byte) {
+	var seed [relayframe.HolderSeedBytes]byte
+	issuer, ok := r.carrier.(credentialCarrier)
+	if !ok {
+		return nil, seed
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), credentialIssueTimeout)
+	defer cancel()
+	wire, holder, issued, err := issuer.ContactCredential(ctx, peer)
+	if err != nil {
+		r.daemon.report("issue contact credential", err)
+		return nil, seed
+	}
+	if !issued {
+		return nil, seed
+	}
+	digest := canon.Digest(wire)
+	if pull.AckedCredentialDigest == digest {
+		return nil, seed
+	}
+	generation.CredentialDigest = digest
+	return wire, holder
+}
+
+// credentialIssueTimeout bounds issuing one contact credential.
+const credentialIssueTimeout = 30 * time.Second
 
 // relaySender carries one sealed copy as a kind-1 frame.
 type relaySender struct{ relay *relayRuntime }
@@ -281,7 +424,7 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 	if err != nil {
 		return fault.Wrap(fault.CodeInternal, err)
 	}
-	frame, generation, err := r.ownFrame(relayframe.KindCopy, peer, object, requireCard)
+	frame, _, err := r.ownFrame(relayframe.KindCopy, peer, object, requireCard)
 	if err != nil {
 		if errors.Is(err, relayframe.ErrContentTooLarge) {
 			return fault.Wrap(fault.CodeContentTooLarge, err)
@@ -299,9 +442,15 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 			return fault.Wrap(fault.CodeInternal, err)
 		}
 	}
-	response, err := r.carrier.Carry(ctx, peer, key, withdraw, message.ExpiresAtUnix, frame)
+	response, sent, err := r.carry(ctx, peer, key, withdraw, message.ExpiresAtUnix, frame)
 	if err != nil {
 		return fault.Wrap(fault.CodeUnreachable, err)
+	}
+	// The generation records what was carried: a retry of a journaled key
+	// carries its first frame, not the one built now.
+	generation, err := sentGeneration(sent)
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, err)
 	}
 	now := r.now()
 	switch response.Result {
@@ -690,7 +839,7 @@ func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 		return err
 	}
 	expires := uint64(now.Add(relayRetentionWindow).Unix())
-	response, err := r.carrier.Carry(ctx, peer, key, withdraw, expires, frame)
+	response, _, err := r.carry(ctx, peer, key, withdraw, expires, frame)
 	var delay time.Duration
 	if err == nil && response.Result == carrierapi.ResultCarried {
 		delay, err = r.redepositDelay(response.RelayTTLSeconds)
@@ -746,7 +895,7 @@ func (r *relayRuntime) sendResponse(ctx context.Context, peer string) error {
 	if err != nil {
 		return err
 	}
-	response, err := r.carrier.Carry(ctx, peer, key, "", uint64(now.Add(relayRetentionWindow).Unix()), frame)
+	response, _, err := r.carry(ctx, peer, key, "", uint64(now.Add(relayRetentionWindow).Unix()), frame)
 	if err != nil {
 		return err
 	}
@@ -1078,13 +1227,24 @@ func (r *relayRuntime) applyAck(peer, deliveryID string, delivery eventlog.Deliv
 		}
 		if !changed {
 			// Already delivered: a lost ack's re-deposit answered again.
+			r.settleCopies(peer, deliveryID, delivery)
 			return eventlog.ErrNotPending
 		}
+		r.settleCopies(peer, deliveryID, settled)
 		return r.recordAckedCard(settled, now)
 	}
 	if ack.Code != fault.CodeDescriptorExpired {
-		_, err := r.daemon.journal.RelayRejected(deliveryID, match, ack.Code, "", now, now)
-		return err
+		rejected, err := r.daemon.journal.RelayRejected(deliveryID, match, ack.Code, "", now, now)
+		if err != nil {
+			return err
+		}
+		// A rejection that ends the copy, or holds it for the owner, settles
+		// its generations at the carrier, so no relay receives it again; a
+		// retry later is a new generation.
+		if rejected.State != eventlog.StatePending {
+			r.settleCopies(peer, deliveryID, rejected)
+		}
+		return nil
 	}
 	// descriptor-expired: retry at once only with evidence newer than the
 	// evidence that was refused, in the single sense of "newer"; otherwise
@@ -1114,7 +1274,8 @@ func (r *relayRuntime) applyAck(peer, deliveryID string, delivery eventlog.Deliv
 // carried that same card; otherwise the card keeps riding.
 func (r *relayRuntime) recordAckedCard(delivery eventlog.Delivery, now time.Time) error {
 	digest := ackedCardDigest(delivery)
-	if digest == "" {
+	credential := ackedCredentialDigest(delivery)
+	if digest == "" && credential == "" {
 		return nil
 	}
 	peer, err := r.peerOf(delivery.SessionID)
@@ -1127,11 +1288,53 @@ func (r *relayRuntime) recordAckedCard(delivery eventlog.Delivery, now time.Time
 	if err != nil {
 		return err
 	}
-	if pull.AckedCardDigest == digest {
+	changed := false
+	if digest != "" && pull.AckedCardDigest != digest {
+		pull.AckedCardDigest, changed = digest, true
+	}
+	if credential != "" && pull.AckedCredentialDigest != credential {
+		pull.AckedCredentialDigest, changed = credential, true
+	}
+	if !changed {
 		return nil
 	}
-	pull.AckedCardDigest = digest
 	return r.daemon.journal.PutRelayPull(pull, now)
+}
+
+// ackedCredentialDigest is the contact credential an ack of this copy proves
+// the peer received, or empty when its generations did not all carry one same
+// credential.
+func ackedCredentialDigest(delivery eventlog.Delivery) string {
+	digest := ""
+	for index, generation := range delivery.Generations {
+		if generation.CredentialDigest == "" || index > 0 && generation.CredentialDigest != digest {
+			return ""
+		}
+		digest = generation.CredentialDigest
+	}
+	return digest
+}
+
+// settleCopies tells a carrier that keeps depositing (the builtin lane) that
+// every generation of the delivery is acknowledged.
+func (r *relayRuntime) settleCopies(peer, deliveryID string, delivery eventlog.Delivery) {
+	settler, ok := r.carrier.(settlingCarrier)
+	if !ok {
+		return
+	}
+	keys := make([]string, 0, delivery.Generation)
+	for generation := uint32(1); generation <= delivery.Generation; generation++ {
+		key, err := relayframe.CopyIdempotencyKey(deliveryID, generation)
+		if err != nil {
+			return
+		}
+		keys = append(keys, key)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), credentialIssueTimeout)
+	defer cancel()
+	if err := settler.Settled(ctx, peer, keys); err != nil {
+		r.daemon.report("settle acknowledged copy", err)
+	}
 }
 
 // ackedCardDigest is the card an ack of this copy proves the peer received,
@@ -1286,6 +1489,12 @@ func (r *relayRuntime) run(ctx context.Context, sweep time.Duration, group *sync
 	group.Add(2)
 	go func() {
 		defer group.Done()
+		if r.builtin != nil {
+			if err := r.builtin.Run(ctx); err != nil && ctx.Err() == nil {
+				r.daemon.report("builtin chat lane", err)
+			}
+			return
+		}
 		if err := r.server.Serve(ctx, r.listener); err != nil && !isClosed(err) {
 			r.daemon.report("serve relay carrier", err)
 		}

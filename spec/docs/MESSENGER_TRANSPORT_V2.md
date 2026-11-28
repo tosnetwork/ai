@@ -1165,10 +1165,18 @@ the lane already sends to that peer:
 - **chat lane:** a new `credential` field of the relay frame, which becomes
   `tos.messaging.relay-frame.v2`:
   `credential_length u16 (0 or 1 .. 2,048) || credential || holder_seed 32`
-  (the seed present only with a credential) directly after `evidence`,
+  (the seed present only with a credential, and never all zero) directly
+  after `evidence`,
   present until the peer acknowledged a frame that carried it, like the card
-  (carriage 2.3). The frame bounds of carriage 1.1 and 4 are recomputed in the
-  frame PR; the largest Event payload falls by at most 2,082 bytes;
+  (carriage 2.3). A credential on an ack frame rides on every ack until it is
+  renewed, because acks are never acknowledged: a peer that only receives
+  returns its credential on its acks, and the sender takes it from an ack it
+  verified and applied. The frame bounds of carriage 1.1, 4 and 11.1 are recomputed
+  from a real maximal frame: the frame's fixed part is 74 bytes, the largest
+  relay Event payload is 137,465 bytes (2,082 below v1), part 0 of a room
+  object holds 160,662 object bytes and every later part 190,390. Only v2
+  frames decode; vectors in `messenger/internal/vectors/testdata/relay-vectors.json`
+  are reproduced by `spec/scripts/reproduce-messenger-relay-frame-v2.py`;
 - **rail lane:** beside the key card in the task, result and
   acknowledgement headers that carry the card today (relay spec 6.4).
 
@@ -1368,6 +1376,7 @@ Rules:
 | Contact lane | at most 64 envelopes; keyed by the `lane` value or else `issuer_chain`, never `credential_id`; contact lanes keep at least 192 of the 256 per recipient |
 | Revocations | 1..32 per request; 1,024 per mailbox; kept at most 604,800 + 300 s |
 | Long poll | 1..25 s; one waiting request per mailbox |
+| Relay frame (chat lane) | `relay-frame.v2` only; at most 190,464 bytes (unchanged); credential at most 2,048 bytes plus a 32-byte holder seed; fixed part 74 bytes; largest relay Event payload 137,465 bytes; room part 0 160,662 and later parts 190,390 object bytes |
 | Envelope | at most 262,144 bytes (unchanged) |
 | Envelope expiry (D10) | at most the packet's business deadline and deposit + 86,400 s (unchanged) |
 | Relay TTL (D10) | 3,600 s on test relays, 10,800 s on production relays, at most 86,400 s |

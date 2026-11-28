@@ -112,8 +112,9 @@ func validateCopy(value Copy) error {
 }
 
 // WorstCaseCopyFrameBytes is the largest kind-1 frame, before padding, that a
-// copy of an Event payload of payloadBytes can need: the maximal card and
-// evidence, a maximal bootstrap and admission token, and the largest
+// copy of an Event payload of payloadBytes can need: the maximal card,
+// evidence and contact credential with its holder seed, a maximal bootstrap
+// and admission token, and the largest
 // ciphertext sealing may produce. It is computed before sealing, so a copy
 // that could not cross the relay never spends a message key.
 func WorstCaseCopyFrameBytes(payloadBytes int) (int, error) {
@@ -124,7 +125,7 @@ func WorstCaseCopyFrameBytes(payloadBytes int) (int, error) {
 		return 0, ErrContentTooLarge
 	}
 	object := copyFixedBytes + MaxBootstrapBytes + MaxAdmissionTokenBytes + payloadBytes + MaxSealOverheadBytes
-	return fixedBytes + MaxCardBytes + MaxEvidenceBytes + object, nil
+	return fixedBytes + MaxCardBytes + MaxEvidenceBytes + MaxCredentialFieldBytes + object, nil
 }
 
 // CheckCopyFits refuses, with the peer-visible content-too-large fault, an
@@ -145,6 +146,6 @@ func CheckCopyFits(payloadBytes int) error {
 
 // MaxRelayPayloadBytes is the largest Event payload CheckCopyFits admits.
 func MaxRelayPayloadBytes() int {
-	return MaxFrameBytes - fixedBytes - MaxCardBytes - MaxEvidenceBytes - copyFixedBytes -
-		MaxBootstrapBytes - MaxAdmissionTokenBytes - MaxSealOverheadBytes
+	return MaxFrameBytes - fixedBytes - MaxCardBytes - MaxEvidenceBytes - MaxCredentialFieldBytes -
+		copyFixedBytes - MaxBootstrapBytes - MaxAdmissionTokenBytes - MaxSealOverheadBytes
 }

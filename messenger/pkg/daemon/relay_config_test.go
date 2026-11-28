@@ -93,3 +93,63 @@ func TestRelayCarriageConfigurationIsCheckedAsAWhole(t *testing.T) {
 		t.Fatalf("contact-files without relay transport: %v", err)
 	}
 }
+
+func builtinRelayConfig(t *testing.T) Config {
+	t.Helper()
+	config := relayConfig(t)
+	root := filepath.Dir(config.StateDir)
+	config.RelayCarriage.CarrySocketPath, config.RelayCarriage.ListenSocketPath = "", ""
+	config.RelayCarriage.Carrier = CarrierBuiltin
+	config.RelayCarriage.Builtin = &BuiltinCarrierConfig{StateDir: filepath.Join(root, "chat-lane"),
+		Relays:                  []string{"https://relay-one.example", "https://relay-two.example"},
+		Directories:             []string{"https://directory-one.example", "https://directory-two.example"},
+		NetworkMode:             "test-network-legacy-epoch-zero",
+		TransportDelegationPath: filepath.Join(root, "chat-delegation.bin"),
+		TransportKeyPath:        filepath.Join(root, "chat-transport.seed"),
+		Signer: BuiltinSignerConfig{Binary: "/usr/local/bin/tosctl", SHA256: strings.Repeat("a", 64),
+			ConfigPath: "/etc/tosctl.json", VaultURL: "http://127.0.0.1:8200", Controller: "chat",
+			KeyID: "mldsa44:" + strings.Repeat("b", 64)}}
+	return config
+}
+
+// carrier builtin runs the chat lane in process: it takes no carrier sockets,
+// needs its own section, and refuses anything but test-network modes.
+func TestBuiltinCarrierConfigurationIsCheckedAsAWhole(t *testing.T) {
+	if err := builtinRelayConfig(t).Validate(); err != nil {
+		t.Fatalf("valid builtin configuration: %v", err)
+	}
+	cases := map[string]func(*Config){
+		"builtin without section": func(c *Config) { c.RelayCarriage.Builtin = nil },
+		"section without builtin": func(c *Config) { c.RelayCarriage.Carrier = "" },
+		"unknown carrier":         func(c *Config) { c.RelayCarriage.Carrier = "openfox" },
+		"builtin with sockets":    func(c *Config) { c.RelayCarriage.CarrySocketPath = "/run/carrier.sock" },
+		"one relay":               func(c *Config) { c.RelayCarriage.Builtin.Relays = c.RelayCarriage.Builtin.Relays[:1] },
+		"one directory":           func(c *Config) { c.RelayCarriage.Builtin.Directories = c.RelayCarriage.Builtin.Directories[:1] },
+		"five directories": func(c *Config) {
+			c.RelayCarriage.Builtin.Directories = []string{"https://d1.example", "https://d2.example", "https://d3.example",
+				"https://d4.example", "https://d5.example"}
+		},
+		"repeated directory":    func(c *Config) { c.RelayCarriage.Builtin.Directories[1] = c.RelayCarriage.Builtin.Directories[0] },
+		"repeated relay":        func(c *Config) { c.RelayCarriage.Builtin.Relays[1] = c.RelayCarriage.Builtin.Relays[0] },
+		"plain HTTP relay":      func(c *Config) { c.RelayCarriage.Builtin.Relays[0] = "http://relay-one.example" },
+		"production mode":       func(c *Config) { c.RelayCarriage.Builtin.NetworkMode = "production" },
+		"lane inside state dir": func(c *Config) { c.RelayCarriage.Builtin.StateDir = filepath.Join(c.StateDir, "lane") },
+		"relative delegation":   func(c *Config) { c.RelayCarriage.Builtin.TransportDelegationPath = "delegation.bin" },
+		"no controller":         func(c *Config) { c.RelayCarriage.Builtin.Signer.Controller = "" },
+		"bad key id":            func(c *Config) { c.RelayCarriage.Builtin.Signer.KeyID = "ed25519:00" },
+		"hint TTL above a day":  func(c *Config) { c.RelayCarriage.Builtin.HintTTLSeconds = 86_401 },
+	}
+	for name, mutate := range cases {
+		config := builtinRelayConfig(t)
+		mutate(&config)
+		if err := config.Validate(); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+	single := builtinRelayConfig(t)
+	single.RelayCarriage.Builtin.Relays = single.RelayCarriage.Builtin.Relays[:1]
+	single.RelayCarriage.Builtin.TestSingleRelay = true
+	if err := single.Validate(); err != nil {
+		t.Fatalf("an explicit single-relay test lane: %v", err)
+	}
+}

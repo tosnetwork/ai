@@ -385,6 +385,8 @@ func (s *Server) handle(ctx context.Context, principal Principal, raw []byte) Re
 		return s.changeRoom(ctx, request)
 	case OpListRooms:
 		return s.listRooms(now)
+	case OpListConversations:
+		return s.listConversations(request)
 	case OpRoomGaps:
 		return s.roomGaps(request)
 	}
@@ -1158,6 +1160,26 @@ func (s *Server) listRooms(now time.Time) Response {
 			InviteExpiresAtUnix: join.InviteExpiresAtUnix})
 	}
 	return Response{OK: true, Rooms: rooms}
+}
+
+// listConversations returns one page of direct conversations, newest first.
+func (s *Server) listConversations(request Request) Response {
+	limit := request.Limit
+	if limit == 0 {
+		limit = MaxConversationsPerPage
+	}
+	local := s.config.Dispatcher.LocalIdentity().AgentID
+	records, err := s.config.Journal.ListDirectConversations(local, request.BeforeCreatedAtUnix,
+		request.BeforeConversationID, limit)
+	if err != nil {
+		return refuse(fault.CodeInternal, err)
+	}
+	conversations := make([]ConversationSummary, 0, len(records))
+	for _, record := range records {
+		conversations = append(conversations, ConversationSummary{ConversationID: record.ConversationID,
+			RemoteAgentID: record.RemoteAgentID, CreatedAtUnix: record.CreatedAtUnix, UpdatedAtUnix: record.UpdatedAtUnix})
+	}
+	return Response{OK: true, Conversations: conversations}
 }
 
 // roomGaps reads one room's gap records, newest first.

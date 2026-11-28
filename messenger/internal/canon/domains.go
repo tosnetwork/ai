@@ -179,8 +179,9 @@ const (
 	// DomainHTTPSDeliveryAck authenticates a recipient Endpoint's durable
 	// acceptance of one encrypted device copy.
 	DomainHTTPSDeliveryAck = "tos.messaging.https-delivery-ack.v1\x00"
-	// DomainRelayFrame prefixes one padded relay carriage frame.
-	DomainRelayFrame = "tos.messaging.relay-frame.v1\x00"
+	// DomainRelayFrame prefixes one padded relay carriage frame, version 2:
+	// the version with the contact credential field. No other version decodes.
+	DomainRelayFrame = "tos.messaging.relay-frame.v2\x00"
 	// DomainRelayObject derives the digest of the object a relay frame
 	// carries, so the parts of one object share one commitment.
 	DomainRelayObject = "tos.messaging.relay-object.v1\x00"
@@ -197,6 +198,9 @@ const (
 	// DomainRelayIdempotency derives the carrier idempotency key of one
 	// relay deposit generation.
 	DomainRelayIdempotency = "tos.messaging.relay-idempotency.v1\x00"
+	// DomainBuiltinAckKey derives the carrier key of the acknowledgement the
+	// builtin chat lane deposits for one received packet, from its nonce.
+	DomainBuiltinAckKey = "tos.messaging.builtin-ack-key.v1\x00"
 	// DomainRelayRoomObject prefixes one room object a kind-3 relay frame
 	// carries: a Commit, Welcome, application message or roster.
 	DomainRelayRoomObject = "tos.messaging.relay-room-object.v1\x00"
@@ -285,6 +289,7 @@ var Domains = []string{
 	DomainRelayDelivery,
 	DomainRelayDeliveryAck,
 	DomainRelayIdempotency,
+	DomainBuiltinAckKey,
 	DomainRelayRoomObject,
 	DomainRoomAAD,
 	DomainRelayRoomAck,

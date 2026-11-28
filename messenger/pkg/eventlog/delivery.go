@@ -88,7 +88,10 @@ type RelayGeneration struct {
 	DescriptorDigest       string `json:"descriptor_digest"`
 	DescriptorIssuedAtUnix uint64 `json:"descriptor_issued_at_unix"`
 	CardDigest             string `json:"card_digest,omitempty"`
-	DepositedAtUnix        uint64 `json:"deposited_at_unix"`
+	// CredentialDigest is the contact credential the generation's frame
+	// carried, as CardDigest is its card (transport 9.3).
+	CredentialDigest string `json:"credential_digest,omitempty"`
+	DepositedAtUnix  uint64 `json:"deposited_at_unix"`
 }
 
 // ErrNotPending reports a transition on a delivery that is no longer waiting.
@@ -644,7 +647,8 @@ func readDelivery(path string) (Delivery, error) {
 	for _, generation := range delivery.Generations {
 		if generation.Generation == 0 || generation.Generation > delivery.Generation ||
 			!canon.ValidDigest(generation.DescriptorDigest) ||
-			generation.CardDigest != "" && !canon.ValidDigest(generation.CardDigest) {
+			generation.CardDigest != "" && !canon.ValidDigest(generation.CardDigest) ||
+			generation.CredentialDigest != "" && !canon.ValidDigest(generation.CredentialDigest) {
 			return Delivery{}, errors.New("invalid delivery record")
 		}
 	}

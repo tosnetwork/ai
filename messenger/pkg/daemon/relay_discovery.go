@@ -69,6 +69,9 @@ type contactImporter struct {
 	observer     Observer
 	localAgentID string
 	now          func() time.Time
+	// learner keeps an imported contact's card for the builtin lane, which
+	// seals to it; nil with an external carrier, which imports its own.
+	learner cardLearner
 }
 
 func (c *contactImporter) Run(ctx context.Context, _ []string, interval time.Duration) error {
@@ -140,7 +143,18 @@ func (c *contactImporter) importFile(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return c.verifier.CommitPeer(peer, now)
+	committed, err := c.verifier.CommitPeer(peer, now)
+	if err != nil {
+		return committed, err
+	}
+	if c.learner != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), credentialIssueTimeout)
+		defer cancel()
+		if err := c.learner.LearnCard(ctx, contact.AgentID, contact.Card); err != nil {
+			return committed, errors.New("keep the contact's chat card: " + err.Error())
+		}
+	}
+	return committed, nil
 }
 
 func (c *contactImporter) report(stage string, err error) {

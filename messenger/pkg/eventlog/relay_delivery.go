@@ -40,7 +40,8 @@ func (j *Journal) Carried(deliveryID, attemptID string, gen RelayGeneration, red
 		return Delivery{}, errors.New("invalid relay carriage time")
 	}
 	if gen.Generation == 0 || !canon.ValidDigest(gen.DescriptorDigest) || gen.DescriptorIssuedAtUnix == 0 ||
-		gen.CardDigest != "" && !canon.ValidDigest(gen.CardDigest) {
+		gen.CardDigest != "" && !canon.ValidDigest(gen.CardDigest) ||
+		gen.CredentialDigest != "" && !canon.ValidDigest(gen.CredentialDigest) {
 		return Delivery{}, errors.New("invalid relay generation")
 	}
 	j.mutex.Lock()
