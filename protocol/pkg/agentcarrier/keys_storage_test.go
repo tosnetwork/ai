@@ -293,3 +293,55 @@ func TestNoSigningOrMutationOnInvalidConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestWritableNonStickyAncestorRefusesBeforeCreatingState(t *testing.T) {
+	f := newFixture(t)
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0777); err != nil {
+		t.Fatal(err)
+	}
+	c := f.config
+	c.StateDir = filepath.Join(parent, "state")
+	if l, err := Open(t.Context(), c); err == nil {
+		if err = l.Close(); err != nil {
+			t.Error(err)
+		}
+		t.Fatal("untrusted ancestor accepted")
+	}
+	if _, err := os.Stat(c.StateDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("state created below an untrusted ancestor", err)
+	}
+}
+func TestCopyingARailKeyIntoChatIsRefused(t *testing.T) {
+	f := newFixture(t)
+	card, err := f.lane.CurrentCard(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.lane.readKey(keyName(card.Card.KeyID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(r.Seed)
+	c := f.config
+	c.Kind = Chat
+	chat, err := Open(t.Context(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = chat.disk.write(keyName(card.Card.KeyID), r); err != nil {
+		t.Fatal(err)
+	}
+	if err = chat.index(t.Context(), keyName(card.Card.KeyID), true); err != nil {
+		t.Fatal(err)
+	}
+	if err = chat.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if l, err := Open(t.Context(), c); err == nil {
+		if err = l.Close(); err != nil {
+			t.Error(err)
+		}
+		t.Fatal("rail seed became a chat seed")
+	}
+}

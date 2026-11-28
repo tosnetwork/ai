@@ -87,6 +87,10 @@ func (c *credentials) DropContact(context.Context, string, string) error {
 }
 
 type fakeRelay struct {
+	waitEntered chan struct{}
+	waitRelease chan struct{}
+	enteredOnce sync.Once
+	fetched     [][32]byte
 	outcomes    []error
 	beforeAck   func([32]byte) error
 	lists       int
@@ -154,12 +158,21 @@ func (r *fakeRelay) List(_ context.Context, agent string, _ []byte, _ ed25519.Pr
 	return out, nil
 }
 func (r *fakeRelay) ListWait(ctx context.Context, a string, w []byte, h ed25519.PrivateKey, _ int) ([]agentpacketrelay.V2MailboxEntry, error) {
+	if r.waitEntered != nil {
+		r.enteredOnce.Do(func() { close(r.waitEntered) })
+		select {
+		case <-r.waitRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return r.List(ctx, a, w, h)
 }
 func (r *fakeRelay) Fetch(_ context.Context, _ string, id [32]byte, _ []byte, _ ed25519.PrivateKey) ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.fetches++
+	r.fetched = append(r.fetched, id)
 	raw, ok := r.envelopes[id]
 	if !ok {
 		return nil, errors.New("missing")

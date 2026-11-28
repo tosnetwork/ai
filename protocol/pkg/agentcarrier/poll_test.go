@@ -163,13 +163,36 @@ func TestReceiveMemoryIsBounded(t *testing.T) {
 	f := newFixture(t)
 	for i := 0; i < MaxEnvelopeMemory+1; i++ {
 		sum := sha256.Sum256([]byte(fmt.Sprint(i)))
-		f.lane.remember(f.lane.refused, fmt.Sprintf("%x", sum), [32]byte{}, start+3600, start)
+		f.lane.remember(f.lane.refused, fmt.Sprintf("%x", sum), [32]byte{}, start+3600, start, false)
 	}
 	if len(f.lane.refused) != MaxEnvelopeMemory {
 		t.Fatal("unbounded memory", len(f.lane.refused))
 	}
-	f.lane.remember(f.lane.refused, "expired", [32]byte{}, start+3601, start+3600)
+	f.lane.remember(f.lane.refused, "expired", [32]byte{}, start+3601, start+3600, false)
 	if len(f.lane.refused) != 1 {
 		t.Fatal("expired entries not reclaimed")
+	}
+}
+
+func TestAZeroRecoveredSecretCanStillBeAcknowledgedAgain(t *testing.T) {
+	f := newFixture(t)
+	card, err := f.lane.CurrentCard(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := agentpacketseal.Seal(agentpacketseal.RecipientKey{AgentID: f.alice.agent, KeyID: card.Card.KeyID, PublicKey: card.Card.PublicKey}, [32]byte{}, f.message(f.bob, f.alice), start+3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putEnvelope(t, f.relays[relayOne], raw)
+	f.lane.config.VerifyPacket = func(context.Context, agentpacket.Packet) error { return ErrRefused }
+	f.relays[relayOne].ackError = ErrUnavailable
+	if _, err = f.lane.Poll(t.Context()); err == nil {
+		t.Fatal("first ACK was supposed to fail")
+	}
+	f.relays[relayOne].ackError = nil
+	v, err := f.lane.Poll(t.Context())
+	if err != nil || v.Acknowledged != 1 {
+		t.Fatal("zero secret was confused with no recovered secret", v, err)
 	}
 }

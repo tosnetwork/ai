@@ -185,9 +185,16 @@ func (l *Lane) Status(ctx context.Context, id string) (DeliveryView, error) {
 	r, err := l.readDelivery(deliveryName(id))
 	return view(r), err
 }
-func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route) (agentpacketseal.RecipientKey, []string, error) {
+
+type resolvedRoute struct {
+	Key    agentpacketseal.RecipientKey
+	Relays []string
+	Card   []byte
+}
+
+func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route) (resolvedRoute, error) {
 	if len(route.HintRecord) == 0 {
-		return agentpacketseal.RecipientKey{}, nil, ErrNoRoute
+		return resolvedRoute{}, ErrNoRoute
 	}
 	objectCheck := func(ctx context.Context, kind agenttransport.HintObjectKind, raw []byte) (string, error) {
 		if l.config.VerifyObject != nil {
@@ -202,24 +209,51 @@ func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route)
 	verified, err := l.config.Verifier.VerifyConsumerHint(ctx, route.HintRecord, l.config.HintPolicy, objectCheck)
 	if err != nil {
 		if errors.Is(err, agenttransport.ErrUnavailable) {
-			return agentpacketseal.RecipientKey{}, nil, ErrUnavailable
+			return resolvedRoute{}, ErrUnavailable
 		}
-		return agentpacketseal.RecipientKey{}, nil, ErrPeerRevoked
+		return resolvedRoute{}, ErrPeerRevoked
 	}
 	if verified.Record.Hint.Delegation.AgentID() != recipient {
-		return agentpacketseal.RecipientKey{}, nil, ErrRefused
+		return resolvedRoute{}, ErrRefused
 	}
-	key, card, err := l.verifyCard(ctx, route.CardPacket)
-	if err != nil {
-		if !errors.Is(err, ErrRefused) {
-			return key, nil, ErrUnavailable
+	candidates := [][]byte{}
+	if len(route.CardPacket) > 0 {
+		candidates = append(candidates, route.CardPacket)
+	}
+	kind := agenttransport.RailCard
+	if l.config.Kind == Chat {
+		kind = agenttransport.ChatCard
+	}
+	for _, object := range verified.Record.Objects {
+		if object.Kind == kind {
+			candidates = append(candidates, object.Bytes)
 		}
-		return key, nil, ErrPeerRevoked
 	}
-	if key.AgentID != recipient || key.KeyID != card.KeyID || agentpacketseal.CheckKeyCardTime(card, l.config.Now()) != nil {
-		return key, nil, ErrPeerRevoked
+	result := resolvedRoute{Relays: append([]string(nil), verified.Record.Hint.Relays...)}
+	var chosen agentpacketseal.KeyCard
+	transient := false
+	for _, raw := range candidates {
+		key, card, err := l.verifyCard(ctx, raw)
+		if err != nil {
+			transient = transient || !errors.Is(err, ErrRefused)
+			continue
+		}
+		if key.AgentID != recipient {
+			return resolvedRoute{}, ErrRefused
+		}
+		if result.Card == nil || card.NotBeforeUnix > chosen.NotBeforeUnix || (card.NotBeforeUnix == chosen.NotBeforeUnix && bytes.Compare(card.KeyID[:], chosen.KeyID[:]) > 0) {
+			chosen = card
+			result.Key = key
+			result.Card = bytes.Clone(raw)
+		}
 	}
-	return key, append([]string(nil), verified.Record.Hint.Relays...), nil
+	if result.Card == nil {
+		if transient {
+			return resolvedRoute{}, ErrUnavailable
+		}
+		return resolvedRoute{}, ErrPeerRevoked
+	}
+	return result, nil
 }
 func accepted(g generation) bool {
 	for _, t := range g.Targets {
@@ -288,10 +322,12 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 	if err != nil {
 		return AttemptResult{}, ErrStorage
 	}
-	key, relays, err := l.verifiedRoute(call, p.RecipientAgentID, route)
+	resolved, err := l.verifiedRoute(call, p.RecipientAgentID, route)
 	if err != nil {
 		return AttemptResult{}, err
 	}
+	key, relays := resolved.Key, resolved.Relays
+	route.CardPacket = resolved.Card
 	if index < 0 || index >= len(relays) {
 		return AttemptResult{}, ErrConfig
 	}
@@ -365,10 +401,8 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 			return AttemptResult{}, ErrUnavailable
 		}
 	}
-	if contact {
-		if err = checkCredential(auth, p.RecipientAgentID, url, agenttransport.OperationDeposit, now, nil); err != nil {
-			return AttemptResult{}, ErrRefused
-		}
+	if err = l.usableContact(call, &auth, &contact, p.RecipientAgentID, url); err != nil {
+		return AttemptResult{}, err
 	}
 	if t.Attempts == math.MaxUint32 {
 		return AttemptResult{}, ErrCapacity
@@ -382,6 +416,9 @@ func (l *Lane) Attempt(ctx context.Context, id string, route Route, index int) (
 	if contact && l.own(call) != nil {
 		auth = Credential{}
 		contact = false
+	}
+	if err = l.usableContact(call, &auth, &contact, p.RecipientAgentID, url); err != nil {
+		return AttemptResult{}, err
 	}
 	if err = l.sendGuard(call, r, *g, route, auth, contact, url); err != nil {
 		return AttemptResult{}, err
@@ -443,7 +480,7 @@ func (l *Lane) sendGuard(ctx context.Context, r delivery, g generation, route Ro
 	if err != nil {
 		return ErrStorage
 	}
-	if _, _, err = l.verifiedRoute(ctx, p.RecipientAgentID, route); err != nil {
+	if _, err = l.verifiedRoute(ctx, p.RecipientAgentID, route); err != nil {
 		return err
 	}
 	if _, _, err = l.verifyCard(ctx, g.Card); err != nil {
@@ -477,6 +514,32 @@ func (l *Lane) sendGuard(ctx context.Context, r delivery, g generation, route Ro
 		return checkCredential(auth, p.RecipientAgentID, url, agenttransport.OperationDeposit, now, nil)
 	}
 	return nil
+}
+func (l *Lane) usableContact(ctx context.Context, auth *Credential, contact *bool, peer, url string) error {
+	if !*contact {
+		return nil
+	}
+	now, err := l.now()
+	if err != nil {
+		return err
+	}
+	c, err := agenttransport.DecodeCredential(auth.wire)
+	if err != nil {
+		return ErrRefused
+	}
+	until, err := c.NotAfter()
+	if err != nil {
+		return ErrRefused
+	}
+	if until <= now {
+		if err = l.config.Credentials.DropContact(ctx, peer, url); err != nil {
+			return ErrUnavailable
+		}
+		*auth = Credential{}
+		*contact = false
+		return nil
+	}
+	return checkCredential(*auth, peer, url, agenttransport.OperationDeposit, now, nil)
 }
 func status(err error, n int, code string) bool {
 	var e *agentpacketrelay.StatusError

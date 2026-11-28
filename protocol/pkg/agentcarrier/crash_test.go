@@ -82,7 +82,11 @@ func TestProcessCrashCutsPreserveJournalAndInventory(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 				defer cancel()
 				cmd := exec.CommandContext(ctx, binary, "-test.run=^TestCarrierProcessCrashChild$")
-				cmd.Env = append(os.Environ(), "CARRIER_CRASH_ROOT="+f.config.StateDir, "CARRIER_CRASH_ACTION="+action, "CARRIER_CRASH_STEP="+step, "TMPDIR="+t.TempDir())
+				scratch := t.TempDir()
+				if err := os.Chmod(scratch, 0700); err != nil {
+					t.Fatal(err)
+				}
+				cmd.Env = append(os.Environ(), "CARRIER_CRASH_ROOT="+f.config.StateDir, "CARRIER_CRASH_ACTION="+action, "CARRIER_CRASH_STEP="+step, "TMPDIR="+scratch)
 				output, err := cmd.CombinedOutput()
 				var exited *exec.ExitError
 				if !errors.As(err, &exited) || exited.ExitCode() != 29 {

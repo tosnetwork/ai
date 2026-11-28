@@ -31,6 +31,7 @@ func (g gate) lock(ctx context.Context) error {
 func (g gate) unlock() { <-g }
 
 type Lane struct {
+	issue            gate
 	meta             gate
 	wait             gate
 	notice           string
@@ -46,6 +47,7 @@ type Lane struct {
 type memory struct {
 	Secret [32]byte
 	Until  uint64
+	CanAck bool
 }
 type identity struct {
 	Schema string `json:"schema"`
@@ -109,7 +111,7 @@ func Open(ctx context.Context, c Config) (l *Lane, err error) {
 	if err != nil {
 		return nil, err
 	}
-	l = &Lane{config: c, disk: disk, out: make(gate, 1), keys: make(gate, 1), poll: make(gate, 1), wait: make(gate, 1), meta: make(gate, 1), settled: map[string]memory{}, refused: map[string]memory{}}
+	l = &Lane{config: c, disk: disk, out: make(gate, 1), keys: make(gate, 1), poll: make(gate, 1), wait: make(gate, 1), meta: make(gate, 1), issue: make(gate, 1), settled: map[string]memory{}, refused: map[string]memory{}}
 	defer func() {
 		if err != nil {
 			if closeErr := disk.close(); closeErr != nil {

@@ -101,11 +101,15 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 	if err := l.own(ctx); err != nil {
 		return OwnCard{}, err
 	}
+	if err := l.issue.lock(ctx); err != nil {
+		return OwnCard{}, err
+	}
+	defer l.issue.unlock()
 	if err := l.keys.lock(ctx); err != nil {
 		return OwnCard{}, err
 	}
-	defer l.keys.unlock()
 	_, records, err := l.heldKeys()
+	l.keys.unlock()
 	if err != nil {
 		return OwnCard{}, err
 	}
@@ -149,8 +153,18 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 			}
 			continue
 		}
-		if err = l.trackRelaysLocked(l.config.Relays, card.NotAfterUnix+uint64(KeyRetention/time.Second)); err != nil {
+		if err = l.keys.lock(ctx); err != nil {
 			return OwnCard{}, err
+		}
+		indexed, indexErr := l.indexed(keyName(card.KeyID))
+		if indexErr == nil && indexed && agentpacketseal.CheckKeyCardTime(card, l.config.Now()) == nil {
+			indexErr = l.trackRelaysLocked(l.config.Relays, card.NotAfterUnix+uint64(KeyRetention/time.Second))
+		} else {
+			indexErr = ErrStorage
+		}
+		l.keys.unlock()
+		if indexErr != nil {
+			return OwnCard{}, indexErr
 		}
 		return OwnCard{bytes.Clone(r.packet), card}, nil
 	}
@@ -178,6 +192,20 @@ func (l *Lane) CurrentCard(ctx context.Context) (OwnCard, error) {
 	recipient, verified, err := l.verifyCard(ctx, packet)
 	if err != nil || recipient.AgentID != l.config.AgentID || recipient.KeyID != card.KeyID || !bytes.Equal(recipient.PublicKey, card.PublicKey) || !slices.Equal(verified.Relays, card.Relays) || verified.NotBeforeUnix != card.NotBeforeUnix || verified.NotAfterUnix != card.NotAfterUnix {
 		return OwnCard{}, ErrRefused
+	}
+	if err = l.own(ctx); err != nil {
+		return OwnCard{}, err
+	}
+	if err = l.keys.lock(ctx); err != nil {
+		return OwnCard{}, err
+	}
+	defer l.keys.unlock()
+	inventory, indexErr := l.inventory()
+	if indexErr != nil {
+		return OwnCard{}, indexErr
+	}
+	if len(inventory.Keys) >= MaxKeys {
+		return OwnCard{}, ErrCapacity
 	}
 	if exists, err := l.indexed(keyName(key.KeyID)); err != nil || exists {
 		return OwnCard{}, ErrStorage

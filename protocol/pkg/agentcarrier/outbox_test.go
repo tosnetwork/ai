@@ -267,3 +267,16 @@ func TestUntrustedErrorsStayFixedText(t *testing.T) {
 		t.Fatal("untrusted error reflected", result, err)
 	}
 }
+
+func TestAnExpiredContactCredentialUsesTheStrangerLane(t *testing.T) {
+	f := newFixture(t)
+	f.auth.hasContact = true
+	if _, err := f.lane.Queue(t.Context(), "id", f.message(f.alice, f.bob), start+7200); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.n.Add(3601)
+	result, err := f.lane.Attempt(t.Context(), "id", f.peerRoute(), 0)
+	if err != nil || !result.Accepted || len(f.relays[relayOne].creds[0]) != 0 || f.auth.dropped != 1 {
+		t.Fatal("expired credential was not replaced by stranger deposit", result, err)
+	}
+}

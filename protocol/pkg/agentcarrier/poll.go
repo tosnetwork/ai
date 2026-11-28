@@ -13,7 +13,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
-func (l *Lane) remember(table map[string]memory, id string, secret [32]byte, until, now uint64) {
+func (l *Lane) remember(table map[string]memory, id string, secret [32]byte, until, now uint64, canAck bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for key, value := range table {
@@ -32,7 +32,7 @@ func (l *Lane) remember(table map[string]memory, id string, secret [32]byte, unt
 		}
 		delete(table, oldest)
 	}
-	table[id] = memory{secret, until}
+	table[id] = memory{secret, until, canAck}
 }
 func (l *Lane) recalled(table map[string]memory, id string, now uint64) (memory, bool) {
 	l.mu.Lock()
@@ -198,7 +198,7 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 			continue
 		}
 		if mem, ok := l.recalled(l.refused, local, now); ok {
-			if mem.Secret != ([32]byte{}) {
+			if mem.CanAck {
 				if err := client.Acknowledge(ctx, l.config.AgentID, mem.Secret); err != nil {
 					total.Code = ErrUnavailable.Error()
 				} else {
@@ -222,13 +222,13 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 		}
 		h, err := agentpacketseal.ParseEnvelope(raw)
 		if err != nil || len(raw) != int(entry.Size) || h.RecipientAgentID != l.config.AgentID || h.RecipientKeyID != entry.RecipientKeyID || h.EnvelopeID != entry.EnvelopeID || h.ExpiresAtUnix <= now {
-			l.remember(l.refused, local, [32]byte{}, until, now)
+			l.remember(l.refused, local, [32]byte{}, until, now, false)
 			total.Refused++
 			continue
 		}
 		opened, err := agentpacketseal.Open(key, raw)
 		if err != nil {
-			l.remember(l.refused, local, [32]byte{}, until, now)
+			l.remember(l.refused, local, [32]byte{}, until, now, false)
 			total.Refused++
 			continue
 		}
@@ -247,10 +247,10 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 			continue
 		}
 		if verifyErr == nil {
-			l.remember(l.settled, id, opened.AckSecret, until, now)
+			l.remember(l.settled, id, opened.AckSecret, until, now, true)
 			total.Stored++
 		} else {
-			l.remember(l.refused, local, opened.AckSecret, until, now)
+			l.remember(l.refused, local, opened.AckSecret, until, now, true)
 			total.Refused++
 		}
 		if err = client.Acknowledge(ctx, l.config.AgentID, opened.AckSecret); err != nil {

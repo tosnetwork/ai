@@ -24,7 +24,7 @@ type disk struct {
 	release  func()
 	cut      func(string) error
 }
-type sealedRecord struct {
+type checkedRecord struct {
 	Schema string          `json:"schema"`
 	Sum    string          `json:"sum"`
 	Data   json.RawMessage `json:"data"`
@@ -51,7 +51,7 @@ func privateRoot(path string) error {
 			}
 			continue
 		}
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !osguard.TrustedExecutableOwner(info) || (info.Mode().Perm()&0022 != 0 && info.Mode()&os.ModeSticky == 0) {
 			return ErrStorage
 		}
 	}
@@ -119,7 +119,7 @@ func (d *disk) read(name string, out any) error {
 	if statErr != nil || readErr != nil || closeErr != nil || !singlePrivate(info) || !os.SameFile(before, info) || len(raw) > MaxRecordBytes {
 		return ErrStorage
 	}
-	var record sealedRecord
+	var record checkedRecord
 	if jsonstrict.Decode(raw, &record) != nil || record.Schema != "tos.service.carrier.checked.v2" || len(record.Data) == 0 {
 		return ErrStorage
 	}
@@ -135,7 +135,7 @@ func (d *disk) write(name string, value any) (err error) {
 		return ErrStorage
 	}
 	sum := sha256.Sum256(raw)
-	encoded, err := json.Marshal(sealedRecord{"tos.service.carrier.checked.v2", hex.EncodeToString(sum[:]), raw})
+	encoded, err := json.Marshal(checkedRecord{"tos.service.carrier.checked.v2", hex.EncodeToString(sum[:]), raw})
 	if err != nil || len(encoded) > MaxRecordBytes {
 		return ErrCapacity
 	}
