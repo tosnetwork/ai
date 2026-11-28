@@ -28,7 +28,7 @@ const (
 	DefaultOutbox     = 256
 	MaxOutbox         = 4096
 	MaxRecordBytes    = 2 << 20
-	MaxPacketBytes    = agentpacketseal.MaxEnvelopeBytes
+	MaxPacketBytes    = agentpacketseal.MaxPacketJSONBytes
 	MaxPollRelays     = 32
 	MaxEnvelopeMemory = 8192
 	KeyLifetime       = 7 * 24 * time.Hour
@@ -118,7 +118,6 @@ type Config struct {
 	Delegation   []byte
 	Verifier     *agenttransport.Verifier
 	HintPolicy   agenttransport.HintPolicy
-	VerifyObject agenttransport.ObjectVerifier
 	Credentials  Credentials
 	Relay        func(string) (Relay, error)
 	SignCard     CardSigner

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,8 +70,15 @@ func TestNoRouteOrBadHintNeverUsesCardRelays(t *testing.T) {
 		t.Fatal(v, err)
 	}
 	bad := route
-	bad.HintRecord = bytes.Clone(route.HintRecord)
-	bad.HintRecord[len(bad.HintRecord)-1] ^= 1
+	record, parseErr := agenttransport.DecodeHintRecord(route.HintRecord)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	record.Hint.Signature[0] ^= 1
+	bad.HintRecord, parseErr = record.Encode()
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
 	if _, err = f.lane.Attempt(t.Context(), "id", bad, 0); err == nil {
 		t.Fatal("tampered hint used")
 	}

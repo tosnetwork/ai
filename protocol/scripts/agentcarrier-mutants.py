@@ -361,13 +361,6 @@ add(
 )
 
 add(
-    "zero-secret-memory",
-    "poll.go",
-    "if mem.CanAck {",
-    "if mem.Secret != ([32]byte{}) {",
-    "TestAZeroRecoveredSecretCanStillBeAcknowledgedAgain",
-)
-add(
     "holder-seed-binding",
     "types.go",
     "!bytes.Equal(ed25519.NewKeyFromSeed(holder[:32]), holder)",
@@ -378,8 +371,115 @@ add(
     "source-no-legacy",
     "source_guard_test.go",
     "!allowed[s.Sel.Name]",
-    "false",
+    "(false && !allowed[s.Sel.Name])",
     "TestCarrierGuardRefusesAliasesAndLegacyObjects",
+)
+
+add(
+    "network-state-binding",
+    "lane.go",
+    "l.config.Verifier.NetworkIdentity()",
+    "[3]string{}",
+    "TestStateNeverMovesBetweenApprovedNetworks",
+)
+
+add(
+    "packet-sealable-bound",
+    "types.go",
+    "MaxPacketBytes    = agentpacketseal.MaxPacketJSONBytes",
+    "MaxPacketBytes    = agentpacketseal.MaxEnvelopeBytes",
+    "TestQueuePacketBoundFitsTheFrozenEnvelope",
+)
+add(
+    "peer-hint-proof",
+    "outbox.go",
+    "verified, err := l.config.Verifier.VerifyHint(ctx, route.HintRecord, l.config.HintPolicy)",
+    "record,err:=agenttransport.DecodeHintRecord(route.HintRecord);verified:=agenttransport.VerifiedHint{Record:record}",
+    "TestNoRouteOrBadHintNeverUsesCardRelays",
+)
+add(
+    "peer-route-identity",
+    "outbox.go",
+    "verified.Record.Hint.Delegation.AgentID() != recipient",
+    "false",
+    "TestAValidHintForAnotherAgentIsNotARoute",
+)
+add(
+    "post-verify-receive-expiry",
+    "poll.go",
+    "h.ExpiresAtUnix <= fresh",
+    "(false && h.ExpiresAtUnix <= fresh)",
+    "TestEnvelopeExpiryIsReadAfterFetchAndBeforeStorage/verification",
+)
+add(
+    "post-list-owner-time",
+    "poll.go",
+    "now, err = l.now()\n\tif err != nil",
+    "now, err = now, nil\n\tif err != nil",
+    "TestPollRechecksOwnerCredentialAfterTheAnswer",
+)
+add(
+    "post-fetch-time",
+    "poll.go",
+    "now, err = l.now()\n\t\tif err != nil",
+    "now, err = now, nil\n\t\tif err != nil",
+    "TestEnvelopeExpiryIsReadAfterFetchAndBeforeStorage/fetch",
+)
+
+# Ignore an already-held lock only after the real first acquisition succeeded.
+lock_call = 'release, acquired, err := osguard.TryExclusiveFileLock(filepath.Join(path, "lock"), 0600)'
+add(
+    "single-writer",
+    "storage.go",
+    lock_call,
+    lock_call + "; if err==nil&&!acquired{release=func(){};acquired=true}",
+    "TestExclusiveStoreAndUnsafeFilesRefuse",
+)
+
+# Layered checks intentionally protect the same symlink property. This control
+# removes both redundant before/opened-inode checks, not just one of them.
+source = (ROOT / "protocol/pkg/agentcarrier/storage.go").read_text()
+old = source
+new = source.replace(
+    "if !singlePrivate(before) {", "if false && !singlePrivate(before) {"
+).replace("!os.SameFile(before, info)", "(false && !os.SameFile(before, info))")
+add("symlink-class", "storage.go", old, new, "TestStorageRefusesAnInternalSymlink")
+
+source = (ROOT / "protocol/pkg/agentcarrier/outbox.go").read_text()
+start = source.index("func (l *Lane) seal(")
+end = source.index("\nfunc ", start + 1)
+old = source
+seal = source[start:end]
+new = source.replace(
+    seal, seal.replace("return l.disk.write(deliveryName(r.ID), *r)", "return nil")
+)
+start = new.index("func (l *Lane) Attempt(")
+end = new.index("\nfunc ", start + 1)
+method = new[start:end]
+needle = "\n\tif err = l.disk.write(deliveryName(id), r); err != nil {"
+if method.count(needle) != 1:
+    raise RuntimeError("missing before-send write")
+new = (
+    new[:start]
+    + method.replace(needle, "\n\tif err = error(nil); err != nil {")
+    + new[end:]
+)
+add(
+    "envelope-before-network",
+    "outbox.go",
+    old,
+    new,
+    "TestJournalPrecedesDepositAndRestartReusesBytes",
+)
+original_start = source.index("func (l *Lane) Attempt(")
+original_end = source.index("\nfunc ", original_start + 1)
+original_method = source[original_start:original_end]
+add(
+    "attempt-before-network",
+    "outbox.go",
+    original_method,
+    original_method.replace(needle, "\n\tif err = error(nil); err != nil {"),
+    "TestJournalPrecedesDepositAndRestartReusesBytes",
 )
 
 

@@ -87,6 +87,8 @@ func (c *credentials) DropContact(context.Context, string, string) error {
 }
 
 type fakeRelay struct {
+	afterList   func()
+	afterFetch  func()
 	waitEntered chan struct{}
 	waitRelease chan struct{}
 	enteredOnce sync.Once
@@ -142,6 +144,9 @@ func (r *fakeRelay) List(_ context.Context, agent string, _ []byte, _ ed25519.Pr
 	if r.listError != nil {
 		return nil, r.listError
 	}
+	if r.afterList != nil {
+		r.afterList()
+	}
 	if r.entries != nil {
 		return append([]agentpacketrelay.V2MailboxEntry(nil), r.entries...), nil
 	}
@@ -171,6 +176,9 @@ func (r *fakeRelay) ListWait(ctx context.Context, a string, w []byte, h ed25519.
 func (r *fakeRelay) Fetch(_ context.Context, _ string, id [32]byte, _ []byte, _ ed25519.PrivateKey) ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.afterFetch != nil {
+		r.afterFetch()
+	}
 	r.fetches++
 	r.fetched = append(r.fetched, id)
 	raw, ok := r.envelopes[id]

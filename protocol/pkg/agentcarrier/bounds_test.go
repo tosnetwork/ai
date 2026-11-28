@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -300,5 +302,102 @@ func TestPruneKeepsIdempotencyUntilEnvelopeRetentionHasEnded(t *testing.T) {
 	yes, err := f.lane.indexed(deliveryName("id"))
 	if err != nil || yes {
 		t.Fatal("expired delivery remains indexed", yes, err)
+	}
+}
+
+func TestQueuePacketBoundFitsTheFrozenEnvelope(t *testing.T) {
+	f := newFixture(t)
+	base := f.message(f.alice, f.bob)
+	raw := append(bytes.Clone(base), bytes.Repeat([]byte(" "), agentpacketseal.MaxPacketJSONBytes-len(base))...)
+	if _, err := f.lane.Queue(t.Context(), "max", raw, start+7200); err != nil {
+		t.Fatal("largest sealable packet refused", err)
+	}
+	if _, err := f.lane.Attempt(t.Context(), "max", f.peerRoute(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.relays[relayOne].deposits[0]) != agentpacketseal.MaxEnvelopeBytes {
+		t.Fatal("boundary did not reach the full envelope")
+	}
+	if _, err := f.lane.Queue(t.Context(), "oversize", append(bytes.Clone(raw), ' '), start+7200); !errors.Is(err, ErrRefused) {
+		t.Fatal("unsealable packet consumed a journal slot", err)
+	}
+}
+func TestMaximumRecordBudgetIncludesEveryGeneration(t *testing.T) {
+	f := newFixture(t)
+	r := delivery{Identity: f.lane.identity(), ID: strings.Repeat("\x00", 128), Packet: make([]byte, agentpacketseal.MaxPacketJSONBytes), Deadline: math.MaxUint64, State: "abandoned", Code: "retention-exceeded", ResolveAfter: math.MaxUint64, ResolveBackoff: 600}
+	for i := 0; i < MaxGenerations; i++ {
+		g := generation{Number: math.MaxUint32, Created: math.MaxUint64, Envelope: make([]byte, agentpacketseal.MaxEnvelopeBytes), Card: make([]byte, agenttransport.MaxHintCardBytes), Hint: make([]byte, agenttransport.MaxHintRecordSize), Stopped: true}
+		for j := range g.Secret {
+			g.Secret[j] = 255
+		}
+		for j := 0; j < MaxTargets; j++ {
+			g.Targets = append(g.Targets, target{URL: "https://" + strings.Repeat("a", 248), State: "abandoned", Attempts: math.MaxUint32})
+		}
+		r.Generations = append(r.Generations, g)
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked, err := json.Marshal(checkedRecord{"tos.service.carrier.checked.v2", strings.Repeat("f", 64), raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checked) > MaxRecordBytes {
+		t.Fatal("legal field maxima can exceed the record bound", len(checked), MaxRecordBytes)
+	}
+	t.Logf("upper-bound record: %d bytes under %d", len(checked), MaxRecordBytes)
+}
+
+func TestAValidHintForAnotherAgentIsNotARoute(t *testing.T) {
+	f := newFixture(t)
+	route := f.peerRoute()
+	d, err := agenttransport.DecodeDelegation(f.alice.wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint, err := agenttransport.SignHint(agenttransport.Hint{Delegation: d, IssuedAt: start, ExpiresAt: start + 3600, Relays: []string{relayOne, relayTwo}}, f.alice.transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.HintRecord, err = (agenttransport.HintRecord{Hint: hint, Objects: []agenttransport.HintObject{}}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.lane.Queue(t.Context(), "id", f.message(f.alice, f.bob), start+7200); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.lane.Attempt(t.Context(), "id", route, 0); !errors.Is(err, ErrRefused) || len(f.relays[relayOne].deposits) != 0 {
+		t.Fatal("another Agent controlled the recipient route", err)
+	}
+}
+
+func TestUnusedLaneEvidenceIsNeverUsedAsAuthority(t *testing.T) {
+	f := newFixture(t)
+	route := f.peerRoute()
+	record, err := agenttransport.DecodeHintRecord(route.HintRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opaque := []byte("not-consumed-as-identity-by-this-lane")
+	digest, err := agenttransport.HintObjectDigest(agenttransport.MessengerEvidence, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Hint.Objects = []agenttransport.HintObjectRef{{Kind: agenttransport.MessengerEvidence, Length: uint32(len(opaque)), Digest: digest}}
+	record.Objects = []agenttransport.HintObject{{Kind: agenttransport.MessengerEvidence, Bytes: opaque}}
+	record.Hint, err = agenttransport.SignHint(record.Hint, f.bob.transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.HintRecord, err = record.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.lane.Queue(t.Context(), "id", f.message(f.alice, f.bob), start+7200); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.lane.Attempt(t.Context(), "id", route, 0); err != nil {
+		t.Fatal("unconsumed opaque evidence became a dependency", err)
 	}
 }

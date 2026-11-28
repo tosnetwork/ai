@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +115,9 @@ func TestOutboxAndPollTargetsHaveHardBounds(t *testing.T) {
 	}
 	if _, err = f.lane.Queue(t.Context(), "two", raw, start+7200); !errors.Is(err, ErrCapacity) {
 		t.Fatal("outbox overflow accepted", err)
+	}
+	if _, err = os.Stat(filepath.Join(f.config.StateDir, string(Rail), deliveryName("two"))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("outbox cap ran after writing the refused packet", err)
 	}
 	for i := 2; i < MaxPollRelays; i++ {
 		if err = f.lane.TrackRelays(t.Context(), []string{fmt.Sprintf("https://127.0.0.1/%d", i)}, start+1000); err != nil {
@@ -343,5 +348,28 @@ func TestCopyingARailKeyIntoChatIsRefused(t *testing.T) {
 			t.Error(err)
 		}
 		t.Fatal("rail seed became a chat seed")
+	}
+}
+
+func TestStateNeverMovesBetweenApprovedNetworks(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.lane.CurrentCard(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.lane.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := agenttransport.Config{Mode: agenttransport.TestNetworkEpochAware, Network: &nativev1.NetworkDomain{NetworkId: "tos:global-id:2", GenesisRootHash: "7095f2295d9c0a2310e7530f3d4f7ac03970133a19d96167ac6aa87d03ff908c", GenesisFileHash: "bfc773cfbb122917353c93f72494035d4986b7e4ae0dc8b7be39347f7a546186"}, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{"tvm-cell-sha256:" + fmt.Sprintf("%064x", 3)}, Locator: location("0:test")}, Clock: f.clock}
+	verifier, err := agenttransport.NewVerifier(config, f.resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := f.config
+	c.Verifier = verifier
+	if l, err := Open(t.Context(), c); err == nil {
+		if err = l.Close(); err != nil {
+			t.Error(err)
+		}
+		t.Fatal("a different approved genesis opened this lane")
 	}
 }

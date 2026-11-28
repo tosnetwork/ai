@@ -196,17 +196,9 @@ func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route)
 	if len(route.HintRecord) == 0 {
 		return resolvedRoute{}, ErrNoRoute
 	}
-	objectCheck := func(ctx context.Context, kind agenttransport.HintObjectKind, raw []byte) (string, error) {
-		if l.config.VerifyObject != nil {
-			return l.config.VerifyObject(ctx, kind, raw)
-		}
-		if kind != agenttransport.RailCard && kind != agenttransport.ChatCard {
-			return "", ErrRefused
-		}
-		key, _, err := l.verifyCard(ctx, raw)
-		return key.AgentID, err
-	}
-	verified, err := l.config.Verifier.VerifyConsumerHint(ctx, route.HintRecord, l.config.HintPolicy, objectCheck)
+	// Only the selected lane's cards are used here. Other objects remain opaque;
+	// their consuming lane verifies them before using them as identity evidence.
+	verified, err := l.config.Verifier.VerifyHint(ctx, route.HintRecord, l.config.HintPolicy)
 	if err != nil {
 		if errors.Is(err, agenttransport.ErrUnavailable) {
 			return resolvedRoute{}, ErrUnavailable

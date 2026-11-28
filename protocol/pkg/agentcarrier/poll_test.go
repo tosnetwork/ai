@@ -163,36 +163,56 @@ func TestReceiveMemoryIsBounded(t *testing.T) {
 	f := newFixture(t)
 	for i := 0; i < MaxEnvelopeMemory+1; i++ {
 		sum := sha256.Sum256([]byte(fmt.Sprint(i)))
-		f.lane.remember(f.lane.refused, fmt.Sprintf("%x", sum), [32]byte{}, start+3600, start, false)
+		f.lane.remember(f.lane.refused, fmt.Sprintf("%x", sum), [32]byte{}, start+3600, start)
 	}
 	if len(f.lane.refused) != MaxEnvelopeMemory {
 		t.Fatal("unbounded memory", len(f.lane.refused))
 	}
-	f.lane.remember(f.lane.refused, "expired", [32]byte{}, start+3601, start+3600, false)
+	f.lane.remember(f.lane.refused, "expired", [32]byte{}, start+3601, start+3600)
 	if len(f.lane.refused) != 1 {
 		t.Fatal("expired entries not reclaimed")
 	}
 }
 
-func TestAZeroRecoveredSecretCanStillBeAcknowledgedAgain(t *testing.T) {
+func TestPollRechecksOwnerCredentialAfterTheAnswer(t *testing.T) {
 	f := newFixture(t)
-	card, err := f.lane.CurrentCard(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := agentpacketseal.Seal(agentpacketseal.RecipientKey{AgentID: f.alice.agent, KeyID: card.Card.KeyID, PublicKey: card.Card.PublicKey}, [32]byte{}, f.message(f.bob, f.alice), start+3600)
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw := inbound(t, f, f.message(f.bob, f.alice))
 	putEnvelope(t, f.relays[relayOne], raw)
-	f.lane.config.VerifyPacket = func(context.Context, agentpacket.Packet) error { return ErrRefused }
-	f.relays[relayOne].ackError = ErrUnavailable
-	if _, err = f.lane.Poll(t.Context()); err == nil {
-		t.Fatal("first ACK was supposed to fail")
+	f.relays[relayOne].afterList = func() { f.clock.n.Store(int64(start + 3601)) }
+	held, err := f.lane.keysForPoll(t.Context())
+	if err != nil {
+		t.Fatal(err)
 	}
-	f.relays[relayOne].ackError = nil
-	v, err := f.lane.Poll(t.Context())
-	if err != nil || v.Acknowledged != 1 {
-		t.Fatal("zero secret was confused with no recovered secret", v, err)
+	if _, err = f.lane.pollRelay(t.Context(), relayOne, held, 0); !errors.Is(err, ErrRefused) || f.relays[relayOne].fetches != 0 {
+		t.Fatal("expired owner credential reached fetch", err)
+	}
+}
+func TestEnvelopeExpiryIsReadAfterFetchAndBeforeStorage(t *testing.T) {
+	for _, stage := range []string{"fetch", "verification"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newFixture(t)
+			raw := inbound(t, f, f.message(f.bob, f.alice))
+			putEnvelope(t, f.relays[relayOne], raw)
+			if stage == "fetch" {
+				f.relays[relayOne].afterFetch = func() { f.clock.n.Store(int64(start + 3601)) }
+			} else {
+				f.lane.config.VerifyPacket = func(context.Context, agentpacket.Packet) error { f.clock.n.Store(int64(start + 3601)); return nil }
+			}
+			held, err := f.lane.keysForPoll(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := f.lane.pollRelay(t.Context(), relayOne, held, 0)
+			if err != nil || v.Stored != 0 || len(f.inbox) != 0 || v.Refused != 1 {
+				t.Fatal("expired envelope reached storage", v, err)
+			}
+			wantAck := 1
+			if stage == "fetch" {
+				wantAck = 0
+			}
+			if v.Acknowledged != wantAck {
+				t.Fatal("expiry was checked at the wrong receive boundary", v)
+			}
+		})
 	}
 }

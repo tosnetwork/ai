@@ -47,12 +47,12 @@ type Lane struct {
 type memory struct {
 	Secret [32]byte
 	Until  uint64
-	CanAck bool
 }
 type identity struct {
-	Schema string `json:"schema"`
-	Agent  string `json:"agent"`
-	Kind   Kind   `json:"kind"`
+	Schema  string    `json:"schema"`
+	Agent   string    `json:"agent"`
+	Kind    Kind      `json:"kind"`
+	Network [3]string `json:"network"`
 }
 type pollRelay struct {
 	URL   string `json:"url"`
@@ -64,7 +64,7 @@ type pollSet struct {
 }
 
 func (l *Lane) identity() identity {
-	return identity{"tos.service.carrier.lane.v2", l.config.AgentID, l.config.Kind}
+	return identity{"tos.service.carrier.lane.v2", l.config.AgentID, l.config.Kind, l.config.Verifier.NetworkIdentity()}
 }
 func validRelays(in []string) bool {
 	if len(in) < 1 || len(in) > 4 {
@@ -81,6 +81,9 @@ func validRelays(in []string) bool {
 }
 func Open(ctx context.Context, c Config) (l *Lane, err error) {
 	if (c.Kind != Rail && c.Kind != Chat) || !validRelays(c.Relays) || c.Verifier == nil || c.Credentials == nil || c.Relay == nil || c.SignCard == nil || c.VerifyCard == nil || c.VerifyPacket == nil || c.Store == nil {
+		return nil, ErrConfig
+	}
+	if c.Verifier.NetworkIdentity() == ([3]string{}) {
 		return nil, ErrConfig
 	}
 	if _, err = agentpacketseal.AgentDigest(c.AgentID); err != nil || c.AgentID == agentpacketseal.KeyCardAudience {

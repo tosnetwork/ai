@@ -13,7 +13,7 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
-func (l *Lane) remember(table map[string]memory, id string, secret [32]byte, until, now uint64, canAck bool) {
+func (l *Lane) remember(table map[string]memory, id string, secret [32]byte, until, now uint64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for key, value := range table {
@@ -32,7 +32,7 @@ func (l *Lane) remember(table map[string]memory, id string, secret [32]byte, unt
 		}
 		delete(table, oldest)
 	}
-	table[id] = memory{secret, until, canAck}
+	table[id] = memory{secret, until}
 }
 func (l *Lane) recalled(table map[string]memory, id string, now uint64) (memory, bool) {
 	l.mu.Lock()
@@ -155,7 +155,7 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 	}
 	auth, err := l.config.Credentials.Owner(ctx, url)
 	if err != nil {
-		return total, ErrTransportRevoked
+		return total, ErrUnavailable
 	}
 	now, err := l.now()
 	if err != nil {
@@ -174,6 +174,16 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 		return total, ErrUnavailable
 	}
 	total.Listed = 1
+	if err = l.own(ctx); err != nil {
+		return total, err
+	}
+	now, err = l.now()
+	if err != nil {
+		return total, err
+	}
+	if checkCredential(auth, l.config.AgentID, url, agenttransport.OperationFetch, now, l.config.Delegation) != nil {
+		return total, ErrRefused
+	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Lane == "contact" && entries[j].Lane != "contact" })
 	downloads := 0
 	for _, entry := range entries {
@@ -198,7 +208,7 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 			continue
 		}
 		if mem, ok := l.recalled(l.refused, local, now); ok {
-			if mem.CanAck {
+			if mem.Secret != ([32]byte{}) {
 				if err := client.Acknowledge(ctx, l.config.AgentID, mem.Secret); err != nil {
 					total.Code = ErrUnavailable.Error()
 				} else {
@@ -220,15 +230,19 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 			total.Code = ErrUnavailable.Error()
 			continue
 		}
+		now, err = l.now()
+		if err != nil {
+			return total, err
+		}
 		h, err := agentpacketseal.ParseEnvelope(raw)
 		if err != nil || len(raw) != int(entry.Size) || h.RecipientAgentID != l.config.AgentID || h.RecipientKeyID != entry.RecipientKeyID || h.EnvelopeID != entry.EnvelopeID || h.ExpiresAtUnix <= now {
-			l.remember(l.refused, local, [32]byte{}, until, now, false)
+			l.remember(l.refused, local, [32]byte{}, until, now)
 			total.Refused++
 			continue
 		}
 		opened, err := agentpacketseal.Open(key, raw)
 		if err != nil {
-			l.remember(l.refused, local, [32]byte{}, until, now, false)
+			l.remember(l.refused, local, [32]byte{}, until, now)
 			total.Refused++
 			continue
 		}
@@ -240,6 +254,15 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 			verifyErr = l.config.VerifyPacket(ctx, p)
 		}
 		if verifyErr == nil {
+			fresh, timeErr := l.now()
+			if timeErr != nil {
+				return total, timeErr
+			}
+			if h.ExpiresAtUnix <= fresh {
+				verifyErr = ErrRefused
+			}
+		}
+		if verifyErr == nil {
 			verifyErr = l.config.Store(ctx, opened.PacketJSON)
 		}
 		if verifyErr != nil && !errors.Is(verifyErr, ErrRefused) {
@@ -247,10 +270,10 @@ func (l *Lane) pollRelay(ctx context.Context, url string, held map[[32]byte]agen
 			continue
 		}
 		if verifyErr == nil {
-			l.remember(l.settled, id, opened.AckSecret, until, now, true)
+			l.remember(l.settled, id, opened.AckSecret, until, now)
 			total.Stored++
 		} else {
-			l.remember(l.refused, local, opened.AckSecret, until, now, true)
+			l.remember(l.refused, local, opened.AckSecret, until, now)
 			total.Refused++
 		}
 		if err = client.Acknowledge(ctx, l.config.AgentID, opened.AckSecret); err != nil {

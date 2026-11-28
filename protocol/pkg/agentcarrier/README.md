@@ -23,7 +23,8 @@ the transport signing key in external custody.
 id with different bytes refuses. `Attempt` accepts a raw hint record and a signed
 card, re-verifies both, selects one relay by index from the verified hint, and
 sends only journaled envelope bytes. The card's relay list never selects a
-peer route. A lost response or crash after send reuses those bytes. The result's
+peer route. Only the selected lane card is consumed as authority; unused hint
+objects stay opaque and are never exposed as verified identities. A lost response or crash after send reuses those bytes. The result's
 TTL is that relay's description, **not** a claim about every relay in the hint.
 The later fanout scheduler computes the minimum advertised TTL and carriage
 report. Relay acceptance never authenticates a business outcome.
@@ -40,9 +41,11 @@ Key cards normally live seven days and rotate 48 hours early. Seeds stay until
 card expiry plus 24 hours and 300 seconds. TrackRelays only extends existing
 poll retention. Hint publication supplies its own retirement deadline through
 this API in part 2. Opening or operating a used store refuses missing/corrupt
-records, mixed lane identities, unsafe permissions, symlinks and multiple
+records, mixed lane or verifier-network identities, unsafe permissions, symlinks and multiple
 writers. Atomic files carry a checksum; uncertain writes poison the instance
-until restart. Temporary files left before rename are never delivery records.
+until restart. A checksummed inventory admits new key/outbox files only after
+they are synced, and retires references before unlinking; a missing referenced
+file refuses startup. Temporary files left before rename are never delivery records.
 
 Bounds: 16 retained keys, 32 poll targets, default 256/max 4,096 outbox records,
 2 MiB per record, four retained envelope generations, 16 remembered relay
