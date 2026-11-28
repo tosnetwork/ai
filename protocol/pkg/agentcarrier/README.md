@@ -67,7 +67,9 @@ Routing and credential APIs compose with the primitives:
 3. `Publisher.Publish` journals exact hint bytes before publication and receipts
    afterward. Call it periodically and on local configuration changes: it reuses
    a live hint until half-life, and republishes when public cards, relays, policy
-   or delegation change. Partial failures retry only missing targets with the
+   or delegation change. Same-second changes get monotonically increasing hint
+   and policy stamps within the permitted clock skew, so relays do not ignore an
+   equal-time update. Partial failures retry only missing targets with the
    saved bytes. Default hints disclose no objects or direct addresses. Rail card
    disclosure is explicit; chat public contact requires both consent and an
    independently verified evidence object. Default mailbox policy is 32/2 MiB;

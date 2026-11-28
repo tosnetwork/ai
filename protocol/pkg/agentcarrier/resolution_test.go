@@ -174,7 +174,9 @@ func TestRoutingInventoryRefusesMissingUsedRecordAndMixedIdentity(t *testing.T) 
 		t.Fatal(e)
 	}
 	if opened, e := openRoutingStore(root, f.lane.identity()); e == nil {
-		_ = opened.Close()
+		if closeErr := opened.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
 		t.Fatal("missing indexed record accepted")
 	}
 	other := filepath.Join(f.config.StateDir, "other")
@@ -188,7 +190,9 @@ func TestRoutingInventoryRefusesMissingUsedRecordAndMixedIdentity(t *testing.T) 
 	id := f.lane.identity()
 	id.Kind = Chat
 	if opened, e := openRoutingStore(other, id); e == nil {
-		_ = opened.Close()
+		if closeErr := opened.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
 		t.Fatal("mixed lane accepted")
 	}
 	info, e := os.Stat(filepath.Join(other, "identity"))
