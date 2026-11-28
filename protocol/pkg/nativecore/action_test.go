@@ -193,3 +193,42 @@ func TestNativeActionHasNoAnchorOrPortableStateCommitment(t *testing.T) {
 		t.Fatalf("action refs = %d, want domain+payload only", s.RefsNum())
 	}
 }
+
+// Until the v2 registry encoding lands, the encoder refuses a delegation epoch
+// and a withdrawal rather than signing bytes that omit them.
+func TestEpochFieldsAreRefusedByTheCurrentEncoding(t *testing.T) {
+	policy, _ := testPolicy(t)
+	network := &nativev1.NetworkDomain{NetworkId: "tos-testnet", GenesisRootHash: "sha256:" + strings.Repeat("11", 32), GenesisFileHash: "sha256:" + strings.Repeat("22", 32)}
+	agentID, err := DeriveAgentID(network, []byte(strings.Repeat("o", 32)), policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := "sha256:" + strings.Repeat("ab", 32)
+	action := func() *nativev1.NativeActionV1 {
+		return &nativev1.NativeActionV1{Protocol: Protocol, Network: network, TargetObjectId: agentID,
+			TargetContractCodeHash: "tvm-cell-sha256:" + strings.Repeat("44", 32), Generation: 1, Sequence: 2,
+			PredecessorTvmStateHash: "tvm-cell-sha256:" + strings.Repeat("55", 32),
+			Nonce:                   []byte(strings.Repeat("n", 32))}
+	}
+	plain := action()
+	plain.Payload = &nativev1.NativeActionV1_DelegateAgent{DelegateAgent: &nativev1.DelegateAgentV1{DelegationDigest: digest}}
+	if _, err := BuildAction(plain); err != nil {
+		t.Fatalf("delegation without an epoch: %v", err)
+	}
+	withEpoch := action()
+	withEpoch.Payload = &nativev1.NativeActionV1_DelegateAgent{DelegateAgent: &nativev1.DelegateAgentV1{DelegationDigest: digest, AuthorizationEpoch: 1}}
+	if _, err := BuildAction(withEpoch); err == nil {
+		t.Fatalf("withEpoch was built")
+	}
+	if _, _, err := buildPayload(withEpoch, 1); err == nil || !strings.Contains(err.Error(), "authorization_epoch is not supported") {
+		t.Fatalf("delegation with an epoch: %v", err)
+	}
+	withdrawal := action()
+	withdrawal.Payload = &nativev1.NativeActionV1_WithdrawAgentDelegation{WithdrawAgentDelegation: &nativev1.WithdrawAgentDelegationV1{DelegationDigest: digest, AuthorizationEpoch: 1}}
+	if _, err := BuildAction(withdrawal); err == nil {
+		t.Fatalf("withdrawal was built")
+	}
+	if _, _, err := buildPayload(withdrawal, 1); err == nil || !strings.Contains(err.Error(), "withdraw-agent-delegation is not supported") {
+		t.Fatalf("withdrawal: %v", err)
+	}
+}
