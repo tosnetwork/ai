@@ -202,14 +202,14 @@ add(
     "index-order",
     "agentpacketrelay/v2_directory_wire.go",
     "(i > 0 && bytes.Compare(entries[i-1].Digest[:], e.Digest[:]) >= 0)",
-    "false",
+    "(false && i > 0 && bytes.Compare(entries[i-1].Digest[:], e.Digest[:]) >= 0)",
     "TestV2DirectoryCodecBounds",
 )
 add(
     "index-length",
     "agentpacketrelay/v2_directory_wire.go",
     "e.Length == 0 || e.Length > agenttransport.MaxHintRecordSize",
-    "false",
+    "false && (e.Length == 0 || e.Length > agenttransport.MaxHintRecordSize)",
     "TestV2FrozenDirectoryVectors",
 )
 add(

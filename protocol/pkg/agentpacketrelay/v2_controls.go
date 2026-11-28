@@ -3,9 +3,10 @@ package agentpacketrelay
 import (
 	"bytes"
 	"errors"
-	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"path/filepath"
 	"strings"
+
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
 func (s *V2Store) loadControls(now uint64) error {
