@@ -192,3 +192,7 @@ reachability-vectors-check:
 agenttransport-mutants: agenttransport-reachability-mutants
 agenttransport-reachability-mutants:
 	GOWORK=off python3 -I protocol/scripts/agenttransport-reachability-mutants.py
+
+.PHONY: relay-v2-store-mutants
+relay-v2-store-mutants:
+	GOWORK=off python3 -I protocol/scripts/relay-v2-store-mutants.py
