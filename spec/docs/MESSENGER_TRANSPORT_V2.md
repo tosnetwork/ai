@@ -123,9 +123,11 @@ What the M0-R work did establish, and this design relies on:
 - Relay payment, leases or bonds: they stay behind the Expansion Gate
   (ROADMAP section 8).
 - Multi-device over the relay (carriage D3 stands).
-- Backward compatibility. TOS is pre-launch: V1 relay endpoints, the
-  `carrierapi` boundary and OpenFox's chat lane are removed, not kept
-  (section 17).
+- Backward compatibility. TOS is pre-launch and keeps Messenger V2 only:
+  V1 relay endpoints, the `carrierapi` boundary and OpenFox's chat lane are
+  removed, not kept (section 17). No V2 component reads a V1 store, decodes
+  a V1 frame, accepts a V1-only object or falls back to a V1 route, and no
+  pull request adds a compatibility shim, dual-read path or state migration.
 
 ## 2. Authority model
 
@@ -710,9 +712,10 @@ points at a dead or hostile relay loses availability, which multi-relay
 deposit (section 10) and the carriage's redelivery bound.
 
 **Precedence over the card's relay list.** While a valid hint of the
-recipient's lane is held, its relay list replaces the relay list of the key
-card it carries; without one, the card's list is used as in V1. Section 18
-Q11 removes the card's list later.
+recipient's lane is held, its relay list is the only route; the relay list of
+the key card it carries is ignored, and without a valid hint the send stays
+pending with `no-route`. Section 18 Q11 removes the card's list from the
+format later.
 
 ### 5.6 Direct hello and receipt
 
@@ -749,22 +752,31 @@ V2 keeps every rule of relay spec section 9 that this section does not
 change: HTTPS only, no redirects, no query strings, the request evaluation
 order, the deposit steps, the acknowledgement secret, tombstones, bounds,
 retention and the D10 TTLs, including the 64 KiB bound on every response
-but a downloaded envelope. Paths are below the base URL `B`.
+but a downloaded envelope and the mailbox listing (below). Paths are below the base URL `B`.
 
-**Separate stores while V1 runs.** A relay that serves both APIs keeps V2
-mailboxes in a store of their own; no V1 request reads, lists, downloads or
-acknowledges an envelope deposited through V2, and V1 mailbox paths of an
-Agent answer from the V1 store only. The privacy claims of this design (G4,
-section 11) hold for the V2 store, and for a relay only once its V1
-endpoints are disabled or its stores are separate. The V1 endpoints are
-removed in section 17 PR 14.
+**V2 only.** The V2 mailboxes live in a store of their own; no V1 request
+reads, lists, downloads or acknowledges an envelope deposited through V2, and
+no V2 request reads the V1 store. The V1 endpoints exist only until the
+in-repo client still using them has moved (section 17): each pull request
+that moves a client deletes the V1 path it replaced, and PR 14 deletes the
+last one. Nothing is migrated and no V2 client falls back to V1. The privacy
+claims of this design (G4, section 11) hold for the V2 store.
+
+**Listing bound.** The 64 KiB response bound has one exception: the mailbox
+listing (`GET B/v2/mailboxes/{agent}/envelopes`) is bounded at 80 KiB
+(81,920 bytes). A full legal listing, both lanes at their maximum envelope
+counts with every field at its maximum length, is 67,544 bytes; the extra
+room is headroom, not a larger envelope count. Listings are not paginated.
+The relay tests build that maximal listing and require it to fit, and a
+listing that would exceed the bound is a relay bug that answers `500`,
+never a truncated list.
 
 ### 6.1 Operations
 
 | Request | Credential | Effect |
 |---|---|---|
 | `PUT B/v2/mailboxes/{agent}/envelopes/{id}` | none (stranger lane) or deposit | deposit, relay spec 9.2 steps, then lane quotas |
-| `GET B/v2/mailboxes/{agent}/envelopes` | list, owner | the V1 listing plus `"lane": "stranger"` or `"contact"` per entry; optional `TOS-Relay-Wait: 1..25` holds the answer until an entry exists or the wait ends |
+| `GET B/v2/mailboxes/{agent}/envelopes` | list, owner | the listing of relay spec section 9 plus `"lane": "stranger"` or `"contact"` per entry, bounded by the listing rule below; optional `TOS-Relay-Wait: 1..25` holds the answer until an entry exists or the wait ends |
 | `GET B/v2/mailboxes/{agent}/envelopes/{id}` | fetch, owner | download |
 | `POST B/v2/mailboxes/{agent}/envelopes/{id}/ack` | none | acknowledgement by secret, unchanged; the sender can still withdraw |
 | `PUT B/v2/mailboxes/{agent}/policy` | publish, owner | mailbox policy (6.2) |
@@ -772,7 +784,7 @@ removed in section 17 PR 14.
 | `PUT B/v2/hints/{agent}` | none | store a hint record (6.5) |
 | `GET B/v2/hints/{agent}` | none | the hint index (6.5): one entry per live record of the Agent, at most 4 |
 | `GET B/v2/hints/{agent}/{digest}` | none | one hint record (6.5), by its delegation digest |
-| `GET B/v2/relay` | none | description: the V1 fields plus `stranger_max_envelopes`, `stranger_max_bytes`, `max_wait_seconds`, `directory` |
+| `GET B/v2/relay` | none | description: the relay spec description fields plus `stranger_max_envelopes`, `stranger_max_bytes`, `max_wait_seconds`, `directory` |
 
 `{agent}` MUST equal the Agent of the credential's delegation; a mismatch is
 `403 credential_scope`. Mailboxes stay keyed by Agent ID (section 18 Q4).
@@ -1119,8 +1131,8 @@ In order, using the first that yields a valid hint for the needed lane:
    no fewer than two directory relays, merged.
 
 Every answer is verified with `VerifyHint` before use, and the resolved
-cards and evidence with their own verifiers. With no valid hint, the V1 card
-relay list is used. With neither, the send stays pending with `no-route`.
+cards and evidence with their own verifiers. With no valid hint, the send
+stays pending with `no-route`; the card's relay list is never a route.
 
 ### 9.3 Distributing contact credentials
 
@@ -1240,7 +1252,7 @@ Rules that keep the operator's view minimal:
 | Situation | Behaviour | Surface |
 |---|---|---|
 | No valid hint and no card | send stays pending; retried on the next resolution | `no-route` |
-| Hint expired, cards valid | card relay list (V1 behaviour) | none |
+| Hint expired, cards valid | pending until a valid hint is resolved; the card's relay list is not used | `no-route` |
 | Peer's delegation no longer verifies | no seal, no deposit, no direct; pending until a hint of a verifying delegation arrives | `peer-revoked` |
 | Own delegation no longer verifies | stop publishing; stranger lanes only; owner credential unusable, so no fetch | `transport-revoked` owner notice |
 | Contact credential refused (`credential_revoked`) | drop it; stranger lane | none |
@@ -1312,8 +1324,9 @@ Rules:
    separate relays (carriage section 7).
 4. No state migration: pre-launch nodes are re-provisioned with fresh keys,
    delegations and cards; contacts re-establish by Agent ID through hints.
-5. `messenger/pkg/carrierapi` and the V1 relay endpoints are removed once no
-   client uses them (section 17, PR 14). The no-loop rule of carriage 1
+5. `messenger/pkg/carrierapi` and the V1 relay endpoints are removed as their
+   in-repo clients move, the last in PR 14 (section 17); none is kept for
+   compatibility. The no-loop rule of carriage 1
    stays: no rail packet travels inside a chat copy.
 
 ## 15. Limits
