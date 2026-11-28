@@ -7,8 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 )
+
+// ErrEndpointsUnavailable means every endpoint failed at the network transport,
+// not malformed data, a failed proof, or a split quorum.
+var ErrEndpointsUnavailable = errors.New("all finalized endpoints unavailable")
 
 type consensusObservation struct {
 	seqno      uint64
@@ -95,11 +100,17 @@ func quorumRead[T any](
 	}
 	groups := make(map[string]*group, len(nodes))
 	failures := 0
+	transportFailures := 0
 	var firstFailure error
 	for range nodes {
 		result := <-results
 		if result.err != nil {
 			failures++
+			var op *net.OpError
+			var dns *net.DNSError
+			if errors.As(result.err, &op) || errors.As(result.err, &dns) || errors.Is(result.err, context.DeadlineExceeded) {
+				transportFailures++
+			}
 			if firstFailure == nil {
 				firstFailure = result.err
 			}
@@ -124,6 +135,9 @@ func quorumRead[T any](
 		if len(candidate.nodes) >= quorum {
 			return candidate.value, candidate.nodes, nil
 		}
+	}
+	if len(groups) == 0 && transportFailures == len(nodes) {
+		return zero, nil, ErrEndpointsUnavailable
 	}
 	if firstFailure != nil {
 		return zero, nil, fmt.Errorf(

@@ -8,9 +8,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// FinalizedStateReader is the typed, authenticated finalized read exposed by
-// the protocol's chain resolver. The transport spec selects its strict-majority
-// reader; a single unchecked RPC response does not implement this promise.
+// FinalizedStateReader is the typed finalized read exposed by the protocol
+// chain resolver. The deployed adapter uses a strict endpoint majority, not
+// cryptographic account-proof finality; one bare RPC reply cannot implement it.
 type FinalizedStateReader interface {
 	ResolveState(context.Context, string, string) (*nativev1.NativeStateV1, bool, error)
 }
@@ -47,7 +47,10 @@ func (r *LegacyTestNetworkResolver) ResolveFinalizedAgent(ctx context.Context, i
 	if err = ctx.Err(); err != nil {
 		return Snapshot{}, err
 	}
-	if !found || state == nil {
+	if found && state == nil {
+		return Snapshot{}, errors.New("inconsistent finalized presence result")
+	}
+	if !found {
 		return Snapshot{}, nil
 	}
 	n := state.Network

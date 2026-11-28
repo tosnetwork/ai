@@ -149,18 +149,31 @@ type V2Store struct {
 	strangers         map[netip.Addr]int
 	sites             map[netip.Addr]int
 	stranger, contact v2Usage
+	policies          map[string]v2PolicyRecord
+	controlLimits     v2ControlLimits
+	revocations       map[string]map[[32]byte]uint64
+	revocationCount   int
+	hints             map[string]map[[32]byte]v2HintMeta
+	waiters           map[agentDigest]chan struct{}
 	closed, poisoned  bool
 }
 
 type V2OpenOptions struct {
-	Replay        agenttransport.ReplayConfig
-	RecoveryFloor *uint64
+	DirectoryAgents   int
+	RevocationEntries int
+	MaxWaiters        int
+	Replay            agenttransport.ReplayConfig
+	RecoveryFloor     *uint64
 	// Required for explicit recovery. The callback logs only the public floor,
 	// never a credential, proof, lane, secret or mailbox identifier.
 	RecoveryAudit func(uint64) error
 }
 
 func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOptions) (*V2Store, error) {
+	controls, controlErr := controlLimits(options)
+	if controlErr != nil {
+		return nil, controlErr
+	}
 	if err := limits.Validate(); err != nil {
 		return nil, err
 	}
@@ -195,15 +208,14 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 	}
 	s := newV2Store(limits)
 	s.disk, s.replay = d, replay
+	s.controlLimits = controls
 	if err = d.clearTemp(); err != nil {
 		d.release()
 		return nil, err
 	}
-	// Control records are introduced by the HTTP/policy layer in its own change.
-	controls, err := boundedV2Dir(filepath.Join(path, "controls"), 1)
-	if err != nil || len(controls) != 0 {
+	if err = s.loadControls(unixNow(now)); err != nil {
 		d.release()
-		return nil, errors.New("unknown V2 control record")
+		return nil, err
 	}
 	entries, err := boundedV2Dir(filepath.Join(path, "records"), limits.Base.GlobalMaxEntries)
 	if err != nil {
@@ -237,7 +249,7 @@ func OpenV2Store(path string, limits V2Limits, now time.Time, options V2OpenOpti
 	return s, nil
 }
 func newV2Store(limits V2Limits) *V2Store {
-	return &V2Store{mu: v2Gate{make(chan struct{}, 1)}, limits: limits, records: map[entryKey]v2Record{}, memory: map[entryKey][]byte{}, mailboxes: map[agentDigest]*v2MailboxUsage{}, lanes: map[v2LaneSlot]v2Usage{}, strangers: map[netip.Addr]int{}, sites: map[netip.Addr]int{}}
+	return &V2Store{mu: v2Gate{make(chan struct{}, 1)}, limits: limits, records: map[entryKey]v2Record{}, memory: map[entryKey][]byte{}, mailboxes: map[agentDigest]*v2MailboxUsage{}, lanes: map[v2LaneSlot]v2Usage{}, strangers: map[netip.Addr]int{}, sites: map[netip.Addr]int{}, policies: map[string]v2PolicyRecord{}, controlLimits: v2ControlLimits{DefaultDirectoryAgents, DefaultRevocationEntries, 512}, revocations: map[string]map[[32]byte]uint64{}, hints: map[string]map[[32]byte]v2HintMeta{}, waiters: map[agentDigest]chan struct{}{}}
 }
 func boundedV2Dir(path string, limit int) ([]os.DirEntry, error) {
 	f, err := os.Open(path)
@@ -377,6 +389,7 @@ func (s *V2Store) add(key entryKey, rec v2Record) {
 	if rec.Tombstone {
 		return
 	}
+	s.notifyLocked(rec.Agent)
 	usage.Bytes += bodySize
 	box := s.mailboxes[key.agent]
 	if box == nil {
@@ -562,6 +575,15 @@ func (s *V2Store) deposit(ctx context.Context, in depositInput, checked *agenttr
 	if err = ctx.Err(); err != nil {
 		return 0, err
 	}
+	if checked != nil {
+		chains, err := checkedChains(*checked)
+		if err != nil {
+			return 0, err
+		}
+		if s.revokedLocked(header.RecipientAgentID, chains, in.now) {
+			return 0, ErrCredentialRevoked
+		}
+	}
 	if old, ok := s.records[key]; ok {
 		if old.Expires > in.now {
 			if old.Tombstone {
@@ -624,7 +646,7 @@ type V2MailboxEntry struct {
 	Lane                          string
 }
 
-func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64) ([]V2MailboxEntry, error) {
+func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64, checked ...agenttransport.CheckedRequest) ([]V2MailboxEntry, error) {
 	if err := s.mu.lock(ctx); err != nil {
 		return nil, err
 	}
@@ -635,10 +657,22 @@ func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64) ([]V2
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if len(checked) > 0 {
+		chains, err := checkedChains(checked[0])
+		if err != nil {
+			return nil, err
+		}
+		if s.revokedLocked("agent_"+hexAgent(agent), chains, now) {
+			return nil, ErrCredentialRevoked
+		}
+	}
+	return s.listLocked(agent, now), nil
+}
+func (s *V2Store) listLocked(agent agentDigest, now uint64) []V2MailboxEntry {
 	out := make([]V2MailboxEntry, 0)
 	box := s.mailboxes[agent]
 	if box == nil {
-		return out, nil
+		return out
 	}
 	// The index is bounded globally; a mailbox has at most 256 active records.
 	for id := range box.IDs {
@@ -653,9 +687,9 @@ func (s *V2Store) list(ctx context.Context, agent agentDigest, now uint64) ([]V2
 		out = append(out, V2MailboxEntry{EnvelopeID: rec.ID, RecipientKeyID: rec.KeyID, Size: uint32(rec.Size), ReceivedAtUnix: rec.Received, ExpiresAtUnix: rec.Expires, Lane: class})
 	}
 	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].EnvelopeID[:], out[j].EnvelopeID[:]) < 0 })
-	return out, nil
+	return out
 }
-func (s *V2Store) get(ctx context.Context, agent agentDigest, id [32]byte, now uint64) ([]byte, error) {
+func (s *V2Store) get(ctx context.Context, agent agentDigest, id [32]byte, now uint64, checked ...agenttransport.CheckedRequest) ([]byte, error) {
 	if err := s.mu.lock(ctx); err != nil {
 		return nil, err
 	}
@@ -665,6 +699,15 @@ func (s *V2Store) get(ctx context.Context, agent agentDigest, id [32]byte, now u
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if len(checked) > 0 {
+		chains, err := checkedChains(checked[0])
+		if err != nil {
+			return nil, err
+		}
+		if s.revokedLocked("agent_"+hexAgent(agent), chains, now) {
+			return nil, ErrCredentialRevoked
+		}
 	}
 	key := entryKey{agent, id}
 	rec, ok := s.records[key]
@@ -698,6 +741,15 @@ func (s *V2Store) Sweep(now time.Time) error {
 			}
 		}
 	}
+	if err := s.sweepRevocationsLocked(unixNow(now)); err != nil {
+		return err
+	}
+	if err := s.sweepHintsLocked(unixNow(now)); err != nil {
+		return err
+	}
+	if err := s.sweepPolicies(unixNow(now)); err != nil {
+		return err
+	}
 	return nil
 }
 func (s *V2Store) Close() error {
@@ -707,6 +759,9 @@ func (s *V2Store) Close() error {
 		return nil
 	}
 	s.closed = true
+	for agent := range s.waiters {
+		s.notifyLocked("agent_" + hexAgent(agent))
+	}
 	if s.replay != nil {
 		s.replay.close()
 	}

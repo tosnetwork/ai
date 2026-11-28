@@ -2,6 +2,7 @@ package agenttransport
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -148,7 +149,10 @@ func CheckState(policy ChainPolicy, network *nativev1.NetworkDomain, agentID str
 	if agent.AgentId != agentID {
 		return nil, errors.New("resolver returned state for another Agent")
 	}
-	if agent.Tombstoned || agent.Policy == nil {
+	if agent.Tombstoned {
+		return nil, fmt.Errorf("%w: Agent tombstoned", ErrDelegationRevoked)
+	}
+	if agent.Policy == nil {
 		return nil, errors.New("Agent is not finalized and live")
 	}
 	return agent, nil

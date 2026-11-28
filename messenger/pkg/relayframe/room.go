@@ -57,8 +57,8 @@ const (
 	// MaxRoomApplicationPlaintextBytes bounds the Event a member seals.
 	MaxRoomApplicationPlaintextBytes = 131_072
 	// FirstPartBytes is the object bytes in part 0: a maximal frame less the
-	// fixed bytes and a maximal card and evidence.
-	FirstPartBytes = MaxFrameBytes - fixedBytes - MaxCardBytes - MaxEvidenceBytes
+	// fixed bytes and a maximal card, evidence and credential with its seed.
+	FirstPartBytes = MaxFrameBytes - fixedBytes - MaxCardBytes - MaxEvidenceBytes - MaxCredentialFieldBytes
 	// LaterPartBytes is the object bytes in every later part.
 	LaterPartBytes = MaxFrameBytes - fixedBytes
 	// MinTestPartBytes and MaxTestPartBytes bound the test part size P that

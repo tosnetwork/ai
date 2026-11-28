@@ -740,7 +740,7 @@ type RelayCarriageConfig struct {
 	// accepts them; a production build refuses a configuration that names
 	// any of them, whatever its value. Each needs mls_driver_path.
 	//
-	// RoomPartBytes is the test part size P, 1,024..162,744: every part of
+	// RoomPartBytes is the test part size P, 1,024..160,662: every part of
 	// a handshake object is cut at P; application objects keep the
 	// production cut. Unset is the production cut.
 	RoomPartBytes *uint64 `json:"room_part_bytes,omitempty"`
@@ -817,7 +817,7 @@ func (r RelayCarriageConfig) RoomSettings() (RoomSettings, error) {
 	if r.RoomPartBytes != nil {
 		value := *r.RoomPartBytes
 		if value < uint64(relayframe.MinTestPartBytes) || value > uint64(relayframe.MaxTestPartBytes) {
-			return RoomSettings{}, errors.New("relay_carriage room_part_bytes is outside 1,024..162,744")
+			return RoomSettings{}, errors.New("relay_carriage room_part_bytes is outside 1,024..160,662")
 		}
 		settings.PartBytes = int(value)
 	}

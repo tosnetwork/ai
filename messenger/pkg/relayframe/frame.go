@@ -1,8 +1,9 @@
 // Package relayframe is the binary codec of Messenger relay carriage: the
-// padded frame that rides as the payload of one signed Agent Packet, the
-// objects it carries (a device copy, an Endpoint-signed delivery ack, an
-// evidence pull), and the locator-free relay identity evidence every frame
-// repeats.
+// padded frame (tos.messaging.relay-frame.v2) that rides as the payload of one
+// signed Agent Packet, the objects it carries (a device copy, an
+// Endpoint-signed delivery ack, an evidence pull), the locator-free relay
+// identity evidence every frame repeats, and the optional contact credential
+// with its holder seed (MESSENGER_TRANSPORT_V2.md 9.3). Only v2 frames decode.
 //
 // The package encodes and bounds bytes; it decides no authority. Whether the
 // evidence names a live Endpoint, whether a copy may be opened and whether an
@@ -17,6 +18,7 @@ import (
 
 	"github.com/tosnetwork/ai/messenger/internal/canon"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
 // Frame kinds.
@@ -47,6 +49,15 @@ const (
 	MaxCardBytes = 9_216
 	// MaxEvidenceBytes bounds the relay identity evidence of one frame.
 	MaxEvidenceBytes = 18_432
+	// MaxCredentialBytes bounds the contact credential a frame may carry: the
+	// relay credential bound of the transport.
+	MaxCredentialBytes = agenttransport.MaxCredentialSize
+	// HolderSeedBytes is the Ed25519 seed of the credential's holder key, which
+	// follows a credential and is absent without one.
+	HolderSeedBytes = 32
+	// MaxCredentialFieldBytes is the most a credential adds to a frame besides
+	// its length prefix: the credential and its holder seed.
+	MaxCredentialFieldBytes = MaxCredentialBytes + HolderSeedBytes
 	// MaxParts bounds the parts of one object. Kinds 1, 2 and 4 use one.
 	MaxParts = 8
 	// MaxPartBytes is the most object bytes one frame carries: a frame
@@ -55,10 +66,10 @@ const (
 
 	// domainBytes is the frame separator with its terminating zero byte.
 	domainBytes = len(canon.DomainRelayFrame)
-	// fixedBytes is everything of a frame except card, evidence, part and
-	// padding: separator, kind, part index, part count, object digest and the
-	// three length prefixes.
-	fixedBytes = domainBytes + 3 + sha256.Size + 2 + 2 + 4
+	// fixedBytes is everything of a frame except card, evidence, credential,
+	// holder seed, part and padding: separator, kind, part index, part count,
+	// object digest and the four length prefixes.
+	fixedBytes = domainBytes + 3 + sha256.Size + 2 + 2 + 2 + 4
 )
 
 // Packet and seal sizes the envelope-size formula is built from.
@@ -99,6 +110,8 @@ var (
 	ErrRelayEvidenceTooLarge = errors.New("relay-evidence-too-large")
 	ErrContentTooLarge       = errors.New("relay frame content exceeds the largest bucket")
 	ErrFrameNotMinimal       = errors.New("relay frame is not padded to its smallest bucket")
+	ErrCredentialTooLarge    = errors.New("relay frame credential exceeds its bound")
+	ErrCredentialMalformed   = errors.New("relay frame credential or holder seed is malformed")
 )
 
 // Buckets returns the frame size buckets, ascending.
@@ -132,6 +145,11 @@ func isBucket(n int) bool {
 // computed by Encode and checked by Decode, and a caller never supplies it.
 // For a part of a split kind-3 object it is the digest of the whole object,
 // which the caller supplies and reassembly checks (Reassembler).
+//
+// Credential is the sender's contact credential for the receiver, opaque to
+// this codec, and HolderSeed the seed of its holder key; both are present or
+// both absent. Whether the receiver takes them is decided against the
+// verified packet that carried the frame, never here.
 type Frame struct {
 	Kind         uint8
 	PartIndex    uint8
@@ -139,7 +157,18 @@ type Frame struct {
 	ObjectDigest [sha256.Size]byte
 	Card         []byte
 	Evidence     []byte
+	Credential   []byte
+	HolderSeed   [HolderSeedBytes]byte
 	Part         []byte
+}
+
+// credentialFieldBytes is what a credential of credentialBytes adds to a
+// frame besides its length prefix.
+func credentialFieldBytes(credentialBytes int) int {
+	if credentialBytes == 0 {
+		return 0
+	}
+	return credentialBytes + HolderSeedBytes
 }
 
 // ObjectDigest commits one carried object.
@@ -153,10 +182,14 @@ func ObjectDigest(object []byte) [sha256.Size]byte {
 }
 
 // UnpaddedSize returns the frame length before padding for the given field
-// lengths, refusing lengths outside their bounds.
-func UnpaddedSize(cardBytes, evidenceBytes, partBytes int) (int, error) {
-	if cardBytes < 0 || evidenceBytes < 0 || partBytes < 0 {
+// lengths, refusing lengths outside their bounds. credentialBytes is the
+// credential alone; its holder seed is counted with it.
+func UnpaddedSize(cardBytes, evidenceBytes, credentialBytes, partBytes int) (int, error) {
+	if cardBytes < 0 || evidenceBytes < 0 || credentialBytes < 0 || partBytes < 0 {
 		return 0, ErrFrameMalformed
+	}
+	if credentialBytes > MaxCredentialBytes {
+		return 0, ErrCredentialTooLarge
 	}
 	if cardBytes > MaxCardBytes {
 		return 0, ErrCardTooLarge
@@ -169,7 +202,7 @@ func UnpaddedSize(cardBytes, evidenceBytes, partBytes int) (int, error) {
 	}
 	// Each term is bounded above, so the sum cannot overflow an int, but the
 	// total is still checked against the largest bucket.
-	total := fixedBytes + cardBytes + evidenceBytes + partBytes
+	total := fixedBytes + cardBytes + evidenceBytes + credentialFieldBytes(credentialBytes) + partBytes
 	if total > MaxFrameBytes {
 		return 0, ErrContentTooLarge
 	}
@@ -186,7 +219,10 @@ func Encode(frame Frame) ([]byte, error) {
 	if err := validateFields(frame.Kind, frame.PartIndex, frame.Card, frame.Evidence, frame.Part); err != nil {
 		return nil, err
 	}
-	size, err := UnpaddedSize(len(frame.Card), len(frame.Evidence), len(frame.Part))
+	if err := validateCredential(frame.Kind, frame.PartIndex, frame.Credential, frame.HolderSeed); err != nil {
+		return nil, err
+	}
+	size, err := UnpaddedSize(len(frame.Card), len(frame.Evidence), len(frame.Credential), len(frame.Part))
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +249,12 @@ func Encode(frame Frame) ([]byte, error) {
 	binary.BigEndian.PutUint16(length[:2], uint16(len(frame.Evidence)))
 	out.Write(length[:2])
 	out.Write(frame.Evidence)
+	binary.BigEndian.PutUint16(length[:2], uint16(len(frame.Credential)))
+	out.Write(length[:2])
+	if len(frame.Credential) > 0 {
+		out.Write(frame.Credential)
+		out.Write(frame.HolderSeed[:])
+	}
 	binary.BigEndian.PutUint32(length[:], uint32(len(frame.Part)))
 	out.Write(length[:])
 	out.Write(frame.Part)
@@ -223,9 +265,11 @@ func Encode(frame Frame) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// Decode strictly parses one frame: a bucket-sized total, the frame domain, a
-// kind this build carries, one part, bounded card and evidence, the object
-// digest, and zero padding to the end.
+// Decode strictly parses one v2 frame: a bucket-sized total, the v2 frame
+// domain, a kind this build carries, one part, bounded card, evidence and
+// credential (with its holder seed exactly when a credential is present), the
+// object digest, and zero padding to the end. A v1 frame has another domain
+// and is refused as malformed; there is no other frame version to fall back to.
 func Decode(raw []byte) (Frame, error) {
 	if !isBucket(len(raw)) {
 		return Frame{}, ErrFrameSize
@@ -260,6 +304,18 @@ func Decode(raw []byte) (Frame, error) {
 		return Frame{}, ErrRelayEvidenceTooLarge
 	}
 	evidence := reader.take(evidenceLength)
+	credentialLength := int(reader.u16())
+	if reader.err != nil {
+		return Frame{}, ErrFrameMalformed
+	}
+	if credentialLength > MaxCredentialBytes {
+		return Frame{}, ErrCredentialTooLarge
+	}
+	credential := reader.take(credentialLength)
+	var seed [HolderSeedBytes]byte
+	if credentialLength > 0 {
+		copy(seed[:], reader.take(HolderSeedBytes))
+	}
 	partLength := reader.u32()
 	if reader.err != nil {
 		return Frame{}, ErrFrameMalformed
@@ -283,9 +339,13 @@ func Decode(raw []byte) (Frame, error) {
 	}
 	frame := Frame{Kind: kind, PartIndex: partIndex, PartCount: partCount,
 		Card: append([]byte(nil), card...), Evidence: append([]byte(nil), evidence...),
+		Credential: append([]byte(nil), credential...), HolderSeed: seed,
 		Part: append([]byte(nil), part...)}
 	copy(frame.ObjectDigest[:], digestRaw)
 	if err := validateFields(kind, partIndex, frame.Card, frame.Evidence, frame.Part); err != nil {
+		return Frame{}, err
+	}
+	if err := validateCredential(kind, partIndex, frame.Credential, frame.HolderSeed); err != nil {
 		return Frame{}, err
 	}
 	// A split object is checked once, on reassembly; a single part is the
@@ -345,6 +405,26 @@ func validateFields(kind, partIndex uint8, card, evidence, part []byte) error {
 	}
 	if kind == KindEvidence && (len(part) != 1 || part[0] != EvidenceRequest && part[0] != EvidenceResponse) {
 		return ErrFrameMalformed
+	}
+	return nil
+}
+
+// validateCredential applies the credential field rules: a credential of at
+// most MaxCredentialBytes travels with a non-zero holder seed, a frame without
+// a credential has no seed, and like the card it rides only where evidence
+// does, never in a later part of a split room object.
+func validateCredential(kind, partIndex uint8, credential []byte, seed [HolderSeedBytes]byte) error {
+	if len(credential) > MaxCredentialBytes {
+		return ErrCredentialTooLarge
+	}
+	if len(credential) == 0 {
+		if seed != ([HolderSeedBytes]byte{}) {
+			return ErrCredentialMalformed
+		}
+		return nil
+	}
+	if seed == ([HolderSeedBytes]byte{}) || kind == KindRoom && partIndex > 0 {
+		return ErrCredentialMalformed
 	}
 	return nil
 }
