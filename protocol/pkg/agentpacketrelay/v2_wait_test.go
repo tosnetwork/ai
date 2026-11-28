@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"testing"
 	"time"
+
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
 func waitStarted(t *testing.T, ch <-chan struct{}) {
@@ -178,5 +179,26 @@ func TestV2LongPollRechecksNativeWithdrawal(t *testing.T) {
 	waitDone(t, done)
 	if w.Code != 403 {
 		t.Fatal("withdrawn delegation read after waiting", w.Code, w.Body.String())
+	}
+}
+
+func TestV2WaitRearmFailureStillReleasesItsRegistration(t *testing.T) {
+	f := newV2HTTP(t)
+	started := make(chan struct{}, 1)
+	installWaitClock(t, f, started, make(chan time.Time))
+	request, w := fWaitRequest(t, f, t.Context(), "25")
+	done := make(chan struct{})
+	go func() { defer close(done); f.s.ServeHTTP(v2DeadlineWriter{w}, request) }()
+	waitStarted(t, started)
+	// The verifier returns a valid refresh, but storage becomes unavailable
+	// before the next atomic snapshot. Cleanup must retain the old registration.
+	f.clock.at = f.clock.at.Add(300 * time.Second)
+	f.source.after = func() { f.s.store.mu.Lock(); f.s.store.poisoned = true; f.s.store.mu.Unlock() }
+	f.s.store.mu.Lock()
+	f.s.store.notifyLocked(f.r.agentID)
+	f.s.store.mu.Unlock()
+	waitDone(t, done)
+	if w.Code != 503 || len(f.s.store.waiters) != 0 {
+		t.Fatalf("status=%d waiters=%d", w.Code, len(f.s.store.waiters))
 	}
 }

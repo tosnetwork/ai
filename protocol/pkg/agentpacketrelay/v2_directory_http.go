@@ -98,11 +98,12 @@ func (s *V2Server) listV2(w http.ResponseWriter, r *http.Request, agent agentDig
 				if expired {
 					break
 				}
-				entries, ch, err = s.store.waitSnapshot(r.Context(), agent, unixNow(s.now()), ch)
+				nextEntries, next, err := s.store.waitSnapshot(r.Context(), agent, unixNow(s.now()), ch)
 				if err != nil {
 					v2Fail(w, 503, CodeUnavailable)
 					return
 				}
+				entries, ch = nextEntries, next
 			}
 		}
 	}

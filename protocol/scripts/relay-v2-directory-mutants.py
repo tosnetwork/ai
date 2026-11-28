@@ -263,6 +263,14 @@ add(
     "TestV2DescriptionRequiresEveryField",
 )
 
+add(
+    "failed-rearm-cleanup",
+    "agentpacketrelay/v2_directory_http.go",
+    "nextEntries, next, err := s.store.waitSnapshot(r.Context(), agent, unixNow(s.now()), ch)",
+    "nextEntries, next, err := s.store.waitSnapshot(r.Context(), agent, unixNow(s.now()), ch); if err != nil { ch=nil }",
+    "TestV2WaitRearmFailureStillReleasesItsRegistration",
+)
+
 for method in ["list", "get"]:
     file = ROOT / "protocol/pkg/agentpacketrelay/v2_store.go"
     text = file.read_text()
@@ -289,6 +297,7 @@ def execute(args):
         env={**os.environ, "GOWORK": "off"},
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=180,
     )
     return result.returncode, result.stdout + result.stderr
