@@ -4,8 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
+	"google.golang.org/protobuf/proto"
 )
 
 // opAuthorizedCapability is the opcode an owner Agent account uses to forward
@@ -180,4 +183,69 @@ func DecodeRegistryTransition(body *cell.Cell) (RegistryTransitionV1, error) {
 		return result, nil
 	}
 	return RegistryTransitionV1{}, errors.New("Registry body is not a tombstone or version revocation")
+}
+
+// WithdrawalConfirmation describes a verified finalized goal. The original
+// action may have been superseded, so this proof does not replace action
+// reconciliation when the operation's exact outcome is needed.
+type WithdrawalConfirmation struct {
+	AgentID             string `json:"agent_id"`
+	Digest              string `json:"delegation_digest"`
+	ActionHash          string `json:"action_hash"`
+	PriorEpoch          uint64 `json:"prior_epoch"`
+	FinalizedEpoch      uint64 `json:"finalized_epoch"`
+	FinalizedCheckpoint uint64 `json:"finalized_checkpoint"`
+	Result              string `json:"result"`
+}
+
+// ConfirmDelegationWithdrawal checks the goal against two authenticated
+// finalized observations. A missing account or an exit code alone cannot
+// prove that a previously live digest was revoked.
+func ConfirmDelegationWithdrawal(action *nativev1.NativeActionV1, before, after *nativev1.NativeStateV1) (*WithdrawalConfirmation, error) {
+	built, err := BuildAction(action)
+	if err != nil {
+		return nil, err
+	}
+	payload := action.GetWithdrawAgentDelegation()
+	if payload == nil || action.TargetContractCodeHash != RegistryV2CodeHash {
+		return nil, errors.New("Registry v2 withdrawal action required")
+	}
+	prior, current := before.GetAgent(), after.GetAgent()
+	first, last := before.GetReference(), after.GetReference()
+	if prior == nil || current == nil || first == nil || last == nil ||
+		first.Account == "" || first.Account != last.Account ||
+		first.ContractCodeHash != action.TargetContractCodeHash || last.ContractCodeHash != action.TargetContractCodeHash ||
+		!proto.Equal(before.Network, action.Network) || !proto.Equal(after.Network, action.Network) ||
+		prior.AgentId != action.TargetObjectId || current.AgentId != action.TargetObjectId ||
+		first.FinalizedCheckpoint == 0 || first.FinalizedCheckpoint >= last.FinalizedCheckpoint {
+		return nil, errors.New("withdrawal requires ordered finalized observations of the same Registry v2 Agent")
+	}
+	if prior.Tombstoned || before.TvmStateHash != action.PredecessorTvmStateHash ||
+		prior.Generation != action.Generation || prior.Sequence == math.MaxUint64 || prior.Sequence+1 != action.Sequence {
+		return nil, errors.New("withdrawal prior state does not match the signed predecessor")
+	}
+	if err := CheckDelegationMutation(prior, payload.DelegationDigest, payload.AuthorizationEpoch, true); err != nil {
+		return nil, err
+	}
+	if current.EncodingVersion != StateEncodingVersion || current.AuthorizationEpoch < prior.AuthorizationEpoch ||
+		current.Tombstoned && current.AuthorizationEpoch == prior.AuthorizationEpoch {
+		return nil, errors.New("withdrawal finalized epoch is missing or regressed")
+	}
+	result := "cleared_by_epoch_bump"
+	for _, entry := range current.DelegationAdmissions {
+		if entry.GetDigest() != payload.DelegationDigest {
+			continue
+		}
+		if current.AuthorizationEpoch != prior.AuthorizationEpoch || entry.AdmissionEpoch != current.AuthorizationEpoch || !entry.Withdrawn {
+			return nil, errors.New("withdrawal digest is still present without proof of same-epoch withdrawal")
+		}
+		result = "withdrawn"
+		break
+	}
+	if current.AuthorizationEpoch == prior.AuthorizationEpoch && result != "withdrawn" {
+		return nil, errors.New("same-epoch absence cannot prove withdrawal")
+	}
+	return &WithdrawalConfirmation{AgentID: prior.AgentId, Digest: payload.DelegationDigest,
+		ActionHash: built.HashString, PriorEpoch: prior.AuthorizationEpoch, FinalizedEpoch: current.AuthorizationEpoch,
+		FinalizedCheckpoint: last.FinalizedCheckpoint, Result: result}, nil
 }

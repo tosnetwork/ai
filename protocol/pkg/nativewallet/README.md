@@ -72,6 +72,19 @@ The result contains only the delegation's canonical base64, digest and actual
 vault key ID (the `key_name` field), which future transport signers can use.
 Transport keys remain separate from packet encryption and controller keys.
 
+## Confirming withdrawal
+
+After submitting the original signed action, run `confirm-withdrawal` with
+the same action JSON, the Registry config and checkpoint fence, and the exact
+prior finalized block tuple from which the action was built
+(`--prior-checkpoint`, `--prior-root`, `--prior-file`). The command reads the
+authenticated predecessor and a fresh finalized post-state. It reports
+`withdrawn` for a digest withdrawn in the same epoch or
+`cleared_by_epoch_bump` for an absent formerly live digest after a proven bump.
+It issues no signature or submission. Reconcile the exact action before
+deciding whether to retry. After a finalized policy rotation, issue a fresh
+delegation for the new epoch before reconnecting.
+
 ## Crash and retry rules
 
 Keep both the vault and the journal. Repeat the **same arguments and journal**,

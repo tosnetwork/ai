@@ -134,6 +134,27 @@
     "reason": "an empty document is not an object"
   },
   {
+    "name": "endpoint-delegation/epoch-case-alias",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v3\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"AUTHORIZATION_EPOCH\":1,\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"}",
+    "reason": "the wire schema names one exact lower-case epoch key"
+  },
+  {
+    "name": "endpoint-delegation/epoch-duplicate",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v3\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"authorization_epoch\":0,\"authorization_epoch\":1,\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"}",
+    "reason": "duplicate zero and positive epochs make the wire document ambiguous"
+  },
+  {
+    "name": "endpoint-delegation/epoch-missing",
+    "layer": "decode",
+    "target": "endpoint-delegation",
+    "wire": "{\"schema\":\"tos.messaging.endpoint-delegation.v3\",\"network_id\":\"tos-local\",\"genesis_root_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"genesis_file_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"agent_id\":\"agent_2222222222222222222222222222222222222222222222222222222222222222\",\"messaging_endpoint_id\":\"mep_7e03fe8741547ed3530ae38dbc690a42273db8dce07edda055f309d26f24f46a\",\"messaging_identity_public_key_hex\":\"d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737\",\"adnl_id\":\"adnl:2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e\",\"allowed_protocol_versions\":[1],\"allowed_outbound_event_classes\":[\"agent.task\",\"text\"],\"not_before_unix\":1800000000,\"expires_at_unix\":1800086400,\"maximum_session_lifetime_seconds\":3600,\"contact_descriptor_policy_digest\":\"sha256:579c9ccc2ffce6284ca260b19a444836ef77dc714125da0d6b45270d7917f84a\",\"inbox_admission_policy_digest\":\"sha256:4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c\"}",
+    "reason": "the v3 wire document must carry an epoch"
+  },
+  {
     "name": "endpoint-delegation/epoch-zero",
     "layer": "decode",
     "target": "endpoint-delegation",

@@ -32,6 +32,14 @@ func (p *namesFlag) Set(value string) error {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "confirm-withdrawal" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		if err := confirmWithdrawalCommand(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil && !errors.Is(err, flag.ErrHelp) {
+			fail(err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "transport-delegate" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()

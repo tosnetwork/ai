@@ -233,6 +233,9 @@ func EncodeJSON(delegation Delegation) ([]byte, error) {
 // DecodeJSON rejects unknown and trailing fields and reconstructs the exact
 // delegation. Decoding proves nothing about authority; Verify must still run.
 func DecodeJSON(raw []byte) (Delegation, error) {
+	if err := checkDelegationJSONKeys(raw); err != nil {
+		return Delegation{}, err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var value wireDelegation
@@ -273,6 +276,37 @@ func DecodeJSON(raw []byte) (Delegation, error) {
 		return Delegation{}, err
 	}
 	return delegation, nil
+}
+
+// The struct decoder rejects unknown fields but otherwise accepts duplicate
+// keys and case-insensitive aliases. Every v3 key is lower-case ASCII.
+func checkDelegationJSONKeys(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return errors.New("endpoint delegation must be a JSON object")
+	}
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return errors.New("invalid endpoint delegation JSON key")
+		}
+		for _, c := range key {
+			if c != '_' && (c < 'a' || c > 'z') {
+				return errors.New("non-canonical endpoint delegation JSON key")
+			}
+		}
+		if _, found := seen[key]; found {
+			return errors.New("duplicate endpoint delegation JSON key")
+		}
+		seen[key] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Verify runs the full resolution required before a delegation may authorize

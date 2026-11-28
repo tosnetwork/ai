@@ -515,3 +515,35 @@ func TestTransportRefusesMixedRegistryRelease(t *testing.T) {
 		t.Fatal("mixed Registry releases accepted")
 	}
 }
+
+func TestNewFinalizedObservationInvalidatesSiblingPass(t *testing.T) {
+	for _, change := range []string{"epoch", "withdrawal", "tombstone"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFixture(t)
+			v := f.verifier(t)
+			old := append([]byte(nil), f.wire...)
+			oldDigest := sha256.Sum256(old)
+			verify(t, v, old, Relay, true)
+			f.d.Purposes = Relay
+			state := f.r.snapshot.State
+			agent := state.GetAgent()
+			state.TvmStateHash = "tvm-cell-sha256:" + strings.Repeat("e", 64)
+			state.Reference.FinalizedCheckpoint++
+			f.r.snapshot.EpochCheckpoint++
+			if change == "epoch" {
+				f.d.AuthorizationEpoch++
+				agent.AuthorizationEpoch = f.d.AuthorizationEpoch
+				*f.r.snapshot.CurrentEpoch = f.d.AuthorizationEpoch
+			}
+			f.reencode(t)
+			if change == "withdrawal" {
+				agent.DelegationAdmissions = append(agent.DelegationAdmissions, &nativev1.DelegationAdmissionV1{
+					Digest: "sha256:" + hex.EncodeToString(oldDigest[:]), AdmissionEpoch: agent.AuthorizationEpoch, Withdrawn: true,
+				})
+			}
+			agent.Tombstoned = change == "tombstone"
+			verify(t, v, f.wire, Relay, change != "tombstone")
+			verify(t, v, old, Relay, false)
+		})
+	}
+}

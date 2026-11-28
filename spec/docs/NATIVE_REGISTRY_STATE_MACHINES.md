@@ -244,3 +244,18 @@ to request a transition.
 - mutation by a former owner after transfer;
 - transfer rejected by either current or new owner policy; and
 - any failure producing a partial ownership transfer.
+
+
+### Epoch lifecycle vector reproduction
+
+The epoch lifecycle vector file is
+`spec/test-vectors/tos-service-v1-registry-epochs.json`.
+Append `spec/scripts/native-registry-epoch-export.rs` to
+`tosctl/src/node-control/contracts/tests/native_registry/epochs.rs` in a
+disposable copy of the pinned contract checkout. Use that copy's build tools
+and run the sandbox test `export_registry_epoch_protocol_vectors` with
+`NATIVE_REGISTRY_PROTOCOL_VECTORS_OUT` set to the output file. The sandbox
+executes the frozen contract and exports action bytes and hashes, typed state
+cells and hashes, counts, exit codes and out-message counts. The Go test
+`TestFrozenRegistryEpochLifecycle` independently rebuilds the actions and
+validates the captured state cells.

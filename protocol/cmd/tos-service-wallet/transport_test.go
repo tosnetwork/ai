@@ -139,3 +139,11 @@ func TestTransportPromptBound(t *testing.T) {
 		t.Fatal("overlong confirmation accepted")
 	}
 }
+
+func TestConfirmWithdrawalRequiresExactPriorCheckpoint(t *testing.T) {
+	var output, diagnostics bytes.Buffer
+	err := confirmWithdrawalCommand(t.Context(), []string{"--prior-checkpoint", "42", "--prior-root", strings.Repeat("a", 64)}, &output, &diagnostics)
+	if err == nil || !strings.Contains(err.Error(), "exact prior finalized checkpoint") || output.Len() != 0 {
+		t.Fatalf("incomplete prior evidence reached confirmation: %v, %q", err, output.String())
+	}
+}

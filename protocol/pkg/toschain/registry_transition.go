@@ -7,8 +7,10 @@ import (
 	"errors"
 	"strings"
 
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 	"github.com/tosnetwork/tosutils-go/tlb"
+	"google.golang.org/protobuf/proto"
 )
 
 // ErrRegistryTransitionUnproven reports that the object's finalized history
@@ -134,4 +136,36 @@ func earliestRegistryTransition(address string, history []tlb.Transaction, objec
 		return RegistryTransitionTx{LT: transaction.LT, Hash: hex.EncodeToString(transaction.Hash), ActionHash: decoded.ActionHash}, true, nil
 	}
 	return RegistryTransitionTx{}, false, nil
+}
+
+// ConfirmDelegationWithdrawal proves the finalized goal using one exact
+// historical predecessor and one fresh finalized post-state. The historical
+// read is evidence for this comparison and never advances the current fence.
+func (r *SimplifiedNativeResolver) ConfirmDelegationWithdrawal(ctx context.Context, action *nativev1.NativeActionV1, checkpoint *nativev1.DNSCheckpointV1) (*nativecore.WithdrawalConfirmation, error) {
+	if r == nil || ctx == nil || action.GetWithdrawAgentDelegation() == nil || checkpoint == nil ||
+		checkpoint.Workchain != -1 || checkpoint.Sequence == 0 || len(checkpoint.RootHash) != 32 || len(checkpoint.FileHash) != 32 {
+		return nil, errors.New("invalid withdrawal confirmation request")
+	}
+	if action.TargetContractCodeHash != r.locator.CodeHash || !proto.Equal(action.Network, r.network) {
+		return nil, errors.New("withdrawal action does not match the pinned Registry")
+	}
+	identity, err := r.locator.Locate(action.TargetObjectId)
+	if err != nil {
+		return nil, err
+	}
+	before, found, err := r.readNativeAtCheckpoint(ctx, identity.Address, checkpoint)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errors.New("withdrawal prior finalized state is unavailable")
+	}
+	after, found, err := r.ResolveState(ctx, action.TargetObjectId, "")
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errors.New("withdrawal post-state is unavailable")
+	}
+	return nativecore.ConfirmDelegationWithdrawal(action, before, after)
 }

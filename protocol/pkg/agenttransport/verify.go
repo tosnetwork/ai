@@ -57,8 +57,30 @@ type Verifier struct {
 	gate     chan struct{}
 	config   Config
 	resolver FinalizedResolver
-	passes   map[[32]byte]time.Time
+	passes   map[[32]byte]cachedPass
 	lastNow  time.Time
+}
+
+type cachedPass struct {
+	agent     [32]byte
+	stateHash string
+	epoch     uint64
+	checked   time.Time
+}
+
+// A newly observed finalized state can revoke sibling digests of this Agent.
+func (v *Verifier) invalidateChangedAgentPasses(agent [32]byte, snapshot Snapshot) {
+	state := snapshot.State
+	typed := state.GetAgent()
+	usable := typed != nil && !typed.Tombstoned && typed.EncodingVersion == nativecore.StateEncodingVersion &&
+		snapshot.CurrentEpoch != nil && *snapshot.CurrentEpoch == typed.AuthorizationEpoch &&
+		state.GetReference().GetFinalizedCheckpoint() == snapshot.EpochCheckpoint
+	for digest, pass := range v.passes {
+		if pass.agent == agent && (!usable || pass.stateHash != state.TvmStateHash ||
+			pass.epoch != typed.AuthorizationEpoch || snapshot.AdmissionEpochs[digest] != pass.epoch) {
+			delete(v.passes, digest)
+		}
+	}
 }
 
 func NewVerifier(c Config, r FinalizedResolver) (*Verifier, error) {
@@ -91,7 +113,7 @@ func NewVerifier(c Config, r FinalizedResolver) (*Verifier, error) {
 	}
 	c.Network = proto.Clone(c.Network).(*nativev1.NetworkDomain)
 	c.ChainPolicy.RegistryCodeHashes = append([]string(nil), c.ChainPolicy.RegistryCodeHashes...)
-	return &Verifier{gate: make(chan struct{}, 1), config: c, resolver: r, passes: make(map[[32]byte]time.Time)}, nil
+	return &Verifier{gate: make(chan struct{}, 1), config: c, resolver: r, passes: make(map[[32]byte]cachedPass)}, nil
 }
 
 func (v *Verifier) now() (time.Time, error) {
@@ -148,7 +170,8 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 		return d, err
 	}
 	digest := sha256.Sum256(b)
-	checked, cached := v.passes[digest]
+	pass, cached := v.passes[digest]
+	checked := pass.checked
 	if cached && now.Sub(checked) < RefreshAfter {
 		return d, nil
 	}
@@ -156,6 +179,11 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 	if err := ctx.Err(); err != nil {
 		delete(v.passes, sha256.Sum256(b))
 		return d, err
+	}
+	if readErr == nil {
+		v.invalidateChangedAgentPasses(d.AgentDigest, snapshot)
+	} else if !errors.Is(readErr, ErrUnavailable) {
+		v.invalidateChangedAgentPasses(d.AgentDigest, Snapshot{})
 	}
 	after, err := v.now()
 	if err != nil {
@@ -166,7 +194,6 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 	}
 	if readErr != nil {
 		if !errors.Is(readErr, ErrUnavailable) {
-			delete(v.passes, digest)
 			return d, errors.New("finalized resolver integrity failure")
 		}
 		if cached && after.Sub(checked) < RefuseAfter {
@@ -175,7 +202,7 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 		delete(v.passes, digest)
 		return d, errors.New("finalized Agent state unavailable and no usable cached pass")
 	}
-	// A revoking or malformed answer invalidates the previous pass immediately.
+	// Recheck the requested digest even when the finalized state is unchanged.
 	delete(v.passes, digest)
 	if err = v.checkSnapshot(d, digest, snapshot, true); err != nil {
 		return d, err
@@ -183,13 +210,13 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 	if after.Sub(now) >= RefreshAfter {
 		return d, errors.New("finalized read too old")
 	}
-	for key, t := range v.passes {
-		if after.Sub(t) >= RefuseAfter {
+	for key, pass := range v.passes {
+		if after.Sub(pass.checked) >= RefuseAfter {
 			delete(v.passes, key)
 		}
 	}
 	if len(v.passes) < v.config.CacheEntries {
-		v.passes[digest] = now
+		v.passes[digest] = cachedPass{agent: d.AgentDigest, stateHash: snapshot.State.TvmStateHash, epoch: d.AuthorizationEpoch, checked: now}
 	}
 	return d, nil
 }

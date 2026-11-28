@@ -78,16 +78,25 @@ func TestRegistryEpochAdapterReadsOneFinalizedObject(t *testing.T) {
 		}
 	}
 	wrapper := cell.BeginCell().MustStoreUInt(1, 16).MustStoreUInt(2, 16).MustStoreDict(admissions).EndCell()
-	state := cell.BeginCell().MustStoreUInt(0x4e565331, 32).MustStoreUInt(2, 16).MustStoreUInt(1, 8).
-		MustStoreBoolBit(false).MustStoreUInt(1, 64).MustStoreUInt(9, 64).MustStoreSlice(bytes.Repeat([]byte{2}, 32), 256).MustStoreUInt(7, 64).
-		MustStoreRef(policyCell).MustStoreRef(wrapper).MustStoreRef(cell.BeginCell().MustStoreBoolBit(false).EndCell()).EndCell()
+	typedState := func(sequence, epoch uint64, delegations *cell.Cell) *cell.Cell {
+		return cell.BeginCell().MustStoreUInt(0x4e565331, 32).MustStoreUInt(2, 16).MustStoreUInt(1, 8).
+			MustStoreBoolBit(false).MustStoreUInt(1, 64).MustStoreUInt(sequence, 64).MustStoreSlice(bytes.Repeat([]byte{2}, 32), 256).MustStoreUInt(epoch, 64).
+			MustStoreRef(policyCell).MustStoreRef(delegations).MustStoreRef(cell.BeginCell().MustStoreBoolBit(false).EndCell()).EndCell()
+	}
 	rawID, err := hex.DecodeString(strings.TrimPrefix(id, "agent_"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := cell.BeginCell().MustStoreUInt(0x4e564431, 32).MustStoreUInt(1, 16).MustStoreUInt(1, 8).
-		MustStoreSlice(rawID, 256).MustStoreRef(config).MustStoreBoolBit(true).MustStoreRef(state).EndCell()
+	accountData := func(state *cell.Cell) string {
+		return bocText(cell.BeginCell().MustStoreUInt(0x4e564431, 32).MustStoreUInt(1, 16).MustStoreUInt(1, 8).
+			MustStoreSlice(rawID, 256).MustStoreRef(config).MustStoreBoolBit(true).MustStoreRef(state).EndCell())
+	}
+	priorState := typedState(9, 7, wrapper)
+	priorData := accountData(priorState)
+	afterBump := accountData(typedState(10, 8, cell.BeginCell().MustStoreUInt(0, 16).MustStoreUInt(0, 16).MustStoreDict(nil).EndCell()))
 	block := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
+	priorBlock := tokenTestBlock(bytes.Repeat([]byte{7}, 32), 41)
+	var bumped atomic.Bool
 	consensusTime := time.Now().Unix()
 	var status atomic.Value
 	status.Store("active")
@@ -116,11 +125,17 @@ func TestRegistryEpochAdapterReadsOneFinalizedObject(t *testing.T) {
 			}}
 		case "getAddressInformation":
 			accountReads.Add(1)
-			if q.Params.Address != identity.Address || q.Params.Seqno != 42 {
+			if q.Params.Address != identity.Address || (q.Params.Seqno != 42 && q.Params.Seqno != 41) {
 				t.Error("Registry account read escaped its finalized identity")
 			}
-			result = map[string]any{"@type": "raw.fullAccountState", "state": status.Load(), "balance": "1000", "code": release.Code, "data": bocText(data),
-				"block_id": block, "last_transaction_id": map[string]any{"@type": "internal.transactionId", "lt": "400", "hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))}}
+			stateData, stateBlock := priorData, block
+			if q.Params.Seqno == 41 {
+				stateBlock = priorBlock
+			} else if bumped.Load() {
+				stateData = afterBump
+			}
+			result = map[string]any{"@type": "raw.fullAccountState", "state": status.Load(), "balance": "1000", "code": release.Code, "data": stateData,
+				"block_id": stateBlock, "last_transaction_id": map[string]any{"@type": "internal.transactionId", "lt": "400", "hash": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))}}
 		default:
 			t.Errorf("unexpected Registry read: %s", q.Method)
 			return
@@ -159,5 +174,26 @@ func TestRegistryEpochAdapterReadsOneFinalizedObject(t *testing.T) {
 	status.Store("uninitialized")
 	if state, err := adapter.ResolveFinalizedAgent(t.Context(), id); err != nil || state.State != nil {
 		t.Fatalf("uninitialized account returned authority: %v, %v", state.State, err)
+	}
+	status.Store("active")
+	bumped.Store(true)
+	priorRoot, err := base64.StdEncoding.DecodeString(priorBlock["root_hash"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorFile, err := base64.StdEncoding.DecodeString(priorBlock["file_hash"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := &nativev1.NativeActionV1{Protocol: nativecore.Protocol, Network: network, TargetObjectId: id, TargetContractCodeHash: locator.CodeHash,
+		Generation: 1, Sequence: 10, PredecessorTvmStateHash: "tvm-cell-sha256:" + hex.EncodeToString(priorState.Hash()), Nonce: bytes.Repeat([]byte{5}, 32),
+		Payload: &nativev1.NativeActionV1_WithdrawAgentDelegation{WithdrawAgentDelegation: &nativev1.WithdrawAgentDelegationV1{
+			DelegationDigest: "sha256:" + hex.EncodeToString(live[:]), AuthorizationEpoch: 7,
+		}}}
+	proof, err := reader.ConfirmDelegationWithdrawal(t.Context(), action, &nativev1.DNSCheckpointV1{
+		Workchain: -1, Sequence: 41, RootHash: priorRoot, FileHash: priorFile,
+	})
+	if err != nil || proof.Result != "cleared_by_epoch_bump" || proof.FinalizedEpoch != 8 || proof.FinalizedCheckpoint != 42 {
+		t.Fatalf("finalized goal was not proven: %+v, %v", proof, err)
 	}
 }

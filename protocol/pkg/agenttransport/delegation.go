@@ -136,8 +136,12 @@ func (v *Verifier) BuildDelegation(ctx context.Context, d Delegation) ([]byte, e
 		return nil, expired
 	}
 	if err != nil {
+		if !errors.Is(err, ErrUnavailable) {
+			v.invalidateChangedAgentPasses(d.AgentDigest, Snapshot{})
+		}
 		return nil, err
 	}
+	v.invalidateChangedAgentPasses(d.AgentDigest, s)
 	if err = v.checkSnapshot(d, sha256.Sum256(b), s, false); err != nil {
 		return nil, err
 	}
