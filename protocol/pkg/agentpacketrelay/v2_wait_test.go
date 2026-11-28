@@ -142,3 +142,41 @@ func TestV2WaitRegistrationBoundsAndRearms(t *testing.T) {
 		t.Fatal("waiter was not freed")
 	}
 }
+
+func TestV2WaitRegistryCommitNotificationAndBusyBound(t *testing.T) {
+	f := newV2HTTP(t)
+	a, _ := parseAgentText(f.r.agentID)
+	now := unixNow(f.clock.Now())
+	_, ch, err := f.s.store.waitSnapshot(t.Context(), a, now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = f.s.store.waitSnapshot(t.Context(), a, now, nil); !errors.Is(err, errWaitBusy) {
+		t.Fatal("second waiter replaced the first", err)
+	}
+	e := f.r.seal(t, testPacket(1), now+3600)
+	v2Deposit(t, f.s.store, f.r, e, v2Loopback(1), now, nil)
+	select {
+	case <-ch:
+	default:
+		t.Fatal("committed deposit did not wake the registered reader")
+	}
+	f.s.store.endWait(a, ch)
+}
+func TestV2LongPollRechecksNativeWithdrawal(t *testing.T) {
+	f := newV2HTTP(t)
+	started := make(chan struct{}, 1)
+	ticks := make(chan time.Time, 1)
+	installWaitClock(t, f, started, ticks)
+	request, w := fWaitRequest(t, f, t.Context(), "25")
+	done := make(chan struct{})
+	go func() { defer close(done); f.s.ServeHTTP(v2DeadlineWriter{w}, request) }()
+	waitStarted(t, started)
+	f.source.state.GetAgent().DelegationDigests = nil
+	f.clock.at = f.clock.at.Add(300 * time.Second)
+	ticks <- testStart
+	waitDone(t, done)
+	if w.Code != 403 {
+		t.Fatal("withdrawn delegation read after waiting", w.Code, w.Body.String())
+	}
+}

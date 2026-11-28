@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 
 	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
@@ -98,8 +99,14 @@ func (c *V2Client) Describe(ctx context.Context) (V2Description, error) {
 	if err != nil {
 		return out, err
 	}
-	if status != 200 || jsonstrict.Decode(raw, &out) != nil || out.Schema != "tos.service.agent-packet-relay.relay.v2" || out.MaxEnvelopeBytes == 0 || out.MaxEnvelopeBytes > MaxEnvelopeBytes || out.MaxTTLSeconds == 0 || out.MaxTTLSeconds > 86400 || out.PerRecipientMaxEnvelopes == 0 || out.PerRecipientMaxEnvelopes > 256 || out.PerRecipientMaxBytes == 0 || out.PerRecipientMaxBytes > 16<<20 || out.StrangerMaxEnvelopes > 64 || out.StrangerMaxBytes > 4<<20 || out.MaxWaitSeconds != 25 {
+	var fields map[string]json.RawMessage
+	if status != 200 || jsonstrict.Decode(raw, &fields) != nil || len(fields) != 9 || jsonstrict.Decode(raw, &out) != nil || out.Schema != "tos.service.agent-packet-relay.relay.v2" || out.MaxEnvelopeBytes == 0 || out.MaxEnvelopeBytes > MaxEnvelopeBytes || out.MaxTTLSeconds == 0 || out.MaxTTLSeconds > 86400 || out.PerRecipientMaxEnvelopes == 0 || out.PerRecipientMaxEnvelopes > 256 || out.PerRecipientMaxBytes == 0 || out.PerRecipientMaxBytes > 16<<20 || out.StrangerMaxEnvelopes > 64 || out.StrangerMaxBytes > 4<<20 || out.MaxWaitSeconds != 25 {
 		return V2Description{}, errors.New("invalid V2 description")
+	}
+	for _, value := range fields {
+		if string(value) == "null" {
+			return V2Description{}, errors.New("invalid V2 description")
+		}
 	}
 	return out, nil
 }

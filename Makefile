@@ -206,3 +206,13 @@ relay-v2-policy-vectors-check:
 .PHONY: relay-v2-http-mutants
 relay-v2-http-mutants:
 	GOWORK=off python3 -I protocol/scripts/relay-v2-http-mutants.py
+
+.PHONY: relay-v2-directory-vectors-check
+spec-check: relay-v2-directory-vectors-check
+relay-v2-directory-vectors-check:
+	GOWORK=off go run ./protocol/cmd/relay-directory-vectors | cmp - spec/test-vectors/relay-directory-v2.json
+	python3 -I spec/scripts/reproduce-relay-directory-v2.py
+
+.PHONY: relay-v2-directory-mutants
+relay-v2-directory-mutants:
+	python3 -I protocol/scripts/relay-v2-directory-mutants.py

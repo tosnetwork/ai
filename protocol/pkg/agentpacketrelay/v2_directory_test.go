@@ -6,10 +6,15 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -503,6 +508,291 @@ func TestV2DirectoryDropsAbsentAndTombstonedAgents(t *testing.T) {
 			if len(f.s.store.hints) != 0 {
 				t.Fatal("non-live Agent consumes a hint slot")
 			}
+		})
+	}
+}
+
+func TestV2DirectoryPublicLookupRateAndAgentBinding(t *testing.T) {
+	f := newV2HTTP(t)
+	other := newRecipient(t)
+	raw, _ := directoryHint(t, f, 0)
+	f.serve(t, "PUT", "/v2/hints/"+other.agentID, raw, false, 403)
+	for i := range 61 {
+		want := 404
+		if i == 60 {
+			want = 429
+		}
+		f.serve(t, "GET", "/v2/hints/"+f.r.agentID, nil, false, want)
+	}
+	if len(f.s.store.hints) != 0 {
+		t.Fatal("public misses allocate directory slots")
+	}
+}
+func TestV2RevocationNeverShortensAndGlobalCountIsBounded(t *testing.T) {
+	f := newV2HTTP(t)
+	f.s.store.controlLimits.RevocationEntries = 1
+	now := unixNow(f.clock.Now())
+	checked := v2Checked(t, f.wire, f.holder, f.r.agentID, now, 120)
+	key := [32]byte{1}
+	for _, until := range []uint64{now + 3600, now + 1, now - 1} {
+		if err := f.s.store.revoke(t.Context(), f.r.agentID, []Revocation{{key, until}}, checked, now); err != nil {
+			t.Fatal(err)
+		}
+		if f.s.store.revocations[f.r.agentID][key] != now+3600 {
+			t.Fatal("a replay shortened revocation")
+		}
+	}
+	if err := f.s.store.revoke(t.Context(), f.r.agentID, []Revocation{{[32]byte{2}, now + 3600}}, checked, now); !errors.Is(err, errControlQuota) {
+		t.Fatal("global revocation quota lost", err)
+	}
+}
+func TestV2ControlOptionsRefuseBeforeOpeningStore(t *testing.T) {
+	for _, options := range []V2OpenOptions{{DirectoryAgents: -1}, {DirectoryAgents: maxDirectoryAgents + 1}, {RevocationEntries: -1}, {RevocationEntries: maxRevocationEntries + 1}, {MaxWaiters: -1}, {MaxWaiters: 4097}} {
+		path := filepath.Join(v2Temp(t), "unused")
+		if _, err := OpenV2Store(path, DefaultV2Limits(1024, 64<<20), testStart, options); err == nil {
+			t.Fatal("invalid control bounds accepted")
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("invalid config touched storage", err)
+		}
+	}
+}
+func TestV2DirectoryControlCrashWorker(t *testing.T) {
+	root := os.Getenv("V2_DIRECTORY_CRASH_ROOT")
+	if root == "" {
+		return
+	}
+	s := v2Open(t, root, DefaultV2Limits(1024, 64<<20), testStart)
+	cut := func(name string) error {
+		if strings.HasPrefix(name, "controls/") {
+			os.Exit(29)
+		}
+		return nil
+	}
+	if os.Getenv("V2_DIRECTORY_CRASH_POINT") == "before-rename" {
+		s.disk.beforeRename = cut
+	} else {
+		s.disk.beforeSync = cut
+	}
+	agent := os.Getenv("V2_DIRECTORY_CRASH_AGENT")
+	if os.Getenv("V2_DIRECTORY_CRASH_KIND") == "revocation" {
+		s.mu.Lock()
+		err := s.writeRevocationsLocked(agent, map[[32]byte]uint64{{1}: uint64(testStart.Unix()) + 3600})
+		s.mu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		raw, err := hex.DecodeString(os.Getenv("V2_DIRECTORY_CRASH_HINT"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		meta, err := hintMetadata(agent, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := encodeV2(v2HintRecord{"tos.service.relay-hint.v2", agent, raw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.disk.write(hintName(agent, meta.Digest), encoded); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Fatal("crash cut not reached")
+}
+func TestV2DirectoryControlCrashCuts(t *testing.T) {
+	for _, kind := range []string{"revocation", "hint"} {
+		for _, point := range []string{"before-rename", "after-rename"} {
+			t.Run(kind+"/"+point, func(t *testing.T) {
+				f := newV2HTTP(t)
+				raw, _ := directoryHint(t, f, 0)
+				v2Close(t, f.s.store)
+				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestV2DirectoryControlCrashWorker$", "-test.count=1")
+				cmd.Env = append(os.Environ(), "V2_DIRECTORY_CRASH_ROOT="+f.path, "V2_DIRECTORY_CRASH_POINT="+point, "V2_DIRECTORY_CRASH_AGENT="+f.r.agentID, "V2_DIRECTORY_CRASH_KIND="+kind, "V2_DIRECTORY_CRASH_HINT="+hex.EncodeToString(raw))
+				err := cmd.Run()
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 29 {
+					t.Fatal("worker missed cut", err)
+				}
+				f.s.store = v2Open(t, f.path, DefaultV2Limits(1024, 64<<20), f.clock.Now())
+				count := f.s.store.revocationCount
+				if kind == "hint" {
+					count = len(f.s.store.hints[f.r.agentID])
+				}
+				want := 0
+				if point == "after-rename" {
+					want = 1
+				}
+				if count != want {
+					t.Fatal("crash lost or invented committed control", count, want)
+				}
+			})
+		}
+	}
+}
+func TestV2CorruptControlRefusesStartup(t *testing.T) {
+	for _, kind := range []string{"hint", "revocation"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newV2HTTP(t)
+			name := ""
+			if kind == "hint" {
+				raw, digest := directoryHint(t, f, 0)
+				f.serve(t, "PUT", "/v2/hints/"+f.r.agentID, raw, false, 204)
+				name = hintName(f.r.agentID, digest)
+			} else {
+				checked := v2Checked(t, f.wire, f.holder, f.r.agentID, unixNow(f.clock.Now()), 120)
+				if err := f.s.store.revoke(t.Context(), f.r.agentID, []Revocation{{[32]byte{1}, unixNow(f.clock.Now()) + 3600}}, checked, unixNow(f.clock.Now())); err != nil {
+					t.Fatal(err)
+				}
+				name = revocationName(f.r.agentID)
+			}
+			v2Close(t, f.s.store)
+			path := filepath.Join(f.path, name)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw[len(raw)/2] ^= 1
+			if err = os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			opened, err := OpenV2Store(f.path, DefaultV2Limits(1024, 64<<20), f.clock.Now(), V2OpenOptions{})
+			if err == nil {
+				v2Close(t, opened)
+				t.Fatal("corrupt control accepted")
+			}
+		})
+	}
+}
+
+func TestV2DirectoryKeepsNewestAndFreesRevokedSlots(t *testing.T) {
+	f := newV2HTTP(t)
+	path := "/v2/hints/" + f.r.agentID
+	now := unixNow(f.clock.Now())
+	first, digest := directoryHint(t, f, 0)
+	f.serve(t, "PUT", path, first, false, 204)
+	newer, _ := signedDirectoryHint(t, f, 0, now+1, now+21601, []string{f.s.relay})
+	f.serve(t, "PUT", path, newer, false, 204)
+	f.serve(t, "PUT", path, first, false, 204)
+	w := f.serve(t, "GET", path+"/"+hex.EncodeToString(digest[:]), nil, false, 200)
+	if !bytes.Equal(w.Body.Bytes(), newer) {
+		t.Fatal("older hint overwrote newer hint")
+	}
+	for i := 1; i < 4; i++ {
+		raw, _ := directoryHint(t, f, byte(i))
+		f.serve(t, "PUT", path, raw, false, 204)
+	}
+	// Withdraw one live delegation, not the incoming one. Its slot must free.
+	withdrawn := "sha256:" + hex.EncodeToString(digest[:])
+	var kept []string
+	for _, d := range f.source.state.GetAgent().DelegationDigests {
+		if d != withdrawn {
+			kept = append(kept, d)
+		}
+	}
+	f.source.state.GetAgent().DelegationDigests = kept
+	f.clock.at = f.clock.at.Add(300 * time.Second)
+	incoming, _ := directoryHint(t, f, 4)
+	f.serve(t, "PUT", path, incoming, false, 204)
+	if len(f.s.store.hints[f.r.agentID]) != 4 {
+		t.Fatal("slot accounting drift")
+	}
+}
+func TestV2DirectoryReadOutageDoesNotEvictLiveSlots(t *testing.T) {
+	f := newV2HTTP(t)
+	path := "/v2/hints/" + f.r.agentID
+	for i := range 4 {
+		raw, _ := directoryHint(t, f, byte(i))
+		f.serve(t, "PUT", path, raw, false, 204)
+	}
+	f.source.err = agenttransport.ErrUnavailable
+	f.clock.at = f.clock.at.Add(600 * time.Second)
+	f.serve(t, "GET", path, nil, false, 503)
+	if len(f.s.store.hints[f.r.agentID]) != 4 {
+		t.Fatal("outage evicted a live record")
+	}
+	f.source.err = nil
+	raw, _ := directoryHint(t, f, 4)
+	f.serve(t, "PUT", path, raw, false, 507)
+}
+func TestV2DirectoryRefusesUnadmittedDelegation(t *testing.T) {
+	f := newV2HTTP(t)
+	raw, _ := directoryHint(t, f, 0)
+	f.source.state.GetAgent().DelegationDigests = nil
+	f.serve(t, "PUT", "/v2/hints/"+f.r.agentID, raw, false, 403)
+	if len(f.s.store.hints) != 0 {
+		t.Fatal("unadmitted transport key acquired storage")
+	}
+}
+func TestV2RevocationIsCheckedBeforeFinalizedRead(t *testing.T) {
+	f := newV2HTTP(t)
+	c, err := agenttransport.DecodeCredential(f.wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chains, err := c.ChainValues()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.store.mu.Lock()
+	err = f.s.store.writeRevocationsLocked(f.r.agentID, map[[32]byte]uint64{chains[1]: unixNow(f.clock.Now()) + 3600})
+	f.s.store.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.source.err = agenttransport.ErrUnavailable
+	f.serve(t, "GET", f.mail(), nil, true, 403)
+	if f.source.reads != 0 {
+		t.Fatal("revoked credential forced a finalized read")
+	}
+}
+
+func TestV2DescriptionRequiresEveryField(t *testing.T) {
+	f := newV2HTTP(t)
+	handler := f.s
+	recorder := httptest.NewRecorder()
+	handler.describeV2(recorder)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	check := func(t *testing.T, body []byte, valid bool) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", ContentTypeJSON)
+			_, _ = w.Write(body)
+		}))
+		defer server.Close()
+		client, err := NewV2Client(server.URL, server.Client().Transport, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.Describe(context.Background())
+		if (err == nil) != valid {
+			t.Fatalf("valid=%v err=%v", valid, err)
+		}
+	}
+	check(t, recorder.Body.Bytes(), true)
+	for key, value := range fields {
+		t.Run(key+"-missing", func(t *testing.T) {
+			delete(fields, key)
+			body, err := json.Marshal(fields)
+			fields[key] = value
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, body, false)
+		})
+		t.Run(key+"-null", func(t *testing.T) {
+			fields[key] = json.RawMessage("null")
+			body, err := json.Marshal(fields)
+			fields[key] = value
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, body, false)
 		})
 	}
 }
