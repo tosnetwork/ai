@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,7 +115,11 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 		if jsonstrict.Decode(raw, &answer) != nil || answer.Schema != SchemaV2Error || !v2StatusCode(res.StatusCode, answer.Code, answer.Lane) {
 			return 0, nil, errors.New("invalid V2 error response")
 		}
-		return res.StatusCode, nil, &StatusError{StatusCode: res.StatusCode, Code: answer.Code}
+		retry := time.Duration(0)
+		if seconds, err := strconv.ParseUint(res.Header.Get("Retry-After"), 10, 64); err == nil {
+			retry = time.Duration(min(seconds, uint64(maxRetryAfter/time.Second))) * time.Second
+		}
+		return res.StatusCode, nil, &StatusError{StatusCode: res.StatusCode, Code: answer.Code, RetryAfter: retry}
 	}
 	return res.StatusCode, raw, nil
 }

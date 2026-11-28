@@ -244,6 +244,8 @@ func (s *V2Server) authorize(w http.ResponseWriter, r *http.Request, agent strin
 		case errors.Is(err, agenttransport.ErrProofFloor):
 			w.Header().Set("Retry-After", strconv.FormatUint(s.store.Replay().RetryAfter(checked.Proof.IssuedAt), 10))
 			v2Fail(w, 503, "proof_floor")
+		case errors.Is(err, ErrStoreUnavailable):
+			v2Fail(w, 503, CodeUnavailable)
 		case errors.Is(err, agenttransport.ErrReplayTableFull):
 			v2Fail(w, 503, "replay_table_full")
 		case errors.Is(err, agenttransport.ErrReplayCredentialFull):
@@ -396,7 +398,11 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			v2Fail(w, 422, CodeExpiryOutOfBounds)
 			return
 		}
-		stranger, err := s.policyBudget(r.Context(), agent)
+		stranger := v2Usage{s.store.limits.StrangerMaxEnvelopes, s.store.limits.StrangerMaxBytes}
+		err = nil
+		if checked == nil {
+			stranger, err = s.policyBudget(r.Context(), agent)
+		}
 		if err != nil {
 			v2Fail(w, 503, "chain_unavailable")
 			return
@@ -425,6 +431,8 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				lane = "contact"
 			}
 			v2WriteJSON(w, 507, v2HTTPError{SchemaV2Error, CodeQuotaExhausted, lane}, MaxResponseBytes)
+		default:
+			v2Fail(w, 500, "internal_error")
 		}
 	}
 }
@@ -441,6 +449,10 @@ func (s *V2Server) ackV2(w http.ResponseWriter, r *http.Request, agent string, i
 	status, err := s.store.ack(r.Context(), digest, id, unixNow(s.now()))
 	if err != nil {
 		v2Fail(w, 503, CodeUnavailable)
+		return
+	}
+	if status != ackDeleted && status != ackTombstone && status != ackNotFound {
+		v2Fail(w, 500, "internal_error")
 		return
 	}
 	if status == ackNotFound {
