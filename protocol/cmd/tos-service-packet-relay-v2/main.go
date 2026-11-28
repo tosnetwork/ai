@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/internal/jsonstrict"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
@@ -58,14 +58,8 @@ func readConfig(path string) (config, error) {
 	if len(raw) > 65536 {
 		return c, errors.New("configuration too large")
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&c); err != nil {
+	if err = jsonstrict.Decode(raw, &c); err != nil {
 		return c, errors.New("invalid V2 configuration")
-	}
-	var extra any
-	if err = decoder.Decode(&extra); err != io.EOF {
-		return c, errors.New("trailing configuration data")
 	}
 	if c.Listen == "" || c.Network == nil || !filepath.IsAbs(c.StateDir) || !filepath.IsAbs(c.Checkpoint) || c.StateDir == c.Checkpoint {
 		return c, errors.New("explicit listen, network, state directory and checkpoint required")
@@ -75,10 +69,10 @@ func readConfig(path string) (config, error) {
 func verifier(c config) (*agenttransport.Verifier, error) {
 	// Native registry serialization uses prefixed genesis hashes. Normalize only
 	// the configured copy; both constructors enforce the exact approved genesis.
-	nativeNetwork := *c.Network
+	nativeNetwork := &nativev1.NetworkDomain{NetworkId: c.Network.NetworkId, GenesisRootHash: c.Network.GenesisRootHash, GenesisFileHash: c.Network.GenesisFileHash}
 	nativeNetwork.GenesisRootHash = "sha256:" + c.Network.GenesisRootHash
 	nativeNetwork.GenesisFileHash = "sha256:" + c.Network.GenesisFileHash
-	locator, err := nativecore.NewLocator(&nativeNetwork, 0, c.CodeBase64, c.CodeHash)
+	locator, err := nativecore.NewLocator(nativeNetwork, 0, c.CodeBase64, c.CodeHash)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +84,7 @@ func verifier(c config) (*agenttransport.Verifier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return agentpacketrelay.NewV2FinalizedVerifier(agenttransport.Config{Mode: c.Mode, Network: c.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{c.CodeHash}, Locator: registryLocator{locator}}}, source)
+	return agentpacketrelay.NewV2FinalizedVerifier(agenttransport.Config{Mode: c.Mode, Network: c.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{c.CodeHash}, Locator: registryLocator{locator}}}, pinnedReader{source, adapter, nativeNetwork})
 }
 
 type registryLocator struct{ l *nativecore.Locator }
@@ -202,4 +196,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "V2 relay refused to run")
 		os.Exit(2)
 	}
+}
+
+type pinnedReader struct {
+	source  *toschain.SimplifiedNativeResolver
+	chain   *toschain.Adapter
+	network *nativev1.NetworkDomain
+}
+
+func (r pinnedReader) ResolveState(ctx context.Context, id, hash string) (*nativev1.NativeStateV1, bool, error) {
+	if err := r.chain.CheckNetworkGenesis(ctx, r.network.GenesisRootHash, r.network.GenesisFileHash); err != nil {
+		return nil, false, err
+	}
+	return r.source.ResolveState(ctx, id, hash)
 }

@@ -193,7 +193,7 @@ func (s *V2Server) release(client netip.Addr) {
 	}
 }
 func (s *V2Server) readBody(w http.ResponseWriter, r *http.Request, maxBytes int) ([]byte, bool) {
-	if r.ContentLength < 0 || r.ContentLength > int64(maxBytes) || r.Header.Get("Content-Type") != ContentTypeEnvelope {
+	if len(r.Header.Values("Content-Type")) != 1 || r.Header.Get("Content-Encoding") != "" || r.ContentLength < 0 || r.ContentLength > int64(maxBytes) || r.Header.Get("Content-Type") != ContentTypeEnvelope {
 		v2Fail(w, 400, CodeInvalidRequest)
 		return nil, false
 	}

@@ -354,8 +354,10 @@ func TestV2HTTPRestartSecondRelayAndClockRollback(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code)
 	}
-	other := *f.s
-	other.relay = "https://127.0.0.2"
+	other, err := NewV2Server(V2ServerConfig{Store: f.s.store, URL: "https://127.0.0.2", Verifier: f.s.verifier, Now: f.clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
 	w = httptest.NewRecorder()
 	other.ServeHTTP(w, req.Clone(t.Context()))
 	if w.Code != 403 {
