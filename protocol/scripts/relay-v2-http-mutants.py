@@ -11,6 +11,54 @@ ROOT = Path(__file__).resolve().parents[2]
 RELAY = "./protocol/pkg/agentpacketrelay"
 CONTROLS = [
     (
+        "deposit-size-status",
+        "agentpacketrelay/v2_http.go",
+        "r.ContentLength > MaxEnvelopeBytes)",
+        "false)",
+        RELAY,
+        "TestV2HTTPRejectsOversizeBeforeReadingAndBoundsSlots",
+    ),
+    (
+        "per-client-body-slots",
+        "agentpacketrelay/v2_http.go",
+        "s.clients[client] >= DefaultMaxConcurrentDepositsPerClient",
+        "false",
+        RELAY,
+        "TestV2HTTPRejectsOversizeBeforeReadingAndBoundsSlots",
+    ),
+    (
+        "global-body-slots",
+        "agentpacketrelay/v2_http.go",
+        "make(chan struct{}, DefaultMaxConcurrentDeposits)",
+        "make(chan struct{}, DefaultMaxConcurrentDeposits+1)",
+        RELAY,
+        "TestV2HTTPRejectsOversizeBeforeReadingAndBoundsSlots",
+    ),
+    (
+        "policy-expiry-reclamation",
+        "agentpacketrelay/v2_store.go",
+        "if err := s.sweepPolicies(unixNow(now)); err != nil {",
+        "if err := error(nil); err != nil {",
+        RELAY,
+        "TestV2ExpiredPoliciesAreReclaimedWithoutAVisitor",
+    ),
+    (
+        "config-unknown-fields",
+        "../internal/jsonstrict/decode.go",
+        "decoder.DisallowUnknownFields()",
+        "// allow unknown fields",
+        "./protocol/cmd/tos-service-packet-relay-v2",
+        "TestV2ConfigIsStrictAndHasNoLegacyMode",
+    ),
+    (
+        "config-duplicate-fields",
+        "../internal/jsonstrict/decode.go",
+        "if _, duplicate := seen[key]; duplicate {",
+        "if _, duplicate := seen[key]; false && duplicate {",
+        "./protocol/cmd/tos-service-packet-relay-v2",
+        "TestV2ConfigIsStrictAndHasNoLegacyMode",
+    ),
+    (
         "finalized-authorization",
         "agentpacketrelay/v2_http.go",
         "_, err = s.verifier.VerifyDelegation(r.Context(), raw, agenttransport.Relay)",
@@ -240,7 +288,7 @@ def main():
                 "go",
                 "test",
                 "-run",
-                "TestV2HTTP|TestV2Client|TestV2Maximal|TestV2Policy|TestV2Rotated|TestEndpointOutage|TestCheckNetworkGenesis",
+                "TestV2HTTP|TestV2Client|TestV2Maximal|TestV2Policy|TestV2Rotated|TestV2Config|TestV2Expired|TestEndpointOutage|TestCheckNetworkGenesis",
                 "-count=1",
                 package,
             ]
@@ -248,7 +296,7 @@ def main():
         if code:
             raise RuntimeError("baseline failed\n" + output)
     for name, filename, old, new, package, test in CONTROLS:
-        source = ROOT / "protocol/pkg" / filename
+        source = (ROOT / "protocol/pkg" / filename).resolve()
         text = source.read_text()
         if text.count(old) != 1:
             raise RuntimeError("nonunique anchor: " + name)

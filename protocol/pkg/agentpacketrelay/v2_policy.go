@@ -199,3 +199,24 @@ func RunV2Maintenance(ctx context.Context, store *V2Store, now func() time.Time,
 		}
 	}
 }
+
+// Caller holds the store gate. Expired delegations cannot authorize a policy;
+// reclaim their bounded records even for mailboxes nobody visits again.
+func (s *V2Store) sweepPolicies(now uint64) error {
+	for agent, p := range s.policies {
+		d, err := agenttransport.DecodeDelegation(p.Delegation)
+		if err != nil {
+			s.poisoned = true
+			return ErrStoreUnavailable
+		}
+		if d.NotAfter > now {
+			continue
+		}
+		if err = s.disk.remove(policyName(agent)); err != nil {
+			s.poisoned = true
+			return ErrStoreUnavailable
+		}
+		delete(s.policies, agent)
+	}
+	return nil
+}

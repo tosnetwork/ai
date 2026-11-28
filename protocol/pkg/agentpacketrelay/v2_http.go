@@ -165,23 +165,23 @@ func (s *V2Server) route(path string) (string, string, [32]byte) {
 	}
 	return "", "", zero
 }
-func (s *V2Server) take(client netip.Addr) bool {
+func (s *V2Server) take(client netip.Addr) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	site, grouped := site48(client)
 	if s.clients[client] >= DefaultMaxConcurrentDepositsPerClient || (grouped && s.sites[site] >= DefaultMaxConcurrentDepositsPer48) {
-		return false
+		return 429
 	}
 	select {
 	case s.bodies <- struct{}{}:
 	default:
-		return false
+		return 503
 	}
 	s.clients[client]++
 	if grouped {
 		s.sites[site]++
 	}
-	return true
+	return 0
 }
 func (s *V2Server) release(client netip.Addr) {
 	s.mu.Lock()
@@ -193,11 +193,11 @@ func (s *V2Server) release(client netip.Addr) {
 	}
 }
 func (s *V2Server) readBody(w http.ResponseWriter, r *http.Request, maxBytes int) ([]byte, bool) {
-	if len(r.Header.Values("Content-Type")) != 1 || r.Header.Get("Content-Encoding") != "" || r.ContentLength < 0 || r.ContentLength > int64(maxBytes) || r.Header.Get("Content-Type") != ContentTypeEnvelope {
+	if len(r.Header.Values("Content-Type")) != 1 || r.Header.Get("Content-Encoding") != "" || (r.ContentLength < 0 && maxBytes != agentpacketseal.AckSecretSize) || r.ContentLength > int64(maxBytes) || r.Header.Get("Content-Type") != ContentTypeEnvelope {
 		v2Fail(w, 400, CodeInvalidRequest)
 		return nil, false
 	}
-	deadline := DefaultDepositReadBase + time.Duration(r.ContentLength)*time.Second/DefaultDepositMinBytesPerSecond
+	deadline := DefaultDepositReadBase + time.Duration(max(r.ContentLength, 0))*time.Second/DefaultDepositMinBytesPerSecond
 	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(deadline)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		v2Fail(w, 503, CodeUnavailable)
 		return nil, false
@@ -208,7 +208,7 @@ func (s *V2Server) readBody(w http.ResponseWriter, r *http.Request, maxBytes int
 		v2Fail(w, 408, CodeRequestTimeout)
 		return nil, false
 	}
-	if err != nil || int64(len(body)) != r.ContentLength {
+	if err != nil || (r.ContentLength >= 0 && int64(len(body)) != r.ContentLength) {
 		v2Fail(w, 400, CodeInvalidRequest)
 		return nil, false
 	}
@@ -317,9 +317,17 @@ func (s *V2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} // Long polling is the next relay change.
 	var body []byte
 	if method == "PUT" || method == "POST" {
-		if !s.take(client) {
+		if kind != "ack" && (r.Header.Get("Content-Length") == "" || r.ContentLength < 0 || len(r.TransferEncoding) > 0 || r.ContentLength > MaxEnvelopeBytes) {
+			v2Fail(w, 413, CodeTooLarge)
+			return
+		}
+		if status := s.take(client); status != 0 {
 			w.Header().Set("Retry-After", "1")
-			v2Fail(w, 503, CodeUnavailable)
+			code := CodeUnavailable
+			if status == 429 {
+				code = CodeRateLimited
+			}
+			v2Fail(w, status, code)
 			return
 		}
 		defer s.release(client)

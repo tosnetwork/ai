@@ -697,6 +697,9 @@ func (s *V2Store) Sweep(now time.Time) error {
 			}
 		}
 	}
+	if err := s.sweepPolicies(unixNow(now)); err != nil {
+		return err
+	}
 	return nil
 }
 func (s *V2Store) Close() error {

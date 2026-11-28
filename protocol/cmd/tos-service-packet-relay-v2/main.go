@@ -28,6 +28,9 @@ import (
 )
 
 type config struct {
+	StrangerCount *int                       `json:"stranger_max_envelopes,omitempty"`
+	StrangerBytes *int64                     `json:"stranger_max_bytes,omitempty"`
+	StrangerShare *int                       `json:"stranger_global_share,omitempty"`
 	Listen        string                     `json:"listen"`
 	URL           string                     `json:"url"`
 	TLSCert       string                     `json:"tls_cert"`
@@ -117,7 +120,17 @@ func serve(ctx context.Context, c config, ready func(net.Addr)) error {
 			return errors.New("plaintext listener must be numeric loopback behind a TLS proxy")
 		}
 	}
-	store, err := agentpacketrelay.OpenV2Store(c.StateDir, agentpacketrelay.DefaultV2Limits(c.GlobalEntries, c.GlobalBytes), time.Now(), agentpacketrelay.V2OpenOptions{})
+	limits := agentpacketrelay.DefaultV2Limits(c.GlobalEntries, c.GlobalBytes)
+	if c.StrangerCount != nil {
+		limits.StrangerMaxEnvelopes = *c.StrangerCount
+	}
+	if c.StrangerBytes != nil {
+		limits.StrangerMaxBytes = *c.StrangerBytes
+	}
+	if c.StrangerShare != nil {
+		limits.StrangerGlobalPercent = *c.StrangerShare
+	}
+	store, err := agentpacketrelay.OpenV2Store(c.StateDir, limits, time.Now(), agentpacketrelay.V2OpenOptions{})
 	if err != nil {
 		return err
 	}

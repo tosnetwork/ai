@@ -13,7 +13,10 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -119,6 +122,7 @@ func (f *v2HTTPFixture) request(t testing.TB, method, path string, body []byte, 
 	req.RemoteAddr = "127.0.0.1:1234"
 	if method == "PUT" || method == "POST" {
 		req.Header.Set("Content-Type", ContentTypeEnvelope)
+		req.Header.Set("Content-Length", strconv.Itoa(len(body)))
 	}
 	if auth {
 		c, err := agenttransport.DecodeCredential(f.wire)
@@ -708,5 +712,75 @@ func TestV2HTTPProofBindsConfiguredRelayWithoutRelayCaveat(t *testing.T) {
 	second.ServeHTTP(w, req)
 	if w.Code != 403 {
 		t.Fatal("proof moved between relays", w.Code, w.Body.String())
+	}
+}
+
+type v2CountingBody struct{ reads int }
+
+func (b *v2CountingBody) Read([]byte) (int, error) { b.reads++; return 0, io.EOF }
+func (b *v2CountingBody) Close() error             { return nil }
+func TestV2HTTPRejectsOversizeBeforeReadingAndBoundsSlots(t *testing.T) {
+	f := newV2HTTP(t)
+	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+	req := f.request(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false)
+	body := &v2CountingBody{}
+	req.Body = body
+	req.ContentLength = MaxEnvelopeBytes + 1
+	req.Header.Set("Content-Length", strconv.Itoa(MaxEnvelopeBytes+1))
+	w := httptest.NewRecorder()
+	f.s.ServeHTTP(w, req)
+	if w.Code != 413 || body.reads != 0 {
+		t.Fatal("oversize read started", w.Code, body.reads)
+	}
+	var held []netip.Addr
+	defer func() {
+		for _, client := range held {
+			f.s.release(client)
+		}
+	}()
+	for i := range DefaultMaxConcurrentDeposits {
+		client := v2Loopback(1 + i/4)
+		if status := f.s.take(client); status != 0 {
+			t.Fatal("premature slot refusal", i, status)
+		}
+		held = append(held, client)
+	}
+	if status := f.s.take(v2Loopback(1)); status != 429 {
+		t.Fatal("per-client bound", status)
+	}
+	if status := f.s.take(v2Loopback(100)); status != 503 {
+		t.Fatal("global bound", status)
+	}
+}
+func TestV2ExpiredPoliciesAreReclaimedWithoutAVisitor(t *testing.T) {
+	f := newV2HTTP(t)
+	f.serve(t, "PUT", "/v2/mailboxes/"+f.r.agentID+"/policy", (MailboxPolicy{unixNow(f.clock.Now()), 0, 0}).Encode(), true, 204)
+	f.clock.at = f.clock.at.Add(86400 * time.Second)
+	if err := f.s.store.Sweep(f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.s.store.policies) != 0 {
+		t.Fatal("expired policy consumes a permanent record")
+	}
+	entries, err := os.ReadDir(filepath.Join(f.path, "controls"))
+	if err != nil || len(entries) != 0 {
+		t.Fatal("expired policy stays on disk", err)
+	}
+}
+
+func TestV2ProductionAndUnknownNetworksNeverEnable(t *testing.T) {
+	f := newV2HTTP(t)
+	c := f.config
+	c.Mode = agenttransport.Production
+	if _, err := NewV2FinalizedVerifier(c, f.source); err == nil {
+		t.Fatal("production enabled without registry epochs")
+	}
+	for _, mode := range []agenttransport.NetworkMode{agenttransport.Production, agenttransport.TestNetworkLegacyEpochZero, agenttransport.TestNetworkEpochAware} {
+		c := f.config
+		c.Mode = mode
+		c.Network = &nativev1.NetworkDomain{NetworkId: "tos:global-id:1", GenesisRootHash: f.config.Network.GenesisRootHash, GenesisFileHash: f.config.Network.GenesisFileHash}
+		if _, err := NewV2FinalizedVerifier(c, f.source); err == nil {
+			t.Fatal("unapproved network enabled", mode)
+		}
 	}
 }

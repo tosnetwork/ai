@@ -1,12 +1,8 @@
-// Package agentpacketrelay is the Agent Packet Relay V1 mailbox: an HTTP
-// service that stores end-to-end-encrypted envelopes for recipient Agents,
-// and the client a sender or recipient uses to reach it.
-//
-// The relay has no authority. It never decrypts, never holds a key, never
-// signs and never reads chain state; it checks only the clear envelope header
-// with agentpacketseal.ParseEnvelope and deletes an envelope only for the
-// party that presents the acknowledgement secret hashing to its ID. Finalized
-// TOS state stays the only authority over the packets inside.
+// Package agentpacketrelay provides separate encrypted-envelope relay APIs.
+// V2 uses durable replay bounds and finalized delegation checks. The retired
+// V1 API remains only for its unmigrated in-repository clients, in a disjoint
+// store; no V2 handler or client routes through it. Neither API decrypts an
+// envelope or authorizes the business action carried inside it.
 package agentpacketrelay
 
 import (
