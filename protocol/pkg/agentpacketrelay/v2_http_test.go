@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -266,5 +267,110 @@ func TestV2HTTPPolicyDurabilityTimestampAndRevocation(t *testing.T) {
 	budget, err = f.s.policyBudget(t.Context(), f.r.agentID)
 	if err != nil || budget.Count != 32 {
 		t.Fatal("revoked policy remains", budget, err)
+	}
+}
+
+type v2RoundTrip func(*http.Request) (*http.Response, error)
+
+func (f v2RoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestV2ClientAcceptsOnlyListingExceptionAndNoFallback(t *testing.T) {
+	f := newV2HTTP(t)
+	entries := make([]v2WireEntry, 256)
+	for i := range entries {
+		lane := "contact"
+		if i < 64 {
+			lane = "stranger"
+		}
+		hash := sha256.Sum256([]byte{byte(i)})
+		entries[i] = v2WireEntry{hex.EncodeToString(hash[:]), "hpke:" + strings.Repeat("f", 64), 65536, math.MaxUint64 - 1, math.MaxUint64, lane}
+	}
+	raw, err := json.Marshal(v2WireMailbox{SchemaV2Mailbox, f.r.agentID, entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) <= MaxResponseBytes || len(raw) > MaxV2ListingBytes {
+		t.Fatal("listing did not cross the original limit", len(raw))
+	}
+	calls := 0
+	transport := v2RoundTrip(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if !strings.HasPrefix(r.URL.Path, "/v2/") {
+			t.Fatal("fallback path", r.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{ContentTypeJSON}}, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+	})
+	client, err := NewV2Client(v2TestURL, transport, f.clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.List(t.Context(), f.r.agentID, f.wire, f.holder)
+	if err != nil || len(got) != 256 || calls != 1 {
+		t.Fatal("maximal legal listing refused", len(got), calls, err)
+	}
+	// Every other response retains its smaller bound; no V1 schema is accepted.
+	if _, _, err = client.exchange(t.Context(), "PUT", f.mail()+"/policy", nil, nil, nil); err == nil {
+		t.Fatal("listing bound leaked into policy")
+	}
+	raw = bytes.Replace(raw, []byte(SchemaV2Mailbox), []byte(SchemaMailbox), 1)
+	before := calls
+	if _, err = client.List(t.Context(), f.r.agentID, f.wire, f.holder); err == nil || calls != before+1 {
+		t.Fatal("V1 response accepted or retried", err)
+	}
+	raw = bytes.Repeat([]byte("x"), MaxV2ListingBytes+1)
+	if _, err = client.List(t.Context(), f.r.agentID, f.wire, f.holder); err == nil {
+		t.Fatal("oversize response accepted")
+	}
+}
+func TestV2HTTPInvalidCredentialsNeverBecomeStrangers(t *testing.T) {
+	f := newV2HTTP(t)
+	e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+	path := f.mail() + "/" + hex.EncodeToString(e.id[:])
+	for _, kind := range []string{"bad", "missing-proof", "duplicate", "bad-body"} {
+		t.Run(kind, func(t *testing.T) {
+			req := f.request(t, "PUT", path, e.envelope, true)
+			switch kind {
+			case "bad":
+				req.Header.Set("TOS-Relay-Credential", "bad")
+			case "missing-proof":
+				req.Header.Del("TOS-Relay-Proof")
+			case "duplicate":
+				req.Header.Add("TOS-Relay-Proof", req.Header.Get("TOS-Relay-Proof"))
+			case "bad-body":
+				req.Body = io.NopCloser(bytes.NewReader(bytes.Repeat([]byte("x"), len(e.envelope))))
+			}
+			w := httptest.NewRecorder()
+			f.s.ServeHTTP(w, req)
+			if w.Code != 403 || f.s.store.Usage().StrangerEntries != 0 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		})
+	}
+}
+func TestV2HTTPRestartSecondRelayAndClockRollback(t *testing.T) {
+	f := newV2HTTP(t)
+	req := f.request(t, "GET", f.mail(), nil, true)
+	w := httptest.NewRecorder()
+	f.s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	other := *f.s
+	other.relay = "https://127.0.0.2"
+	w = httptest.NewRecorder()
+	other.ServeHTTP(w, req.Clone(t.Context()))
+	if w.Code != 403 {
+		t.Fatal("second relay accepted same proof", w.Code)
+	}
+	f.clock.at = f.clock.at.Add(-time.Minute)
+	if err := f.s.store.Replay().Record(unixNow(f.clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	v2Close(t, f.s.store)
+	f.s.store = v2Open(t, f.path, DefaultV2Limits(1024, 64<<20), f.clock.Now())
+	f.clock.at = testStart
+	w = httptest.NewRecorder()
+	f.s.ServeHTTP(w, req.Clone(t.Context()))
+	if w.Code != 503 || !strings.Contains(w.Body.String(), "proof_floor") || w.Header().Get("Retry-After") != "141" {
+		t.Fatal(w.Code, w.Body.String(), w.Header())
 	}
 }

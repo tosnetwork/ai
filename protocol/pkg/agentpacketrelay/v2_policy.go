@@ -99,7 +99,7 @@ func (s *V2Server) currentPolicy(ctx context.Context, agent string) (*v2PolicyRe
 		return nil, nil
 	}
 	_, err := s.verifier.VerifyDelegation(ctx, p.Delegation, agenttransport.Relay)
-	if err == nil || errors.Is(err, agenttransport.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || !errors.Is(err, agenttransport.ErrDelegationRevoked) {
 		return &p, nil
 	}
 	if err = s.store.disk.remove(policyName(agent)); err != nil {

@@ -80,6 +80,9 @@ func NewV2Server(c V2ServerConfig) (*V2Server, error) {
 // NewV2FinalizedVerifier uses the existing finalized reader; production and
 // unknown genesis tuples remain refused by the transport's pinned constructors.
 func NewV2FinalizedVerifier(c agenttransport.Config, source agenttransport.FinalizedStateReader) (*agenttransport.Verifier, error) {
+	if source == nil {
+		return nil, errors.New("finalized source required")
+	}
 	adapter, err := agenttransport.NewLegacyTestNetworkResolver(c.Mode, c.Network, v2FinalizedSource{source})
 	if err != nil {
 		return nil, err

@@ -49,6 +49,9 @@ type FinalizedResolver interface {
 // must not wrap it.
 var ErrUnavailable = errors.New("finalized read unavailable")
 
+// ErrDelegationRevoked is positive finalized evidence, unlike a failed read.
+var ErrDelegationRevoked = errors.New("delegation no longer authorized")
+
 type Clock interface{ Now() time.Time }
 type systemClock struct{}
 
@@ -221,7 +224,7 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 			}
 		}
 		if !found {
-			return errors.New("delegation is not in the finalized live set")
+			return fmt.Errorf("%w: not in finalized live set", ErrDelegationRevoked)
 		}
 	}
 	if v.config.Mode == TestNetworkLegacyEpochZero {
@@ -244,7 +247,7 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 		return err
 	}
 	if !bytes.Equal(policy.Hash(), d.PolicyHash[:]) {
-		return errors.New("delegation policy differs from finalized policy")
+		return fmt.Errorf("%w: finalized policy changed", ErrDelegationRevoked)
 	}
 	return nil
 }
