@@ -37,8 +37,10 @@ type location string
 func (l location) Locate(string, string) (string, error) { return string(l), nil }
 
 type resolver struct {
-	mu    sync.Mutex
-	state map[string]agenttransport.Snapshot
+	failure error
+	reads   int
+	mu      sync.Mutex
+	state   map[string]agenttransport.Snapshot
 }
 
 func (r *resolver) ResolveFinalizedAgent(ctx context.Context, id string) (agenttransport.Snapshot, error) {
@@ -47,6 +49,10 @@ func (r *resolver) ResolveFinalizedAgent(ctx context.Context, id string) (agentt
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.reads++
+	if r.failure != nil {
+		return agenttransport.Snapshot{}, r.failure
+	}
 	s, ok := r.state[id]
 	if !ok {
 		return agenttransport.Snapshot{}, nil

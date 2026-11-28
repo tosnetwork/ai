@@ -187,9 +187,12 @@ func (l *Lane) Status(ctx context.Context, id string) (DeliveryView, error) {
 }
 
 type resolvedRoute struct {
-	Key    agentpacketseal.RecipientKey
-	Relays []string
-	Card   []byte
+	Key             agentpacketseal.RecipientKey
+	Relays          []string
+	Card            []byte
+	FreshUntil      time.Time
+	DelegationUntil uint64
+	HintUntil       uint64
 }
 
 func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route) (resolvedRoute, error) {
@@ -221,7 +224,7 @@ func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route)
 			candidates = append(candidates, object.Bytes)
 		}
 	}
-	result := resolvedRoute{Relays: append([]string(nil), verified.Record.Hint.Relays...)}
+	result := resolvedRoute{Relays: append([]string(nil), verified.Record.Hint.Relays...), FreshUntil: verified.FreshUntil, DelegationUntil: verified.Record.Hint.Delegation.NotAfter, HintUntil: verified.Record.Hint.ExpiresAt}
 	var chosen agentpacketseal.KeyCard
 	transient := false
 	for _, raw := range candidates {
@@ -245,7 +248,24 @@ func (l *Lane) verifiedRoute(ctx context.Context, recipient string, route Route)
 		}
 		return resolvedRoute{}, ErrPeerRevoked
 	}
+	if err := result.validAt(l.config.Now()); err != nil {
+		return resolvedRoute{}, err
+	}
 	return result, nil
+}
+
+// validAt is local: it never renews authority with another blocking read.
+func (r resolvedRoute) validAt(now time.Time) error {
+	if now.Unix() < 0 || !now.Before(r.FreshUntil) {
+		return ErrUnavailable
+	}
+	if uint64(now.Unix()) >= r.DelegationUntil {
+		return ErrPeerRevoked
+	}
+	if uint64(now.Unix()) >= r.HintUntil {
+		return ErrNoRoute
+	}
+	return nil
 }
 func accepted(g generation) bool {
 	for _, t := range g.Targets {
@@ -472,7 +492,8 @@ func (l *Lane) sendGuard(ctx context.Context, r delivery, g generation, route Ro
 	if err != nil {
 		return ErrStorage
 	}
-	if _, err = l.verifiedRoute(ctx, p.RecipientAgentID, route); err != nil {
+	resolved, err := l.verifiedRoute(ctx, p.RecipientAgentID, route)
+	if err != nil {
 		return err
 	}
 	if _, _, err = l.verifyCard(ctx, g.Card); err != nil {
@@ -503,9 +524,11 @@ func (l *Lane) sendGuard(ctx context.Context, r delivery, g generation, route Ro
 		return ErrUnavailable
 	}
 	if contact {
-		return checkCredential(auth, p.RecipientAgentID, url, agenttransport.OperationDeposit, now, nil)
+		if err := checkCredential(auth, p.RecipientAgentID, url, agenttransport.OperationDeposit, now, nil); err != nil {
+			return err
+		}
 	}
-	return nil
+	return resolved.validAt(l.config.Now())
 }
 func (l *Lane) usableContact(ctx context.Context, auth *Credential, contact *bool, peer, url string) error {
 	if !*contact {
