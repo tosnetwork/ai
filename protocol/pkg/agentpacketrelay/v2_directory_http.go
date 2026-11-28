@@ -37,18 +37,30 @@ func realWaitTimer(d time.Duration) (<-chan time.Time, func()) {
 	return timer.C, func() { timer.Stop() }
 }
 func (s *V2Server) recheck(ctx context.Context, agent string, checked agenttransport.CheckedRequest) error {
+	_, err := s.recheckUntil(ctx, agent, checked)
+	return err
+}
+func (s *V2Server) recheckUntil(ctx context.Context, agent string, checked agenttransport.CheckedRequest) (time.Time, error) {
 	if err := checked.Credential.CheckScope(unixNow(s.now()), s.relay, agenttransport.OperationList); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	if err := s.store.checkRevoked(ctx, agent, checked, unixNow(s.now())); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	raw, err := checked.Credential.DelegationBytes()
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
-	_, err = s.verifier.VerifyDelegation(ctx, raw, agenttransport.Relay)
-	return err
+	_, until, err := s.verifier.VerifyDelegationUntil(ctx, raw, agenttransport.Relay)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return until, s.listScope(checked)
+}
+
+// This local check must follow blocking reads and run again at response commit.
+func (s *V2Server) listScope(checked agenttransport.CheckedRequest) error {
+	return checked.Credential.CheckScope(unixNow(s.now()), s.relay, agenttransport.OperationList)
 }
 func (s *V2Server) authorityFailure(w http.ResponseWriter, err error) {
 	switch {
@@ -109,11 +121,12 @@ func (s *V2Server) listV2(w http.ResponseWriter, r *http.Request, agent agentDig
 	}
 	// One final authorization and atomic local-revocation check also covers a
 	// credential expiring, or being revoked, while its request was waiting.
-	if err := s.recheck(r.Context(), text, checked); err != nil {
+	freshUntil, err := s.recheckUntil(r.Context(), text, checked)
+	if err != nil {
 		s.authorityFailure(w, err)
 		return
 	}
-	entries, err := s.store.list(r.Context(), agent, unixNow(s.now()), checked)
+	entries, err = s.store.list(r.Context(), agent, unixNow(s.now()), checked)
 	if err != nil {
 		s.authorityFailure(w, err)
 		return
@@ -121,6 +134,14 @@ func (s *V2Server) listV2(w http.ResponseWriter, r *http.Request, agent agentDig
 	listing := v2WireMailbox{SchemaV2Mailbox, text, make([]v2WireEntry, 0, len(entries))}
 	for _, e := range entries {
 		listing.Envelopes = append(listing.Envelopes, v2WireEntry{hex.EncodeToString(e.EnvelopeID[:]), agentpacketseal.KeyIDText(e.RecipientKeyID), e.Size, e.ReceivedAtUnix, e.ExpiresAtUnix, e.Lane})
+	}
+	if err := s.listScope(checked); err != nil {
+		s.authorityFailure(w, err)
+		return
+	}
+	if !s.now().Before(freshUntil) {
+		s.authorityFailure(w, agenttransport.ErrUnavailable)
+		return
 	}
 	v2WriteJSON(w, 200, listing, MaxV2ListingBytes)
 }
@@ -170,14 +191,6 @@ func (s *V2Server) serveHints(w http.ResponseWriter, r *http.Request, kind, agen
 		v2Fail(w, 404, CodeNotFound)
 		return
 	}
-	// Recheck the first records after the bounded multi-record read; a later
-	// record's slow refresh must not extend an earlier cached pass beyond 600 s.
-	for _, record := range records {
-		if _, err = s.verifier.VerifyHint(r.Context(), record.Raw, s.hintPolicy); err != nil {
-			s.authorityFailure(w, err)
-			return
-		}
-	}
 	var raw []byte
 	if kind == "hint-record" {
 		raw = records[0].Raw
@@ -189,6 +202,18 @@ func (s *V2Server) serveHints(w http.ResponseWriter, r *http.Request, kind, agen
 		raw, err = EncodeHintIndex(entries)
 		if err != nil {
 			v2Fail(w, 500, "internal_error")
+			return
+		}
+	}
+	// Commit uses the original deadlines, with no further blocking read.
+	for _, record := range records {
+		if !s.now().Before(record.FreshUntil) {
+			s.authorityFailure(w, agenttransport.ErrUnavailable)
+			return
+		}
+		d, err := agenttransport.DecodeDelegation(record.Meta.Delegation)
+		if err != nil || unixNow(s.now()) >= d.NotAfter || unixNow(s.now()) >= record.Meta.ExpiresAt {
+			s.authorityFailure(w, agenttransport.ErrHint)
 			return
 		}
 	}

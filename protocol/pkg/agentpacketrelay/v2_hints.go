@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
@@ -70,8 +71,9 @@ func (s *V2Store) readHintLocked(agent string, meta v2HintMeta) ([]byte, error) 
 }
 
 type v2HintSnapshot struct {
-	Meta v2HintMeta
-	Raw  []byte
+	Meta       v2HintMeta
+	Raw        []byte
+	FreshUntil time.Time
 }
 
 func (s *V2Store) hintSnapshot(ctx context.Context, agent string, only *[32]byte) ([]v2HintSnapshot, error) {
@@ -92,7 +94,7 @@ func (s *V2Store) hintSnapshot(ctx context.Context, agent string, only *[32]byte
 			s.poisoned = true
 			return nil, ErrStoreUnavailable
 		}
-		out = append(out, v2HintSnapshot{meta, raw})
+		out = append(out, v2HintSnapshot{Meta: meta, Raw: raw})
 	}
 	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].Meta.Digest[:], out[j].Meta.Digest[:]) < 0 })
 	return out, nil
@@ -111,7 +113,9 @@ func (s *V2Server) liveHints(ctx context.Context, agent string, only *[32]byte) 
 		}
 		expired := record.Meta.ExpiresAt <= now || d.NotAfter <= now
 		if !expired {
-			_, err = s.verifier.VerifyHint(ctx, record.Raw, s.hintPolicy)
+			var verified agenttransport.VerifiedHint
+			verified, err = s.verifier.VerifyHint(ctx, record.Raw, s.hintPolicy)
+			record.FreshUntil = verified.FreshUntil
 		}
 		if expired || errors.Is(err, agenttransport.ErrDelegationRevoked) {
 			if lockErr := s.store.mu.lock(ctx); lockErr != nil {
@@ -164,6 +168,9 @@ func (s *V2Server) putHint(ctx context.Context, agent string, raw []byte) error 
 	defer s.store.mu.Unlock()
 	if err = s.store.available(); err != nil {
 		return err
+	}
+	if !s.now().Before(verified.FreshUntil) {
+		return agenttransport.ErrUnavailable
 	}
 	now := unixNow(s.now())
 	if meta.ExpiresAt <= now || (meta.IssuedAt > now && meta.IssuedAt-now > 300) {

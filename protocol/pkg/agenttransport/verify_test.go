@@ -579,3 +579,35 @@ func TestPresenceAndTombstoneAreDistinctFromReadFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestVerificationDeadlineStaysAtTheOriginalRead(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	base := f.clock.Now()
+	_, until, err := v.VerifyDelegationUntil(t.Context(), f.wire, Relay)
+	if err != nil || !until.Equal(base.Add(RefuseAfter)) {
+		t.Fatal(until, err)
+	}
+	f.clock.advance(299 * time.Second)
+	_, cached, err := v.VerifyDelegationUntil(t.Context(), f.wire, Relay)
+	if err != nil || !cached.Equal(until) || f.r.calls != 1 {
+		t.Fatal(cached, err, f.r.calls)
+	}
+	f.r.err = ErrUnavailable
+	f.clock.advance(300 * time.Second)
+	_, stale, err := v.VerifyDelegationUntil(t.Context(), f.wire, Relay)
+	if err != nil || !stale.Equal(until) {
+		t.Fatal(stale, err)
+	}
+	f.clock.advance(time.Second)
+	if _, _, err = v.VerifyDelegationUntil(t.Context(), f.wire, Relay); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("stale boundary accepted", err)
+	}
+	f.r.err = nil
+	readAt := f.clock.Now()
+	f.r.after = func() { f.clock.advance(2 * time.Second) }
+	_, fresh, err := v.VerifyDelegationUntil(t.Context(), f.wire, Relay)
+	if err != nil || !fresh.Equal(readAt.Add(RefuseAfter)) {
+		t.Fatal(fresh, err)
+	}
+}

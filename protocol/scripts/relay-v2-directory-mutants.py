@@ -62,7 +62,7 @@ add(
     "hint-native-authority",
     "agentpacketrelay/v2_hints.go",
     "verified, err := s.verifier.VerifyHint(ctx, raw, s.hintPolicy)",
-    "record, err := agenttransport.DecodeHintRecord(raw); verified:=agenttransport.VerifiedHint{Record:record}",
+    "record, err := agenttransport.DecodeHintRecord(raw); verified:=agenttransport.VerifiedHint{Record:record, FreshUntil:s.now().Add(agenttransport.RefuseAfter)}",
     "TestV2DirectoryRefusesUnadmittedDelegation",
 )
 add(
@@ -110,8 +110,8 @@ add(
 add(
     "hint-serve-authority",
     "agentpacketrelay/v2_hints.go",
-    "_, err = s.verifier.VerifyHint(ctx, record.Raw, s.hintPolicy)",
-    "err = nil",
+    "verified, err = s.verifier.VerifyHint(ctx, record.Raw, s.hintPolicy)",
+    "verified, err = agenttransport.VerifiedHint{}, nil",
     "TestV2DirectoryKeepsNewestAndFreesRevokedSlots",
 )
 add(
@@ -184,18 +184,25 @@ add(
     "false",
     "TestV2LongPollHeadersAreStrict",
 )
+scope_source = (ROOT / "protocol/pkg/agentpacketrelay/v2_directory_http.go").read_text()
+scope_start = scope_source.index("func (s *V2Server) recheckUntil(")
+scope_end = scope_source.index("func (s *V2Server) authorityFailure", scope_start)
+scope_block = scope_source[scope_start:scope_end]
 add(
     "wait-credential-expiry",
     "agentpacketrelay/v2_directory_http.go",
-    "if err := checked.Credential.CheckScope(unixNow(s.now()), s.relay, agenttransport.OperationList); err != nil {",
-    "if err := error(nil); err != nil {",
+    scope_block,
+    scope_block.replace(
+        "checked.Credential.CheckScope(unixNow(s.now()), s.relay, agenttransport.OperationList)",
+        "error(nil)",
+    ),
     "TestV2LongPollWakeTimeoutAndSingleWaiter/expiry",
 )
 add(
     "wait-native-withdrawal",
     "agentpacketrelay/v2_directory_http.go",
-    "_, err = s.verifier.VerifyDelegation(ctx, raw, agenttransport.Relay)",
-    "_ = raw; err = nil",
+    "_, until, err := s.verifier.VerifyDelegationUntil(ctx, raw, agenttransport.Relay)",
+    "_ = raw; until, err := s.now().Add(agenttransport.RefuseAfter), error(nil)",
     "TestV2LongPollRechecksNativeWithdrawal",
 )
 add(
@@ -287,6 +294,32 @@ for method in ["list", "get"]:
         old.replace(guard, "false && " + guard),
         "TestV2RevocationCommitRechecksLocalAuthority",
     )
+
+
+add(
+    "credential-post-read-scope",
+    "agentpacketrelay/v2_directory_http.go",
+    "return checked.Credential.CheckScope(unixNow(s.now()), s.relay, agenttransport.OperationList)",
+    "return nil",
+    "TestV2LongPollCredentialExpiresDuringFinalRead",
+)
+add(
+    "hint-commit-freshness",
+    "agentpacketrelay/v2_directory_http.go",
+    "if !s.now().Before(record.FreshUntil) {",
+    "if false && !s.now().Before(record.FreshUntil) {",
+    "TestV2HintIndexCommitRefusesEarlierStalePass",
+)
+
+
+add(
+    "original-pass-deadline",
+    "agenttransport/verify.go",
+    "if cached && after.Sub(checked) < RefuseAfter {\n\t\t\treturn d, checked.Add(RefuseAfter), nil",
+    "if cached && after.Sub(checked) < RefuseAfter {\n\t\t\treturn d, after.Add(RefuseAfter), nil",
+    "TestVerificationDeadlineStaysAtTheOriginalRead",
+    "./protocol/pkg/agenttransport",
+)
 
 
 def execute(args):
