@@ -36,6 +36,9 @@ type prunedCall struct {
 		Seqno   uint64 `json:"seqno"`
 		Param   int    `json:"param"`
 		Method  string `json:"method"`
+		// WithProof is getConfigParam's flag: the node reports the block it
+		// read a parameter at only when it is set.
+		WithProof bool `json:"with_proof"`
 	} `json:"params"`
 }
 
@@ -244,7 +247,7 @@ func TestAgentAccountStateSurvivesPrunedLastTransaction(t *testing.T) {
 			if call.Params.Param != 19 || call.Params.Seqno != 42 {
 				t.Error("global id read escaped its checkpoint")
 			}
-			return map[string]any{"@type": "configInfo", "config": map[string]string{"@type": "tvm.cell", "bytes": bocText(globalID)}}, true
+			return configAnswer(call, globalID, block), true
 		}
 		return nil, false
 	})
@@ -276,6 +279,226 @@ func TestAgentAccountStateSurvivesPrunedLastTransaction(t *testing.T) {
 	}
 	if errors.Is(err, ErrHistoryAnchorMissing) {
 		t.Fatal("pruned history reported as a known absence")
+	}
+}
+
+// configAnswer is a node's getConfigParam answer: like the node, it names the
+// block it read the parameter at only when with_proof is set.
+func configAnswer(call prunedCall, value *cell.Cell, block map[string]any) map[string]any {
+	answer := map[string]any{"@type": "configInfo", "config": map[string]string{"@type": "tvm.cell", "bytes": bocText(value)}}
+	if call.Params.WithProof {
+		answer["block_id"] = block
+		answer["state_proof"], answer["config_proof"] = "c3RhdGU=", "Y29uZmln"
+	}
+	return answer
+}
+
+// Two endpoints can serve one seqno from different blocks. Every read of an
+// Agent Account resolution is bound to the block the account state was read
+// at, by root and file hash, not only by seqno.
+func TestAgentAccountReadsBindToOneBlockOfTheSeqno(t *testing.T) {
+	owner, err := address.ParseRawAddr("-1:" + strings.Repeat("1", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := cell.BeginCell().MustStoreCoins(5_000_000_000).MustStoreCoins(6_000_000_000).
+		MustStoreUInt(3600, 64).MustStoreBoolBit(false).MustStoreBoolBit(false).EndCell()
+	data := cell.BeginCell().MustStoreAddr(owner).MustStoreSlice([]byte(strings.Repeat("c", 32)), 256).
+		MustStoreSlice([]byte(strings.Repeat("d", 32)), 256).
+		MustStoreUInt(9, 64).MustStoreUInt(7, 32).MustStoreUInt(1, 32).MustStoreCoins(2_000_000_000).MustStoreRef(policy).EndCell()
+	code := cell.BeginCell().MustStoreUInt(0xa6, 8).EndCell()
+	account := "-1:" + strings.Repeat("2", 64)
+	now := time.Unix(1_900_000_000, 0).UTC()
+	globalID := cell.BeginCell().MustStoreInt(42, 32).EndCell()
+	blockA := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
+	blockB := tokenTestBlock(bytes.Repeat([]byte{0x5b}, 32), 42)
+	blockC := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42) // A's root, another file hash
+	blockC["file_hash"] = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x5c}, 32))
+	type blocks [3]map[string]any
+	reader := func(t *testing.T, state, config blocks) (*AgentGiftReader, *Adapter) {
+		t.Helper()
+		urls := prunedHistoryServersByIndex(t, func(index int, call prunedCall) (any, bool) {
+			switch call.Method {
+			case "getConsensusBlock":
+				return map[string]any{"@type": "ext.blocks.consensusBlock", "consensus_block": uint64(42),
+					"timestamp": now.Unix(), "last_block_utime": now.Unix()}, true
+			case "getMasterchainInfo":
+				return prunedMasterchainInfo(state[index]), true
+			case "getAddressInformation":
+				return map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "9000000000",
+					"code": bocText(code), "data": bocText(data), "block_id": state[index], "last_transaction_id": prunedAnchor()}, true
+			case "getConfigParam":
+				return configAnswer(call, globalID, config[index]), true
+			}
+			return nil, false
+		})
+		network := prunedNetwork("tos:agent-one-block")
+		chain, err := New(Config{Network: network.NetworkId, Endpoints: urls, Quorum: 2, Now: func() time.Time { return now }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gifts, err := NewAgentGiftReader(chain, network)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gifts.accountCode = "tvm-cell-sha256:" + hex.EncodeToString(code.Hash())
+		return gifts, chain
+	}
+	for name, test := range map[string]struct {
+		state, config blocks
+		refused       bool
+	}{
+		"every read at one block":                     {state: blocks{blockA, blockA, blockA}, config: blocks{blockA, blockA, blockA}},
+		"one endpoint's global id at another block":   {state: blocks{blockA, blockA, blockA}, config: blocks{blockA, blockA, blockB}},
+		"the global id at another block of the seqno": {state: blocks{blockA, blockA, blockA}, config: blocks{blockB, blockB, blockB}, refused: true},
+		"a majority's global id at another block":     {state: blocks{blockA, blockA, blockA}, config: blocks{blockA, blockB, blockB}, refused: true},
+		"the global id at another file hash":          {state: blocks{blockA, blockA, blockA}, config: blocks{blockC, blockC, blockC}, refused: true},
+		"the state at the majority's other block":     {state: blocks{blockB, blockB, blockA}, config: blocks{blockA, blockA, blockA}, refused: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gifts, _ := reader(t, test.state, test.config)
+			state, _, err := gifts.FinalizedAgentAccount(context.Background(), account)
+			if test.refused {
+				if !errors.Is(err, errAgentGiftBlockMismatch) {
+					t.Fatalf("reads at different blocks of one seqno were combined: %+v %v", state, err)
+				}
+				return
+			}
+			if err != nil || !state.Active || state.GlobalID != 42 {
+				t.Fatalf("reads at one block refused: %+v %v", state, err)
+			}
+		})
+	}
+	// A Gift's execution and credit walks start at a last transaction read at
+	// the account state's block, and refuse one read at another block.
+	_, chain := reader(t, blocks{blockA, blockB, blockC}, blocks{blockA, blockA, blockA})
+	rootA, fileA, err := blockHashes(blockID{RootHash: blockA["root_hash"].(string), FileHash: blockA["file_hash"].(string)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := agentGiftBlock{root: rootA, file: fileA}
+	if last, err := finalizedAccountLastTransaction(context.Background(), chain.nodes[0], account, 42, pinned); err != nil || last.LT != "10" {
+		t.Fatalf("last transaction at the pinned block refused: %+v %v", last, err)
+	}
+	for index, what := range map[int]string{1: "another root", 2: "another file hash"} {
+		if _, err := finalizedAccountLastTransaction(context.Background(), chain.nodes[index], account, 42, pinned); !errors.Is(err, errAgentGiftBlockMismatch) {
+			t.Fatalf("last transaction at %s of the seqno was accepted: %v", what, err)
+		}
+	}
+	if _, err := finalizedAccountLastTransaction(context.Background(), chain.nodes[0], account, 42, agentGiftBlock{}); !errors.Is(err, errAgentGiftBlockMismatch) {
+		t.Fatalf("last transaction accepted without a pinned block: %v", err)
+	}
+}
+
+// A Gift resolution follows the exact external message into the sender's
+// finalized history and its one output into the destination's. The
+// destination's last transaction is read at the block of the sender's state
+// read; an endpoint that serves the same seqno from another block is refused.
+func TestResolveGiftReadsTheDestinationAtTheStateBlock(t *testing.T) {
+	fixture, boc, key := loadRelayRustFixture(t)
+	parsed, err := agentgift.ParseAgentNativeSendBOC(boc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := address.ParseRawAddr(fixture.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := cell.BeginCell().MustStoreCoins(parsed.AmountAtomic).MustStoreCoins(parsed.AmountAtomic).
+		MustStoreUInt(3600, 64).MustStoreBoolBit(false).MustStoreBoolBit(false).EndCell()
+	data := cell.BeginCell().MustStoreAddr(owner).MustStoreSlice(key, 256).
+		MustStoreSlice([]byte(strings.Repeat("d", 32)), 256).MustStoreUInt(parsed.ControllerEpoch, 64).
+		MustStoreUInt(uint64(parsed.Seqno), 32).MustStoreUInt(1, 32).MustStoreCoins(0).MustStoreRef(policy).EndCell()
+	code := cell.BeginCell().MustStoreUInt(0xa8, 8).EndCell()
+	globalID := cell.BeginCell().MustStoreInt(int64(parsed.GlobalID), 32).EndCell()
+	now := time.Unix(1_900_000_000, 0).UTC()
+	const executedAt = 1_899_999_000
+
+	root, err := cell.FromBOC(boc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var external tlb.Message
+	if err := tlb.LoadFromCell(&external, root.MustBeginParse()); err != nil {
+		t.Fatal(err)
+	}
+	output := testGiftMessage(t, tlb.MsgTypeInternal, parsed.SenderAgentAccount, parsed.DestinationAddress, parsed.AmountAtomic)
+	sent := buildTransaction(t, 20, executedAt, nil, &external, true, 0, output)
+	received := buildTransaction(t, 30, executedAt+5, nil, output, true, 0)
+	description := received.Description.(tlb.TransactionDescriptionOrdinary)
+	description.CreditPhase = &tlb.CreditPhase{Credit: tlb.CurrencyCollection{Coins: tlb.FromNanoTONU(parsed.AmountAtomic)}}
+	received.Description = description
+	sentRaw, receivedRaw := rawTransactionOf(t, sent), rawTransactionOf(t, received)
+
+	blockA := tokenTestBlock(bytes.Repeat([]byte{8}, 32), 42)
+	blockB := tokenTestBlock(bytes.Repeat([]byte{0x5b}, 32), 42)
+	resolve := func(t *testing.T, destination [3]map[string]any) (agentgift.FinalizedGiftObservation, error) {
+		t.Helper()
+		urls := prunedHistoryServersWithIndex(t, func(index int, call prunedCall, _ json.RawMessage) (any, bool) {
+			switch call.Method {
+			case "getConsensusBlock":
+				return map[string]any{"@type": "ext.blocks.consensusBlock", "consensus_block": uint64(42),
+					"timestamp": now.Unix(), "last_block_utime": now.Unix()}, true
+			case "getMasterchainInfo":
+				return prunedMasterchainInfo(blockA), true
+			case "getConfigParam":
+				return configAnswer(call, globalID, blockA), true
+			case "getAddressInformation":
+				switch call.Params.Address {
+				case parsed.SenderAgentAccount:
+					return map[string]any{"@type": "raw.fullAccountState", "state": "active", "balance": "9000000000",
+						"code": bocText(code), "data": bocText(data), "block_id": blockA,
+						"last_transaction_id": sentRaw["transaction_id"]}, true
+				case parsed.DestinationAddress:
+					return map[string]any{"@type": "raw.fullAccountState", "state": "active", "block_id": destination[index],
+						"last_transaction_id": receivedRaw["transaction_id"]}, true
+				}
+			case "getTransactions":
+				switch call.Params.Address {
+				case parsed.SenderAgentAccount:
+					return []any{sentRaw}, true
+				case parsed.DestinationAddress:
+					return []any{receivedRaw}, true
+				}
+			}
+			return nil, false
+		})
+		network := prunedNetwork("tos:gift-destination-block")
+		chain, err := New(Config{Network: network.NetworkId, Endpoints: urls, Quorum: 2, Now: func() time.Time { return now }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gifts, err := NewAgentGiftReader(chain, network)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gifts.accountCode = "tvm-cell-sha256:" + hex.EncodeToString(code.Hash())
+		return gifts.ResolveGift(context.Background(), parsed.SenderAgentAccount, parsed.DestinationAddress, boc,
+			parsed.Seqno, parsed.ValidUntil, "sha256:"+strings.Repeat("ab", 32), 0, executedAt-100)
+	}
+	for name, test := range map[string]struct {
+		destination [3]map[string]any
+		refused     bool
+	}{
+		"every read at the state block":               {destination: [3]map[string]any{blockA, blockA, blockA}},
+		"one endpoint's destination at another block": {destination: [3]map[string]any{blockA, blockA, blockB}},
+		"a majority's destination at another block":   {destination: [3]map[string]any{blockA, blockB, blockB}, refused: true},
+		"every destination at another block":          {destination: [3]map[string]any{blockB, blockB, blockB}, refused: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			observation, err := resolve(t, test.destination)
+			if test.refused {
+				if err == nil || !strings.Contains(err.Error(), "quorum not reached") ||
+					!strings.Contains(err.Error(), errAgentGiftBlockMismatch.Error()) || observation.ExactDestinationCredit {
+					t.Fatalf("a destination read at another block of the seqno was used: %+v %v", observation, err)
+				}
+				return
+			}
+			if err != nil || !observation.ExactExternalBOCExecuted || !observation.ExactDestinationCredit ||
+				!observation.DestinationCreditFinalityKnown {
+				t.Fatalf("the exact Gift was not traced at one block: %+v %v", observation, err)
+			}
+		})
 	}
 }
 
@@ -444,6 +667,15 @@ var prunedRPCError = &struct{ pruned bool }{true}
 
 func prunedHistoryServersWith(t *testing.T, answer func(call prunedCall, params json.RawMessage) (any, bool)) []string {
 	t.Helper()
+	return prunedHistoryServersWithIndex(t, func(_ int, call prunedCall, params json.RawMessage) (any, bool) {
+		return answer(call, params)
+	})
+}
+
+// prunedHistoryServersWithIndex is prunedHistoryServersWith with each answer
+// told which of the three endpoints it serves.
+func prunedHistoryServersWithIndex(t *testing.T, answer func(index int, call prunedCall, params json.RawMessage) (any, bool)) []string {
+	t.Helper()
 	urls := make([]string, 3)
 	for index := range urls {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -460,7 +692,7 @@ func prunedHistoryServersWith(t *testing.T, answer func(call prunedCall, params 
 				t.Error(err)
 				return
 			}
-			result, ok := answer(call.prunedCall, call.Raw)
+			result, ok := answer(index, call.prunedCall, call.Raw)
 			switch {
 			case !ok:
 				t.Errorf("pruned-anchor read consulted %s", call.Method)

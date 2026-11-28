@@ -21,6 +21,8 @@ REGISTRY = "TestOfferRegistryStateSurvivesPrunedLastTransaction"
 WALLET = "TestTokenWalletStateSurvivesPrunedLastTransaction"
 RELAY = "TestRelayObservationReadsTheExactLastTransactionFirst"
 ANCHORED = "TestAnchoredWalksReachAPrunedAnchorByItsVerifiedLink"
+AGENT_BLOCK = "TestAgentAccountReadsBindToOneBlockOfTheSeqno"
+GIFT_DESTINATION = "TestResolveGiftReadsTheDestinationAtTheStateBlock"
 BRIDGE = "./provider/pkg/servicebridge"
 
 # (name, file, unique source anchor, replacement, test that must fail[, package])
@@ -120,6 +122,51 @@ CASES = [
         ),
         "if !vote.Found {\n\t\treturn nil, false, nil\n\t}\n\tdataCell",
         "TestServiceActorStateSurvivesPrunedLastTransaction",
+    ),
+    # Agent Account reads are bound to the state read's block, not its seqno.
+    (
+        "agent-global-id-block-bind",
+        "agent_gift.go",
+        "if !block.matches(vote.Root, vote.File) {",
+        "if false && !block.matches(vote.Root, vote.File) {",
+        AGENT_BLOCK,
+    ),
+    (
+        "agent-last-transaction-block-bind",
+        "agent_gift.go",
+        "if !block.matches(root, file) {",
+        "if false && !block.matches(root, file) {",
+        AGENT_BLOCK,
+    ),
+    (
+        "agent-block-file-hash",
+        "agent_gift.go",
+        "b.root == root && b.file == file",
+        "b.root == root",
+        AGENT_BLOCK,
+    ),
+    # The global id is read with with_proof: without it the node names no block.
+    (
+        "agent-global-id-without-proof",
+        "agent_gift.go",
+        "}{19, seqno, true}, &result)",
+        "}{19, seqno, false}, &result)",
+        AGENT_BLOCK,
+    ),
+    # A Gift's destination walk starts at a last transaction of the state block.
+    (
+        "gift-destination-unpinned",
+        "agent_gift.go",
+        "finalizedAccountLastTransaction(ctx, node, destination, observation.seqno, block)",
+        "finalizedAccountLastTransaction(ctx, node, destination, observation.seqno, agentGiftBlock{})",
+        GIFT_DESTINATION,
+    ),
+    (
+        "gift-destination-block-bind",
+        "agent_gift.go",
+        "if !block.matches(root, file) {",
+        "if false && !block.matches(root, file) {",
+        GIFT_DESTINATION,
     ),
     # The Agent Account code pin is the production one and is reported as read.
     (

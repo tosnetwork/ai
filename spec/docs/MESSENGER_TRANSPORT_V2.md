@@ -5,16 +5,16 @@ carrier leaves OpenFox: relay-first store-and-forward with an optional direct
 upgrade, signed reachability hints, and short-lived relay credentials that
 are verified offline and revoked by finalized chain state.
 
-**Status: 🟡 Delegation and credential boundaries implemented; transport not
-accepted.** `protocol/pkg/agenttransport` implements the delegation codec and
-finalized verifier of phase 1 item 2, and the credential, caveat and request
-proof codecs with the replay admission logic of item 3, each with frozen
-vectors (`spec/test-vectors/agent-transport-v1.json` and
-`agent-transport-credential-v1.json`), an independent reproducer and
-synthetic epoch/cache, narrowing and replay tests. Production configuration
-refuses; there is no registry epoch adapter, relay deployment or live
-revocation evidence. The remaining transport surfaces are not implemented.
-This remains an incubation design under [ROADMAP section 8.1](ROADMAP.md#81-incubation-designs):
+**Status: 🟡 Delegation, credential and reachability boundaries implemented;
+transport not accepted.** `protocol/pkg/agenttransport` implements the
+finalized delegation verifier of phase 1 item 2; credential, caveat, request
+proof and replay admission logic of item 3; and hint, hint record, hello and
+receipt codecs/verifiers of item 4. Each has frozen vectors and an independent
+reproducer, with synthetic epoch/cache, narrowing, replay and boundary tests.
+Production configuration refuses; there is no registry epoch adapter, relay
+deployment or live revocation evidence. The remaining runtime transport
+surfaces are not implemented. This remains an incubation design under
+[ROADMAP section 8.1](ROADMAP.md#81-incubation-designs):
 it carries no gate status and supplies no gate evidence. Section 16 lists the
 evidence each part needs; section 17 is the implementation order. Until the
 registry change of section 18 Q1 is finalized on a network, V2 transport is
@@ -123,9 +123,11 @@ What the M0-R work did establish, and this design relies on:
 - Relay payment, leases or bonds: they stay behind the Expansion Gate
   (ROADMAP section 8).
 - Multi-device over the relay (carriage D3 stands).
-- Backward compatibility. TOS is pre-launch: V1 relay endpoints, the
-  `carrierapi` boundary and OpenFox's chat lane are removed, not kept
-  (section 17).
+- Backward compatibility. TOS is pre-launch and keeps Messenger V2 only:
+  V1 relay endpoints, the `carrierapi` boundary and OpenFox's chat lane are
+  removed, not kept (section 17). No V2 component reads a V1 store, decodes
+  a V1 frame, accepts a V1-only object or falls back to a V1 route, and no
+  pull request adds a compatibility shim, dual-read path or state migration.
 
 ## 2. Authority model
 
@@ -710,9 +712,10 @@ points at a dead or hostile relay loses availability, which multi-relay
 deposit (section 10) and the carriage's redelivery bound.
 
 **Precedence over the card's relay list.** While a valid hint of the
-recipient's lane is held, its relay list replaces the relay list of the key
-card it carries; without one, the card's list is used as in V1. Section 18
-Q11 removes the card's list later.
+recipient's lane is held, its relay list is the only route; the relay list of
+the key card it carries is ignored, and without a valid hint the send stays
+pending with `no-route`. Section 18 Q11 removes the card's list from the
+format later.
 
 ### 5.6 Direct hello and receipt
 
@@ -749,22 +752,36 @@ V2 keeps every rule of relay spec section 9 that this section does not
 change: HTTPS only, no redirects, no query strings, the request evaluation
 order, the deposit steps, the acknowledgement secret, tombstones, bounds,
 retention and the D10 TTLs, including the 64 KiB bound on every response
-but a downloaded envelope. Paths are below the base URL `B`.
+but a downloaded envelope and the mailbox listing (below). Paths are below the base URL `B`.
 
-**Separate stores while V1 runs.** A relay that serves both APIs keeps V2
-mailboxes in a store of their own; no V1 request reads, lists, downloads or
-acknowledges an envelope deposited through V2, and V1 mailbox paths of an
-Agent answer from the V1 store only. The privacy claims of this design (G4,
-section 11) hold for the V2 store, and for a relay only once its V1
-endpoints are disabled or its stores are separate. The V1 endpoints are
-removed in section 17 PR 14.
+**V2 only.** The V2 mailboxes live in a store of their own; no V1 request
+reads, lists, downloads or acknowledges an envelope deposited through V2, and
+no V2 request reads the V1 store. The V1 endpoints exist only until their
+last client has moved (section 17): `buyeragent` in PR 10, `carrierapi` and
+OpenFox's rail and chat lanes in PR 14. Each pull request that moves a client
+deletes that client's V1 code path, and PR 14 deletes `carrierapi`, the V1
+endpoints and the V1 store. Nothing is migrated and no V2 client falls back to V1. The privacy
+claims of this design (G4, section 11) hold for the V2 store.
+
+**Listing bound.** The 64 KiB response bound has one exception: the mailbox
+listing (`GET B/v2/mailboxes/{agent}/envelopes`) is bounded at 80 KiB
+(81,920 bytes). A full legal listing, 256 entries (64 stranger, 192 contact)
+in compact JSON with every field at its maximum length, timestamps at the
+u64 maximum included, is at most 72,920 bytes; the remaining room is
+headroom, not a larger envelope count. Listings are not paginated.
+The relay tests build that maximal listing and require it to fit, and a
+listing that would exceed the bound is a relay bug that answers `500`,
+never a truncated list. A client reads at most 81,920 bytes of a listing,
+with or without `TOS-Relay-Wait`, and at most 65,536 bytes of every other
+response but a downloaded envelope (262,144); a larger body is refused,
+never truncated.
 
 ### 6.1 Operations
 
 | Request | Credential | Effect |
 |---|---|---|
 | `PUT B/v2/mailboxes/{agent}/envelopes/{id}` | none (stranger lane) or deposit | deposit, relay spec 9.2 steps, then lane quotas |
-| `GET B/v2/mailboxes/{agent}/envelopes` | list, owner | the V1 listing plus `"lane": "stranger"` or `"contact"` per entry; optional `TOS-Relay-Wait: 1..25` holds the answer until an entry exists or the wait ends |
+| `GET B/v2/mailboxes/{agent}/envelopes` | list, owner | the listing of relay spec section 9 plus `"lane": "stranger"` or `"contact"` per entry, bounded by the listing rule of section 6; optional `TOS-Relay-Wait: 1..25` holds the answer until an entry exists or the wait ends |
 | `GET B/v2/mailboxes/{agent}/envelopes/{id}` | fetch, owner | download |
 | `POST B/v2/mailboxes/{agent}/envelopes/{id}/ack` | none | acknowledgement by secret, unchanged; the sender can still withdraw |
 | `PUT B/v2/mailboxes/{agent}/policy` | publish, owner | mailbox policy (6.2) |
@@ -772,7 +789,7 @@ removed in section 17 PR 14.
 | `PUT B/v2/hints/{agent}` | none | store a hint record (6.5) |
 | `GET B/v2/hints/{agent}` | none | the hint index (6.5): one entry per live record of the Agent, at most 4 |
 | `GET B/v2/hints/{agent}/{digest}` | none | one hint record (6.5), by its delegation digest |
-| `GET B/v2/relay` | none | description: the V1 fields plus `stranger_max_envelopes`, `stranger_max_bytes`, `max_wait_seconds`, `directory` |
+| `GET B/v2/relay` | none | description: the relay spec description fields plus `stranger_max_envelopes`, `stranger_max_bytes`, `max_wait_seconds`, `directory` |
 
 `{agent}` MUST equal the Agent of the credential's delegation; a mismatch is
 `403 credential_scope`. Mailboxes stay keyed by Agent ID (section 18 Q4).
@@ -914,7 +931,7 @@ hint_index (at most 209 bytes) =
 
 `GET B/v2/hints/{agent}` answers the index, `application/octet-stream`;
 `GET B/v2/hints/{agent}/{digest}` answers one record, at most 40,960 bytes,
-or `404`. No list response is paginated because none can exceed the bound;
+or `404`. Neither hint response is paginated because neither can exceed the 64 KiB bound;
 A1's vectors include an index of 4 entries and a maximal record.
 A full directory refuses new Agents with `507` and evicts only expired
 records. A relay stores records of Agents whose hint names it; a relay whose
@@ -1111,16 +1128,31 @@ its relays and directory relays.
 
 In order, using the first that yields a valid hint for the needed lane:
 
-1. a hint the peer carried in band in a verified packet of this lane;
-2. the local hint cache (newest per delegation, bounded to 4,096 peers);
-3. a hint record from a contact file, invite, offer file or Gateway Quote
+1. the local hint cache (newest per delegation, bounded to 4,096 peers);
+2. a hint record from a contact file, invite, offer file or Gateway Quote
    package;
-4. the hint index and records (6.5) at the peer's last known relays, then at
+3. the hint index and records (6.5) at the peer's last known relays, then at
    no fewer than two directory relays, merged.
 
 Every answer is verified with `VerifyHint` before use, and the resolved
-cards and evidence with their own verifiers. With no valid hint, the V1 card
-relay list is used. With neither, the send stays pending with `no-route`.
+cards and evidence with their own verifiers. With no valid hint, the send
+stays pending with `no-route`; the card's relay list is never a route.
+
+No packet carries a route in band: a reply resolves its sender like any
+peer. A contact file, invite, offer file or Gateway Quote package supplies
+the Agent ID and cards; it supplies a route only through a hint record it
+carries that still verifies. Otherwise step 3 is required; the formats that
+gain a hint record field are listed in section 19.
+
+A delivery pending with `no-route`, and every re-deposit generation that
+falls due without a valid hint, stays in the journal. The sender re-runs
+resolution (steps 1 to 3) with back-off from 30 s doubling to 10 minutes,
+and at least at every due generation, until a valid hint is found or the
+delivery expires (then `abandoned` with `retention-exceeded`, carriage 4). A
+recipient offline longer than its hint's remaining lifetime receives nothing
+new at relays until it republishes; its pending messages wait in the
+senders' journals and are delivered once a sender resolves the republished
+hint.
 
 ### 9.3 Distributing contact credentials
 
@@ -1239,8 +1271,8 @@ Rules that keep the operator's view minimal:
 
 | Situation | Behaviour | Surface |
 |---|---|---|
-| No valid hint and no card | send stays pending; retried on the next resolution | `no-route` |
-| Hint expired, cards valid | card relay list (V1 behaviour) | none |
+| No valid hint (none resolved, or every resolved hint expired), whatever cards are held | send stays pending; resolution retried by the schedule of 9.2; the card's relay list is never used | `no-route` |
+| Recipient's hint expired while it was offline | as no valid hint; a due generation is deposited at the first valid hint | `no-route` |
 | Peer's delegation no longer verifies | no seal, no deposit, no direct; pending until a hint of a verifying delegation arrives | `peer-revoked` |
 | Own delegation no longer verifies | stop publishing; stranger lanes only; owner credential unusable, so no fetch | `transport-revoked` owner notice |
 | Contact credential refused (`credential_revoked`) | drop it; stranger lane | none |
@@ -1312,14 +1344,16 @@ Rules:
    separate relays (carriage section 7).
 4. No state migration: pre-launch nodes are re-provisioned with fresh keys,
    delegations and cards; contacts re-establish by Agent ID through hints.
-5. `messenger/pkg/carrierapi` and the V1 relay endpoints are removed once no
-   client uses them (section 17, PR 14). The no-loop rule of carriage 1
+5. `messenger/pkg/carrierapi` and the V1 relay endpoints are removed as their
+   in-repo clients move, the last in PR 14 (section 17); none is kept for
+   compatibility. The no-loop rule of carriage 1
    stays: no rail packet travels inside a chat copy.
 
 ## 15. Limits
 
 | Item | Bound |
 |---|---|
+| Mailbox listing | at most 81,920 bytes, the only response other than a download above 64 KiB; maximal legal listing at most 72,920 bytes; not paginated; same bound under `TOS-Relay-Wait` |
 | Transport delegation | 167 bytes; lifetime at most 365 days; production needs the authorization epoch (5.1) |
 | Re-check of finalized state | every 300 s; cached pass refused after 600 s without a read |
 | Credential | at most 2,048 bytes; 1..4 blocks; 1..8 caveats per block; block 0 `not_before < not_after`; at most one lane value |
@@ -1359,14 +1393,14 @@ team's).
 | A3 Chain revocation | after a policy update on a test chain, owner and contact credentials are refused (`credential_revoked`) by two relays within 300 s of the update being readable, and hints stop being served; and, combined, a revocation finalized just after a relay's successful read followed by stopping that relay's chain endpoints is refused within 600 s and not honoured after | chain transaction hashes, relay logs of the read and refusal times, both relay commits |
 | A4 Fail closed | with every chain endpoint of a relay stopped, credentialed requests get `503 chain_unavailable` once the cached pass is 600 s old; stranger deposits continue | relay log and client transcript |
 | A5 Closed mailbox and replay | list and fetch without a credential `401`; with another Agent's credential `403`; a proof replayed at a second relay `403`; the same proof replayed at the same relay `403`, also after the relay restarted (`proof_floor` until the floor passes) and after a backward clock step (`403` or `503 proof_floor`: a dropped proof is at or below the floor, which the relay cannot tell from an honest proof at the floor); one holder appending many blocks to one issued credential holds at most 64 live replay entries and one default lane; the combined control: proof admitted, clock rolled back, high-water mark recorded, relay restarted, clock restored, same proof refused; a relay with a used V2 store refuses to start with its record missing and with it corrupted; the restart delay measured with aligned clocks (at most 141 s) and with the client 120 s behind (at most 261 s); a proof at or above the recorded high-water mark refused (`503 replay_table_full`); a full replay table refuses (`503 replay_table_full`) and evicts no live entry | integration tests with the controls named; a live transcript against a deployed test relay |
-| A6 Lane isolation | a stranger flood from 64 IPv4 addresses into one mailbox fills only its stranger lane; a stranger flood spread over 10,000 arbitrary Agent IDs stops at the relay-wide stranger share; a stranger deposit-and-withdraw cycle stops at the stranger share by its tombstones, also across a relay restart; contacts deposit throughout all three; `507` names the stranger lane | live run against a test relay, per-mailbox and global quota counters (tombstones included) before and after |
+| A6 Lane isolation | a stranger flood from 64 IPv4 addresses into one mailbox fills only its stranger lane; a stranger flood spread over 10,000 arbitrary Agent IDs stops at the relay-wide stranger share; a stranger deposit-and-withdraw cycle stops at the stranger share by its tombstones, also across a relay restart; contacts deposit throughout all three; `507` names the stranger lane; the maximal listing (256 entries) fits 81,920 bytes and a client accepts it | live run against a test relay, per-mailbox and global quota counters (tombstones included) before and after |
 | A7 Contact revocation | a revoked contact's deposits are refused at every relay of the hint; its stored envelopes stay until acknowledged | live transcript |
 | A8 Multi-relay | with the minimum production configuration of two relays, one killed mid-run: no loss, exactly-once application, acknowledgement at both after restart; every delivery deposited while one relay was down that is still pending and unexpired when it returns reaches its second copy through the retry of section 10; separately, a delivery the recipient acknowledged through the surviving relay during the outage gets no second copy and is not re-deposited | relay store snapshots, journals, `single-copy` telemetry, runtime outcome log |
 | A9 First contact by Agent ID | an MCP client on a host without OpenFox resolves an OpenFox Agent by Agent ID through a directory relay (no contact file), sends, the owner admits, and the conversation proceeds both ways across two hosts | deployment record with both hosts' commits, the hint records, the MCP transcript |
 | A10 OpenFox on the library | OpenFox has no chat carrier code and imports `agentcarrier`; the M-R1 and M-R2 scenarios pass again on V2 relays | `go list -deps` output, the openfox commit, rerun records |
 | A11 Direct upgrade | between a node with a verified inbound IPv4 entry and a node behind NAT: upgrade after the first envelope, later envelopes delivered direct with no deposits at relays; a firewall drop mid-run falls back to relays within 13 s with no loss and no duplicate execution | relay deposit counters, sidecar logs, the receipts |
 | A12 Never required | with direct disabled, on an IPv6-only host, and between two NATed nodes: no probe is made and every message is delivered by relay | probe counters equal zero, delivery records |
-| A13 Metadata | relay store, logs and directory contain nothing of section 11's "does not learn" column; a third party holding the Agent ID gets only the hint contents section 5.5 lists for the Agent's publication setting, and nothing through the V1 URLs (list, download, acknowledgement) about envelopes deposited through V2 | dumps of relay state and logs taken while envelopes were held; requests to the V1 URLs recorded |
+| A13 Metadata | relay store, logs and directory contain nothing of section 11's "does not learn" column; a third party holding the Agent ID gets only the hint contents section 5.5 lists for the Agent's publication setting, and every V1 URL (list, download, acknowledgement, deposit, description) answers `404`, so nothing about any mailbox is reachable through V1 | dumps of relay state and logs taken while envelopes were held; requests to the V1 URLs recorded, each `404` |
 | A14 D10 | test relays at 1 h: re-deposit at 48 min; production profile at 3 h: 2 h 24 min; packet expiry equals the business deadline | carrier journal timestamps against relay descriptions |
 | A15 Hygiene | no credential, proof, secret, lane value or plaintext in any URL or log; the relay holds no key but its TLS key and no `tosctl` | grep of logs and the relay's file system; process inspection |
 | A16 Timestamp poisoning | a mailbox policy and a hint dated `UINT64_MAX`, and one dated 301 s ahead, are refused; a compromised transport key's policy dated 300 s ahead with a zero stranger lane is accepted, then voided by the owner's policy update (on an epoch network) or by the delegation no longer verifying (on a test network), after which the owner's new policy with an earlier `issued_at_unix` is accepted | relay tests, and a live transcript on a test chain |
@@ -1377,6 +1411,14 @@ team's).
 Production claims additionally need relays and directory relays run by an
 operator other than the core team, and a public chain, as ROADMAP Gate O
 requires.
+
+The reachability/control-object portion of A1 is frozen separately in
+`spec/test-vectors/agent-transport-reachability-v1.json`, with an independent
+stdlib reproducer `spec/scripts/reproduce-agent-transport-reachability-v1.py`
+under `make spec-check`. This covers phase 1 item 4's codecs, signatures,
+finalized delegation verification and synthetic boundary tests; it does not
+claim directory, carrier, live first-contact or direct-path acceptance. The
+167-byte delegation corpus remains unchanged.
 
 ## 17. Implementation plan
 
@@ -1403,15 +1445,14 @@ V2 are separate work outside this plan.
    deposit over V2, extracted from `buyeragent` and OpenFox's rail lane.
 9. `agentcarrier` part 2: hint publication and resolution, credential issue,
    storage and refresh, two-copy deposit (A8).
-10. `buyeragent` on `agentcarrier`.
+10. `buyeragent` on `agentcarrier`; its V1 relay client path is deleted.
 11. Messenger: relay frame v2 with the credential field; recomputed bounds;
     vectors.
 12. Messenger: `messenger/pkg/transport` and `carrier: builtin` in
     `tos-messengerd`; `conversations.list`.
 13. Messenger: `tos-messenger-mcp` (A9).
 14. OpenFox: rail on `agentcarrier`, chat lane removed (A10); then remove
-    `carrierapi` and the V1 relay endpoints here, which ends the separate V1
-    store (section 6).
+    `carrierapi`, the V1 relay endpoints and the V1 store here (section 6).
 15. Live evidence runs for phase 1 (A3 to A10, A13 to A16, A18) and status
     updates in this document, the carriage, the relay spec and ROADMAP.
 
@@ -1501,7 +1542,8 @@ The questions this design raised, each with its decision (recorded
   path (carriage 1).
 - **Q11. Remove the relay list from the key card?** Two signed sources of
   routes is one too many. **Decided:** after A9, a key card V2 without a
-  relay list; until then the hint takes precedence (5.5).
+  relay list. Until then the card's list is never a route: a V2 sender
+  ignores it and uses only a valid hint (5.5, 9.2).
 - **Q12. Who runs directory relays?** **Decided:** at least two operators
   listed in network settings, the core team being one; none is trusted, and
   every answer is verified.
@@ -1516,11 +1558,22 @@ The questions this design raised, each with its decision (recorded
 
 - [`MESSENGER_RELAY_CARRIAGE_V1.md`](MESSENGER_RELAY_CARRIAGE_V1.md): a note
   that the carrier moves into this repository and the relay changes under
-  this design; frames, double encryption, evidence and rooms stay.
+  this design; frames, double encryption, evidence and rooms stay. V2 keeps
+  no V1 compatibility: routes come only from hints, never from a card's relay
+  list; section 4's re-deposit TTL is the smallest of the hint's relays; and
+  a contact file (D4) supplies a route only through a valid hint record it
+  carries, otherwise the route comes from a directory lookup (9.2).
+- The contact file, invite, offer file and Gateway Quote package formats
+  gain an optional hint record field (9.2); until a format has it, first
+  contact through it needs a directory lookup.
 - [`OPENFOX_AUTONOMOUS_MESSENGER_ECONOMY_PLAN.md`](OPENFOX_AUTONOMOUS_MESSENGER_ECONOMY_PLAN.md):
   Phase B records that the route is relay-first by this design and that M0-R
   evidence now gates only the direct upgrade.
 - [`ROADMAP.md`](ROADMAP.md) section 8.1: this design is listed as an
   incubation design.
-- [`AGENT_PACKET_RELAY_V1.md`](AGENT_PACKET_RELAY_V1.md) stays the V1
-  specification; the V2 relay API is section 6 here.
+- [`AGENT_PACKET_RELAY_V1.md`](AGENT_PACKET_RELAY_V1.md): a status note
+  that V2 keeps no V1 compatibility, that its endpoints are deleted in
+  section 17 PR 14, that a key card's relay list is not a route under V2,
+  and that the V2 mailbox listing is bounded at 80 KiB (section 6). Its
+  envelope, seal, card and section 9 rules stay normative as V2 inherits
+  them; the V2 relay API is section 6 here.
