@@ -259,3 +259,67 @@ executes the frozen contract and exports action bytes and hashes, typed state
 cells and hashes, counts, exit codes and out-message counts. The Go test
 `TestFrozenRegistryEpochLifecycle` independently rebuilds the actions and
 validates the captured state cells.
+
+### Registry v2 release measurements
+
+The following measurements come from section 9 of the pinned contract implementation record. [`docs/native-registry-delegation-epochs.md`](https://github.com/tosnetwork/tos/blob/39528086c126af42bfbe14d125fbae541472a3da/docs/native-registry-delegation-epochs.md#9-slice-1-implementation-record)
+
+Gas, Rust executor, 2,000,000-gas transaction limit, every value at or below the
+800,000 ceiling. Populations are seeded in the contract's exact layout; the bump
+rows hold 128 live / 384 admitted entries. Each add and each refusal naming a new
+digest is the worse of a shallow probe (`0xd1` repeated) and a deep one
+(`0...03`, which shares a 254-bit prefix with the spine keys 1 and 2); each
+refusal naming a stored digest, and "withdraw", is the worst over every stored
+position.
+
+| Path | 1 key, hashed | 1 key, spine | 8 keys, hashed | 8 keys, spine |
+| --- | ---: | ---: | ---: | ---: |
+| add 127 -> 128 live | 32,226 | 106,601 | 89,311 | 163,686 |
+| add 383 -> 384 admitted | 32,851 | 187,226 | 89,936 | 244,311 |
+| refused add: live full (128/128) | 13,928 | 25,928 | 13,928 | 25,928 |
+| refused add: admitted full (127/384) | 14,028 | 38,728 | 14,028 | 38,728 |
+| refused add: withdrawn digest | 14,128 | 25,928 | 14,128 | 25,928 |
+| refused add: duplicate live | 14,224 | 38,624 | 14,224 | 38,624 |
+| refused add: stale epoch | 12,019 | 12,019 | 12,019 | 12,019 |
+| refused withdraw: withdrawn digest (2218) | 14,088 | 25,888 | 14,088 | 25,888 |
+| refused withdraw: absent digest (2220) | 13,560 | 38,260 | 13,560 | 38,260 |
+| withdraw (worst position) | 33,468 | 185,968 | 90,553 | 243,053 |
+| update_agent_policy | 34,436 | 34,436 | 155,545 | 155,545 |
+| initiate_recovery | 34,926 | 34,926 | 156,455 | 156,455 |
+| complete_recovery | 26,376 | 26,376 | 83,881 | 83,881 |
+| revoke_agent (tombstone) | 25,441 | 25,441 | 82,526 | 82,526 |
+| register_agent | 29,034 | | 92,137 | |
+
+Existing eight-controller paths (`every_policy_path_fits_the_gas_ceiling_at_the_supported_width`),
+v1 design-pin value in brackets: register 92,137 (92,005); delegate 83,811
+(82,352); revoke 82,526 (82,025); update 176,695 (175,444); initiate recovery
+177,605 (177,113); complete recovery 83,881 (83,390); Capability authorization
+81,203-84,325.
+
+Native engine: the 1,046 transactions the epoch suite runs were recorded with
+`NATIVE_REGISTRY_TRACE_DIR` and replayed through `libemulator` with
+`scripts/replay-token-bridge-trace.py`: 0 differ.
+
+Message size (relayer external message, eight signatures): add and withdrawal
+20,716 B each; the existing widest paths are update 52,498 B, initiate recovery
+52,506 B, transfer 41,279 B and registration 36,742 B. The fixture maximum and the
+generated genesis' ConfigParam 43 `max_ext_msg_size` are both 65,535 B.
+
+Storage (eight-controller Agent, generated genesis ConfigParam 18: bit price 0,
+cell price 135 per 2^16 s; ConfigParam 21 basechain: freeze_due_limit
+100,000,000, delete_due_limit 1,000,000,000 nanotomi):
+
+| Agent account | Cells | Bits | Rent per year (nanotomi) | Unpaid rent reaches freeze_due_limit after |
+| --- | ---: | ---: | ---: | ---: |
+| one live delegation | 170 | 122,090 | 11,043,567 | ~285.6 M s |
+| 128 / 384, hashed keys | 936 | 246,178 | 60,804,581 | ~51.9 M s |
+| 128 / 384, spine keys | 688 | 141,486 | 44,693,965 | ~70.6 M s |
+| after one bump | 169 | 121,758 | | |
+
+A bump releases the whole dictionary: the account drops back to 169 cells.
+Under the sandbox's own prices an Agent holding 1,000 nanotomi aged 30 days owes
+421,810 nanotomi, stays active and withdraws; aged 50 years it owes 256,600,525,
+which is past freeze_due_limit: the storage phase freezes it and the withdrawal
+runs no code. Recommendation from these numbers: keep at least 0.1 TOS on an
+Agent that may hold a full set (about 1.6 years of rent at the hashed bound) and
+1 TOS for long-lived Agents; this is a funding floor, not a protocol rule.
