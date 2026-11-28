@@ -345,7 +345,9 @@ func TestV2HTTPInvalidCredentialsNeverBecomeStrangers(t *testing.T) {
 			case "duplicate":
 				req.Header.Add("TOS-Relay-Proof", req.Header.Get("TOS-Relay-Proof"))
 			case "bad-body":
-				req.Body = io.NopCloser(bytes.NewReader(bytes.Repeat([]byte("x"), len(e.envelope))))
+				tampered := bytes.Clone(e.envelope)
+				tampered[len(tampered)-1] ^= 1
+				req.Body = io.NopCloser(bytes.NewReader(tampered))
 			}
 			w := httptest.NewRecorder()
 			f.s.ServeHTTP(w, req)

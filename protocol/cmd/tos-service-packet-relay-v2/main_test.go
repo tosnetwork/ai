@@ -25,7 +25,13 @@ func TestV2ConfigIsStrictAndHasNoLegacyMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, body := range map[string]string{"positive": string(raw), "unknown": strings.TrimSuffix(string(raw), "}") + `,"v1_store":"old"}`, "duplicate": strings.Replace(string(raw), `"listen":"127.0.0.1:0"`, `"listen":"127.0.0.1:0","listen":"127.0.0.2:0"`, 1), "trailing": string(raw) + ` {}`} {
+	nested := valid
+	nested.Checkpoint = filepath.Join(valid.StateDir, "registry.checkpoint")
+	nestedJSON, err := json.Marshal(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"positive": string(raw), "nested": string(nestedJSON), "unknown": strings.TrimSuffix(string(raw), "}") + `,"v1_store":"old"}`, "duplicate": strings.Replace(string(raw), `"listen":"127.0.0.1:0"`, `"listen":"127.0.0.1:0","listen":"127.0.0.2:0"`, 1), "trailing": string(raw) + ` {}`} {
 		path := filepath.Join(dir, name+".json")
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -94,7 +100,7 @@ func TestV2CommandServesOnlyV2AndShutsDown(t *testing.T) {
 }
 
 func TestV2ConfiguredRetentionIsBoundedBeforeConversion(t *testing.T) {
-	for _, seconds := range []uint64{0, 1, 3600, 10800, 86400, 86401, ^uint64(0)} {
+	for _, seconds := range []uint64{0, 1, 3600, 10800, 86400, 86401, (uint64(1) << 63) + 3600, ^uint64(0)} {
 		c := config{GlobalEntries: 1024, GlobalBytes: 64 << 20, TTLSeconds: &seconds}
 		limits, err := c.limits()
 		valid := seconds > 0 && seconds <= 86400

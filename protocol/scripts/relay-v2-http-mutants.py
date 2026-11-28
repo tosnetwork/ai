@@ -11,6 +11,22 @@ ROOT = Path(__file__).resolve().parents[2]
 RELAY = "./protocol/pkg/agentpacketrelay"
 CONTROLS = [
     (
+        "retention-before-conversion",
+        "../cmd/tos-service-packet-relay-v2/main.go",
+        "*c.TTLSeconds > uint64(agentpacketrelay.MaxTTL/time.Second)",
+        "false",
+        "./protocol/cmd/tos-service-packet-relay-v2",
+        "TestV2ConfiguredRetentionIsBoundedBeforeConversion",
+    ),
+    (
+        "checkpoint-outside-store",
+        "../cmd/tos-service-packet-relay-v2/main.go",
+        '(!strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && relative != "..")',
+        '(false && (!strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && relative != ".."))',
+        "./protocol/cmd/tos-service-packet-relay-v2",
+        "TestV2ConfigIsStrictAndHasNoLegacyMode",
+    ),
+    (
         "deposit-size-status",
         "agentpacketrelay/v2_http.go",
         "r.ContentLength > MaxEnvelopeBytes)",
@@ -288,7 +304,7 @@ def main():
                 "go",
                 "test",
                 "-run",
-                "TestV2HTTP|TestV2Client|TestV2Maximal|TestV2Policy|TestV2Rotated|TestV2Config|TestV2Expired|TestEndpointOutage|TestCheckNetworkGenesis",
+                "TestV2HTTP|TestV2Client|TestV2Maximal|TestV2Policy|TestV2Rotated|TestV2Config|TestV2Configured|TestV2Expired|TestEndpointOutage|TestCheckNetworkGenesis",
                 "-count=1",
                 package,
             ]

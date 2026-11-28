@@ -55,6 +55,7 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 	if err != nil {
 		return 0, nil, err
 	}
+	req.Header.Set("Accept-Encoding", "identity")
 	if method == "PUT" || method == "POST" {
 		req.Header.Set("Content-Type", ContentTypeEnvelope)
 	}
@@ -82,6 +83,9 @@ func (c *V2Client) exchange(ctx context.Context, method, path string, body, cred
 		return 0, nil, errors.New("V2 relay exchange failed")
 	}
 	defer res.Body.Close()
+	if res.Uncompressed || (res.Header.Get("Content-Encoding") != "" && res.Header.Get("Content-Encoding") != "identity") {
+		return 0, nil, errors.New("invalid V2 response encoding")
+	}
 	if res.StatusCode >= 300 || (res.StatusCode == 200 && method == "GET") {
 		want := ContentTypeJSON
 		if res.StatusCode == 200 && method == "GET" {
