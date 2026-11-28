@@ -198,3 +198,7 @@ spec-check: relay-v2-policy-vectors-check
 relay-v2-policy-vectors-check:
 	GOWORK=off go run ./protocol/cmd/relay-policy-vectors | cmp - spec/test-vectors/relay-mailbox-policy-v1.json
 	python3 -I spec/scripts/reproduce-relay-mailbox-policy-v1.py
+
+.PHONY: relay-v2-http-mutants
+relay-v2-http-mutants:
+	GOWORK=off python3 -I protocol/scripts/relay-v2-http-mutants.py

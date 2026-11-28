@@ -33,10 +33,14 @@ type v2Source struct {
 	state *nativev1.NativeStateV1
 	err   error
 	reads int
+	after func()
 }
 
 func (s *v2Source) ResolveState(ctx context.Context, _, _ string) (*nativev1.NativeStateV1, bool, error) {
 	s.reads++
+	if s.after != nil {
+		s.after()
+	}
 	if _, ok := ctx.Deadline(); !ok {
 		return nil, false, errors.New("missing bounded read")
 	}
@@ -550,4 +554,121 @@ func TestV2TLSClientRoundTripNeverUsesV1(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatal("ACK failed", entries, err)
 	}
+}
+
+func TestV2HTTPLaneFloodLeavesContactReservation(t *testing.T) {
+	f := newV2HTTP(t)
+	now := unixNow(f.clock.Now())
+	for i := range 64 {
+		e := f.r.seal(t, testPacket(1), now+3600)
+		path := f.mail() + "/" + hex.EncodeToString(e.id[:])
+		req := f.request(t, "PUT", path, e.envelope, false)
+		req.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", i+1)
+		w := httptest.NewRecorder()
+		f.s.ServeHTTP(w, req)
+		want := 201
+		if i >= 32 {
+			want = 507
+		}
+		if w.Code != want {
+			t.Fatal("mailbox flood", i, w.Code, w.Body.String())
+		}
+		if want == 507 && !strings.Contains(w.Body.String(), `"lane":"stranger"`) {
+			t.Fatal(w.Body.String())
+		}
+	}
+	e := f.r.seal(t, testPacket(1), now+3600)
+	f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, true, 201)
+	template := f.r.seal(t, testPacket(1), now+3600)
+	original, _ := agentpacketseal.AgentDigest(f.r.agentID)
+	offset := bytes.Index(template.envelope, original[:])
+	if offset < 0 {
+		t.Fatal("missing clear Agent header")
+	}
+	for i := range 10000 {
+		body := bytes.Clone(template.envelope)
+		agent := sha256.Sum256([]byte(fmt.Sprint("v2-http-flood-", i)))
+		copy(body[offset:offset+32], agent[:])
+		path := "/v2/mailboxes/agent_" + hex.EncodeToString(agent[:]) + "/envelopes/" + hex.EncodeToString(template.id[:])
+		req := f.request(t, "PUT", path, body, false)
+		req.RemoteAddr = fmt.Sprintf("127.%d.%d.%d:1234", 1+(i>>16), (i>>8)&255, i&255)
+		w := httptest.NewRecorder()
+		f.s.ServeHTTP(w, req)
+		want := 201
+		if i >= 224 {
+			want = 507
+		}
+		if w.Code != want {
+			t.Fatal("global flood", i, w.Code, w.Body.String())
+		}
+	}
+	if f.s.store.Usage().StrangerEntries != 256 {
+		t.Fatal(f.s.store.Usage())
+	}
+	e = f.r.seal(t, testPacket(1), now+3600)
+	f.serve(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, true, 201)
+}
+func TestV2HTTPTombstoneFloodSurvivesRestart(t *testing.T) {
+	f := newV2HTTP(t)
+	now := unixNow(f.clock.Now())
+	for i := range 256 {
+		e := f.r.seal(t, testPacket(1), now+3600)
+		path := f.mail() + "/" + hex.EncodeToString(e.id[:])
+		req := f.request(t, "PUT", path, e.envelope, false)
+		req.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", 1+i/64)
+		w := httptest.NewRecorder()
+		f.s.ServeHTTP(w, req)
+		if w.Code != 201 {
+			t.Fatal(i, w.Code, w.Body.String())
+		}
+		f.serve(t, "POST", path+"/ack", e.secret[:], false, 204)
+	}
+	if f.s.store.Usage().StrangerEntries != 256 || f.s.store.Usage().StrangerBytes != 0 {
+		t.Fatal(f.s.store.Usage())
+	}
+	for round := range 2 {
+		e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+		path := f.mail() + "/" + hex.EncodeToString(e.id[:])
+		req := f.request(t, "PUT", path, e.envelope, false)
+		req.RemoteAddr = "127.0.0.99:1234"
+		w := httptest.NewRecorder()
+		f.s.ServeHTTP(w, req)
+		if w.Code != 507 {
+			t.Fatal("tombstones freed stranger share", w.Code)
+		}
+		f.serve(t, "PUT", path, e.envelope, true, 201)
+		if round == 0 {
+			v2Close(t, f.s.store)
+			f.clock.at = f.clock.at.Add(141 * time.Second)
+			f.s.store = v2Open(t, f.path, DefaultV2Limits(1024, 64<<20), f.clock.Now())
+		}
+	}
+}
+
+func TestV2HTTPRechecksCredentialAfterFinalizedRead(t *testing.T) {
+	f := newV2HTTP(t)
+	c, err := agenttransport.DecodeCredential(f.wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.DelegationBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := c.Blocks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caveats := blocks[0].Caveats
+	for i := range caveats {
+		if caveats[i].Type == agenttransport.CaveatNotAfter {
+			caveats[i] = agenttransport.NotAfterCaveat(unixNow(f.clock.Now()) + 5)
+		}
+	}
+	f.wire, err = agenttransport.IssueCredential(raw, v2TestKey("http-transport"), f.holder.Public().(ed25519.PublicKey), caveats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.source.after = func() { f.clock.at = f.clock.at.Add(10 * time.Second) }
+	f.serve(t, "GET", f.mail(), nil, true, 403)
 }
