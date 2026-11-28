@@ -239,3 +239,19 @@ func TestResolutionCarriesFreshnessThroughCardVerification(t *testing.T) {
 		t.Fatal("stale hint pass survived blocking card verification", e)
 	}
 }
+
+func TestPrivateContactHintKeepsItsVerifiedCardAcrossResolution(t *testing.T) {
+	f := newFixture(t)
+	r, dirs := resolverFixture(t, f)
+	contact := f.peerRoute()
+	first, e := r.Resolve(t.Context(), f.bob.agent, contact)
+	if e != nil {
+		t.Fatal(e)
+	}
+	dirs[relayOne].failure = ErrUnavailable
+	dirs[relayTwo].failure = ErrUnavailable
+	cached, e := r.Resolve(t.Context(), f.bob.agent, Route{})
+	if e != nil || !bytes.Equal(first.CardPacket, cached.CardPacket) {
+		t.Fatal("private contact card disappeared from verified cache", e)
+	}
+}

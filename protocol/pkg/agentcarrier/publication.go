@@ -118,21 +118,22 @@ func (p *Publisher) Publish(ctx context.Context) (PublicationView, error) {
 	if e != nil {
 		return PublicationView{}, e
 	}
-	fingerprint := sha256.Sum256(fingerprintBytes)
+	fingerprint := sha256.Sum256(append(fingerprintBytes, p.lane.config.Delegation...))
 	var previous publication
 	e = p.store.read(routingName("current"), &previous)
 	if e != nil && !errors.Is(e, os.ErrNotExist) {
 		return PublicationView{}, e
 	}
+	exists := e == nil
 	now, e := p.lane.now()
 	if e != nil {
 		return PublicationView{}, e
 	}
 	reuse := false
-	if e == nil && (len(previous.Raw) == 0 || previous.Hints == nil || previous.Policies == nil) {
+	if exists && (len(previous.Raw) == 0 || previous.Hints == nil || previous.Policies == nil) {
 		return PublicationView{}, ErrStorage
 	}
-	if e == nil && len(previous.Raw) > 0 {
+	if exists && len(previous.Raw) > 0 {
 		h, decodeErr := agenttransport.DecodeHintRecord(previous.Raw)
 		if decodeErr != nil || h.Hint.Delegation.AgentID() != p.lane.config.AgentID || h.Hint.IssuedAt > now {
 			return PublicationView{}, ErrStorage

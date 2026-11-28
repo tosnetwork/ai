@@ -2,11 +2,16 @@ package agentcarrier
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"slices"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
+	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
 )
 
 func schedulerFixture(t *testing.T, f *fixture) (*Scheduler, *Resolver, map[string]*fakeDirectory) {
@@ -199,5 +204,142 @@ func TestPermanentRelayRefusalIsNotRetriedInThisGeneration(t *testing.T) {
 	}
 	if len(f.relays[relayOne].deposits) != 1 {
 		t.Fatal("permanent refusal retried")
+	}
+}
+
+func TestTwoCopiesStopBeforeAThirdRelayAndJournalBeforeTransport(t *testing.T) {
+	f := newFixture(t)
+	s, _, dirs := schedulerFixture(t, f)
+	defer func() {
+		if e := s.Close(); e != nil {
+			t.Error(e)
+		}
+	}()
+	const third = "https://127.0.0.1:19003"
+	f.relays[third] = newRelay()
+	route := f.peerRoute()
+	record, e := agenttransport.DecodeHintRecord(route.HintRecord)
+	if e != nil {
+		t.Fatal(e)
+	}
+	record.Hint.Relays = []string{relayOne, relayTwo, third}
+	raw, e := f.verifier.BuildHintRecord(t.Context(), record.Hint, []agenttransport.HintObject{{Kind: agenttransport.RailCard, Bytes: route.CardPacket}}, f.bob.transport, agenttransport.PublishOptions{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	dirs[relayTwo].records = map[[32]byte][]byte{}
+	addDirectoryHint(t, dirs[relayTwo], raw)
+	if _, e = f.lane.Queue(t.Context(), "three", f.message(f.alice, f.bob), start+86400); e != nil {
+		t.Fatal(e)
+	}
+	for _, url := range []string{relayOne, relayTwo, third} {
+		url := url
+		f.relays[url].before = func(_ []byte) {
+			var m schedule
+			if e := s.store.read(routingName("three"), &m); e != nil {
+				t.Fatal(e)
+			}
+			found := false
+			for _, retry := range m.Targets {
+				if retry.URL == url && retry.After >= start+30 {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("retry not journalled before transport", url)
+			}
+		}
+	}
+	view, e := s.Advance(t.Context(), "three", Route{})
+	if e != nil || view.Copies != 2 || len(f.relays[third].deposits) != 0 {
+		t.Fatal("not exactly two copies", view, e)
+	}
+}
+
+func TestDriverKeepsResolvingNoRouteUntilHintOrDeadline(t *testing.T) {
+	for _, republish := range []bool{false, true} {
+		t.Run(strconv.FormatBool(republish), func(t *testing.T) {
+			f := newFixture(t)
+			s, _, dirs := schedulerFixture(t, f)
+			defer func() {
+				if e := s.Close(); e != nil {
+					t.Error(e)
+				}
+			}()
+			dirs[relayTwo].records = map[[32]byte][]byte{}
+			if _, e := f.lane.Queue(t.Context(), "driver", f.message(f.alice, f.bob), start+2000); e != nil {
+				t.Fatal(e)
+			}
+			waits := []uint64{}
+			complete := false
+			s.wait = func(ctx context.Context, d time.Duration) error {
+				if e := ctx.Err(); e != nil {
+					return e
+				}
+				if d <= 0 || d > 600*time.Second {
+					t.Fatal("unbounded retry", d)
+				}
+				waits = append(waits, uint64(d/time.Second))
+				if len(waits) > 12 {
+					t.Fatal("driver is not making progress")
+				}
+				if republish && len(f.relays[relayOne].deposits) > 0 && !complete {
+					if e := f.lane.Complete(ctx, "driver"); e != nil {
+						return e
+					}
+					complete = true
+				}
+				f.clock.n.Add(int64(d / time.Second))
+				if republish && f.clock.n.Load() >= int64(start+600) {
+					addDirectoryHint(t, dirs[relayTwo], directoryRecord(t, f, f.peerRoute()))
+				}
+				return nil
+			}
+			view, e := s.RunDelivery(t.Context(), "driver", nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			expected := []uint64{30, 60, 120, 240, 150}
+			if len(waits) < len(expected) || !slices.Equal(waits[:len(expected)], expected) {
+				t.Fatal("retry schedule or due-generation override", waits)
+			}
+			if republish {
+				if view.State != "complete" || len(f.relays[relayOne].deposits) != 1 || len(f.relays[relayTwo].deposits) != 1 {
+					t.Fatal("hint recovery or receipt did not stop retries", view)
+				}
+			} else if view.State != "abandoned" || view.Code != "retention-exceeded" || f.clock.n.Load() != int64(start+2000) {
+				t.Fatal("deadline did not end no-route", view, f.clock.Now())
+			}
+		})
+	}
+}
+
+func TestTTLIncreaseCannotExtendCopiesAlreadyAccepted(t *testing.T) {
+	f := newFixture(t)
+	s, _, _ := schedulerFixture(t, f)
+	defer func() {
+		if e := s.Close(); e != nil {
+			t.Error(e)
+		}
+	}()
+	if _, e := f.lane.Queue(t.Context(), "ttl", f.message(f.alice, f.bob), start+86400); e != nil {
+		t.Fatal(e)
+	}
+	f.relays[relayTwo].outcomes = []error{ErrUnavailable}
+	if _, e := s.Advance(t.Context(), "ttl", Route{}); e != nil {
+		t.Fatal(e)
+	}
+	f.relays[relayTwo].error = nil
+	f.relays[relayOne].ttl = 10800
+	f.relays[relayTwo].ttl = 10800
+	f.clock.n.Store(int64(start + 30))
+	view, e := s.Advance(t.Context(), "ttl", Route{})
+	if e != nil || view.Copies != 2 || view.TTLSeconds != 3600 || view.NextAttempt != start+2880 {
+		t.Fatal("description change extended an earlier acceptance", view, e)
+	}
+	f.clock.n.Store(int64(start + 2880))
+	view, e = s.Advance(t.Context(), "ttl", Route{})
+	if e != nil || view.Copies != 2 || view.TTLSeconds != 10800 || view.NextAttempt != start+2880+8640 {
+		t.Fatal("new generation did not adopt its new retention", view, e)
 	}
 }

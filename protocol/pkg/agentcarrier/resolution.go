@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/tosnetwork/ai/protocol/pkg/agentpacket"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketrelay"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
@@ -37,10 +39,11 @@ type Resolver struct {
 	store  *routingStore
 }
 type peerHints struct {
-	Agent      string   `json:"agent"`
-	Records    [][]byte `json:"records"`
-	LastRelays []string `json:"last_relays"`
-	Touched    uint64   `json:"touched"`
+	Agent      string            `json:"agent"`
+	Records    [][]byte          `json:"records"`
+	Cards      map[string][]byte `json:"cards"`
+	LastRelays []string          `json:"last_relays"`
+	Touched    uint64            `json:"touched"`
 }
 
 func OpenResolver(l *Lane, c ResolverConfig) (*Resolver, error) {
@@ -55,7 +58,7 @@ func OpenResolver(l *Lane, c ResolverConfig) (*Resolver, error) {
 	return &Resolver{l, c, s}, nil
 }
 func (r *Resolver) Close() error { return r.store.Close() }
-func (r *Resolver) verify(ctx context.Context, agent string, raw []byte, card []byte) (Route, error) {
+func (r *Resolver) verify(ctx context.Context, agent string, raw []byte, cards ...[]byte) (Route, error) {
 	hint, e := r.lane.config.Verifier.VerifyHint(ctx, raw, r.lane.config.HintPolicy)
 	if e != nil {
 		return Route{}, ErrNoRoute
@@ -63,26 +66,48 @@ func (r *Resolver) verify(ctx context.Context, agent string, raw []byte, card []
 	if hint.Record.Hint.Delegation.AgentID() != agent || (!r.config.TestSingleRelay && len(hint.Record.Hint.Relays) < 2) {
 		return Route{}, ErrNoRoute
 	}
-	route := Route{bytes.Clone(raw), bytes.Clone(card)}
-	resolved, e := r.lane.verifiedRoute(ctx, agent, route)
-	if e != nil {
-		return Route{}, e
+	if len(cards) == 0 {
+		cards = [][]byte{nil}
+	}
+	var route Route
+	var chosen agentpacketseal.KeyCard
+	for _, card := range cards {
+		candidate := Route{HintRecord: bytes.Clone(raw), CardPacket: bytes.Clone(card)}
+		resolved, err := r.lane.verifiedRoute(ctx, agent, candidate)
+		if err != nil {
+			continue
+		}
+		packet, err := agentpacket.DecodeJSON(resolved.Card)
+		if err != nil {
+			return Route{}, ErrRefused
+		}
+		parsed, err := agentpacketseal.DecodeKeyCard(packet.Payload)
+		if err != nil {
+			return Route{}, ErrRefused
+		}
+		if route.CardPacket == nil || parsed.NotBeforeUnix > chosen.NotBeforeUnix || (parsed.NotBeforeUnix == chosen.NotBeforeUnix && bytes.Compare(parsed.KeyID[:], chosen.KeyID[:]) > 0) {
+			chosen = parsed
+			route = Route{HintRecord: bytes.Clone(raw), CardPacket: bytes.Clone(resolved.Card)}
+		}
+	}
+	if route.CardPacket == nil {
+		return Route{}, ErrNoRoute
 	}
 	// Card verification can block. Do not renew the hint pass from its return time.
 	now := r.lane.config.Now()
-	if !now.Before(hint.FreshUntil) || uint64(now.Unix()) >= hint.Record.Hint.ExpiresAt || uint64(now.Unix()) >= hint.Record.Hint.Delegation.NotAfter {
+	if !now.Before(hint.FreshUntil) || now.Unix() < 0 || uint64(now.Unix()) >= hint.Record.Hint.ExpiresAt || uint64(now.Unix()) >= hint.Record.Hint.Delegation.NotAfter {
 		return Route{}, ErrNoRoute
 	}
-	route.CardPacket = bytes.Clone(resolved.Card)
 	return route, nil
 }
+
 func (r *Resolver) load(agent string) (peerHints, error) {
 	var p peerHints
 	e := r.store.read(routingName(agent), &p)
 	if errors.Is(e, os.ErrNotExist) {
-		return peerHints{Agent: agent, Records: [][]byte{}, LastRelays: []string{}}, nil
+		return peerHints{Agent: agent, Records: [][]byte{}, Cards: map[string][]byte{}, LastRelays: []string{}}, nil
 	}
-	if e != nil || p.Agent != agent || len(p.Records) > 4 || len(p.LastRelays) > 16 {
+	if e != nil || p.Agent != agent || p.Cards == nil || len(p.Cards) != len(p.Records) || len(p.Cards) > 4 || len(p.Records) > 4 || len(p.LastRelays) > 16 {
 		return p, ErrStorage
 	}
 	for _, u := range p.LastRelays {
@@ -92,7 +117,8 @@ func (r *Resolver) load(agent string) (peerHints, error) {
 	}
 	for _, raw := range p.Records {
 		h, e := agenttransport.DecodeHintRecord(raw)
-		if e != nil || h.Hint.Delegation.AgentID() != agent {
+		card, cardErr := agentpacket.DecodeJSON(p.Cards[cacheKey(raw)])
+		if e != nil || cardErr != nil || card.SenderAgentID != agent || h.Hint.Delegation.AgentID() != agent {
 			return p, ErrStorage
 		}
 	}
@@ -110,7 +136,9 @@ func hintNewer(a, b []byte) bool {
 	ah, bh := sha256.Sum256(a), sha256.Sum256(b)
 	return bytes.Compare(ah[:], bh[:]) > 0
 }
-func (r *Resolver) remember(ctx context.Context, agent string, raw []byte) error {
+func cacheKey(raw []byte) string { h := sha256.Sum256(raw); return hex.EncodeToString(h[:]) }
+func (r *Resolver) remember(ctx context.Context, agent string, route Route) error {
+	raw := route.HintRecord
 	if e := r.store.lock(ctx); e != nil {
 		return e
 	}
@@ -150,6 +178,16 @@ func (r *Resolver) remember(ctx context.Context, agent string, raw []byte) error
 	if len(kept) > 4 {
 		kept = kept[:4]
 	}
+	cards := map[string][]byte{}
+	for _, record := range kept {
+		key := cacheKey(record)
+		if bytes.Equal(record, raw) {
+			cards[key] = bytes.Clone(route.CardPacket)
+		} else {
+			cards[key] = bytes.Clone(p.Cards[key])
+		}
+	}
+	p.Cards = cards
 	p.Records = kept
 	for _, u := range h.Hint.Relays {
 		found := false
@@ -213,12 +251,17 @@ func (r *Resolver) Resolve(ctx context.Context, agent string, contact Route) (Ro
 	}
 	sort.Slice(p.Records, func(i, j int) bool { return hintNewer(p.Records[i], p.Records[j]) })
 	for _, raw := range p.Records {
-		if route, e := r.verify(ctx, agent, raw, contact.CardPacket); e == nil {
+		if route, e := r.verify(ctx, agent, raw, p.Cards[cacheKey(raw)], contact.CardPacket); e == nil {
+			if !bytes.Equal(route.CardPacket, p.Cards[cacheKey(raw)]) {
+				if e = r.remember(ctx, agent, route); e != nil {
+					return Route{}, e
+				}
+			}
 			return route, nil
 		}
 	}
 	if route, e := r.verify(ctx, agent, contact.HintRecord, contact.CardPacket); e == nil {
-		if e = r.remember(ctx, agent, route.HintRecord); e != nil {
+		if e = r.remember(ctx, agent, route); e != nil {
 			return Route{}, e
 		}
 		return route, nil
@@ -265,7 +308,7 @@ func (r *Resolver) Resolve(ctx context.Context, agent string, contact Route) (Ro
 	sort.Slice(merged, func(i, j int) bool { return hintNewer(merged[i], merged[j]) })
 	for _, raw := range merged {
 		if route, e := r.verify(ctx, agent, raw, contact.CardPacket); e == nil {
-			if e = r.remember(ctx, agent, route.HintRecord); e != nil {
+			if e = r.remember(ctx, agent, route); e != nil {
 				return Route{}, e
 			}
 			return route, nil

@@ -49,7 +49,7 @@ func (m *CredentialManager) Format(s fmt.State, _ rune) {
 	}
 }
 func (m *CredentialManager) MarshalJSON() ([]byte, error) { return nil, ErrRefused }
-func OpenCredentialManager(c Config, key ed25519.PrivateKey, admitted Admission) (*CredentialManager, error) {
+func OpenCredentialManager(ctx context.Context, c Config, key ed25519.PrivateKey, admitted Admission) (*CredentialManager, error) {
 	if c.Verifier == nil || c.Verifier.NetworkIdentity() == ([3]string{}) || admitted == nil || !validRelays(c.Relays) || len(key) != ed25519.PrivateKeySize {
 		return nil, ErrConfig
 	}
@@ -79,10 +79,33 @@ func OpenCredentialManager(c Config, key ed25519.PrivateKey, admitted Admission)
 		record = authorityRecord{bytes.Clone(c.Delegation), bytes.Clone(key[:32])}
 		e = store.write(routingName("authority"), record)
 	}
-	if e != nil || !bytes.Equal(record.Delegation, c.Delegation) || !bytes.Equal(record.Seed, key[:32]) {
+	if e != nil {
 		clear(record.Seed)
 		return fail(ErrStorage)
 	}
+	stored, decodeErr := agenttransport.DecodeDelegation(record.Delegation)
+	if decodeErr != nil || stored.AgentID() != c.AgentID || len(record.Seed) != ed25519.SeedSize || !bytes.Equal(ed25519.NewKeyFromSeed(record.Seed)[32:], stored.TransportKey[:]) {
+		clear(record.Seed)
+		return fail(ErrStorage)
+	}
+	if !bytes.Equal(record.Delegation, c.Delegation) {
+		// Rotation is authorized by a new finalized delegation, never merely by a
+		// runtime key argument. Old peer grants remain independently verifiable.
+		if _, _, err := c.Verifier.VerifyDelegationUntil(ctx, c.Delegation, agenttransport.Relay); err != nil {
+			clear(record.Seed)
+			return fail(ErrTransportRevoked)
+		}
+		clear(record.Seed)
+		record = authorityRecord{bytes.Clone(c.Delegation), bytes.Clone(key[:32])}
+		if err := store.write(routingName("authority"), record); err != nil {
+			clear(record.Seed)
+			return fail(err)
+		}
+	} else if !bytes.Equal(record.Seed, key[:32]) {
+		clear(record.Seed)
+		return fail(ErrStorage)
+	}
+
 	clear(record.Seed)
 	c.Delegation = bytes.Clone(c.Delegation)
 	c.Relays = append([]string(nil), c.Relays...)
@@ -156,7 +179,11 @@ func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) 
 			return Credential{}, ErrStorage
 		}
 		previousDelegation, decodeErr := decoded.DelegationBytes()
-		if decodeErr != nil || !bytes.Equal(previousDelegation, m.config.Delegation) {
+		if decodeErr != nil {
+			return Credential{}, ErrStorage
+		}
+		oldAuthority, decodeErr := agenttransport.DecodeDelegation(previousDelegation)
+		if decodeErr != nil || oldAuthority.AgentID() != m.config.AgentID {
 			return Credential{}, ErrStorage
 		}
 		if err != nil {
@@ -166,7 +193,7 @@ func (m *CredentialManager) issue(ctx context.Context, peer string, owner bool) 
 		if owner {
 			threshold = min(threshold, 60)
 		}
-		if previous.Until > seconds && previous.Until-seconds > threshold {
+		if bytes.Equal(previousDelegation, m.config.Delegation) && previous.Until > seconds && previous.Until-seconds > threshold {
 			return credential, nil
 		}
 	} else if !errors.Is(e, os.ErrNotExist) {

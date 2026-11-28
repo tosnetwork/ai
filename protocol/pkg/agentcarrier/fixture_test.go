@@ -87,6 +87,7 @@ func (c *credentials) DropContact(context.Context, string, string) error {
 }
 
 type fakeRelay struct {
+	ttl         uint64
 	policies    []agentpacketrelay.MailboxPolicy
 	policyError error
 	afterList   func()
@@ -125,7 +126,11 @@ func (r *fakeRelay) PublishPolicy(_ context.Context, _ string, p agentpacketrela
 	return nil
 }
 func (r *fakeRelay) Describe(context.Context) (agentpacketrelay.V2Description, error) {
-	return agentpacketrelay.V2Description{Schema: "tos.service.agent-packet-relay.relay.v2", MaxTTLSeconds: 3600}, nil
+	ttl := r.ttl
+	if ttl == 0 {
+		ttl = 3600
+	}
+	return agentpacketrelay.V2Description{Schema: "tos.service.agent-packet-relay.relay.v2", MaxTTLSeconds: ttl}, nil
 }
 func (r *fakeRelay) Deposit(_ context.Context, raw, wire []byte, _ ed25519.PrivateKey) error {
 	r.mu.Lock()

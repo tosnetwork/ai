@@ -3,6 +3,9 @@ package agentcarrier
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +29,7 @@ func credentialManager(t *testing.T, f *fixture, p *person, admit Admission) *Cr
 			t.Fatal(e)
 		}
 	}
-	m, e := OpenCredentialManager(c, p.transport, admit)
+	m, e := OpenCredentialManager(t.Context(), c, p.transport, admit)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -43,6 +46,10 @@ func TestOwnerCredentialRefreshAndPrivateCustody(t *testing.T) {
 	first, e := m.Owner(t.Context(), relayOne)
 	if e != nil {
 		t.Fatal(e)
+	}
+	var saved credentialRecord
+	if e = m.store.read(routingName("owner/"+relayOne), &saved); e != nil || !bytes.Equal(saved.Wire, first.wire) {
+		t.Fatal("owner credential not durable before return", e)
 	}
 	c, e := agenttransport.DecodeCredential(first.wire)
 	if e != nil {
@@ -223,7 +230,7 @@ func TestContactImportVerifiesPacketIssuerAdmissionAndRoute(t *testing.T) {
 }
 func TestCredentialIssuerRefusesWrongKeyAndRevokedAuthority(t *testing.T) {
 	f := newFixture(t)
-	if m, e := OpenCredentialManager(f.config, f.bob.transport, func(context.Context, string) error { return nil }); e == nil {
+	if m, e := OpenCredentialManager(t.Context(), f.config, f.bob.transport, func(context.Context, string) error { return nil }); e == nil {
 		if closeErr := m.Close(); closeErr != nil {
 			t.Fatal(closeErr)
 		}
@@ -239,5 +246,91 @@ func TestCredentialIssuerRefusesWrongKeyAndRevokedAuthority(t *testing.T) {
 	f.clock.n.Store(int64(start + 300))
 	if _, e := m.Owner(t.Context(), relayOne); !errors.Is(e, ErrTransportRevoked) {
 		t.Fatal("revoked issuer signed", e)
+	}
+}
+
+func rotatedTransport(t *testing.T, f *fixture) (Config, ed25519.PrivateKey, [32]byte) {
+	t.Helper()
+	key := testKey("rotated transport")
+	d, e := agenttransport.DecodeDelegation(f.alice.wire)
+	if e != nil {
+		t.Fatal(e)
+	}
+	copy(d.TransportKey[:], key[32:])
+	wire, e := d.Encode()
+	if e != nil {
+		t.Fatal(e)
+	}
+	c := f.config
+	c.Delegation = wire
+	return c, key, sha256.Sum256(wire)
+}
+func admitRotatedTransport(f *fixture, digest [32]byte) {
+	f.resolver.mu.Lock()
+	defer f.resolver.mu.Unlock()
+	snapshot := f.resolver.state[f.alice.agent]
+	snapshot.State.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(digest[:])}
+	snapshot.AdmissionEpochs = map[[32]byte]uint64{digest: 1}
+	f.resolver.state[f.alice.agent] = snapshot
+}
+func TestTransportRotationRequiresFinalizedAdmissionAndKeepsTheLane(t *testing.T) {
+	f := newFixture(t)
+	admit := func(context.Context, string) error { return nil }
+	m, e := OpenCredentialManager(t.Context(), f.config, f.alice.transport, admit)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer func() {
+		if m != nil {
+			if e := m.Close(); e != nil {
+				t.Error(e)
+			}
+		}
+	}()
+	old, e := m.IssueContact(t.Context(), f.bob.agent)
+	if e != nil {
+		t.Fatal(e)
+	}
+	decoded, e := agenttransport.DecodeCredential(old.wire)
+	if e != nil {
+		t.Fatal(e)
+	}
+	oldLane, _, e := decoded.Lane()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = m.Close(); e != nil {
+		t.Fatal(e)
+	}
+	m = nil
+	c, key, digest := rotatedTransport(t, f)
+	if opened, e := OpenCredentialManager(t.Context(), c, key, admit); !errors.Is(e, ErrTransportRevoked) {
+		if opened != nil {
+			if err := opened.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Fatal("uncommitted runtime key became authority", e)
+	}
+	admitRotatedTransport(f, digest)
+	m, e = OpenCredentialManager(t.Context(), c, key, admit)
+	if e != nil {
+		t.Fatal(e)
+	}
+	fresh, e := m.IssueContact(t.Context(), f.bob.agent)
+	if e != nil {
+		t.Fatal("old credential row blocked rotation", e)
+	}
+	decoded, e = agenttransport.DecodeCredential(fresh.wire)
+	if e != nil {
+		t.Fatal(e)
+	}
+	wire, e := decoded.DelegationBytes()
+	if e != nil || !bytes.Equal(wire, c.Delegation) {
+		t.Fatal("new grant uses old authority", e)
+	}
+	lane, _, e := decoded.Lane()
+	if e != nil || lane != oldLane {
+		t.Fatal("rotation reset the contact lane", e)
 	}
 }

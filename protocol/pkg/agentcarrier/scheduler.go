@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
@@ -28,6 +29,7 @@ type withdrawal struct {
 	Until  uint64   `json:"until"`
 }
 type schedule struct {
+	Deadline           uint64       `json:"deadline"`
 	ID                 string       `json:"id"`
 	Packet             [32]byte     `json:"packet"`
 	Generation         uint32       `json:"generation"`
@@ -44,6 +46,7 @@ type Scheduler struct {
 	resolver *Resolver
 	store    *routingStore
 	gate     gate
+	wait     func(context.Context, time.Duration) error
 }
 type CarriageView struct {
 	State, Code             string
@@ -59,16 +62,16 @@ func OpenScheduler(l *Lane, r *Resolver) (*Scheduler, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &Scheduler{l, r, s, make(gate, 1)}, nil
+	return &Scheduler{lane: l, resolver: r, store: s, gate: make(gate, 1), wait: waitForRetry}, nil
 }
 func (s *Scheduler) Close() error { return s.store.Close() }
 func (s *Scheduler) load(r delivery) (schedule, error) {
 	var m schedule
 	e := s.store.read(routingName(r.ID), &m)
 	if errors.Is(e, os.ErrNotExist) {
-		return schedule{ID: r.ID, Packet: sha256.Sum256(r.Packet), ResolveBackoff: initialRetry, TTL: 86400, Targets: []relayRetry{}, Withdrawals: []withdrawal{}}, nil
+		return schedule{ID: r.ID, Deadline: r.Deadline, Packet: sha256.Sum256(r.Packet), ResolveBackoff: initialRetry, TTL: 86400, Targets: []relayRetry{}, Withdrawals: []withdrawal{}}, nil
 	}
-	if e != nil || m.ID != r.ID || m.Packet != sha256.Sum256(r.Packet) || m.ResolveBackoff < 30 || m.ResolveBackoff > 600 || m.TTL == 0 || m.TTL > 86400 || m.Targets == nil || m.Withdrawals == nil || len(m.Targets) > MaxTargets || len(m.Withdrawals) > MaxWithdrawals {
+	if e != nil || m.ID != r.ID || m.Deadline != r.Deadline || m.Packet != sha256.Sum256(r.Packet) || m.ResolveBackoff < 30 || m.ResolveBackoff > 600 || m.TTL == 0 || m.TTL > 86400 || m.Targets == nil || m.Withdrawals == nil || len(m.Targets) > MaxTargets || len(m.Withdrawals) > MaxWithdrawals {
 		return m, ErrStorage
 	}
 	seen := map[string]bool{}
@@ -90,7 +93,46 @@ func (s *Scheduler) load(r delivery) (schedule, error) {
 	}
 	return m, nil
 }
-func (s *Scheduler) save(m schedule) error { return s.store.write(routingName(m.ID), m) }
+func (s *Scheduler) save(m schedule) error {
+	e := s.store.write(routingName(m.ID), m)
+	if errors.Is(e, ErrCapacity) {
+		if e = s.prune(); e != nil {
+			return e
+		}
+		return s.store.write(routingName(m.ID), m)
+	}
+	return e
+}
+func (s *Scheduler) prune() error {
+	now, e := s.lane.now()
+	if e != nil {
+		return e
+	}
+	index, e := s.store.index()
+	if e != nil {
+		return e
+	}
+	for _, name := range index.Names {
+		var m schedule
+		if e = s.store.read(name, &m); e != nil || m.Deadline == 0 || m.Deadline > uint64(^uint64(0)>>1)-uint64(KeyRetention/time.Second) || routingName(m.ID) != name {
+			return ErrStorage
+		}
+		if now >= m.Deadline+uint64(KeyRetention/time.Second) {
+			if e = s.store.remove(name); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+func (s *Scheduler) Prune(ctx context.Context) error {
+	if e := s.gate.lock(ctx); e != nil {
+		return e
+	}
+	defer s.gate.unlock()
+	return s.prune()
+}
+
 func (s *Scheduler) snapshot(ctx context.Context, id string) (delivery, error) {
 	if e := s.lane.out.lock(ctx); e != nil {
 		return delivery{}, e
@@ -295,7 +337,7 @@ func (s *Scheduler) Advance(ctx context.Context, id string, contact Route) (Carr
 		if e != nil {
 			return CarriageView{}, e
 		}
-		return CarriageView{State: r.State, Code: "no-route", Copies: copies(r), NextAttempt: min(m.ResolveAfter, m.NextGeneration)}, nil
+		return CarriageView{State: r.State, Code: "no-route", Copies: copies(r), NextAttempt: min(r.Deadline, m.ResolveAfter, m.NextGeneration)}, nil
 	}
 	m.ResolveAfter = 0
 	m.ResolveBackoff = initialRetry
@@ -320,12 +362,12 @@ func (s *Scheduler) Advance(ctx context.Context, id string, contact Route) (Carr
 		client, err := s.lane.config.Relay(url)
 		if err == nil {
 			description, err := client.Describe(ctx)
-			if err == nil && description.MaxTTLSeconds > 0 && description.MaxTTLSeconds <= 86400 {
+			if err == nil && description.Schema == "tos.service.agent-packet-relay.relay.v2" && description.MaxTTLSeconds > 0 && description.MaxTTLSeconds <= 86400 {
 				ttl = min(ttl, description.MaxTTLSeconds)
 			}
 		}
 	}
-	m.TTL = ttl
+	m.TTL = min(m.TTL, ttl)
 	if generationDue && len(r.Generations) > 0 {
 		resolved, e := s.lane.verifiedRoute(ctx, p.RecipientAgentID, route)
 		if e != nil {
@@ -342,6 +384,7 @@ func (s *Scheduler) Advance(ctx context.Context, id string, contact Route) (Carr
 				if e == nil {
 					m.Targets = []relayRetry{}
 					m.Generation = r.Generations[len(r.Generations)-1].Number
+					m.TTL = ttl
 				}
 			}
 		}
@@ -429,7 +472,7 @@ func (s *Scheduler) Advance(ctx context.Context, id string, contact Route) (Carr
 	return carriage(r, m, now), nil
 }
 func nextCarriageAttempt(r delivery, m schedule, now uint64) uint64 {
-	next := m.NextGeneration
+	next := min(m.NextGeneration, r.Deadline)
 	done := map[string]bool{}
 	if len(r.Generations) > 0 {
 		for _, t := range r.Generations[len(r.Generations)-1].Targets {
@@ -455,4 +498,55 @@ func carriage(r delivery, m schedule, now uint64) CarriageView {
 		}
 	}
 	return view
+}
+
+func waitForRetry(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// RunDelivery owns retries for one queued ID. Sources return only out-of-band
+// contact data; nil selects directory resolution by Agent ID. Business receipt
+// processing calls Lane.Complete; relay acceptance alone never stops the driver.
+func (s *Scheduler) RunDelivery(ctx context.Context, id string, contact func(context.Context) (Route, error)) (CarriageView, error) {
+	for {
+		if e := ctx.Err(); e != nil {
+			return CarriageView{}, e
+		}
+		route := Route{}
+		if contact != nil {
+			var e error
+			route, e = contact(ctx)
+			if e != nil {
+				if errors.Is(e, ErrStorage) {
+					return CarriageView{}, e
+				}
+				route = Route{}
+			}
+		}
+		view, e := s.Advance(ctx, id, route)
+		if e != nil {
+			return view, e
+		}
+		if view.State == "complete" || view.State == "abandoned" {
+			return view, nil
+		}
+		now, e := s.lane.now()
+		if e != nil {
+			return view, e
+		}
+		delay := uint64(1)
+		if view.NextAttempt > now {
+			delay = min(uint64(600), view.NextAttempt-now)
+		}
+		if e = s.wait(ctx, time.Duration(delay)*time.Second); e != nil {
+			return view, e
+		}
+	}
 }
