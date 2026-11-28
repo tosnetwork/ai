@@ -173,7 +173,7 @@ func TestV2LongPollRechecksNativeWithdrawal(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); f.s.ServeHTTP(v2DeadlineWriter{w}, request) }()
 	waitStarted(t, started)
-	f.source.state.GetAgent().DelegationDigests = nil
+	f.source.state.GetAgent().DelegationAdmissions = nil
 	f.clock.at = f.clock.at.Add(300 * time.Second)
 	ticks <- testStart
 	waitDone(t, done)

@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 // MaxRegistryCodeHashes bounds a predeclared registry code set.
@@ -149,11 +150,14 @@ func CheckState(policy ChainPolicy, network *nativev1.NetworkDomain, agentID str
 	if agent.AgentId != agentID {
 		return nil, errors.New("resolver returned state for another Agent")
 	}
-	if agent.Tombstoned {
-		return nil, fmt.Errorf("%w: Agent tombstoned", ErrDelegationRevoked)
+	if agent.EncodingVersion != nativecore.StateEncodingVersion || agent.AuthorizationEpoch == 0 {
+		return nil, errors.New("finalized Agent must use Registry schema 2 with a positive epoch")
 	}
 	if agent.Policy == nil {
 		return nil, errors.New("Agent is not finalized and live")
+	}
+	if agent.Tombstoned {
+		return nil, fmt.Errorf("%w: Agent tombstoned", ErrDelegationRevoked)
 	}
 	return agent, nil
 }

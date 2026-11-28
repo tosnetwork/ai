@@ -83,7 +83,7 @@ func packetFrom(t *testing.T, sender, recipient string, created uint64, payloadB
 }
 
 func agentPolicy(agentID string) *nativev1.AgentStateV1 {
-	return &nativev1.AgentStateV1{AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1, RecoveryThreshold: 1,
+	return &nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{Threshold: 1, RecoveryThreshold: 1,
 		Controllers: []*nativev1.ControllerV1{{KeyId: sendKeys.KeyID(agentID), Mldsa44PublicKey: sendKeys.PublicKey(agentID),
 			Weight: 1, PurposeMask: 15, Recovery: true}}}}
 }

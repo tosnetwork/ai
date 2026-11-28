@@ -539,7 +539,7 @@ func TestOfferRegistryStateSurvivesPrunedLastTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	typed := cell.BeginCell().MustStoreUInt(0x4e565331, 32).MustStoreUInt(1, 16).MustStoreUInt(2, 8).MustStoreBoolBit(false).MustStoreUInt(1, 64).MustStoreUInt(1, 64).MustStoreSlice(bytes.Repeat([]byte{0x44}, 32), 256).MustStoreSlice(bytes.Repeat([]byte{0x66}, 32), 256).MustStoreRef(cell.BeginCell().MustStoreUInt(1, 16).MustStoreDict(versions).EndCell()).EndCell()
+	typed := cell.BeginCell().MustStoreUInt(0x4e565331, 32).MustStoreUInt(2, 16).MustStoreUInt(2, 8).MustStoreBoolBit(false).MustStoreUInt(1, 64).MustStoreUInt(1, 64).MustStoreSlice(bytes.Repeat([]byte{0x44}, 32), 256).MustStoreSlice(bytes.Repeat([]byte{0x66}, 32), 256).MustStoreRef(cell.BeginCell().MustStoreUInt(1, 16).MustStoreDict(versions).EndCell()).EndCell()
 	rawID, err := hex.DecodeString(strings.TrimPrefix(subject, "cap_"))
 	if err != nil {
 		t.Fatal(err)

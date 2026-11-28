@@ -239,7 +239,7 @@ func channelDelegation(t testing.TB, network *nativev1.NetworkDomain, marker byt
 	if err != nil {
 		t.Fatal(err)
 	}
-	return identity.Delegation{Network: network, AgentID: agentID, EndpointID: endpointID,
+	return identity.Delegation{AuthorizationEpoch: 1, Network: network, AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: key.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"public.channel"}, NotBeforeUnix: channelNow - 100,
 		ExpiresAtUnix: channelNow + 7200, MaximumSessionLifetimeSeconds: 3600,

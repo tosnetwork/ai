@@ -41,7 +41,7 @@ func newAPIHarness(t *testing.T, planned bool) *apiHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := identity.Delegation{
+	delegation := identity.Delegation{AuthorizationEpoch: 1,
 		Network: network, AgentID: agentID, EndpointID: endpointID,
 		IdentityPublicKey: private.Public().(ed25519.PublicKey), AllowedProtocolVersions: []uint32{1},
 		AllowedOutboundEventClasses: []string{"message.text"}, NotBeforeUnix: 1_799_999_000,

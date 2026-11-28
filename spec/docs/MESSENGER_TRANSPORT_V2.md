@@ -295,18 +295,10 @@ change MUST:
 - require every later authority-changing action to increment it, and every
   state migration to preserve or advance it, never reset it.
 
-**Production gating.** Until that change is finalized on a network, V2
-transport runs only on test networks: delegations carry
-`authorization_epoch = 0`, verifiers check the policy hash only, and the A →
-B → A and same-bytes cases above are known gaps. A verifier configured for a
-production network refuses every delegation with epoch 0, and a production
-network configuration that lacks the epoch is refused at startup. The
-test-network exception MUST also match a reviewed, code-pinned allowlist of
-exact `(global_id, zero_state_root_hash, zero_state_file_hash)` identities.
-Selecting a test mode is not enrollment: an unlisted identity, including a
-production identity, is refused in every mode before any delegation is
-verified. The list is never supplied by runtime configuration; a new genesis
-requires a reviewed code change.
+**Registry release gating.** Adopted networks require Registry schema 2, the
+selected v2 code hash and a positive finalized authorization epoch. The separate
+December release remains pinned to Registry v1 and its reviewed epoch-0
+test-network profile.
 
 `VerifyDelegation(bytes, purpose, now)` passes only if:
 
@@ -316,8 +308,7 @@ requires a reviewed code change.
 3. `delegation_digest` is in the Agent's finalized live delegation set;
 4. `authorization_epoch` equals the epoch the registry recorded when it
    admitted that digest, and both equal the Agent's finalized authorization
-   epoch (on a test network without the epoch: the field is 0 and the
-   recorded epoch does not exist);
+   epoch;
 5. `policy_hash` equals the hash of the Agent's finalized policy;
 6. `not_before_unix <= now + 300` and `now < not_after_unix`;
 7. the requested purpose bit is set.
@@ -378,10 +369,11 @@ epoch**, the live set with admission epochs and a withdrawn-digest set:
 - add-delegation refuses a digest in the withdrawn set;
 - within one epoch the live set stays bounded at 128 digests, as today, and
   the live and withdrawn sets together at **384**; storage at the bound is
-  about 12 KiB, paid by the Agent like any other state;
-- when either bound is reached, add-delegation is refused **until the next
-  epoch bump**; withdrawal still works;
-- every epoch bump (policy update, recovery completion) clears **both** the
+  about 15.2 KiB of bits plus cell overhead, paid by the Agent as registry storage;
+- when either bound is reached, add-delegation is refused **while full**;
+  withdrawal still works. Withdrawing at 128 live opens one live slot if total
+  admissions remain below 384;
+- every epoch bump (policy update, recovery completion, tombstone) clears **both** the
   live and the withdrawn set, as recovery completion and the tombstone
   already clear the live set (`native-registry-code.fc:790-792`). Live
   entries are dead after a bump anyway, since check 4 refuses their epoch;

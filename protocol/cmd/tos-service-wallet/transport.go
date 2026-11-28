@@ -27,15 +27,14 @@ import (
 )
 
 type transportConfig struct {
-	Network                *nativev1.NetworkDomain    `json:"network"`
-	Mode                   agenttransport.NetworkMode `json:"mode"`
-	RPC                    []string                   `json:"rpc"`
-	Quorum                 int                        `json:"quorum"`
-	RegistryCodeBOC        string                     `json:"registry_code_boc_base64"`
-	RegistryCodeHash       string                     `json:"registry_code_hash"`
-	MinFinalizedCheckpoint uint64                     `json:"min_finalized_checkpoint"`
-	RelayURL               string                     `json:"relay_url"`
-	InsecureRelay          bool                       `json:"insecure_relay"`
+	Network                *nativev1.NetworkDomain `json:"network"`
+	RPC                    []string                `json:"rpc"`
+	Quorum                 int                     `json:"quorum"`
+	RegistryCodeBOC        string                  `json:"registry_code_boc_base64"`
+	RegistryCodeHash       string                  `json:"registry_code_hash"`
+	MinFinalizedCheckpoint uint64                  `json:"min_finalized_checkpoint"`
+	RelayURL               string                  `json:"relay_url"`
+	InsecureRelay          bool                    `json:"insecure_relay"`
 }
 type transportLocator struct{ locator *nativecore.Locator }
 
@@ -54,7 +53,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	directory := set.String("journal", "", "absolute owner-private operation directory; reuse it after a crash")
 	agent := set.String("agent", "", "Agent identifier")
 	key := set.String("key-name", "", "operation key label; a fresh internal vault ID is journalled")
-	epoch := set.Uint64("authorization-epoch", 0, "current finalized epoch; legacy approved test networks require zero")
+	epoch := set.Uint64("authorization-epoch", 0, "positive current finalized authorization epoch")
 	purposes := set.Uint("purposes", 7, "nonzero transport purpose mask, 1..7")
 	lifetime := set.Uint64("lifetime-seconds", 86400, "delegation lifetime, at most 31536000 seconds")
 	credential := set.Uint64("max-credential-seconds", 21600, "credential lifetime, at most 604800 seconds")
@@ -78,39 +77,23 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	if err := loadTransportConfig(*configPath, &config); err != nil {
 		return err
 	}
-	// Enforce the same compiled network gate before opening a checkpoint, vault,
-	// signer, or relay connection. No production/epoch-aware registry exists yet.
-
-	if _, err := agenttransport.NewLegacyTestNetworkResolver(config.Mode, config.Network, unopenedReader{}); err != nil {
+	if err := agenttransport.ValidateApprovedTestNetwork(config.Network); err != nil {
 		return err
 	}
-	if *epoch != 0 {
-		return errors.New("transport wallet requires current epoch zero in test-network-legacy-epoch-zero mode")
+	if config.RegistryCodeHash != nativecore.RegistryV2CodeHash {
+		return errors.New("transport wallet requires the Registry v2 code hash")
+	}
+	if *epoch == 0 {
+		return errors.New("transport wallet requires a positive current authorization epoch")
 	}
 	if err := makeTransportDirectory(*directory); err != nil {
 		return err
 	}
-	locator, err := nativecore.NewLocator(nativewallet.NativeTransportNetwork(config.Network), 0, config.RegistryCodeBOC, config.RegistryCodeHash)
+	resolver, locator, err := openWalletRegistry(config, filepath.Join(*directory, "registry.checkpoint"))
 	if err != nil {
 		return err
 	}
-	idText := strings.TrimPrefix(config.Network.NetworkId, "tos:global-id:")
-	if idText != "2" && idText != "3" {
-		return agenttransport.ErrUnapprovedNetwork
-	}
-	var globalID int32 = 2
-	if idText == "3" {
-		globalID = 3
-	}
-	adapter, err := toschain.New(toschain.Config{Network: config.Network.NetworkId, Endpoints: config.RPC, Quorum: config.Quorum, PinnedNetworkDomain: &toschain.PinnedNetworkDomain{NetworkID: config.Network.NetworkId, GlobalID: globalID, ZeroStateRootHash: "sha256:" + config.Network.GenesisRootHash, ZeroStateFileHash: "sha256:" + config.Network.GenesisFileHash, WorkchainID: 0}})
-	if err != nil {
-		return err
-	}
-	resolver, err := toschain.NewSimplifiedNativeResolver(adapter, locator, filepath.Join(*directory, "registry.checkpoint"))
-	if err != nil {
-		return err
-	}
-	legacy, err := agenttransport.NewLegacyTestNetworkResolver(config.Mode, config.Network, resolver)
+	registry, err := agenttransport.NewRegistryResolver(config.Network, resolver)
 	if err != nil {
 		return err
 	}
@@ -127,7 +110,7 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 		return err
 	}
 	defer relay.Close()
-	issuer := nativewallet.TransportIssuer{Config: agenttransport.Config{Mode: config.Mode, Network: config.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{config.RegistryCodeHash}, MinFinalizedCheckpoint: config.MinFinalizedCheckpoint, Locator: transportLocator{locator}}}, Resolver: legacy, Keys: vault, Signer: signer, Submitter: relay, Confirm: func(ctx context.Context, review nativewallet.Review) error {
+	issuer := nativewallet.TransportIssuer{Config: agenttransport.Config{Network: config.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{config.RegistryCodeHash}, MinFinalizedCheckpoint: config.MinFinalizedCheckpoint, Locator: transportLocator{locator}}}, Resolver: registry, Keys: vault, Signer: signer, Submitter: relay, Confirm: func(ctx context.Context, review nativewallet.Review) error {
 		raw, err := json.MarshalIndent(review, "", "  ")
 		if err != nil {
 			return err
@@ -153,11 +136,36 @@ func transportCommand(ctx context.Context, args []string, input io.Reader, outpu
 	}{"tos-service-transport-delegation.v1", base64.StdEncoding.EncodeToString(result.Delegation), "sha256:" + hex.EncodeToString(digest[:]), result.VaultKeyName})
 }
 
-type unopenedReader struct{}
-
-func (unopenedReader) ResolveState(context.Context, string, string) (*nativev1.NativeStateV1, bool, error) {
-	return nil, false, errors.New("reader not opened")
+func openWalletRegistry(config transportConfig, checkpointPath string) (*toschain.SimplifiedNativeResolver, *nativecore.Locator, error) {
+	if err := agenttransport.ValidateApprovedTestNetwork(config.Network); err != nil {
+		return nil, nil, err
+	}
+	if config.RegistryCodeHash != nativecore.RegistryV2CodeHash {
+		return nil, nil, errors.New("wallet requires the Registry v2 code hash")
+	}
+	locator, err := nativecore.NewLocator(nativewallet.NativeTransportNetwork(config.Network), 0, config.RegistryCodeBOC, config.RegistryCodeHash)
+	if err != nil {
+		return nil, nil, err
+	}
+	idText := strings.TrimPrefix(config.Network.NetworkId, "tos:global-id:")
+	if idText != "2" && idText != "3" {
+		return nil, nil, agenttransport.ErrUnapprovedNetwork
+	}
+	var globalID int32 = 2
+	if idText == "3" {
+		globalID = 3
+	}
+	adapter, err := toschain.New(toschain.Config{Network: config.Network.NetworkId, Endpoints: config.RPC, Quorum: config.Quorum, PinnedNetworkDomain: &toschain.PinnedNetworkDomain{NetworkID: config.Network.NetworkId, GlobalID: globalID, ZeroStateRootHash: "sha256:" + config.Network.GenesisRootHash, ZeroStateFileHash: "sha256:" + config.Network.GenesisFileHash, WorkchainID: 0}})
+	if err != nil {
+		return nil, nil, err
+	}
+	resolver, err := toschain.NewSimplifiedNativeResolver(adapter, locator, checkpointPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resolver, locator, nil
 }
+
 func loadTransportConfig(path string, config *transportConfig) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return errors.New("transport config must be an absolute clean path")

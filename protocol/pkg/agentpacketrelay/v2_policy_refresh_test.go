@@ -117,7 +117,7 @@ func TestV2PolicyRefreshDiscardsAReplacedSnapshot(t *testing.T) {
 					t.Fatal(err)
 				}
 				hash := sha256.Sum256(raw)
-				source2.state.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(hash[:])}
+				source2.state.GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + hex.EncodeToString(hash[:]), AdmissionEpoch: 1}}
 				blocks, err := c.Blocks()
 				if err != nil {
 					t.Fatal(err)

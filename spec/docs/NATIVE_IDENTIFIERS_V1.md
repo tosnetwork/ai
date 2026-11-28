@@ -29,7 +29,9 @@ agent_<lowercase SHA-256 hex>
 ```
 
 The digest is calculated from the canonical identity cell containing protocol
-version, network domain, object nonce, and canonical initial controller policy.
+identity magic, object-kind tag 3, network domain, object nonce, and canonical
+initial controller policy. Registry v1 used tag 1. The two tags yield distinct
+Agent identities under the cell hash collision-resistance assumption.
 Controller input order does not affect the result because policies are sorted
 canonically before encoding.
 
@@ -42,7 +44,7 @@ cap_<lowercase SHA-256 hex>
 ```
 
 The digest is calculated from the canonical identity cell containing protocol
-version, network domain, object nonce, owner Agent ID, initial version string,
+identity magic, object-kind tag 2, network domain, object nonce, owner Agent ID, initial version string,
 and initial manifest digest.
 
 The owner's controller policy is not part of Capability identity. Policy

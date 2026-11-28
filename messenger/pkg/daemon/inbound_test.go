@@ -422,8 +422,8 @@ func installPhaseAAdmission(t *testing.T, now time.Time, local, peer *Daemon) {
 			Reference: &nativev1.ChainReference{Workchain: 0, Account: "0:" + strings.Repeat("d", 64),
 				LogicalTime: 42, TransactionHash: "sha256:" + strings.Repeat("e", 64),
 				ContractCodeHash: registryCode, FinalizedCheckpoint: 100},
-			State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: agentID,
-				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{digest}}}}
+			State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: agentID,
+				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}}}}}
 	}
 	resolver := phaseAResolver{states: map[string]*nativev1.NativeStateV1{
 		local.config.AgentID: state(local.config.AgentID, localDigest),

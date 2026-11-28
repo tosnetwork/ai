@@ -20,6 +20,7 @@ import (
 
 	"github.com/tosnetwork/ai/execution/pkg/railgate"
 	"github.com/tosnetwork/ai/execution/pkg/softwarework"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 type tokenNodeFixture struct {
@@ -178,7 +179,7 @@ func frozenTokenNode(t *testing.T, initialMode string) (*Node, Message, *tokenRe
 func TestNodeInstallsTokenWorkSafetyAtTheExecutionGate(t *testing.T) {
 	for _, mode := range []string{"alarm", "stale"} {
 		t.Run(mode, func(t *testing.T) {
-			node, message, _, monitor := frozenTokenNode(t, mode)
+			node, message, _, monitor := syntheticTokenNode(t, mode)
 			claim, _, err := node.Provider.claimFor(message)
 			if err != nil {
 				t.Fatal(err)
@@ -206,7 +207,7 @@ func TestNodeInstallsTokenWorkSafetyAtTheExecutionGate(t *testing.T) {
 }
 
 func TestHandleTaskRetriesAnAdmittedSlotWithoutAProviderRecord(t *testing.T) {
-	node, message, runner, _ := frozenTokenNode(t, "clear")
+	node, message, runner, _ := syntheticTokenNode(t, "clear")
 	claim, _, err := node.Provider.claimFor(message)
 	if err != nil {
 		t.Fatal(err)
@@ -227,5 +228,17 @@ func TestHandleTaskRetriesAnAdmittedSlotWithoutAProviderRecord(t *testing.T) {
 	}
 	if runner.calls.Load() != 1 {
 		t.Fatal("recorded task executed twice")
+	}
+}
+
+func TestRegistryV2RefusesRecordedV1Purchase(t *testing.T) {
+	node, message, runner, _ := frozenTokenNode(t, "clear")
+	claim, _, err := node.Provider.claimFor(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = node.Provider.config.Gate.Admit(t.Context(), claim)
+	if code, _ := nativecore.ErrorCodeOf(err); code != nativecore.ErrBadMessage || runner.calls.Load() != 0 {
+		t.Fatalf("historical Registry v1 evidence did not fail at typed state decoding: %v", err)
 	}
 }

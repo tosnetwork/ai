@@ -12,7 +12,7 @@ package canon
 // Adding an object means adding a separator here first.
 const (
 	// DomainEndpointDelegation namespaces a Messaging Endpoint delegation.
-	DomainEndpointDelegation = "tos.messaging.endpoint-delegation.v2\x00"
+	DomainEndpointDelegation = "tos.messaging.endpoint-delegation.v3\x00"
 	// DomainEndpointID namespaces the endpoint identifier derivation.
 	DomainEndpointID = "tos.messaging.endpoint-id.v2\x00"
 	// DomainOwnerDecision namespaces what an owner signs to authorise one

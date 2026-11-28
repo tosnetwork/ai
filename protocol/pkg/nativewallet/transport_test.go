@@ -118,7 +118,13 @@ func (h *transportHarness) SubmitNativeAction(ctx context.Context, r *nativev1.S
 func (h *transportHarness) commit(s *nativev1.SignedNativeActionV1) {
 	h.snapshot.State = proto.Clone(h.snapshot.State).(*nativev1.NativeStateV1)
 	agent := h.snapshot.State.GetAgent()
-	agent.DelegationDigests = append(agent.DelegationDigests, s.Action.GetDelegateAgent().DelegationDigest)
+	payload := s.Action.GetDelegateAgent()
+	agent.DelegationAdmissions = append(agent.DelegationAdmissions, &nativev1.DelegationAdmissionV1{Digest: payload.DelegationDigest, AdmissionEpoch: payload.AuthorizationEpoch})
+	raw, err := hex.DecodeString(strings.TrimPrefix(payload.DelegationDigest, "sha256:"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.snapshot.AdmissionEpochs[[32]byte(raw)] = payload.AuthorizationEpoch
 	agent.Sequence = s.Action.Sequence
 	built, err := nativecore.BuildAction(s.Action)
 	if err != nil {
@@ -126,23 +132,25 @@ func (h *transportHarness) commit(s *nativev1.SignedNativeActionV1) {
 	}
 	agent.LastActionHash = built.HashString
 	h.snapshot.State.Reference.FinalizedCheckpoint++
+	h.snapshot.EpochCheckpoint = h.snapshot.State.Reference.FinalizedCheckpoint
 }
 func transportFixture(t *testing.T) (*TransportIssuer, *transportHarness, *transportTestKeys, TransportRequest) {
 	t.Helper()
 	fake := &mldsa44test.Fake{}
 	network := &nativev1.NetworkDomain{NetworkId: "tos:global-id:3", GenesisRootHash: "65735247a371030abe811aeac0afe357301ce90e161450d26f88b4beb5b4c366", GenesisFileHash: "c3860fe196a2a1b5e4e74a9cf9448624a353ce68a8c4c5f6413347586d688769"}
 	policy := &nativev1.ControllerPolicyV1{Threshold: 1, RecoveryThreshold: 1, Controllers: []*nativev1.ControllerV1{controller(fake.KeyID("owner"), fake.PublicKey("owner"))}}
-	code := "tvm-cell-sha256:" + strings.Repeat("3", 64)
-	request := TransportRequest{AgentID: "agent_" + strings.Repeat("1", 64), KeyName: "test-transport", Purposes: 7, Lifetime: 86400, CredentialLifetime: 21600, Controllers: []string{"owner"}}
+	code := nativecore.RegistryV2CodeHash
+	request := TransportRequest{Epoch: 1, AgentID: "agent_" + strings.Repeat("1", 64), KeyName: "test-transport", Purposes: 7, Lifetime: 86400, CredentialLifetime: 21600, Controllers: []string{"owner"}}
 	h := &transportHarness{t: t, signer: fake, finalize: true, directory: t.TempDir()}
 	if err := os.Chmod(h.directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	h.snapshot = agenttransport.Snapshot{State: &nativev1.NativeStateV1{Network: network, TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: request.AgentID, Generation: 1, Sequence: 1, Policy: policy}}}}
+	epoch := uint64(1)
+	h.snapshot = agenttransport.Snapshot{CurrentEpoch: &epoch, EpochCheckpoint: 10, AdmissionEpochs: map[[32]byte]uint64{}, State: &nativev1.NativeStateV1{Network: network, TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{EncodingVersion: 2, AuthorizationEpoch: epoch, AgentId: request.AgentID, Generation: 1, Sequence: 1, Policy: policy}}}}
 	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{42}, 32))
 	keys := &transportTestKeys{}
 	copy(keys.key[:], private.Public().(ed25519.PublicKey))
-	issuer := &TransportIssuer{Config: agenttransport.Config{Mode: agenttransport.TestNetworkLegacyEpochZero, Network: network, Clock: transportTestClock{}, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{code}, Locator: transportTestLocator{}}}, Resolver: h, Keys: keys, Signer: fake, Submitter: h, Confirm: func(context.Context, Review) error { return nil }, PollInterval: time.Millisecond}
+	issuer := &TransportIssuer{Config: agenttransport.Config{Network: network, Clock: transportTestClock{}, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{code}, Locator: transportTestLocator{}}}, Resolver: h, Keys: keys, Signer: fake, Submitter: h, Confirm: func(context.Context, Review) error { return nil }, PollInterval: time.Millisecond}
 	return issuer, h, keys, request
 }
 func issueTest(t *testing.T, w *TransportIssuer, h *transportHarness, r TransportRequest) ([]byte, error) {
@@ -170,7 +178,7 @@ func TestTransportRoundTripAndRerun(t *testing.T) {
 		}
 	}
 	d, err := agenttransport.DecodeDelegation(wire)
-	if err != nil || d.AuthorizationEpoch != 0 || d.Purposes != 7 {
+	if err != nil || d.AuthorizationEpoch != 1 || d.Purposes != 7 {
 		t.Fatalf("delegation %v %v", d, err)
 	}
 }
@@ -197,12 +205,12 @@ func TestTransportAcknowledgementIsNotFinalization(t *testing.T) {
 	}
 }
 func TestTransportEpochAndNetworkRefusals(t *testing.T) {
-	for _, name := range []string{"future-epoch", "production", "unknown-root", "unknown-file", "wrong-global-id", "production-mode"} {
+	for _, name := range []string{"future-epoch", "production", "unknown-root", "unknown-file", "wrong-global-id", "schema-one"} {
 		t.Run(name, func(t *testing.T) {
 			w, h, k, r := transportFixture(t)
 			switch name {
 			case "future-epoch":
-				r.Epoch = 1
+				r.Epoch = 2
 			case "production":
 				w.Config.Network.NetworkId = "tos:global-id:1"
 			case "unknown-root":
@@ -211,16 +219,20 @@ func TestTransportEpochAndNetworkRefusals(t *testing.T) {
 				w.Config.Network.GenesisFileHash = strings.Repeat("9", 64)
 			case "wrong-global-id":
 				w.Config.Network.NetworkId = "tos:global-id:2"
-			case "production-mode":
-				w.Config.Mode = agenttransport.Production
+			case "schema-one":
+				h.snapshot.State.GetAgent().EncodingVersion = 1
 			}
-			if _, err := issueTest(t, w, h, r); err == nil {
+			_, err := issueTest(t, w, h, r)
+			if err == nil {
 				t.Fatal("invalid issuance accepted")
+			}
+			if name == "future-epoch" && !strings.Contains(err.Error(), "delegation epoch differs from the current finalized authorization epoch") {
+				t.Fatalf("issuance did not refuse the encoded future epoch: %v", err)
 			}
 			if h.submits != 0 || w.Signer.(*mldsa44test.Fake).Calls() != 0 {
 				t.Fatal("invalid issuance signed/submitted")
 			}
-			if name != "future-epoch" && k.calls != 0 {
+			if name != "future-epoch" && name != "schema-one" && k.calls != 0 {
 				t.Fatal("unapproved network reached custody")
 			}
 		})
@@ -384,28 +396,7 @@ func TestTransportCurrentEpochOnly(t *testing.T) {
 	for _, epoch := range []uint64{0, 1, 2} {
 		t.Run(fmt.Sprint(epoch), func(t *testing.T) {
 			w, h, _, r := transportFixture(t)
-			current := uint64(1)
-			h.snapshot.CurrentEpoch = &current
-			h.snapshot.EpochCheckpoint = 10
-			h.snapshot.AdmissionEpochs = map[[32]byte]uint64{}
-			w.Config.Mode = agenttransport.TestNetworkEpochAware
 			r.Epoch = epoch
-			h.beforeSubmit = func() {
-				raw, err := os.ReadFile(filepath.Join(h.directory, "transport.json"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				var record transportRecord
-				if err = json.Unmarshal(raw, &record); err != nil {
-					t.Fatal(err)
-				}
-				digest, err := agenttransport.DelegationDigest(record.Delegation)
-				if err != nil {
-					t.Fatal(err)
-				}
-				h.snapshot.AdmissionEpochs[digest] = 1
-				h.snapshot.EpochCheckpoint++
-			}
 			_, err := issueTest(t, w, h, r)
 			if (err == nil) != (epoch == 1) {
 				t.Fatalf("epoch %d: %v", epoch, err)
@@ -646,5 +637,49 @@ func TestTransportVaultIDSurvivesAStopAfterKeyCreation(t *testing.T) {
 	}
 	if len(keys.names) != 2 || keys.names[0] != keys.names[1] || keys.names[0] == r.KeyName || !strings.HasPrefix(keys.names[0], "mtv2-") {
 		t.Fatal("key creation was not resumed using its journalled internal ID")
+	}
+}
+
+func TestTransportEpochChangesBeforeSigning(t *testing.T) {
+	w, h, _, req := transportFixture(t)
+	w.Confirm = func(context.Context, Review) error {
+		*h.snapshot.CurrentEpoch = 2
+		h.snapshot.State.GetAgent().AuthorizationEpoch = 2
+		return nil
+	}
+	if _, err := issueTest(t, w, h, req); err == nil || w.Signer.(*mldsa44test.Fake).Calls() != 0 || h.submits != 0 {
+		t.Fatalf("epoch change reached signing or dispatch: %v", err)
+	}
+}
+
+func TestTransportJournalActionMustBindDocumentEpoch(t *testing.T) {
+	w, h, _, req := transportFixture(t)
+	w.Confirm = func(context.Context, Review) error { return errors.New("defer review") }
+	if _, err := issueTest(t, w, h, req); err == nil {
+		t.Fatal("declined review was accepted")
+	}
+	path := filepath.Join(h.directory, "transport.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record transportRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	var submission nativev1.SignedNativeActionV1
+	if err := protojson.Unmarshal(record.Submission, &submission); err != nil {
+		t.Fatal(err)
+	}
+	submission.Action.GetDelegateAgent().AuthorizationEpoch++
+	record.Submission, err = protojson.Marshal(&submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveTransport(path, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateTransportSubmission(&submission, record.Delegation, w.Config.Network); err == nil {
+		t.Fatal("journal validated an action for a different epoch")
 	}
 }

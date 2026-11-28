@@ -28,7 +28,7 @@ func mlsAuthority(t *testing.T) (identity.Delegation, ed25519.PrivateKey) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return identity.Delegation{Network: mlsNetwork(), AgentID: mlsAgent(), EndpointID: endpoint, IdentityPublicKey: key.Public().(ed25519.PublicKey), NotBeforeUnix: 100, ExpiresAtUnix: 10000}, key
+	return identity.Delegation{AuthorizationEpoch: 1, Network: mlsNetwork(), AgentID: mlsAgent(), EndpointID: endpoint, IdentityPublicKey: key.Public().(ed25519.PublicKey), NotBeforeUnix: 100, ExpiresAtUnix: 10000}, key
 }
 
 func mlsCredential(t *testing.T, delegation identity.Delegation, key ed25519.PrivateKey, device, setDigest string) DeviceCredential {

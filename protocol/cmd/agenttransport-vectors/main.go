@@ -43,7 +43,7 @@ func run() error {
 	for i := range 4 {
 		seed := sha256.Sum256([]byte(fmt.Sprintf("transport-vector-test-seed-%d", i)))
 		key := ed25519.NewKeyFromSeed(seed[:]).Public().(ed25519.PublicKey)
-		d := agenttransport.Delegation{AgentDigest: sha256.Sum256([]byte(fmt.Sprintf("transport-vector-agent-%d", i))), AuthorizationEpoch: uint64(i), PolicyHash: sha256.Sum256([]byte(fmt.Sprintf("transport-vector-policy-%d", i))), Purposes: agenttransport.Purpose(i + 1), NotBefore: 1800000000, NotAfter: 1800003600, MaxCredentialSeconds: 600}
+		d := agenttransport.Delegation{AgentDigest: sha256.Sum256([]byte(fmt.Sprintf("transport-vector-agent-%d", i))), AuthorizationEpoch: uint64(i + 1), PolicyHash: sha256.Sum256([]byte(fmt.Sprintf("transport-vector-policy-%d", i))), Purposes: agenttransport.Purpose(i + 1), NotBefore: 1800000000, NotAfter: 1800003600, MaxCredentialSeconds: 600}
 		copy(d.TransportKey[:], key)
 		if i == 3 {
 			d.AuthorizationEpoch = ^uint64(0)

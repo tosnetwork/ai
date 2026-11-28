@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"os"
 	"strings"
 	"testing"
@@ -218,8 +219,8 @@ func TestSealedCopiesAreGatedBeforeEveryDeposit(t *testing.T) {
 	})
 	t.Run("delegation withdrawn", func(t *testing.T) {
 		a, b, eventID := carry(t)
-		a.d.discovery.resolver.(phaseAResolver).states[b.d.config.AgentID].GetAgent().DelegationDigests =
-			[]string{"sha256:" + strings.Repeat("9", 64)}
+		a.d.discovery.resolver.(phaseAResolver).states[b.d.config.AgentID].GetAgent().DelegationAdmissions =
+			[]*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + strings.Repeat("9", 64), AdmissionEpoch: 1}}
 		a.d.now = func() time.Time { return later }
 		held(t, a, b, eventID, fault.CodeDelegationUncommitted)
 		// Moved back to pending, its last envelope may still be stored and
@@ -243,8 +244,8 @@ func TestSealedCopiesAreGatedBeforeEveryDeposit(t *testing.T) {
 			DeviceID: b.d.config.DeviceID, CiphertextDigest: ack.CiphertextDigest}, now); err != nil {
 			t.Fatal(err)
 		}
-		a.d.discovery.resolver.(phaseAResolver).states[b.d.config.AgentID].GetAgent().DelegationDigests =
-			[]string{"sha256:" + strings.Repeat("9", 64)}
+		a.d.discovery.resolver.(phaseAResolver).states[b.d.config.AgentID].GetAgent().DelegationAdmissions =
+			[]*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + strings.Repeat("9", 64), AdmissionEpoch: 1}}
 		held(t, a, b, eventID, fault.CodeDelegationUncommitted)
 	})
 }

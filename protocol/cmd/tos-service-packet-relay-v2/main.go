@@ -29,28 +29,27 @@ import (
 )
 
 type config struct {
-	Directory         bool                       `json:"directory"`
-	DirectoryAgents   int                        `json:"directory_agents,omitempty"`
-	RevocationEntries int                        `json:"revocation_entries,omitempty"`
-	MaxWaiters        int                        `json:"max_waiters,omitempty"`
-	TTLSeconds        *uint64                    `json:"ttl_seconds,omitempty"`
-	TrustedProxies    []string                   `json:"trusted_proxies,omitempty"`
-	StrangerCount     *int                       `json:"stranger_max_envelopes,omitempty"`
-	StrangerBytes     *int64                     `json:"stranger_max_bytes,omitempty"`
-	StrangerShare     *int                       `json:"stranger_global_share,omitempty"`
-	Listen            string                     `json:"listen"`
-	URL               string                     `json:"url"`
-	TLSCert           string                     `json:"tls_cert"`
-	TLSKey            string                     `json:"tls_key"`
-	StateDir          string                     `json:"state_dir"`
-	Checkpoint        string                     `json:"checkpoint"`
-	GlobalEntries     int                        `json:"global_entries"`
-	GlobalBytes       int64                      `json:"global_bytes"`
-	Endpoints         []string                   `json:"endpoints"`
-	Mode              agenttransport.NetworkMode `json:"mode"`
-	Network           *nativev1.NetworkDomain    `json:"network"`
-	CodeBase64        string                     `json:"code_base64"`
-	CodeHash          string                     `json:"code_hash"`
+	Directory         bool                    `json:"directory"`
+	DirectoryAgents   int                     `json:"directory_agents,omitempty"`
+	RevocationEntries int                     `json:"revocation_entries,omitempty"`
+	MaxWaiters        int                     `json:"max_waiters,omitempty"`
+	TTLSeconds        *uint64                 `json:"ttl_seconds,omitempty"`
+	TrustedProxies    []string                `json:"trusted_proxies,omitempty"`
+	StrangerCount     *int                    `json:"stranger_max_envelopes,omitempty"`
+	StrangerBytes     *int64                  `json:"stranger_max_bytes,omitempty"`
+	StrangerShare     *int                    `json:"stranger_global_share,omitempty"`
+	Listen            string                  `json:"listen"`
+	URL               string                  `json:"url"`
+	TLSCert           string                  `json:"tls_cert"`
+	TLSKey            string                  `json:"tls_key"`
+	StateDir          string                  `json:"state_dir"`
+	Checkpoint        string                  `json:"checkpoint"`
+	GlobalEntries     int                     `json:"global_entries"`
+	GlobalBytes       int64                   `json:"global_bytes"`
+	Endpoints         []string                `json:"endpoints"`
+	Network           *nativev1.NetworkDomain `json:"network"`
+	CodeBase64        string                  `json:"code_base64"`
+	CodeHash          string                  `json:"code_hash"`
 }
 
 func readConfig(path string) (config, error) {
@@ -81,7 +80,7 @@ func readConfig(path string) (config, error) {
 }
 func verifier(c config) (*agenttransport.Verifier, error) {
 	// Native registry serialization uses prefixed genesis hashes. Normalize only
-	// the configured copy; both constructors enforce the exact approved genesis.
+	// the configured copy; the reader checks the configured genesis against its endpoint quorum.
 	nativeNetwork := &nativev1.NetworkDomain{NetworkId: c.Network.NetworkId, GenesisRootHash: c.Network.GenesisRootHash, GenesisFileHash: c.Network.GenesisFileHash}
 	nativeNetwork.GenesisRootHash = "sha256:" + c.Network.GenesisRootHash
 	nativeNetwork.GenesisFileHash = "sha256:" + c.Network.GenesisFileHash
@@ -97,7 +96,7 @@ func verifier(c config) (*agenttransport.Verifier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return agentpacketrelay.NewV2FinalizedVerifier(agenttransport.Config{Mode: c.Mode, Network: c.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{c.CodeHash}, Locator: registryLocator{locator}}}, pinnedReader{source, adapter, nativeNetwork})
+	return agentpacketrelay.NewV2FinalizedVerifier(agenttransport.Config{Network: c.Network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{c.CodeHash}, Locator: registryLocator{locator}}}, pinnedReader{source, adapter, nativeNetwork})
 }
 
 type registryLocator struct{ l *nativecore.Locator }

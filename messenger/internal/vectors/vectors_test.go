@@ -109,7 +109,7 @@ func delegation(t *testing.T) identity.Delegation {
 	if err != nil {
 		t.Fatalf("policy digest: %v", err)
 	}
-	return identity.Delegation{
+	return identity.Delegation{AuthorizationEpoch: 1,
 		Network:                       network,
 		AgentID:                       agentID,
 		EndpointID:                    endpointID,

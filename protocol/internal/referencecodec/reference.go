@@ -176,7 +176,7 @@ func ComputeAgent(v VectorSet) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	identity := cell.BeginCell().MustStoreUInt(identityMagic, 32).MustStoreUInt(1, 8).
+	identity := cell.BeginCell().MustStoreUInt(identityMagic, 32).MustStoreUInt(3, 8).
 		MustStoreSlice(objectNonce, 256).MustStoreSlice(policy.Hash(), 256).MustStoreRef(domain).EndCell()
 	objectID := "agent_" + hex.EncodeToString(identity.Hash())
 	payload := cell.BeginCell().MustStoreSlice(objectNonce, 256).MustStoreRef(policy).EndCell()

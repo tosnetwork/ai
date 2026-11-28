@@ -216,6 +216,23 @@ func generateCorpus(t *testing.T, verifiers map[string]func([]byte) error) []Cor
 			"an empty document is not an object")
 	}
 
+	delegationJSON := string(validDelegationJSON(t))
+	add("endpoint-delegation/epoch-zero", "endpoint-delegation",
+		replaceNumberField(delegationJSON, "authorization_epoch", "0"),
+		"a Registry v2 Endpoint delegation must bind a positive epoch")
+	add("endpoint-delegation/epoch-duplicate", "endpoint-delegation",
+		strings.Replace(delegationJSON, `"authorization_epoch":1`, `"authorization_epoch":0,"authorization_epoch":1`, 1),
+		"duplicate zero and positive epochs make the wire document ambiguous")
+	add("endpoint-delegation/epoch-case-alias", "endpoint-delegation",
+		strings.Replace(delegationJSON, `"authorization_epoch"`, `"AUTHORIZATION_EPOCH"`, 1),
+		"the wire schema names one exact lower-case epoch key")
+	add("endpoint-delegation/epoch-missing", "endpoint-delegation",
+		strings.Replace(delegationJSON, `"authorization_epoch":1,`, "", 1),
+		"the v3 wire document must carry an epoch")
+	add("endpoint-delegation/legacy-schema", "endpoint-delegation",
+		setField(delegationJSON, "schema", "tos.messaging.endpoint-delegation.v2"),
+		"the legacy canonical domain cannot authorize a Registry v2 Endpoint")
+
 	// Delegation: an inverted validity window, and a zeroed policy digest.
 	add("endpoint-delegation/window-inverted", "endpoint-delegation",
 		flipUnix(string(validDelegationJSON(t)), "not_before_unix", "expires_at_unix"),

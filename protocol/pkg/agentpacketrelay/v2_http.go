@@ -14,10 +14,8 @@ import (
 	"sync"
 	"time"
 
-	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"github.com/tosnetwork/ai/protocol/pkg/agentpacketseal"
 	"github.com/tosnetwork/ai/protocol/pkg/agenttransport"
-	"github.com/tosnetwork/ai/protocol/pkg/toschain"
 )
 
 const MaxV2ListingBytes = 80 << 10
@@ -82,13 +80,12 @@ func NewV2Server(c V2ServerConfig) (*V2Server, error) {
 	return &V2Server{store: c.Store, verifier: c.Verifier, base: u.EscapedPath(), relay: c.URL, now: c.Now, trusted: append([]netip.Prefix(nil), c.TrustedProxies...), deposits: newRateLimiter(c.DepositRate, DefaultMaxRateClients, DefaultMaxRateClientsPer48), reads: newRateLimiter(c.ReadRate, DefaultMaxRateClients, DefaultMaxRateClientsPer48), bodies: make(chan struct{}, DefaultMaxConcurrentDeposits), clients: map[netip.Addr]int{}, sites: map[netip.Addr]int{}, directory: c.Directory, hintPolicy: c.HintPolicy, lookups: newRateLimiter(RateLimit{PerMinute: 60, Burst: 60}, DefaultMaxRateClients, DefaultMaxRateClientsPer48), waitTimer: realWaitTimer}, nil
 }
 
-// NewV2FinalizedVerifier uses the existing finalized reader; production and
-// unknown genesis tuples remain refused by the transport's pinned constructors.
+// NewV2FinalizedVerifier uses the authenticated Registry v2 reader.
 func NewV2FinalizedVerifier(c agenttransport.Config, source agenttransport.FinalizedStateReader) (*agenttransport.Verifier, error) {
 	if source == nil {
 		return nil, errors.New("finalized source required")
 	}
-	adapter, err := agenttransport.NewLegacyTestNetworkResolver(c.Mode, c.Network, v2FinalizedSource{source})
+	adapter, err := agenttransport.NewRegistryResolver(c.Network, source)
 	if err != nil {
 		return nil, err
 	}
@@ -540,18 +537,4 @@ func (s *V2Server) ackV2(w http.ResponseWriter, r *http.Request, agent string, i
 		return
 	}
 	v2Empty(w, 204)
-}
-
-// Only transport-level outage errors allow the verifier's bounded cached pass.
-// A malformed answer, contradiction or corrupt checkpoint never does.
-type v2FinalizedSource struct {
-	agenttransport.FinalizedStateReader
-}
-
-func (s v2FinalizedSource) ResolveState(ctx context.Context, id, hash string) (*nativev1.NativeStateV1, bool, error) {
-	state, found, err := s.FinalizedStateReader.ResolveState(ctx, id, hash)
-	if errors.Is(err, toschain.ErrEndpointsUnavailable) || errors.Is(err, context.DeadlineExceeded) {
-		return nil, false, agenttransport.ErrUnavailable
-	}
-	return state, found, err
 }

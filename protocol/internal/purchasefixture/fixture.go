@@ -149,10 +149,10 @@ func New() (*Purchase, error) {
 		SourceDigest: "sha256:" + hex.EncodeToString(source[:]), RequestHash: requestHash,
 		Output: []byte("ok  example.com/work 0.01s\n"), Report: []byte(`{"ok":true}`)}
 	purchase.Capability = &nativev1.NativeStateV1{Network: network, State: &nativev1.NativeStateV1_Capability{
-		Capability: &nativev1.CapabilityStateV1{CapabilityId: CapabilityID, OwnerAgentId: ProviderAgentID,
+		Capability: &nativev1.CapabilityStateV1{EncodingVersion: nativecore.StateEncodingVersion, CapabilityId: CapabilityID, OwnerAgentId: ProviderAgentID,
 			Versions: []*nativev1.CapabilityVersionV1{{Version: Version, ManifestDigest: digest}}}}}
 	purchase.Agent = &nativev1.NativeStateV1{Network: network, State: &nativev1.NativeStateV1_Agent{
-		Agent: &nativev1.AgentStateV1{AgentId: ProviderAgentID}}}
+		Agent: &nativev1.AgentStateV1{EncodingVersion: nativecore.StateEncodingVersion, AuthorizationEpoch: 1, AgentId: ProviderAgentID}}}
 	if purchase.Artifact, err = ArtifactTar(purchase.Output, purchase.Report); err != nil {
 		return nil, err
 	}

@@ -6,7 +6,7 @@ import (
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
 
-// ErrUnapprovedNetwork refuses the test-only exception outside a reviewed
+// ErrUnapprovedNetwork refuses wallet use outside a reviewed
 // genesis. A runtime mode string cannot enroll a network.
 var ErrUnapprovedNetwork = errors.New("transport delegation network identity is not on the code-pinned approved test-network allowlist")
 
@@ -22,7 +22,8 @@ const (
 	publicTestFile      = "bfc773cfbb122917353c93f72494035d4986b7e4ae0dc8b7be39347f7a546186"
 )
 
-func validateApprovedTestNetwork(network *nativev1.NetworkDomain) error {
+// ValidateApprovedTestNetwork validates the wallet command’s approved network tuple.
+func ValidateApprovedTestNetwork(network *nativev1.NetworkDomain) error {
 	if err := validateNetwork(network); err != nil {
 		return err
 	}

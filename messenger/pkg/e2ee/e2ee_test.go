@@ -43,7 +43,7 @@ func testDelegation(t *testing.T, key ed25519.PrivateKey) identity.Delegation {
 	if err != nil {
 		t.Fatalf("derive endpoint: %v", err)
 	}
-	delegation := identity.Delegation{
+	delegation := identity.Delegation{AuthorizationEpoch: 1,
 		Network:                       network,
 		AgentID:                       senderAgent,
 		EndpointID:                    endpointID,

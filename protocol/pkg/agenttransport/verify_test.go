@@ -71,12 +71,12 @@ func newFixture(t testing.TB) *fixture {
 	}
 	digest := sha256.Sum256(wire)
 	network := &nativev1.NetworkDomain{NetworkId: localTestNetworkID, GenesisRootHash: localTestRoot, GenesisFileHash: localTestFile}
-	code := "tvm-cell-sha256:" + strings.Repeat("3", 64)
-	state := &nativev1.NativeStateV1{Network: proto.Clone(network).(*nativev1.NetworkDomain), TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: d.AgentID(), Policy: policy, DelegationDigests: []string{"sha256:" + hex.EncodeToString(digest[:])}}}}
+	code := nativecore.RegistryV2CodeHash
+	state := &nativev1.NativeStateV1{Network: proto.Clone(network).(*nativev1.NetworkDomain), TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{EncodingVersion: 2, AuthorizationEpoch: 1, AgentId: d.AgentID(), Policy: policy, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + hex.EncodeToString(digest[:]), AdmissionEpoch: 1}}}}}
 	epoch := uint64(1)
 	r := &reader{snapshot: Snapshot{State: state, CurrentEpoch: &epoch, AdmissionEpochs: map[[32]byte]uint64{digest: 1}, EpochCheckpoint: 10}}
 	clock := &fakeClock{at: time.Unix(1800000010, 0)}
-	return &fixture{d: d, wire: wire, c: Config{Mode: TestNetworkEpochAware, Network: network, ChainPolicy: ChainPolicy{RegistryCodeHashes: []string{code}, MinFinalizedCheckpoint: 10, Locator: locator("0:test")}, Clock: clock}, r: r, clock: clock}
+	return &fixture{d: d, wire: wire, c: Config{Network: network, ChainPolicy: ChainPolicy{RegistryCodeHashes: []string{code}, MinFinalizedCheckpoint: 10, Locator: locator("0:test")}, Clock: clock}, r: r, clock: clock}
 }
 func (f *fixture) verifier(t testing.TB) *Verifier {
 	t.Helper()
@@ -101,7 +101,7 @@ func (f *fixture) reencode(t *testing.T) {
 	}
 	f.wire = b
 	digest := sha256.Sum256(b)
-	f.r.snapshot.State.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(digest[:])}
+	f.r.snapshot.State.GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + hex.EncodeToString(digest[:]), AdmissionEpoch: f.d.AuthorizationEpoch}}
 	f.r.snapshot.AdmissionEpochs = map[[32]byte]uint64{digest: f.d.AuthorizationEpoch}
 }
 
@@ -132,8 +132,12 @@ func TestVerificationChecks(t *testing.T) {
 		{"agent", func(f *fixture) { f.r.snapshot.State.GetAgent().AgentId = "agent_" + strings.Repeat("a", 64) }, Relay},
 		{"absent", func(f *fixture) { f.r.snapshot.State = nil }, Relay},
 		{"tombstone", func(f *fixture) { f.r.snapshot.State.GetAgent().Tombstoned = true }, Relay},
-		{"membership", func(f *fixture) { f.r.snapshot.State.GetAgent().DelegationDigests = nil }, Relay},
-		{"current-epoch", func(f *fixture) { *f.r.snapshot.CurrentEpoch = 2 }, Relay},
+		{"membership", func(f *fixture) { f.r.snapshot.State.GetAgent().DelegationAdmissions = nil }, Relay},
+		{"withdrawn", func(f *fixture) { f.r.snapshot.State.GetAgent().DelegationAdmissions[0].Withdrawn = true }, Relay},
+		{"current-epoch", func(f *fixture) {
+			*f.r.snapshot.CurrentEpoch = 2
+			f.r.snapshot.State.GetAgent().AuthorizationEpoch = 2
+		}, Relay},
 		{"admission-epoch", func(f *fixture) {
 			for key := range f.r.snapshot.AdmissionEpochs {
 				f.r.snapshot.AdmissionEpochs[key] = 2
@@ -191,7 +195,7 @@ func TestFallbackNeverHidesRevocationOrIntegrity(t *testing.T) {
 		if integrity {
 			f.r.err = errors.New("invalid proof")
 		} else {
-			f.r.snapshot.State.GetAgent().DelegationDigests = nil
+			f.r.snapshot.State.GetAgent().DelegationAdmissions = nil
 		}
 		verify(t, v, f.wire, Relay, false)
 		f.r.err = ErrUnavailable
@@ -219,9 +223,16 @@ func TestCacheCapacityAndClockRollback(t *testing.T) {
 	f := newFixture(t)
 	f.c.CacheEntries = 1
 	v := f.verifier(t)
-	verify(t, v, f.wire, Relay, true)
+	first := append([]byte(nil), f.wire...)
+	firstDigest := sha256.Sum256(first)
 	f.d.NotAfter++
 	f.reencode(t)
+	f.r.snapshot.AdmissionEpochs[firstDigest] = f.d.AuthorizationEpoch
+	agent := f.r.snapshot.State.GetAgent()
+	agent.DelegationAdmissions = append(agent.DelegationAdmissions, &nativev1.DelegationAdmissionV1{
+		Digest: "sha256:" + hex.EncodeToString(firstDigest[:]), AdmissionEpoch: f.d.AuthorizationEpoch,
+	})
+	verify(t, v, first, Relay, true)
 	verify(t, v, f.wire, Relay, true)
 	if len(v.passes) != 1 {
 		t.Fatal("unbounded cache")
@@ -232,37 +243,18 @@ func TestCacheCapacityAndClockRollback(t *testing.T) {
 		t.Fatal("rollback retained passes")
 	}
 }
-func TestProductionAndLegacyModes(t *testing.T) {
+func TestEpochZeroRefused(t *testing.T) {
 	f := newFixture(t)
-	for _, mode := range []NetworkMode{Production, "", "typo"} {
-		c := f.c
-		c.Mode = mode
-		if _, err := NewVerifier(c, f.r); err == nil {
-			t.Fatal("production or unknown mode accepted")
-		}
-	}
-	f.c.Mode = TestNetworkLegacyEpochZero
 	f.d.AuthorizationEpoch = 0
 	f.reencode(t)
-	f.r.snapshot.CurrentEpoch = nil
-	f.r.snapshot.AdmissionEpochs = nil
-	f.r.snapshot.EpochCheckpoint = 0
-	verify(t, f.verifier(t), f.wire, Relay, true)
-	f.d.AuthorizationEpoch = 1
-	f.reencode(t)
-	f.r.snapshot.AdmissionEpochs = nil
-	verify(t, f.verifier(t), f.wire, Relay, false)
-	f.d.AuthorizationEpoch = 0
-	f.reencode(t)
-	epoch := uint64(1)
-	f.r.snapshot.CurrentEpoch = &epoch
 	verify(t, f.verifier(t), f.wire, Relay, false)
 }
+
 func TestBuilderRequiresCurrentEpochAndPolicy(t *testing.T) {
 	f := newFixture(t)
 	v := f.verifier(t)
 	// A builder checks before commitment, so there is intentionally no membership.
-	f.r.snapshot.State.GetAgent().DelegationDigests = nil
+	f.r.snapshot.State.GetAgent().DelegationAdmissions = nil
 	if _, err := v.BuildDelegation(context.Background(), f.d); err != nil {
 		t.Fatal(err)
 	}
@@ -283,13 +275,16 @@ func TestPolicyCyclesNeverResurrectOldEpoch(t *testing.T) {
 	original := proto.Clone(f.r.snapshot.State.GetAgent().Policy).(*nativev1.ControllerPolicyV1)
 	f.r.snapshot.State.GetAgent().Policy.RecoveryTimelockSeconds = 60
 	*f.r.snapshot.CurrentEpoch = 2
+	f.r.snapshot.State.GetAgent().AuthorizationEpoch = 2
 	f.clock.advance(300 * time.Second)
 	verify(t, v, f.wire, Relay, false)
 	f.r.snapshot.State.GetAgent().Policy = original
 	*f.r.snapshot.CurrentEpoch = 3
+	f.r.snapshot.State.GetAgent().AuthorizationEpoch = 3
 	verify(t, v, f.wire, Relay, false)
 	// Installing identical bytes still advances the epoch.
 	*f.r.snapshot.CurrentEpoch = 4
+	f.r.snapshot.State.GetAgent().AuthorizationEpoch = 4
 	verify(t, v, f.wire, Relay, false)
 	// Admitting a future-encoded digest early does not authorize that epoch.
 	f.d.AuthorizationEpoch = 5
@@ -299,6 +294,7 @@ func TestPolicyCyclesNeverResurrectOldEpoch(t *testing.T) {
 	}
 	verify(t, v, f.wire, Relay, false)
 	*f.r.snapshot.CurrentEpoch = 5
+	f.r.snapshot.State.GetAgent().AuthorizationEpoch = 5
 	verify(t, v, f.wire, Relay, false)
 }
 
@@ -346,37 +342,26 @@ type legacySource struct {
 func (s legacySource) ResolveState(context.Context, string, string) (*nativev1.NativeStateV1, bool, error) {
 	return s.state, s.found, s.err
 }
-func TestLegacyAdapterIsExplicit(t *testing.T) {
+func TestRegistryAdapterUsesOneFinalizedState(t *testing.T) {
 	f := newFixture(t)
-	source := legacySource{state: f.r.snapshot.State, found: true}
-	for _, mode := range []NetworkMode{Production, TestNetworkEpochAware, ""} {
-		if _, err := NewLegacyTestNetworkResolver(mode, f.c.Network, source); err == nil {
-			t.Fatal("implicit legacy adapter")
-		}
-	}
-	adapter, err := NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, source)
+	state := f.r.snapshot.State
+	state.Reference.ContractCodeHash = nativecore.RegistryV2CodeHash
+	source := legacySource{state: state, found: true}
+	adapter, err := NewRegistryResolver(f.c.Network, source)
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := adapter.ResolveFinalizedAgent(context.Background(), f.d.AgentID())
-	if err != nil || !proto.Equal(snapshot.State, source.state) || snapshot.CurrentEpoch != nil || snapshot.AdmissionEpochs != nil || snapshot.EpochCheckpoint != 0 {
-		t.Fatalf("fabricated metadata: %v", err)
+	if err != nil || !proto.Equal(snapshot.State, state) || snapshot.CurrentEpoch == nil ||
+		*snapshot.CurrentEpoch != 1 || len(snapshot.AdmissionEpochs) != 1 || snapshot.EpochCheckpoint != 10 {
+		t.Fatalf("inconsistent finalized snapshot: %+v, %v", snapshot, err)
 	}
-	source.found = false
-	adapter, err = NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err = adapter.ResolveFinalizedAgent(context.Background(), f.d.AgentID())
-	if err != nil || snapshot.State != nil {
-		t.Fatal("missing Agent accepted")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err = adapter.ResolveFinalizedAgent(ctx, f.d.AgentID()); err == nil {
-		t.Fatal("ignored cancellation")
+	state.GetAgent().EncodingVersion = 1
+	if _, err := adapter.ResolveFinalizedAgent(context.Background(), f.d.AgentID()); err == nil {
+		t.Fatal("schema 1 accepted")
 	}
 }
+
 func TestCancelledRequestNeverUsesAPass(t *testing.T) {
 	f := newFixture(t)
 	v := f.verifier(t)
@@ -388,28 +373,6 @@ func TestCancelledRequestNeverUsesAPass(t *testing.T) {
 	}
 }
 
-func TestLegacyPolicyCycleHasTheDocumentedGap(t *testing.T) {
-	f := newFixture(t)
-	f.c.Mode = TestNetworkLegacyEpochZero
-	f.d.AuthorizationEpoch = 0
-	f.reencode(t)
-	f.r.snapshot.CurrentEpoch = nil
-	f.r.snapshot.AdmissionEpochs = nil
-	f.r.snapshot.EpochCheckpoint = 0
-	v := f.verifier(t)
-	verify(t, v, f.wire, Relay, true)
-	original := proto.Clone(f.r.snapshot.State.GetAgent().Policy).(*nativev1.ControllerPolicyV1)
-	f.r.snapshot.State.GetAgent().Policy.RecoveryTimelockSeconds = 60
-	f.clock.advance(300 * time.Second)
-	verify(t, v, f.wire, Relay, false)
-	f.r.snapshot.State.GetAgent().Policy = original
-	// No epoch exists: returning to A resurrects its digest, and installing
-	// identical bytes cannot be detected. This is why this mode is test-only.
-	verify(t, v, f.wire, Relay, true)
-	f.r.snapshot.State.GetAgent().Sequence++
-	f.clock.advance(300 * time.Second)
-	verify(t, v, f.wire, Relay, true)
-}
 func TestWithdrawalAndReadmissionAreScopedByEpoch(t *testing.T) {
 	f := newFixture(t)
 	v := f.verifier(t)
@@ -425,7 +388,8 @@ func TestWithdrawalAndReadmissionAreScopedByEpoch(t *testing.T) {
 	verify(t, v, sibling, Relay, true)
 	// A new admission after an epoch bump cannot revive bytes encoding epoch 1.
 	*f.r.snapshot.CurrentEpoch = 2
-	f.r.snapshot.State.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(oldDigest[:])}
+	f.r.snapshot.State.GetAgent().AuthorizationEpoch = 2
+	f.r.snapshot.State.GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + hex.EncodeToString(oldDigest[:]), AdmissionEpoch: 2}}
 	f.r.snapshot.AdmissionEpochs = map[[32]byte]uint64{oldDigest: 2}
 	verify(t, v, old, Relay, false)
 	// A future-encoded digest admitted now is not valid in the next epoch under
@@ -436,13 +400,14 @@ func TestWithdrawalAndReadmissionAreScopedByEpoch(t *testing.T) {
 	f.r.snapshot.AdmissionEpochs[digest] = 2
 	verify(t, v, f.wire, Relay, false)
 	*f.r.snapshot.CurrentEpoch = 3
+	f.r.snapshot.State.GetAgent().AuthorizationEpoch = 3
 	verify(t, v, f.wire, Relay, false)
 	f.r.snapshot.AdmissionEpochs[digest] = 3
 	verify(t, v, f.wire, Relay, true)
 }
 func TestFinalizedSetBounds(t *testing.T) {
 	f := newFixture(t)
-	f.r.snapshot.State.GetAgent().DelegationDigests = append(f.r.snapshot.State.GetAgent().DelegationDigests, make([]string, 128)...)
+	f.r.snapshot.State.GetAgent().DelegationAdmissions = append(f.r.snapshot.State.GetAgent().DelegationAdmissions, make([]*nativev1.DelegationAdmissionV1, 384)...)
 	verify(t, f.verifier(t), f.wire, Relay, false)
 	f = newFixture(t)
 	for i := range 129 {
@@ -508,16 +473,14 @@ func TestTimeAfterReadAtExpiration(t *testing.T) {
 	verify(t, f.verifier(t), f.wire, Relay, false)
 }
 
-func TestLegacyReaderUsesTheOriginalNetworkBeforeNormalization(t *testing.T) {
+func TestRegistryReaderUsesTheOriginalNetworkBeforeNormalization(t *testing.T) {
 	f := newFixture(t)
-	f.c.Mode = TestNetworkLegacyEpochZero
-	f.d.AuthorizationEpoch = 0
-	f.reencode(t)
 	original := f.r.snapshot.State
 	original.Network.GenesisRootHash = "sha256:" + original.Network.GenesisRootHash
 	original.Network.GenesisFileHash = "sha256:" + original.Network.GenesisFileHash
+	original.Reference.ContractCodeHash = nativecore.RegistryV2CodeHash
 	source := legacySource{state: original, found: true}
-	adapter, err := NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, &source)
+	adapter, err := NewRegistryResolver(f.c.Network, &source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,9 +515,49 @@ func BenchmarkVerifyCached(b *testing.B) {
 	}
 }
 
+func TestTransportRefusesMixedRegistryRelease(t *testing.T) {
+	f := newFixture(t)
+	f.c.ChainPolicy.RegistryCodeHashes = append(f.c.ChainPolicy.RegistryCodeHashes, "tvm-cell-sha256:"+strings.Repeat("8", 64))
+	if _, err := NewVerifier(f.c, f.r); err == nil {
+		t.Fatal("mixed Registry releases accepted")
+	}
+}
+
+func TestNewFinalizedObservationInvalidatesSiblingPass(t *testing.T) {
+	for _, change := range []string{"epoch", "withdrawal", "tombstone"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFixture(t)
+			v := f.verifier(t)
+			old := append([]byte(nil), f.wire...)
+			oldDigest := sha256.Sum256(old)
+			verify(t, v, old, Relay, true)
+			f.d.Purposes = Relay
+			state := f.r.snapshot.State
+			agent := state.GetAgent()
+			state.TvmStateHash = "tvm-cell-sha256:" + strings.Repeat("e", 64)
+			state.Reference.FinalizedCheckpoint++
+			f.r.snapshot.EpochCheckpoint++
+			if change == "epoch" {
+				f.d.AuthorizationEpoch++
+				agent.AuthorizationEpoch = f.d.AuthorizationEpoch
+				*f.r.snapshot.CurrentEpoch = f.d.AuthorizationEpoch
+			}
+			f.reencode(t)
+			if change == "withdrawal" {
+				agent.DelegationAdmissions = append(agent.DelegationAdmissions, &nativev1.DelegationAdmissionV1{
+					Digest: "sha256:" + hex.EncodeToString(oldDigest[:]), AdmissionEpoch: agent.AuthorizationEpoch, Withdrawn: true,
+				})
+			}
+			agent.Tombstoned = change == "tombstone"
+			verify(t, v, f.wire, Relay, change != "tombstone")
+			verify(t, v, old, Relay, false)
+		})
+	}
+}
+
 func TestPresenceAndTombstoneAreDistinctFromReadFailure(t *testing.T) {
 	f := newFixture(t)
-	adapter, err := NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, legacySource{found: true})
+	adapter, err := NewRegistryResolver(f.c.Network, legacySource{found: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,5 +612,13 @@ func TestVerificationDeadlineStaysAtTheOriginalRead(t *testing.T) {
 	_, fresh, err := v.VerifyDelegationUntil(t.Context(), f.wire, Relay)
 	if err != nil || !fresh.Equal(readAt.Add(RefuseAfter)) {
 		t.Fatal(fresh, err)
+	}
+}
+
+func TestBuilderRefusesFutureRegistryEpoch(t *testing.T) {
+	f := newFixture(t)
+	f.d.AuthorizationEpoch++
+	if _, err := f.verifier(t).BuildDelegation(t.Context(), f.d); err == nil {
+		t.Fatal("builder accepted a future authorization epoch")
 	}
 }

@@ -9,52 +9,14 @@ own.
 
 ## Authority and deployment gate
 
-`NewVerifier` refuses `Production`, the zero mode and every unknown mode.
-Every mode is first bound to a code-pinned allowlist of approved test-network
-identities. The exact tuple is the canonical `tos:global-id:N` identifier and
-both bare zero-state hashes. A mode string, a known global id with another
-genesis, or a different global id with known hashes cannot enroll a network.
-Both constructors refuse an unlisted identity with `ErrUnapprovedNetwork`
-before mode selection or any resolver read. The allowlist is constants in
-`networks.go`, never runtime configuration.
-
-The reviewed pins are:
-
-| Network | Global id | Zero-state root | Zero-state file |
-| --- | --- | --- | --- |
-| Local PQ network | 3 | `65735247a371030abe811aeac0afe357301ce90e161450d26f88b4beb5b4c366` | `c3860fe196a2a1b5e4e74a9cf9448624a353ce68a8c4c5f6413347586d688769` |
-| Public testnet epoch 8 | 2 | `7095f2295d9c0a2310e7530f3d4f7ac03970133a19d96167ac6aa87d03ff908c` | `bfc773cfbb122917353c93f72494035d4986b7e4ae0dc8b7be39347f7a546186` |
-
-The local pins were checked against the operator's `network.json` and both
-local global-config copies; the public pins against the published epoch-8
-`genesis.json` (its hexadecimal and base64 zero-state representations agree).
-These are enrollment/provenance checks, not live transport acceptance. A new
-genesis requires a reviewed source change; it is refused until then. Production
-global id 1 is not enrolled even if a test mode is selected.
-
-The deployed registry has no authorization or admission epochs. This PR does
-not add fields to registry state, infer epochs from sequence/generation, or
-claim production readiness.
-
-`TestNetworkLegacyEpochZero` explicitly enables the deployed epoch-less
-reader through `NewLegacyTestNetworkResolver` (the `ResolveState` interface
-provided by the protocol chain resolver). It checks the original network tuple
-before normalizing native `sha256:`-prefixed genesis hashes to transport hashes.
-Delegations must encode zero;
-no current/admission epoch metadata may be supplied. Policy A → B → A and an
-update with identical policy bytes remain known revocation gaps in this mode.
-Do not use it for production networks.
-
-`TestNetworkEpochAware` exercises all epoch rules with synthetic finalized
-snapshots. It is not an adapter for an existing registry. A later registry
-change must expose an atomic finalized snapshot with the current epoch and
-each live digest's admission epoch, at `EpochCheckpoint` equal to the outer
-state's finalized checkpoint, before production can be enabled. Neither epoch
-is guessed when absent. A future-encoded digest admitted early fails both
-before and after that future epoch begins unless deliberately admitted again
-by the new authority. The registry must also enforce withdrawal permanence
-and clear its live and withdrawn sets at each epoch bump; those changes are
-outside this package.
+`NewVerifier` pins the Registry v2 code hash and validates the configured
+network tuple. `NewRegistryResolver` checks the original finalized network
+tuple before normalizing native `sha256:`-prefixed genesis hashes. The
+configured relay independently checks that its endpoint quorum serves that
+genesis. Each finalized Agent read must use schema 2 and include a positive
+current epoch and admission records from the same finalized checkpoint.
+A delegation must match the current epoch and a live admission at that epoch.
+The December epoch-0 release uses its separately pinned Registry v1 client.
 
 `Snapshot` is one immutable result, including the outer native state. The
 resolver must authenticate state and finality under its declared trust model,
@@ -216,9 +178,7 @@ Direct addresses default to public unicast IPv4, excluding private, loopback,
 link-local, shared-address, documentation, benchmark and reserved ranges. The
 explicit `HintPolicy.AllowPrivateIPv4` exception admits only private ranges,
 not other reserved addresses, and is recorded in `VerifiedHint.PrivateIPv4Allowed`.
-The existing verifier constructor still admits only exact code-pinned test
-networks; production configuration refuses. No production one-relay mode is
-introduced: production verification is not available until registry epochs ship.
+Production relay hints must name at least two relays.
 
 A hello is **402 bytes**, including the 167-byte epoch-bearing delegation, and
 fits in one 8,192-byte ADNL query. `VerifyHello` requires authenticated channel

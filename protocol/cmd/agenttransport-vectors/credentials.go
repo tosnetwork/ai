@@ -460,7 +460,7 @@ func allCaveats(nb, na uint64, relay string, ops agenttransport.Operation, l [16
 }
 
 func (g *generator) build() error {
-	if err := g.delegation("owner", "transport-owner", 0, 1, 3600); err != nil {
+	if err := g.delegation("owner", "transport-owner", 1, 1, 3600); err != nil {
 		return err
 	}
 	if err := g.delegation("contact", "transport-contact", 7, 7, agenttransport.MaxCredentialSeconds); err != nil {

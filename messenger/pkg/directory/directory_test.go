@@ -110,7 +110,7 @@ func testDelegation(t *testing.T, key ed25519.PrivateKey) identity.Delegation {
 	if err != nil {
 		t.Fatalf("derive endpoint: %v", err)
 	}
-	delegation := identity.Delegation{
+	delegation := identity.Delegation{AuthorizationEpoch: 1,
 		Network:                       network,
 		AgentID:                       agentID,
 		EndpointID:                    endpointID,
@@ -172,10 +172,10 @@ func liveResolver(t *testing.T, delegation identity.Delegation) stubResolver {
 		t.Fatalf("digest: %v", err)
 	}
 	return stubResolver{states: map[string]*nativev1.NativeStateV1{
-		delegation.AgentID: nativeState(&nativev1.AgentStateV1{
-			AgentId:           delegation.AgentID,
-			Policy:            &nativev1.ControllerPolicyV1{Threshold: 1},
-			DelegationDigests: []string{digest},
+		delegation.AgentID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2,
+			AgentId:              delegation.AgentID,
+			Policy:               &nativev1.ControllerPolicyV1{Threshold: 1},
+			DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 1}},
 		}),
 	}}
 }

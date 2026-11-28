@@ -296,8 +296,8 @@ func TestRefusedModerationClaimsNoInvite(t *testing.T) {
 	}
 	gate, err := New(Config{Network: testNetwork(), Chain: testChain(),
 		Resolver: stubResolver{states: map[string]*nativev1.NativeStateV1{
-			senderID: nativeState(&nativev1.AgentStateV1{AgentId: senderID,
-				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationDigests: []string{senderDigest}}),
+			senderID: nativeState(&nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: senderID,
+				Policy: &nativev1.ControllerPolicyV1{Threshold: 1}, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: senderDigest, AdmissionEpoch: 1}}}),
 			localID: localAgent}}, Journal: journal, Devices: mustDevices(t, journal), Rooms: rooms,
 		Policy: policy, LocalDelegationJSON: localRaw, LocalAgentID: local.AgentID,
 		LocalEndpointID: local.EndpointID, Now: func() time.Time { return now },

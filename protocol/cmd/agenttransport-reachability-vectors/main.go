@@ -87,7 +87,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	d := at.Delegation{AgentDigest: sha256.Sum256([]byte("reachability-vector-agent")), AuthorizationEpoch: 1, PolicyHash: policy, Purposes: 7, NotBefore: 1800000000, NotAfter: 1800000000 + at.MaxDelegationSeconds, MaxCredentialSeconds: 600}
+	d := at.Delegation{AgentDigest: sha256.Sum256([]byte("reachability-vector-agent")), AuthorizationEpoch: 2, PolicyHash: policy, Purposes: 7, NotBefore: 1800000000, NotAfter: 1800000000 + at.MaxDelegationSeconds, MaxCredentialSeconds: 600}
 	copy(d.TransportKey[:], key[32:])
 	emit := func(v positive, wire []byte) {
 		hash := sha256.Sum256(wire)

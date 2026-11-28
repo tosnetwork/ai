@@ -27,6 +27,11 @@ enum NativeErrorCodeV1 {
   reserved 2214;
   reserved "NATIVE_ERROR_CODE_V1_WEAK_KEY";
   NATIVE_ERROR_CODE_V1_POLICY_TOO_WIDE = 2215;
+  NATIVE_ERROR_CODE_V1_EPOCH_MISMATCH = 2216;
+  NATIVE_ERROR_CODE_V1_EPOCH_EXHAUSTED = 2217;
+  NATIVE_ERROR_CODE_V1_WITHDRAWN_DIGEST = 2218;
+  NATIVE_ERROR_CODE_V1_CAPACITY_FULL = 2219;
+  NATIVE_ERROR_CODE_V1_DIGEST_NOT_LIVE = 2220;
   NATIVE_ERROR_CODE_V1_PUBLIC_BAD_REQUEST = 2300;
   NATIVE_ERROR_CODE_V1_PUBLIC_NOT_FOUND = 2301;
   NATIVE_ERROR_CODE_V1_PUBLIC_CONFLICT = 2302;
@@ -101,8 +106,14 @@ message NativeActionV1 {
 // Each signature list holds at most 8 entries in strictly ascending key_id
 // order.
 message SignedNativeActionV1 { NativeActionV1 action = 1; repeated SignatureV1 authority_signatures = 2; repeated SignatureV1 counterparty_signatures = 3; reserved 4, 5; }
-message AgentStateV1 { string agent_id = 1; uint64 generation = 2; uint64 sequence = 3; string last_action_hash = 4; ControllerPolicyV1 policy = 5; repeated string delegation_digests = 6; uint64 recovery_execute_after_unix_seconds = 7; string recovery_initiation_action_hash = 8; ControllerPolicyV1 recovery_policy = 9; bool tombstoned = 10; string recovery_initiating_policy_hash = 11; }
-message CapabilityStateV1 { string capability_id = 1; uint64 generation = 2; uint64 sequence = 3; string last_action_hash = 4; string owner_agent_id = 5; reserved 6; repeated CapabilityVersionV1 versions = 7; bool tombstoned = 8; }
+message AgentStateV1 { string agent_id = 1; uint64 generation = 2; uint64 sequence = 3; string last_action_hash = 4; ControllerPolicyV1 policy = 5; reserved 6; reserved "delegation_digests"; uint64 recovery_execute_after_unix_seconds = 7; string recovery_initiation_action_hash = 8; ControllerPolicyV1 recovery_policy = 9; bool tombstoned = 10; string recovery_initiating_policy_hash = 11; uint64 authorization_epoch = 12; repeated DelegationAdmissionV1 delegation_admissions = 13; uint32 encoding_version = 15; }
+message DelegationAdmissionV1 {
+  string digest = 1;
+  uint64 admission_epoch = 2;
+  bool withdrawn = 3;
+}
+
+message CapabilityStateV1 { string capability_id = 1; uint64 generation = 2; uint64 sequence = 3; string last_action_hash = 4; string owner_agent_id = 5; reserved 6; repeated CapabilityVersionV1 versions = 7; bool tombstoned = 8; uint32 encoding_version = 9; }
 message NativeStateV1 { NetworkDomain network = 1; string tvm_state_hash = 2; ChainReference reference = 3; oneof state { AgentStateV1 agent = 10; CapabilityStateV1 capability = 11; } }
 message SubmitNativeActionRequest { RequestContext context = 1; SignedNativeActionV1 submission = 2; }
 message SubmitNativeActionResponse { string action_hash = 1; NativeStateV1 state = 2; reserved 3; bool relay_accepted = 4; }

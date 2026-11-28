@@ -1,7 +1,6 @@
 package agenttransport
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -50,80 +49,17 @@ func unapprovedNetworkFixtures() []badNetwork {
 	}
 }
 
-func TestVerifierRejectsUnapprovedNetworks(t *testing.T) {
-	for _, bad := range unapprovedNetworkFixtures() {
-		t.Run(bad.name, func(t *testing.T) {
-			for _, mode := range []NetworkMode{TestNetworkLegacyEpochZero, TestNetworkEpochAware, Production, ""} {
-				t.Run(string(mode), func(t *testing.T) {
-					f := newFixture(t)
-					f.c.Network = bad.network
-					f.c.Mode = mode
-					v, err := NewVerifier(f.c, f.r)
-					if v != nil || !errors.Is(err, ErrUnapprovedNetwork) {
-						t.Fatalf("unapproved network must be refused by identity before mode selection: %v", err)
-					}
-					if f.r.calls != 0 {
-						t.Fatal("unapproved identity reached the resolver")
-					}
-				})
+func TestWalletNetworkRequiresApprovedGenesis(t *testing.T) {
+	for _, tc := range unapprovedNetworkFixtures() {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateApprovedTestNetwork(tc.network); err == nil {
+				t.Fatal("unapproved network accepted")
 			}
 		})
 	}
-}
-
-func TestLegacyResolverRejectsUnapprovedNetworks(t *testing.T) {
-	for _, bad := range unapprovedNetworkFixtures() {
-		t.Run(bad.name, func(t *testing.T) {
-			for _, mode := range []NetworkMode{TestNetworkLegacyEpochZero, TestNetworkEpochAware, Production, ""} {
-				t.Run(string(mode), func(t *testing.T) {
-					f := newFixture(t)
-					source := legacySource{state: f.r.snapshot.State, found: true}
-					resolver, err := NewLegacyTestNetworkResolver(mode, bad.network, source)
-					if resolver != nil || !errors.Is(err, ErrUnapprovedNetwork) {
-						t.Fatalf("unapproved network must be refused by identity before mode selection: %v", err)
-					}
-				})
-			}
-		})
-	}
-}
-
-func TestApprovedNetworksAcceptOnlyExplicitTestModes(t *testing.T) {
 	for _, network := range approvedNetworkFixtures() {
-		t.Run(network.NetworkId, func(t *testing.T) {
-			for _, mode := range []NetworkMode{TestNetworkLegacyEpochZero, TestNetworkEpochAware} {
-				t.Run(string(mode), func(t *testing.T) {
-					f := newFixture(t)
-					f.c.Network = network
-					f.c.Mode = mode
-					f.r.snapshot.State.Network = proto.Clone(network).(*nativev1.NetworkDomain)
-					if mode == TestNetworkLegacyEpochZero {
-						f.d.AuthorizationEpoch = 0
-						f.reencode(t)
-						f.r.snapshot.CurrentEpoch = nil
-						f.r.snapshot.AdmissionEpochs = nil
-						f.r.snapshot.EpochCheckpoint = 0
-						source := legacySource{state: f.r.snapshot.State, found: true}
-						adapter, err := NewLegacyTestNetworkResolver(mode, network, source)
-						if err != nil {
-							t.Fatal(err)
-						}
-						v, err := NewVerifier(f.c, adapter)
-						if err != nil {
-							t.Fatal(err)
-						}
-						verify(t, v, f.wire, Relay, true)
-					} else {
-						verify(t, f.verifier(t), f.wire, Relay, true)
-					}
-				})
-			}
-			f := newFixture(t)
-			f.c.Network = network
-			f.c.Mode = Production
-			if _, err := NewVerifier(f.c, f.r); err == nil {
-				t.Fatal("allowlisting did not authorize production mode")
-			}
-		})
+		if err := ValidateApprovedTestNetwork(network); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

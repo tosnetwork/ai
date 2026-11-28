@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"testing"
+
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 )
 
 func TestAuthenticatedRevocationIsDistinctFromMalformedState(t *testing.T) {
@@ -18,11 +20,13 @@ func TestAuthenticatedRevocationIsDistinctFromMalformedState(t *testing.T) {
 			case "tombstone":
 				f.r.snapshot.State.GetAgent().Tombstoned = true
 			case "delegation-removed":
-				f.r.snapshot.State.GetAgent().DelegationDigests = nil
+				f.r.snapshot.State.GetAgent().DelegationAdmissions = nil
+				f.r.snapshot.AdmissionEpochs = nil
 			case "policy-changed":
 				f.d.PolicyHash[0] ^= 1
 			case "epoch-advanced":
 				*f.r.snapshot.CurrentEpoch = 2
+				f.r.snapshot.State.GetAgent().AuthorizationEpoch = 2
 			case "epoch-missing":
 				f.r.snapshot.CurrentEpoch = nil
 				revoked = false
@@ -51,7 +55,7 @@ func TestAuthenticatedRevocationIsDistinctFromMalformedState(t *testing.T) {
 				}
 				f.wire = raw
 				hash := sha256.Sum256(raw)
-				f.r.snapshot.State.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(hash[:])}
+				f.r.snapshot.State.GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + hex.EncodeToString(hash[:]), AdmissionEpoch: f.d.AuthorizationEpoch}}
 				f.r.snapshot.AdmissionEpochs = map[[32]byte]uint64{hash: f.d.AuthorizationEpoch}
 			}
 			v, err := NewVerifier(f.c, f.r)
@@ -68,7 +72,7 @@ func TestAuthenticatedRevocationIsDistinctFromMalformedState(t *testing.T) {
 
 func TestFinalizedPresenceCannotBeInconsistent(t *testing.T) {
 	f := newFixture(t)
-	adapter, err := NewLegacyTestNetworkResolver(TestNetworkLegacyEpochZero, f.c.Network, legacySource{found: true})
+	adapter, err := NewRegistryResolver(f.c.Network, legacySource{found: true})
 	if err != nil {
 		t.Fatal(err)
 	}

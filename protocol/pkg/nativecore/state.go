@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/bits"
 	"sort"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -12,12 +13,17 @@ import (
 	"github.com/tosnetwork/tosutils-go/tvm/cell"
 )
 
-const stateMagic = 0x4e565331 // NVS1
+const (
+	stateMagic              = 0x4e565331 // NVS1
+	StateEncodingVersion    = 2
+	MaxLiveDelegations      = 128
+	MaxDelegationAdmissions = 384
+)
 
 // DecodeData decodes only the typed TVM state stored in the deterministic
 // object account. Portable representations must be derived from this result.
 func (l *Locator) DecodeData(data *cell.Cell, expectedObjectID string) (*nativev1.NativeStateV1, bool, error) {
-	if l == nil || data == nil {
+	if l == nil || data == nil || data.IsSpecial() {
 		return nil, false, errors.New("missing simplified Native account data")
 	}
 	rawExpected, expectedKind, err := objectID(expectedObjectID)
@@ -81,7 +87,7 @@ func (l *Locator) DecodeData(data *cell.Cell, expectedObjectID string) (*nativev
 // account before applying the ordinary expected-ID decoder. It is intended for
 // DNS aliases, where the account address is known before its Native object ID.
 func (l *Locator) DecodeDataAny(data *cell.Cell) (*nativev1.NativeStateV1, bool, string, error) {
-	if l == nil || data == nil {
+	if l == nil || data == nil || data.IsSpecial() {
 		return nil, false, "", errors.New("missing simplified Native account data")
 	}
 	s, err := data.BeginParse()
@@ -125,6 +131,9 @@ func (l *Locator) validateConfig(config *cell.Cell) error {
 }
 
 func decodeState(state *cell.Cell, object string, expectedKind uint8) (*nativev1.NativeStateV1, error) {
+	if state == nil || state.IsSpecial() {
+		return nil, errors.New("Native typed state must be an ordinary cell")
+	}
 	s, err := state.BeginParse()
 	if err != nil {
 		return nil, errors.New("invalid simplified Native state cell")
@@ -134,8 +143,8 @@ func decodeState(state *cell.Cell, object string, expectedKind uint8) (*nativev1
 		return nil, errors.New("invalid simplified Native state magic")
 	}
 	schema, err := s.LoadUInt(16)
-	if err != nil || schema != 1 {
-		return nil, errors.New("invalid simplified Native state schema")
+	if err != nil || schema != StateEncodingVersion {
+		return nil, fmt.Errorf("unsupported Native typed state schema %d: expected schema 2", schema)
 	}
 	kind, err := s.LoadUInt(8)
 	if err != nil || uint8(kind) != expectedKind {
@@ -159,6 +168,10 @@ func decodeState(state *cell.Cell, object string, expectedKind uint8) (*nativev1
 	}
 	last := "sha256:" + hex.EncodeToString(lastAction)
 	if expectedKind == 1 {
+		epoch, err := s.LoadUInt(64)
+		if err != nil || epoch == 0 {
+			return nil, errors.New("invalid Native authorization epoch")
+		}
 		policyCell, err := s.LoadRefCell()
 		if err != nil {
 			return nil, err
@@ -178,7 +191,7 @@ func decodeState(state *cell.Cell, object string, expectedKind uint8) (*nativev1
 		if err != nil {
 			return nil, err
 		}
-		delegations, err := decodeDelegations(delegationsCell)
+		delegations, err := decodeDelegations(delegationsCell, epoch)
 		if err != nil {
 			return nil, err
 		}
@@ -191,8 +204,9 @@ func decodeState(state *cell.Cell, object string, expectedKind uint8) (*nativev1
 		}
 		return &nativev1.NativeStateV1{State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{
 			AgentId: object, Generation: generation, Sequence: sequence, LastActionHash: last, Policy: policy,
-			DelegationDigests: delegations, RecoveryExecuteAfterUnixSeconds: recoveryAt,
-			RecoveryInitiationActionHash: recoveryAction, RecoveryInitiatingPolicyHash: recoveryPolicyHash,
+			AuthorizationEpoch: epoch, DelegationAdmissions: delegations, EncodingVersion: StateEncodingVersion,
+			RecoveryExecuteAfterUnixSeconds: recoveryAt,
+			RecoveryInitiationActionHash:    recoveryAction, RecoveryInitiatingPolicyHash: recoveryPolicyHash,
 			RecoveryPolicy: recoveryPolicy, Tombstoned: tombstoned}}}, nil
 	}
 	owner, err := s.LoadSlice(256)
@@ -212,7 +226,7 @@ func decodeState(state *cell.Cell, object string, expectedKind uint8) (*nativev1
 	}
 	return &nativev1.NativeStateV1{State: &nativev1.NativeStateV1_Capability{Capability: &nativev1.CapabilityStateV1{
 		CapabilityId: object, Generation: generation, Sequence: sequence, LastActionHash: last,
-		OwnerAgentId: "agent_" + hex.EncodeToString(owner), Versions: versions, Tombstoned: tombstoned}}}, nil
+		OwnerAgentId: "agent_" + hex.EncodeToString(owner), Versions: versions, Tombstoned: tombstoned, EncodingVersion: StateEncodingVersion}}}, nil
 }
 
 func DecodePolicyCell(value *cell.Cell) (*nativev1.ControllerPolicyV1, error) {
@@ -316,14 +330,21 @@ func DecodePolicyCell(value *cell.Cell) (*nativev1.ControllerPolicyV1, error) {
 	return policy, nil
 }
 
-func decodeDelegations(value *cell.Cell) ([]string, error) {
+func decodeDelegations(value *cell.Cell, epoch uint64) ([]*nativev1.DelegationAdmissionV1, error) {
+	if value == nil || value.IsSpecial() {
+		return nil, errors.New("Native delegations must be an ordinary cell")
+	}
 	s, err := value.BeginParse()
 	if err != nil {
 		return nil, err
 	}
-	count, err := s.LoadUInt(16)
-	if err != nil || count > 128 {
-		return nil, errors.New("invalid Native delegation count")
+	live, err := s.LoadUInt(16)
+	if err != nil || live > MaxLiveDelegations {
+		return nil, errors.New("invalid Native live delegation count")
+	}
+	total, err := s.LoadUInt(16)
+	if err != nil || total < live || total > MaxDelegationAdmissions {
+		return nil, errors.New("invalid Native total delegation count")
 	}
 	dict, err := s.LoadDict(256)
 	if err != nil {
@@ -332,27 +353,132 @@ func decodeDelegations(value *cell.Cell) ([]string, error) {
 	if err := endSlice(s); err != nil {
 		return nil, err
 	}
-	items, err := dict.LoadAll()
-	if err != nil || uint64(len(items)) != count {
-		return nil, errors.New("Native delegation count mismatch")
+	if root := dict.AsCell(); root != nil {
+		// Count logical edges, including repeated cell references, before
+		// expanding the dictionary into entries.
+		budget := int(2*total) - 1
+		if err := checkDelegationDictionary(root, 256, &budget); err != nil {
+			return nil, err
+		}
 	}
-	result := make([]string, 0, len(items))
+	items, err := dict.LoadAll()
+	if err != nil || uint64(len(items)) != total {
+		return nil, errors.New("Native total delegation count mismatch")
+	}
+	result := make([]*nativev1.DelegationAdmissionV1, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	var liveEntries uint64
 	for _, item := range items {
 		key, err := item.Key.LoadSlice(256)
-		if err != nil || endSlice(item.Key) != nil {
+		if err != nil || equalBytes(key, make([]byte, 32)) || endSlice(item.Key) != nil {
 			return nil, errors.New("invalid Native delegation key")
 		}
-		present, err := item.Value.LoadBoolBit()
-		if err != nil || !present || endSlice(item.Value) != nil {
+		digest := "sha256:" + hex.EncodeToString(key)
+		if _, exists := seen[digest]; exists {
+			return nil, errors.New("duplicate Native delegation key")
+		}
+		seen[digest] = struct{}{}
+		if item.Value.BitsLeft() != 65 || item.Value.RefsNum() != 0 {
+			return nil, errors.New("invalid Native delegation leaf shape")
+		}
+		admission, err := item.Value.LoadUInt(64)
+		if err != nil || admission != epoch {
+			return nil, errors.New("Native delegation admission epoch mismatch")
+		}
+		withdrawn, err := item.Value.LoadBoolBit()
+		if err != nil || endSlice(item.Value) != nil {
 			return nil, errors.New("invalid Native delegation value")
 		}
-		result = append(result, "sha256:"+hex.EncodeToString(key))
+		if !withdrawn {
+			liveEntries++
+		}
+		result = append(result, &nativev1.DelegationAdmissionV1{Digest: digest, AdmissionEpoch: admission, Withdrawn: withdrawn})
 	}
-	sort.Strings(result)
+	if liveEntries != live {
+		return nil, errors.New("Native live delegation count mismatch")
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Digest < result[j].Digest })
 	return result, nil
 }
 
+// checkDelegationDictionary validates the structural bits that LoadAll
+// discards while traversing a Hashmap edge.
+func checkDelegationDictionary(node *cell.Cell, remaining uint, budget *int) error {
+	if *budget <= 0 || node.IsSpecial() {
+		return errors.New("Native delegation dictionary exceeds its shape bound")
+	}
+	*budget -= 1
+	s, err := node.BeginParse()
+	if err != nil {
+		return err
+	}
+	long, err := s.LoadBoolBit()
+	if err != nil {
+		return err
+	}
+	var length uint64
+	if !long {
+		for {
+			more, err := s.LoadBoolBit()
+			if err != nil {
+				return err
+			}
+			if !more {
+				break
+			}
+			length++
+			if length > uint64(remaining) {
+				return errors.New("Native delegation dictionary label exceeds key length")
+			}
+		}
+		if _, err = s.LoadSlice(uint(length)); err != nil {
+			return err
+		}
+	} else {
+		same, err := s.LoadBoolBit()
+		if err != nil {
+			return err
+		}
+		if same {
+			if _, err = s.LoadBoolBit(); err != nil {
+				return err
+			}
+		}
+		length, err = s.LoadUInt(uint(bits.Len(remaining)))
+		if err != nil || length > uint64(remaining) {
+			return errors.New("Native delegation dictionary label exceeds key length")
+		}
+		if !same {
+			if _, err = s.LoadSlice(uint(length)); err != nil {
+				return err
+			}
+		}
+	}
+	if length == uint64(remaining) {
+		return nil
+	}
+	if s.BitsLeft() != 0 || s.RefsNum() != 2 {
+		return errors.New("invalid Native delegation fork shape")
+	}
+	left, err := s.LoadRefCell()
+	if err != nil {
+		return err
+	}
+	right, err := s.LoadRefCell()
+	if err != nil {
+		return err
+	}
+	next := remaining - uint(length) - 1
+	if err := checkDelegationDictionary(left, next, budget); err != nil {
+		return err
+	}
+	return checkDelegationDictionary(right, next, budget)
+}
+
 func decodeRecovery(value *cell.Cell) (uint64, string, string, *nativev1.ControllerPolicyV1, error) {
+	if value == nil || value.IsSpecial() {
+		return 0, "", "", nil, errors.New("Native state reference must be an ordinary cell")
+	}
 	s, err := value.BeginParse()
 	if err != nil {
 		return 0, "", "", nil, err
@@ -391,6 +517,9 @@ func decodeRecovery(value *cell.Cell) (uint64, string, string, *nativev1.Control
 }
 
 func decodeVersions(value *cell.Cell) ([]*nativev1.CapabilityVersionV1, error) {
+	if value == nil || value.IsSpecial() {
+		return nil, errors.New("Native state reference must be an ordinary cell")
+	}
 	s, err := value.BeginParse()
 	if err != nil {
 		return nil, err
@@ -451,6 +580,9 @@ func decodeProtocolText(value *cell.Cell, limit int) (string, error) {
 	}
 	var out []byte
 	for current := value; current != nil; {
+		if current.IsSpecial() {
+			return "", errors.New("Native protocol text must be an ordinary cell")
+		}
 		s, err := current.BeginParse()
 		if err != nil {
 			return "", err

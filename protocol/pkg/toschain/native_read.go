@@ -140,6 +140,7 @@ type rawTransaction struct {
 
 type nativeAccountVote struct {
 	Found           bool   `json:"found"`
+	Frozen          bool   `json:"frozen,omitempty"`
 	Balance         uint64 `json:"balance"`
 	Code            string `json:"code"`
 	Data            string `json:"data"`
@@ -213,6 +214,7 @@ func readNativeAccountStateAt(ctx context.Context, node *rpcNode, address string
 	}
 	vote := nativeAccountVote{BlockRoot: "sha256:" + hex.EncodeToString(root), BlockFile: "sha256:" + hex.EncodeToString(file)}
 	if info.State != "active" {
+		vote.Frozen = info.State == "frozen"
 		return vote, nil
 	}
 	if info.Code == "" || info.Data == "" {

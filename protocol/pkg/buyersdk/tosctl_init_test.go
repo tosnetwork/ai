@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/tosnetwork/ai/protocol/pkg/mldsa44"
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 // scriptedCustody answers every tosctl run with output and err, and records
@@ -68,7 +69,7 @@ func domainAnswer(mutate func(map[string]any)) string {
 	label := sha256.Sum256([]byte("tos:global-id:7"))
 	answer := map[string]any{"network_label": "tos:global-id:7", "genesis_root": strings.Repeat("11", 32),
 		"genesis_file": strings.Repeat("22", 32), "network_hash": hex.EncodeToString(label[:]),
-		"code_hash": strings.Repeat("33", 32)}
+		"code_hash": strings.TrimPrefix(nativecore.RegistryV2CodeHash, "tvm-cell-sha256:")}
 	if mutate != nil {
 		mutate(answer)
 	}
@@ -80,7 +81,7 @@ func TestInitDomainAnswersForTheLabel(t *testing.T) {
 	custody, calls := scriptedCustody(t, initConfig, initEndpoints, domainAnswer(nil), nil)
 	domain, err := custody.Domain(context.Background())
 	if err != nil || domain.GenesisRootHash != "sha256:"+strings.Repeat("11", 32) ||
-		domain.CodeHash != "tvm-cell-sha256:"+strings.Repeat("33", 32) {
+		domain.CodeHash != nativecore.RegistryV2CodeHash {
 		t.Fatalf("domain %+v %v", domain, err)
 	}
 	if got := strings.Join((*calls)[0], " "); got != "agent native-registry domain --global-config /etc/global.json "+
@@ -94,8 +95,9 @@ func TestInitDomainAnswersForTheLabel(t *testing.T) {
 		"an upper genesis file": func(a map[string]any) {
 			a["genesis_file"] = strings.Repeat("AA", 32)
 		},
-		"a bad code hash": func(a map[string]any) { a["code_hash"] = "zz" },
-		"an extra field":  func(a map[string]any) { a["extra"] = 1 },
+		"a bad code hash":          func(a map[string]any) { a["code_hash"] = "zz" },
+		"another registry release": func(a map[string]any) { a["code_hash"] = strings.Repeat("33", 32) },
+		"an extra field":           func(a map[string]any) { a["extra"] = 1 },
 	} {
 		custody, _ := scriptedCustody(t, initConfig, initEndpoints, domainAnswer(mutate), nil)
 		if _, err := custody.Domain(context.Background()); !errors.Is(err, ErrTOSCTLAnswer) {

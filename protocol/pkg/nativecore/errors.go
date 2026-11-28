@@ -5,6 +5,10 @@ import (
 	"fmt"
 )
 
+// ErrFinalizedReadUnavailable indicates endpoint transport failure without
+// a conflicting or malformed finalized response.
+var ErrFinalizedReadUnavailable = errors.New("finalized read unavailable")
+
 // ErrorCode is the stable tos_service_v1 validation code. The numeric values
 // intentionally match the Native Registry TVM exit codes so clients can use a
 // single vocabulary before and after submission.
@@ -26,7 +30,12 @@ const (
 	ErrTimelock           ErrorCode = 2212
 	ErrDuplicateSignature ErrorCode = 2213
 	// 2214 (formerly a weak-Ed25519-key refusal) is retired and never reused.
-	ErrPolicyTooWide ErrorCode = 2215
+	ErrPolicyTooWide   ErrorCode = 2215
+	ErrEpochMismatch   ErrorCode = 2216
+	ErrEpochExhausted  ErrorCode = 2217
+	ErrWithdrawnDigest ErrorCode = 2218
+	ErrCapacityFull    ErrorCode = 2219
+	ErrDigestNotLive   ErrorCode = 2220
 )
 
 var errorNames = map[ErrorCode]string{
@@ -45,6 +54,11 @@ var errorNames = map[ErrorCode]string{
 	ErrTimelock:           "NATIVE_TIMELOCK",
 	ErrDuplicateSignature: "NATIVE_DUPLICATE_SIGNATURE",
 	ErrPolicyTooWide:      "NATIVE_POLICY_TOO_WIDE",
+	ErrEpochMismatch:      "NATIVE_EPOCH_MISMATCH",
+	ErrEpochExhausted:     "NATIVE_EPOCH_EXHAUSTED",
+	ErrWithdrawnDigest:    "NATIVE_WITHDRAWN_DIGEST",
+	ErrCapacityFull:       "NATIVE_CAPACITY_FULL",
+	ErrDigestNotLive:      "NATIVE_DIGEST_NOT_LIVE",
 }
 
 func (c ErrorCode) String() string {

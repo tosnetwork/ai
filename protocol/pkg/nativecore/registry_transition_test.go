@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"google.golang.org/protobuf/proto"
 	"strings"
 	"testing"
 
@@ -218,5 +219,70 @@ func TestRegistryTransitionRefusesEveryOtherBody(t *testing.T) {
 	}
 	if _, err := DecodeRegistryTransition(nil); err == nil {
 		t.Error("a missing body was decoded")
+	}
+}
+
+func TestFinalizedWithdrawalConfirmsBothConcurrentOrderings(t *testing.T) {
+	network := testLocator(t).Network
+	agent := "agent_" + strings.Repeat("aa", 32)
+	digest := "sha256:" + strings.Repeat("bb", 32)
+	predecessor := "tvm-cell-sha256:" + strings.Repeat("cc", 32)
+	base := &nativev1.NativeStateV1{Network: network, TvmStateHash: predecessor,
+		Reference: &nativev1.ChainReference{Account: "0:" + strings.Repeat("dd", 32), ContractCodeHash: RegistryV2CodeHash, FinalizedCheckpoint: 7},
+		State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{
+			AgentId: agent, EncodingVersion: 2, AuthorizationEpoch: 4, Generation: 1, Sequence: 2,
+			DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: digest, AdmissionEpoch: 4}},
+		}}}
+	action := &nativev1.NativeActionV1{Protocol: Protocol, Network: network, TargetObjectId: agent,
+		TargetContractCodeHash: RegistryV2CodeHash, PredecessorTvmStateHash: predecessor, Generation: 1, Sequence: 3,
+		Nonce: bytes32('n'), Payload: &nativev1.NativeActionV1_WithdrawAgentDelegation{
+			WithdrawAgentDelegation: &nativev1.WithdrawAgentDelegationV1{DelegationDigest: digest, AuthorizationEpoch: 4},
+		}}
+	for _, tc := range []struct {
+		name, result string
+		change       func(*nativev1.NativeStateV1)
+	}{
+		{"withdraw-first", "withdrawn", func(s *nativev1.NativeStateV1) { s.GetAgent().DelegationAdmissions[0].Withdrawn = true }},
+		{"update-first", "cleared_by_epoch_bump", func(s *nativev1.NativeStateV1) {
+			s.GetAgent().AuthorizationEpoch++
+			s.GetAgent().DelegationAdmissions = nil
+		}},
+		{"still-live", "", func(*nativev1.NativeStateV1) {}},
+		{"epoch-regressed", "", func(s *nativev1.NativeStateV1) {
+			s.GetAgent().AuthorizationEpoch--
+			s.GetAgent().DelegationAdmissions = nil
+		}},
+		{"absent-without-bump", "", func(s *nativev1.NativeStateV1) { s.GetAgent().DelegationAdmissions = nil }},
+		{"reintroduced-after-bump", "", func(s *nativev1.NativeStateV1) {
+			s.GetAgent().AuthorizationEpoch++
+			s.GetAgent().DelegationAdmissions[0].AdmissionEpoch++
+		}},
+		{"unfinalized", "", func(s *nativev1.NativeStateV1) {
+			s.Reference.FinalizedCheckpoint = 0
+			s.GetAgent().DelegationAdmissions[0].Withdrawn = true
+		}},
+		{"other-agent", "", func(s *nativev1.NativeStateV1) { s.GetAgent().AgentId = "agent_" + strings.Repeat("ee", 32) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			after := proto.Clone(base).(*nativev1.NativeStateV1)
+			after.Reference.FinalizedCheckpoint++
+			after.GetAgent().Sequence++
+			after.TvmStateHash = "tvm-cell-sha256:" + strings.Repeat("f0", 32)
+			tc.change(after)
+			proof, err := ConfirmDelegationWithdrawal(action, base, after)
+			if tc.result == "" {
+				if err == nil {
+					t.Fatalf("unproven withdrawal returned %+v", proof)
+				}
+				return
+			}
+			if err != nil || proof.Result != tc.result || proof.FinalizedCheckpoint != after.Reference.FinalizedCheckpoint ||
+				proof.FinalizedEpoch != after.GetAgent().AuthorizationEpoch {
+				t.Fatalf("withdrawal confirmation: %+v, %v", proof, err)
+			}
+		})
+	}
+	if _, err := ConfirmDelegationWithdrawal(action, base, nil); err == nil {
+		t.Fatal("missing post-state proved a withdrawal")
 	}
 }

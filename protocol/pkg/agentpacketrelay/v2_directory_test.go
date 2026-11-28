@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -44,13 +45,13 @@ func signedDirectoryHint(t testing.TB, f *v2HTTPFixture, tag byte, issued, expir
 	digest := sha256.Sum256(raw)
 	value := "sha256:" + hex.EncodeToString(digest[:])
 	found := false
-	for _, entry := range f.source.state.GetAgent().DelegationDigests {
-		if entry == value {
+	for _, entry := range f.source.state.GetAgent().DelegationAdmissions {
+		if entry.Digest == value {
 			found = true
 		}
 	}
 	if !found {
-		f.source.state.GetAgent().DelegationDigests = append(f.source.state.GetAgent().DelegationDigests, value)
+		f.source.state.GetAgent().DelegationAdmissions = append(f.source.state.GetAgent().DelegationAdmissions, &nativev1.DelegationAdmissionV1{Digest: value, AdmissionEpoch: d.AuthorizationEpoch})
 	}
 	h, err := agenttransport.SignHint(agenttransport.Hint{Delegation: d, IssuedAt: issued, ExpiresAt: expires, Relays: relays}, key)
 	if err != nil {
@@ -311,7 +312,7 @@ func TestV2ChainRevocationInvalidatesMailboxesAndHintsAtBothRelays(t *testing.T)
 		f.serve(t, "PUT", path, raw, false, 204)
 		f.serve(t, "GET", path+"/"+hex.EncodeToString(digest[:]), nil, false, 200)
 	}
-	first.source.state.GetAgent().DelegationDigests = nil
+	first.source.state.GetAgent().DelegationAdmissions = nil
 	first.clock.at = first.clock.at.Add(300 * time.Second)
 	for _, f := range []*v2HTTPFixture{first, second} {
 		if err = f.s.store.Replay().Record(unixNow(f.clock.Now())); err != nil {
@@ -687,13 +688,13 @@ func TestV2DirectoryKeepsNewestAndFreesRevokedSlots(t *testing.T) {
 	}
 	// Withdraw one live delegation, not the incoming one. Its slot must free.
 	withdrawn := "sha256:" + hex.EncodeToString(digest[:])
-	var kept []string
-	for _, d := range f.source.state.GetAgent().DelegationDigests {
-		if d != withdrawn {
+	var kept []*nativev1.DelegationAdmissionV1
+	for _, d := range f.source.state.GetAgent().DelegationAdmissions {
+		if d.Digest != withdrawn {
 			kept = append(kept, d)
 		}
 	}
-	f.source.state.GetAgent().DelegationDigests = kept
+	f.source.state.GetAgent().DelegationAdmissions = kept
 	f.clock.at = f.clock.at.Add(300 * time.Second)
 	incoming, _ := directoryHint(t, f, 4)
 	f.serve(t, "PUT", path, incoming, false, 204)
@@ -721,7 +722,7 @@ func TestV2DirectoryReadOutageDoesNotEvictLiveSlots(t *testing.T) {
 func TestV2DirectoryRefusesUnadmittedDelegation(t *testing.T) {
 	f := newV2HTTP(t)
 	raw, _ := directoryHint(t, f, 0)
-	f.source.state.GetAgent().DelegationDigests = nil
+	f.source.state.GetAgent().DelegationAdmissions = nil
 	f.serve(t, "PUT", "/v2/hints/"+f.r.agentID, raw, false, 403)
 	if len(f.s.store.hints) != 0 {
 		t.Fatal("unadmitted transport key acquired storage")

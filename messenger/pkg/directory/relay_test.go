@@ -295,7 +295,7 @@ func TestCheckPeerFailsAtOnceOnEndpointRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The Agent withdraws the Endpoint delegation in finalized state.
-	f.resolver.states[agentID].GetAgent().DelegationDigests = []string{"sha256:" + strings.Repeat("9", 64)}
+	f.resolver.states[agentID].GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + strings.Repeat("9", 64), AdmissionEpoch: 1}}
 	_, err := f.verifier.CheckPeer(agentID, raw, f.pin(relayDeviceOne), at(baseUnix+201))
 	requireCode(t, err, fault.CodeDelegationUncommitted)
 	// A tombstoned Agent fails the same way, and an unreadable finalized

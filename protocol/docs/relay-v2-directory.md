@@ -4,7 +4,7 @@ The V2 server uses only its separate, checksummed V2 store. It neither reads
 V1 state nor routes a V2 request through a V1 handler. All credentialed routes
 verify the signed credential chain before using its issuer chain or replay
 identity. A directory record is routing information, never controller authority.
-The current finalized resolver remains restricted to code-pinned test networks.
+The finalized resolver requires the pinned Registry v2 release and verifies the configured network tuple.
 
 ## Owner controls
 

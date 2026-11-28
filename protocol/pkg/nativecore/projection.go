@@ -37,17 +37,26 @@ type PortablePolicy struct {
 	Controllers             []PortableController `json:"controllers"`
 }
 type PortableAgentState struct {
-	AgentID                         string          `json:"agent_id"`
-	Generation                      uint64          `json:"generation"`
-	Sequence                        uint64          `json:"sequence"`
-	LastActionHash                  string          `json:"last_action_hash"`
-	Policy                          PortablePolicy  `json:"policy"`
-	DelegationDigests               []string        `json:"delegation_digests"`
-	RecoveryExecuteAfterUnixSeconds uint64          `json:"recovery_execute_after_unix_seconds"`
-	RecoveryInitiationActionHash    string          `json:"recovery_initiation_action_hash"`
-	RecoveryInitiatingPolicyHash    string          `json:"recovery_initiating_policy_hash"`
-	RecoveryPolicy                  *PortablePolicy `json:"recovery_policy,omitempty"`
-	Tombstoned                      bool            `json:"tombstoned"`
+	AgentID                         string                        `json:"agent_id"`
+	Generation                      uint64                        `json:"generation"`
+	Sequence                        uint64                        `json:"sequence"`
+	LastActionHash                  string                        `json:"last_action_hash"`
+	Policy                          PortablePolicy                `json:"policy"`
+	EncodingVersion                 uint32                        `json:"encoding_version"`
+	AuthorizationEpoch              uint64                        `json:"authorization_epoch"`
+	DelegationAdmissions            []PortableDelegationAdmission `json:"delegation_admissions"`
+	LiveDelegationCount             uint32                        `json:"live_delegation_count"`
+	TotalDelegationCount            uint32                        `json:"total_delegation_count"`
+	RecoveryExecuteAfterUnixSeconds uint64                        `json:"recovery_execute_after_unix_seconds"`
+	RecoveryInitiationActionHash    string                        `json:"recovery_initiation_action_hash"`
+	RecoveryInitiatingPolicyHash    string                        `json:"recovery_initiating_policy_hash"`
+	RecoveryPolicy                  *PortablePolicy               `json:"recovery_policy,omitempty"`
+	Tombstoned                      bool                          `json:"tombstoned"`
+}
+type PortableDelegationAdmission struct {
+	Digest         string `json:"digest"`
+	AdmissionEpoch uint64 `json:"admission_epoch"`
+	Withdrawn      bool   `json:"withdrawn"`
 }
 type PortableCapabilityVersion struct {
 	Version        string `json:"version"`
@@ -55,13 +64,14 @@ type PortableCapabilityVersion struct {
 	Revoked        bool   `json:"revoked"`
 }
 type PortableCapabilityState struct {
-	CapabilityID   string                      `json:"capability_id"`
-	Generation     uint64                      `json:"generation"`
-	Sequence       uint64                      `json:"sequence"`
-	LastActionHash string                      `json:"last_action_hash"`
-	OwnerAgentID   string                      `json:"owner_agent_id"`
-	Versions       []PortableCapabilityVersion `json:"versions"`
-	Tombstoned     bool                        `json:"tombstoned"`
+	EncodingVersion uint32                      `json:"encoding_version"`
+	CapabilityID    string                      `json:"capability_id"`
+	Generation      uint64                      `json:"generation"`
+	Sequence        uint64                      `json:"sequence"`
+	LastActionHash  string                      `json:"last_action_hash"`
+	OwnerAgentID    string                      `json:"owner_agent_id"`
+	Versions        []PortableCapabilityVersion `json:"versions"`
+	Tombstoned      bool                        `json:"tombstoned"`
 }
 
 // DecodePortable derives deterministic CBOR exclusively from typed TVM data.
@@ -78,9 +88,19 @@ func (l *Locator) DecodePortable(data *cell.Cell, objectID string) ([]byte, bool
 			return nil, false, err
 		}
 		value := &PortableAgentState{AgentID: agent.AgentId, Generation: agent.Generation, Sequence: agent.Sequence,
-			LastActionHash: agent.LastActionHash, Policy: policy, DelegationDigests: append([]string(nil), agent.DelegationDigests...),
+			LastActionHash: agent.LastActionHash, Policy: policy, EncodingVersion: agent.EncodingVersion,
+			AuthorizationEpoch: agent.AuthorizationEpoch, TotalDelegationCount: uint32(len(agent.DelegationAdmissions)),
+			DelegationAdmissions:            make([]PortableDelegationAdmission, 0, len(agent.DelegationAdmissions)),
 			RecoveryExecuteAfterUnixSeconds: agent.RecoveryExecuteAfterUnixSeconds, RecoveryInitiationActionHash: agent.RecoveryInitiationActionHash,
 			RecoveryInitiatingPolicyHash: agent.RecoveryInitiatingPolicyHash, Tombstoned: agent.Tombstoned}
+		for _, entry := range agent.DelegationAdmissions {
+			value.DelegationAdmissions = append(value.DelegationAdmissions, PortableDelegationAdmission{
+				Digest: entry.Digest, AdmissionEpoch: entry.AdmissionEpoch, Withdrawn: entry.Withdrawn,
+			})
+			if !entry.Withdrawn {
+				value.LiveDelegationCount++
+			}
+		}
 		if agent.RecoveryPolicy != nil {
 			p, err := projectPolicy(agent.RecoveryPolicy)
 			if err != nil {
@@ -97,7 +117,7 @@ func (l *Locator) DecodePortable(data *cell.Cell, objectID string) ([]byte, bool
 			}
 			versions[i] = PortableCapabilityVersion{Version: v.Version, ManifestDigest: v.ManifestDigest, Revoked: v.Revoked}
 		}
-		projection.Capability = &PortableCapabilityState{CapabilityID: capability.CapabilityId, Generation: capability.Generation,
+		projection.Capability = &PortableCapabilityState{EncodingVersion: capability.EncodingVersion, CapabilityID: capability.CapabilityId, Generation: capability.Generation,
 			Sequence: capability.Sequence, LastActionHash: capability.LastActionHash, OwnerAgentID: capability.OwnerAgentId,
 			Versions: versions, Tombstoned: capability.Tombstoned}
 	} else {

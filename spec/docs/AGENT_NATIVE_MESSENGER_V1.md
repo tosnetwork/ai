@@ -1359,12 +1359,14 @@ the AgentID obtained when that state was established.
 A Messaging Endpoint is an online service authorized by an Agent. It is not the
 Agent itself and must be independently replaceable and revocable.
 
-The implemented `MessagingEndpointDelegationV1` contains:
+The Endpoint delegation uses the canonical domain and JSON schema
+`tos.messaging.endpoint-delegation.v3`. Its fields are:
 
 ```text
 schema
 network_domain
 agent_id
+authorization_epoch
 messaging_endpoint_id
 messaging_identity_public_key
 adnl_id_or_transport_key_commitment
@@ -1377,9 +1379,9 @@ contact_descriptor_policy_digest
 mailbox_policy_digest
 ```
 
-With the registry change of [Messenger Transport V2](MESSENGER_TRANSPORT_V2.md)
-section 18 Q1, this format gains `authorization_epoch`, verified against the
-Agent's finalized epoch (V2 section 5.1).
+The v3 domain binds the positive u64 `authorization_epoch` immediately after
+the Agent ID. Verification requires the encoded epoch, finalized epoch and live
+admission epoch to agree.
 
 The Agent account commits only the immutable delegation digest. The full
 document remains off-chain. Verification must:

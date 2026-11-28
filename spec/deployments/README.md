@@ -8,6 +8,11 @@ operator independence and public Internet reachability are false. A mature
 profile requires independently operated HTTPS endpoints. A template is never
 evidence and must not be marked accepted.
 
+The records here retain their original Registry v1 code and object identities.
+Registry v2 adoption requires a new record with its own finalized deployment
+evidence. The separately pinned December release keeps the Registry v1
+epoch-zero profile.
+
 Before publication:
 
 1. reproduce the release BOC and verify every frozen vector;

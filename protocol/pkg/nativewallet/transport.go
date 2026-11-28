@@ -65,15 +65,14 @@ type TransportResult struct {
 }
 
 type transportRecord struct {
-	VaultKeyName   string                     `json:"vault_key_name"`
-	Version        string                     `json:"version"`
-	Request        TransportRequest           `json:"request"`
-	Network        *nativev1.NetworkDomain    `json:"network"`
-	Mode           agenttransport.NetworkMode `json:"mode"`
-	RegistryHashes []string                   `json:"registry_hashes"`
-	Delegation     []byte                     `json:"delegation,omitempty"`
-	Submission     json.RawMessage            `json:"submission,omitempty"`
-	Phase          string                     `json:"phase"`
+	VaultKeyName   string                  `json:"vault_key_name"`
+	Version        string                  `json:"version"`
+	Request        TransportRequest        `json:"request"`
+	Network        *nativev1.NetworkDomain `json:"network"`
+	RegistryHashes []string                `json:"registry_hashes"`
+	Delegation     []byte                  `json:"delegation,omitempty"`
+	Submission     json.RawMessage         `json:"submission,omitempty"`
+	Phase          string                  `json:"phase"`
 }
 
 // IssueTransport holds the operation lock throughout. Once dispatch is durable,
@@ -94,11 +93,14 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	}
 	// Constructor enforces the code-pinned network allowlist before any key or
 	// journal operation. Runtime configuration cannot authorize another genesis.
+	if err := agenttransport.ValidateApprovedTestNetwork(w.Config.Network); err != nil {
+		return TransportResult{}, err
+	}
 	verifier, err := agenttransport.NewVerifier(w.Config, w.Resolver)
 	if err != nil {
 		return TransportResult{}, err
 	}
-	if len(request.AgentID) != 70 || !strings.HasPrefix(request.AgentID, "agent_") || !validTransportLabel(request.KeyName) || request.Lifetime == 0 || request.Lifetime > agenttransport.MaxDelegationSeconds || request.CredentialLifetime == 0 || request.CredentialLifetime > agenttransport.MaxCredentialSeconds || len(request.Controllers) == 0 || len(request.Controllers) > nativecore.MaxSignatures {
+	if request.Epoch == 0 || len(request.AgentID) != 70 || !strings.HasPrefix(request.AgentID, "agent_") || !validTransportLabel(request.KeyName) || request.Lifetime == 0 || request.Lifetime > agenttransport.MaxDelegationSeconds || request.CredentialLifetime == 0 || request.CredentialLifetime > agenttransport.MaxCredentialSeconds || len(request.Controllers) == 0 || len(request.Controllers) > nativecore.MaxSignatures {
 		return TransportResult{}, errors.New("invalid transport issuance request")
 	}
 	if _, err := hex.DecodeString(request.AgentID[6:]); err != nil {
@@ -120,7 +122,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 	}
 	defer release()
 	path := filepath.Join(directory, "transport.json")
-	r := transportRecord{Version: "tos-service-transport-operation.v1", Request: request, Network: w.Config.Network, Mode: w.Config.Mode, RegistryHashes: w.Config.ChainPolicy.RegistryCodeHashes, Phase: "key"}
+	r := transportRecord{Version: "tos-service-transport-operation.v2", Request: request, Network: w.Config.Network, RegistryHashes: w.Config.ChainPolicy.RegistryCodeHashes, Phase: "key"}
 	if err := checkPrivateFile(path, true); err != nil {
 		return TransportResult{}, err
 	}
@@ -138,7 +140,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		if err != nil {
 			return TransportResult{}, err
 		}
-		if r.Version != "tos-service-transport-operation.v1" || !bytes.Equal(expected, actual) || !proto.Equal(r.Network, w.Config.Network) || r.Mode != w.Config.Mode || !sameStrings(r.RegistryHashes, w.Config.ChainPolicy.RegistryCodeHashes) {
+		if r.Version != "tos-service-transport-operation.v2" || !bytes.Equal(expected, actual) || !proto.Equal(r.Network, w.Config.Network) || !sameStrings(r.RegistryHashes, w.Config.ChainPolicy.RegistryCodeHashes) {
 			return TransportResult{}, errors.New("transport journal belongs to another request or network")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -221,7 +223,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		if _, err = rand.Read(nonce); err != nil {
 			return TransportResult{}, err
 		}
-		action := &nativev1.NativeActionV1{Protocol: nativecore.Protocol, Network: NativeTransportNetwork(w.Config.Network), TargetObjectId: request.AgentID, TargetContractCodeHash: snapshot.State.Reference.ContractCodeHash, Generation: agent.Generation, Sequence: agent.Sequence + 1, PredecessorTvmStateHash: snapshot.State.TvmStateHash, Nonce: nonce, Payload: &nativev1.NativeActionV1_DelegateAgent{DelegateAgent: &nativev1.DelegateAgentV1{DelegationDigest: "sha256:" + hex.EncodeToString(digest[:])}}}
+		action := &nativev1.NativeActionV1{Protocol: nativecore.Protocol, Network: NativeTransportNetwork(w.Config.Network), TargetObjectId: request.AgentID, TargetContractCodeHash: snapshot.State.Reference.ContractCodeHash, Generation: agent.Generation, Sequence: agent.Sequence + 1, PredecessorTvmStateHash: snapshot.State.TvmStateHash, Nonce: nonce, Payload: &nativev1.NativeActionV1_DelegateAgent{DelegateAgent: &nativev1.DelegateAgentV1{DelegationDigest: "sha256:" + hex.EncodeToString(digest[:]), AuthorizationEpoch: d.AuthorizationEpoch}}}
 		submission, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&nativev1.SignedNativeActionV1{Action: action})
 		if err != nil {
 			return TransportResult{}, err
@@ -262,6 +264,12 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 		if err = w.Confirm(ctx, review); err != nil {
 			return TransportResult{}, err
 		}
+		if transportExpiredAt(w.Config.Clock, d.NotAfter) {
+			return TransportResult{}, refuseExpiredTransport(path, r)
+		}
+		if err = w.checkTransportAction(ctx, signed.Action, d); err != nil {
+			return TransportResult{}, err
+		}
 		signatures, err := Sign(ctx, w.Signer, built, request.Controllers)
 		if err != nil {
 			return TransportResult{}, err
@@ -286,7 +294,7 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 			return TransportResult{}, refuseExpiredTransport(path, r)
 		}
 
-		if _, err = verifier.BuildDelegation(ctx, d); err != nil {
+		if err = w.checkTransportAction(ctx, signed.Action, d); err != nil {
 			return TransportResult{}, err
 		}
 		// The finalized read above can outlast a short delegation. Check again
@@ -336,6 +344,31 @@ func (w *TransportIssuer) IssueTransport(ctx context.Context, directory string, 
 }
 
 var errTransportExpired = errors.New("journalled delegation expired before submission; nothing was submitted, start a new operation in a fresh journal directory")
+
+func (w *TransportIssuer) checkTransportAction(ctx context.Context, action *nativev1.NativeActionV1, d agenttransport.Delegation) error {
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	snapshot, err := w.Resolver.ResolveFinalizedAgent(readCtx, action.TargetObjectId)
+	if err != nil {
+		return err
+	}
+	agent, err := agenttransport.CheckState(w.Config.ChainPolicy, w.Config.Network, action.TargetObjectId, snapshot.State)
+	if err != nil {
+		return err
+	}
+	if snapshot.CurrentEpoch == nil || *snapshot.CurrentEpoch != d.AuthorizationEpoch ||
+		snapshot.EpochCheckpoint != snapshot.State.Reference.FinalizedCheckpoint {
+		return errors.New("transport delegation action epoch differs from the finalized checkpoint")
+	}
+	policy, err := nativecore.PolicyCell(agent.Policy)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(policy.Hash(), d.PolicyHash[:]) {
+		return errors.New("transport delegation action policy changed")
+	}
+	return CheckDelegationAction(action, snapshot.State)
+}
 
 // transportExpiredAt reports whether a delegation ending at notAfter can no
 // longer be dispatched at the issuer's current clock reading.
@@ -387,7 +420,7 @@ func validateTransportSubmission(s *nativev1.SignedNativeActionV1, wire []byte, 
 	if err != nil {
 		return err
 	}
-	if s.Action == nil || !proto.Equal(s.Action.Network, NativeTransportNetwork(network)) || s.Action.TargetObjectId != d.AgentID() || s.Action.GetDelegateAgent() == nil || s.Action.GetDelegateAgent().DelegationDigest != "sha256:"+hex.EncodeToString(digest[:]) {
+	if s.Action == nil || !proto.Equal(s.Action.Network, NativeTransportNetwork(network)) || s.Action.TargetObjectId != d.AgentID() || s.Action.GetDelegateAgent() == nil || s.Action.GetDelegateAgent().DelegationDigest != "sha256:"+hex.EncodeToString(digest[:]) || s.Action.GetDelegateAgent().AuthorizationEpoch != d.AuthorizationEpoch {
 		return errors.New("journal action differs from transport delegation")
 	}
 	_, err = nativecore.BuildAction(s.Action)

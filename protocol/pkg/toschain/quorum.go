@@ -8,12 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"syscall"
 	"time"
+
+	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
 // ErrEndpointsUnavailable means every endpoint failed at the network transport,
 // not malformed data, a failed proof, or a split quorum.
-var ErrEndpointsUnavailable = errors.New("all finalized endpoints unavailable")
+var ErrEndpointsUnavailable = nativecore.ErrFinalizedReadUnavailable
 
 type consensusObservation struct {
 	seqno      uint64
@@ -99,17 +102,14 @@ func quorumRead[T any](
 		nodes []*rpcNode
 	}
 	groups := make(map[string]*group, len(nodes))
-	failures := 0
-	transportFailures := 0
+	failures, unavailable := 0, 0
 	var firstFailure error
 	for range nodes {
 		result := <-results
 		if result.err != nil {
 			failures++
-			var op *net.OpError
-			var dns *net.DNSError
-			if errors.As(result.err, &op) || errors.As(result.err, &dns) || errors.Is(result.err, context.DeadlineExceeded) {
-				transportFailures++
+			if endpointUnavailable(result.err) {
+				unavailable++
 			}
 			if firstFailure == nil {
 				firstFailure = result.err
@@ -136,8 +136,8 @@ func quorumRead[T any](
 			return candidate.value, candidate.nodes, nil
 		}
 	}
-	if len(groups) == 0 && transportFailures == len(nodes) {
-		return zero, nil, ErrEndpointsUnavailable
+	if unavailable == len(nodes) && unavailable != 0 {
+		return zero, nil, nativecore.ErrFinalizedReadUnavailable
 	}
 	if firstFailure != nil {
 		return zero, nil, fmt.Errorf(
@@ -149,6 +149,16 @@ func quorumRead[T any](
 		"quorum not reached: %d value groups and %d endpoint errors",
 		len(groups), failures,
 	)
+}
+
+// Only transport failures can justify stale-pass fallback. A TLS trust
+// failure, malformed data, or disputed finalized observation fails closed.
+func endpointUnavailable(err error) bool {
+	var networkError net.Error
+	var dnsError *net.DNSError
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.As(err, &dnsError) || (errors.As(err, &networkError) && networkError.Timeout())
 }
 
 func quorumKey(value any) (string, error) {

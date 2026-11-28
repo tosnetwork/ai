@@ -23,8 +23,7 @@ values refused. Required fields:
 | `checkpoint` | Separate absolute finalized-reader high-water file; keep it across restarts |
 | `global_entries`, `global_bytes` | Explicit finite global store limits |
 | `endpoints` | 3–8 distinct read-only registry RPC endpoints; strict majority required |
-| `mode` | Only `test-network-legacy-epoch-zero` for this deployed registry adapter |
-| `network` | Approved `network_id`, bare `genesis_root_hash`, bare `genesis_file_hash` tuple |
+| `network` | Configured `network_id`, bare `genesis_root_hash`, bare `genesis_file_hash` tuple |
 | `code_base64`, `code_hash` | Frozen registry code BOC and its pinned representation hash |
 
 Optional `ttl_seconds` selects retention from 1 to 86,400 seconds (default

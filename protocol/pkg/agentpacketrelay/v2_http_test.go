@@ -87,7 +87,7 @@ func newV2HTTP(t testing.TB) *v2HTTPFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := agenttransport.Delegation{AgentDigest: digest, Purposes: 7, NotBefore: uint64(testStart.Unix()) - 1, NotAfter: uint64(testStart.Unix()) + 86400, MaxCredentialSeconds: 86400}
+	d := agenttransport.Delegation{AgentDigest: digest, AuthorizationEpoch: 1, Purposes: 7, NotBefore: uint64(testStart.Unix()) - 1, NotAfter: uint64(testStart.Unix()) + 86400, MaxCredentialSeconds: 86400}
 	copy(d.PolicyHash[:], cell.Hash())
 	signer := v2TestKey("http-transport")
 	holder := v2TestKey("http-holder")
@@ -102,9 +102,9 @@ func newV2HTTP(t testing.TB) *v2HTTPFixture {
 	}
 	network := &nativev1.NetworkDomain{NetworkId: "tos:global-id:3", GenesisRootHash: "65735247a371030abe811aeac0afe357301ce90e161450d26f88b4beb5b4c366", GenesisFileHash: "c3860fe196a2a1b5e4e74a9cf9448624a353ce68a8c4c5f6413347586d688769"}
 	hash := sha256.Sum256(raw)
-	code := "tvm-cell-sha256:" + strings.Repeat("3", 64)
-	source := &v2Source{state: &nativev1.NativeStateV1{Network: network, TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: r.agentID, Policy: policy, DelegationDigests: []string{"sha256:" + hex.EncodeToString(hash[:])}}}}}
-	config := agenttransport.Config{Mode: agenttransport.TestNetworkLegacyEpochZero, Network: network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{code}, Locator: v2Locator("0:test")}, Clock: clock}
+	code := nativecore.RegistryV2CodeHash
+	source := &v2Source{state: &nativev1.NativeStateV1{Network: network, TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("4", 64), Reference: &nativev1.ChainReference{FinalizedCheckpoint: 10, ContractCodeHash: code, Account: "0:test", TransactionHash: "sha256:" + strings.Repeat("5", 64)}, State: &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: r.agentID, Policy: policy, EncodingVersion: nativecore.StateEncodingVersion, AuthorizationEpoch: 1, DelegationAdmissions: []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + hex.EncodeToString(hash[:]), AdmissionEpoch: 1}}}}}}
+	config := agenttransport.Config{Network: network, ChainPolicy: agenttransport.ChainPolicy{RegistryCodeHashes: []string{code}, Locator: v2Locator("0:test")}, Clock: clock}
 	verifier, err := NewV2FinalizedVerifier(config, source)
 	if err != nil {
 		t.Fatal(err)
@@ -276,7 +276,7 @@ func TestV2HTTPPolicyDurabilityTimestampAndRevocation(t *testing.T) {
 	if err != nil || budget.Count != 0 {
 		t.Fatal("policy lost on restart", budget, err)
 	}
-	f.source.state.GetAgent().DelegationDigests = nil
+	f.source.state.GetAgent().DelegationAdmissions = nil
 	f.clock.at = f.clock.at.Add(300 * time.Second)
 	budget, err = f.s.policyBudget(t.Context(), f.r.agentID)
 	if err != nil || budget.Count != 32 {
@@ -501,7 +501,7 @@ func TestV2RotatedOwnerCanReplaceFuturePolicyWithEarlierTimestamp(t *testing.T) 
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(raw)
-	f.source.state.GetAgent().DelegationDigests = []string{"sha256:" + hex.EncodeToString(hash[:])}
+	f.source.state.GetAgent().DelegationAdmissions = []*nativev1.DelegationAdmissionV1{{Digest: "sha256:" + hex.EncodeToString(hash[:]), AdmissionEpoch: 1}}
 	blocks, err := c.Blocks()
 	if err != nil {
 		t.Fatal(err)
@@ -781,20 +781,29 @@ func TestV2ExpiredPoliciesAreReclaimedWithoutAVisitor(t *testing.T) {
 	}
 }
 
-func TestV2ProductionAndUnknownNetworksNeverEnable(t *testing.T) {
+func TestV2VerifierRequiresRegistryV2AndMatchesFinalizedNetwork(t *testing.T) {
 	f := newV2HTTP(t)
 	c := f.config
-	c.Mode = agenttransport.Production
+	c.ChainPolicy.RegistryCodeHashes = []string{"tvm-cell-sha256:" + strings.Repeat("3", 64)}
 	if _, err := NewV2FinalizedVerifier(c, f.source); err == nil {
-		t.Fatal("production enabled without registry epochs")
+		t.Fatal("another Registry release was accepted")
 	}
-	for _, mode := range []agenttransport.NetworkMode{agenttransport.Production, agenttransport.TestNetworkLegacyEpochZero, agenttransport.TestNetworkEpochAware} {
-		c := f.config
-		c.Mode = mode
-		c.Network = &nativev1.NetworkDomain{NetworkId: "tos:global-id:1", GenesisRootHash: f.config.Network.GenesisRootHash, GenesisFileHash: f.config.Network.GenesisFileHash}
-		if _, err := NewV2FinalizedVerifier(c, f.source); err == nil {
-			t.Fatal("unapproved network enabled", mode)
-		}
+	c = f.config
+	c.Network = &nativev1.NetworkDomain{NetworkId: "tos:global-id:1", GenesisRootHash: f.config.Network.GenesisRootHash, GenesisFileHash: f.config.Network.GenesisFileHash}
+	v, err := NewV2FinalizedVerifier(c, f.source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := agenttransport.DecodeCredential(f.wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := credential.DelegationBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.VerifyDelegation(t.Context(), wire, agenttransport.Relay); err == nil {
+		t.Fatal("accepted state from another finalized network")
 	}
 }
 

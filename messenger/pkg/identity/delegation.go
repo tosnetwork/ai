@@ -29,7 +29,7 @@ import (
 
 const (
 	// Schema is the strict wire schema identifier.
-	Schema = "tos.messaging.endpoint-delegation.v2"
+	Schema = "tos.messaging.endpoint-delegation.v3"
 
 	// MaxProtocolVersions bounds the advertised messaging protocol versions.
 	MaxProtocolVersions = 16
@@ -67,6 +67,7 @@ var (
 type Delegation struct {
 	Network                 *nativev1.NetworkDomain
 	AgentID                 string
+	AuthorizationEpoch      uint64
 	EndpointID              string
 	IdentityPublicKey       ed25519.PublicKey
 	ADNLID                  string
@@ -89,6 +90,7 @@ type wireDelegation struct {
 	GenesisRootHash               string   `json:"genesis_root_hash"`
 	GenesisFileHash               string   `json:"genesis_file_hash"`
 	AgentID                       string   `json:"agent_id"`
+	AuthorizationEpoch            uint64   `json:"authorization_epoch"`
 	EndpointID                    string   `json:"messaging_endpoint_id"`
 	IdentityPublicKeyHex          string   `json:"messaging_identity_public_key_hex"`
 	ADNLID                        string   `json:"adnl_id,omitempty"`
@@ -147,6 +149,7 @@ func CanonicalBytes(delegation Delegation) ([]byte, error) {
 		return nil, err
 	}
 	canon.Text(buffer, delegation.AgentID)
+	canon.Uint64(buffer, delegation.AuthorizationEpoch)
 	canon.Text(buffer, delegation.EndpointID)
 	buffer.Write(delegation.IdentityPublicKey)
 	canon.Text(buffer, delegation.ADNLID)
@@ -175,6 +178,32 @@ func Digest(delegation Delegation) (string, error) {
 	return canon.Digest(canonical), nil
 }
 
+// BuildDelegation validates the requested epoch against a finalized Agent
+// before encoding the bytes that will be committed by a delegation action.
+func BuildDelegation(resolver AgentResolver, chain ChainPolicy, delegation Delegation) ([]byte, error) {
+	if err := Validate(delegation); err != nil {
+		return nil, err
+	}
+	if resolver == nil {
+		return nil, errors.New("finalized Agent resolver is required")
+	}
+	state, found, err := resolver.ResolveAgent(delegation.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errors.New("delegation Agent is not finalized")
+	}
+	agent, err := CheckState(chain, delegation.Network, delegation.AgentID, state)
+	if err != nil {
+		return nil, err
+	}
+	if delegation.AuthorizationEpoch != agent.AuthorizationEpoch {
+		return nil, errors.New("endpoint delegation epoch differs from finalized authorization epoch")
+	}
+	return EncodeJSON(delegation)
+}
+
 // EncodeJSON returns the transport representation of a valid delegation.
 func EncodeJSON(delegation Delegation) ([]byte, error) {
 	if err := Validate(delegation); err != nil {
@@ -186,6 +215,7 @@ func EncodeJSON(delegation Delegation) ([]byte, error) {
 		GenesisRootHash:               delegation.Network.GenesisRootHash,
 		GenesisFileHash:               delegation.Network.GenesisFileHash,
 		AgentID:                       delegation.AgentID,
+		AuthorizationEpoch:            delegation.AuthorizationEpoch,
 		EndpointID:                    delegation.EndpointID,
 		IdentityPublicKeyHex:          hex.EncodeToString(delegation.IdentityPublicKey),
 		ADNLID:                        delegation.ADNLID,
@@ -203,6 +233,9 @@ func EncodeJSON(delegation Delegation) ([]byte, error) {
 // DecodeJSON rejects unknown and trailing fields and reconstructs the exact
 // delegation. Decoding proves nothing about authority; Verify must still run.
 func DecodeJSON(raw []byte) (Delegation, error) {
+	if err := checkDelegationJSONKeys(raw); err != nil {
+		return Delegation{}, err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var value wireDelegation
@@ -227,6 +260,7 @@ func DecodeJSON(raw []byte) (Delegation, error) {
 			GenesisFileHash: value.GenesisFileHash,
 		},
 		AgentID:                       value.AgentID,
+		AuthorizationEpoch:            value.AuthorizationEpoch,
 		EndpointID:                    value.EndpointID,
 		IdentityPublicKey:             ed25519.PublicKey(key),
 		ADNLID:                        value.ADNLID,
@@ -242,6 +276,37 @@ func DecodeJSON(raw []byte) (Delegation, error) {
 		return Delegation{}, err
 	}
 	return delegation, nil
+}
+
+// The struct decoder rejects unknown fields but otherwise accepts duplicate
+// keys and case-insensitive aliases. Every v3 key is lower-case ASCII.
+func checkDelegationJSONKeys(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return errors.New("endpoint delegation must be a JSON object")
+	}
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return errors.New("invalid endpoint delegation JSON key")
+		}
+		for _, c := range key {
+			if c != '_' && (c < 'a' || c > 'z') {
+				return errors.New("non-canonical endpoint delegation JSON key")
+			}
+		}
+		if _, found := seen[key]; found {
+			return errors.New("duplicate endpoint delegation JSON key")
+		}
+		seen[key] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Verify runs the full resolution required before a delegation may authorize
@@ -295,8 +360,11 @@ func VerifyWithCheckpoint(resolver AgentResolver, network *nativev1.NetworkDomai
 		return Delegation{}, 0, err
 	}
 	committed := false
-	for _, candidate := range agent.DelegationDigests {
-		if candidate == digest {
+	if delegation.AuthorizationEpoch != agent.AuthorizationEpoch {
+		return Delegation{}, 0, errors.New("endpoint delegation epoch differs from finalized authorization epoch")
+	}
+	for _, candidate := range agent.DelegationAdmissions {
+		if candidate.GetDigest() == digest && !candidate.Withdrawn && candidate.AdmissionEpoch == delegation.AuthorizationEpoch {
 			committed = true
 			break
 		}
@@ -361,6 +429,9 @@ func AllowsProtocolVersion(delegation Delegation, version uint32) bool {
 // decoder, and verifier so no path can construct a delegation the others would
 // reject.
 func Validate(delegation Delegation) error {
+	if delegation.AuthorizationEpoch == 0 {
+		return errors.New("endpoint delegation requires a positive authorization epoch")
+	}
 	if err := validateNetwork(delegation.Network); err != nil {
 		return err
 	}

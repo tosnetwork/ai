@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
+	"syscall"
 	"testing"
 )
 
@@ -22,14 +23,14 @@ func TestEndpointOutageIsNotIntegrityFailure(t *testing.T) {
 				number := n.Add(1)
 				switch kind {
 				case "network":
-					return 0, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("refused")}
+					return 0, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 				case "integrity":
 					return 0, errors.New("malformed response")
 				case "mixed":
 					if number == 1 {
 						return 0, errors.New("corrupt proof")
 					}
-					return 0, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("refused")}
+					return 0, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 				default:
 					return int(number), nil
 				}

@@ -50,7 +50,7 @@ func (d *contactDirectory) Ensure(_ context.Context, agentID string) (directory.
 	if d.mismatch {
 		agentID = "agent_" + strings.Repeat("f", 64)
 	}
-	return directory.RefreshResult{Delegation: identity.Delegation{AgentID: agentID}}, nil
+	return directory.RefreshResult{Delegation: identity.Delegation{AuthorizationEpoch: 1, AgentID: agentID}}, nil
 }
 
 type accountLocator map[string]string
@@ -219,7 +219,7 @@ func testDNSResponse(agentID string, now time.Time) (*nativev1.ResolveDNSAliasRe
 			Network:      &nativev1.NetworkDomain{NetworkId: "tos-test", GenesisRootHash: "sha256:" + strings.Repeat("a", 64), GenesisFileHash: "sha256:" + strings.Repeat("b", 64)},
 			TvmStateHash: "tvm-cell-sha256:" + strings.Repeat("c", 64),
 			Reference:    &nativev1.ChainReference{Workchain: 0, Account: account, TransactionHash: "sha256:" + strings.Repeat("d", 64), ContractCodeHash: testCodeHash, FinalizedCheckpoint: 42},
-			State:        &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{}}},
+			State:        &nativev1.NativeStateV1_Agent{Agent: &nativev1.AgentStateV1{AuthorizationEpoch: 1, EncodingVersion: 2, AgentId: agentID, Policy: &nativev1.ControllerPolicyV1{}}},
 		},
 		Checkpoint: &nativev1.DNSCheckpointV1{Workchain: -1, Shard: -1, Sequence: 42, RootHash: bytes32(7), FileHash: bytes32(8), GenerationUnixSeconds: uint64(now.Unix())},
 		Lifecycle:  &nativev1.DNSLifecycleV1{LastFillUpUnixSeconds: uint64(now.Unix()), RenewalDeadlineUnixSeconds: deadline},

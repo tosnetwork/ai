@@ -203,15 +203,15 @@ MUTANTS = [
     (
         "hint-chain",
         "hint.go",
-        "v.VerifyDelegation(ctx, delegation, Hints); err != nil",
-        "v.VerifyDelegation(ctx, delegation, Hints); false && err != nil",
+        "v.VerifyDelegationUntil(ctx, delegation, Hints)\n\tif err != nil",
+        "v.VerifyDelegationUntil(ctx, delegation, Hints)\n\tif false && err != nil",
         "TestHintChecksSignatureAndFinalizedDelegation",
     ),
     (
         "hint-purpose",
         "hint.go",
-        "v.VerifyDelegation(ctx, delegation, Hints)",
-        "v.VerifyDelegation(ctx, delegation, Relay)",
+        "v.VerifyDelegationUntil(ctx, delegation, Hints)",
+        "v.VerifyDelegationUntil(ctx, delegation, Relay)",
         "TestHintRequiresHintsPurpose",
     ),
     (

@@ -16,86 +16,65 @@ PACKAGE = "./protocol/pkg/agenttransport"
 # name, source, unique old text, replacement, named test
 MUTANTS = [
     (
-        "verifier-network-allowlist",
-        "verify.go",
-        "if err := validateApprovedTestNetwork(c.Network); err != nil",
-        "if err := validateApprovedTestNetwork(c.Network); false && err != nil",
-        "TestVerifierRejectsUnapprovedNetworks",
-    ),
-    (
-        "resolver-network-allowlist",
-        "legacy.go",
-        "if err := validateApprovedTestNetwork(network); err != nil",
-        "if err := validateApprovedTestNetwork(network); false && err != nil",
-        "TestLegacyResolverRejectsUnapprovedNetworks",
-    ),
-    (
         "local-global-id-pin",
         "networks.go",
         "network.NetworkId == localTestNetworkID",
         "true",
-        "TestVerifierRejectsUnapprovedNetworks/production-identity",
+        "TestWalletNetworkRequiresApprovedGenesis/production-identity",
     ),
     (
         "local-root-pin",
         "networks.go",
         "network.GenesisRootHash == localTestRoot",
         "true",
-        "TestVerifierRejectsUnapprovedNetworks/local-root",
+        "TestWalletNetworkRequiresApprovedGenesis/local-root",
     ),
     (
         "local-file-pin",
         "networks.go",
         "network.GenesisFileHash == localTestFile",
         "true",
-        "TestVerifierRejectsUnapprovedNetworks/local-file",
+        "TestWalletNetworkRequiresApprovedGenesis/local-file",
     ),
     (
         "public-global-id-pin",
         "networks.go",
         "network.NetworkId == publicTestNetworkID",
         "true",
-        "TestVerifierRejectsUnapprovedNetworks/public-global-id",
+        "TestWalletNetworkRequiresApprovedGenesis/public-global-id",
     ),
     (
         "public-root-pin",
         "networks.go",
         "network.GenesisRootHash == publicTestRoot",
         "true",
-        "TestVerifierRejectsUnapprovedNetworks/public-root",
+        "TestWalletNetworkRequiresApprovedGenesis/public-root",
     ),
     (
         "public-file-pin",
         "networks.go",
         "network.GenesisFileHash == publicTestFile",
         "true",
-        "TestVerifierRejectsUnapprovedNetworks/public-file",
+        "TestWalletNetworkRequiresApprovedGenesis/public-file",
     ),
     (
         "source-network",
-        "legacy.go",
+        "registry.go",
         '(n.GenesisRootHash != r.network.GenesisRootHash && n.GenesisRootHash != "sha256:"+r.network.GenesisRootHash)',
         "false",
-        "TestLegacyReaderUsesTheOriginalNetworkBeforeNormalization",
+        "TestRegistryReaderUsesTheOriginalNetworkBeforeNormalization",
     ),
     (
-        "legacy-epoch",
-        "verify.go",
-        "d.AuthorizationEpoch != 0 || s.CurrentEpoch != nil || s.AdmissionEpochs != nil || s.EpochCheckpoint != 0",
+        "registry-schema",
+        "registry.go",
+        "agent.GetEncodingVersion() != nativecore.StateEncodingVersion",
         "false",
-        "TestProductionAndLegacyModes",
-    ),
-    (
-        "legacy-adapter-gate",
-        "legacy.go",
-        "mode != TestNetworkLegacyEpochZero || source == nil",
-        "source == nil",
-        "TestLegacyAdapterIsExplicit",
+        "TestRegistryAdapterUsesOneFinalizedState",
     ),
     (
         "set-bound",
         "verify.go",
-        "len(agent.DelegationDigests) > 128 || len(s.AdmissionEpochs) > 128",
+        "len(agent.DelegationAdmissions) > nativecore.MaxDelegationAdmissions || len(s.AdmissionEpochs) > nativecore.MaxLiveDelegations",
         "false",
         "TestFinalizedSetBounds",
     ),
@@ -121,15 +100,8 @@ MUTANTS = [
         "TestFrozenVectors/trailing",
     ),
     (
-        "production-gate",
-        "verify.go",
-        "c.Mode != TestNetworkLegacyEpochZero && c.Mode != TestNetworkEpochAware",
-        "false",
-        "TestProductionAndLegacyModes",
-    ),
-    (
         "builder",
-        "verify.go",
+        "delegation.go",
         "if err = v.checkSnapshot(d, sha256.Sum256(b), s, false); err != nil",
         "if err = v.checkSnapshot(d, sha256.Sum256(b), s, false); false && err != nil",
         "TestBuilderRequiresCurrentEpochAndPolicy",
@@ -214,8 +186,8 @@ MUTANTS = [
     (
         "tombstone",
         "chain.go",
-        "agent.Tombstoned || agent.Policy == nil",
-        "agent.Policy == nil",
+        "if agent.Tombstoned {",
+        "if false && agent.Tombstoned {",
         "TestVerificationChecks/tombstone",
     ),
     (
@@ -242,16 +214,23 @@ MUTANTS = [
     (
         "membership",
         "verify.go",
-        'if !found {\n\t\t\treturn errors.New("delegation is not in the finalized live set")',
-        'if false && !found {\n\t\t\treturn errors.New("delegation is not in the finalized live set")',
+        'if !found {\n\t\t\tif present {',
+        'if false && !found {\n\t\t\tif present {',
         "TestVerificationChecks/membership",
+    ),
+    (
+        "withdrawn-membership",
+        "verify.go",
+        " && !entry.Withdrawn",
+        "",
+        "TestVerificationChecks/withdrawn",
     ),
     (
         "current-epoch",
         "verify.go",
         "d.AuthorizationEpoch != *s.CurrentEpoch",
         "false",
-        "TestVerificationChecks/current-epoch",
+        "TestBuilderRefusesFutureRegistryEpoch",
     ),
     (
         "admission-epoch",
@@ -326,8 +305,8 @@ MUTANTS = [
     (
         "integrity-fallback",
         "verify.go",
-        "!errors.Is(readErr, ErrUnavailable)",
-        "false",
+        'if !errors.Is(readErr, ErrUnavailable) {\n\t\t\treturn d, time.Time{}, errors.New("finalized resolver integrity failure")',
+        'if false {\n\t\t\treturn d, time.Time{}, errors.New("finalized resolver integrity failure")',
         "TestFallbackNeverHidesRevocationOrIntegrity",
     ),
     (
@@ -974,23 +953,6 @@ def main():
             raise RuntimeError(
                 "mutant did not fail its named test: " + name + "\n" + output
             )
-        if name in {"verifier-network-allowlist", "resolver-network-allowlist"}:
-            # Prove each requested identity/mode refusal went red, rather than
-            # accepting one failing sibling as evidence for the whole matrix.
-            for identity in ("production-identity", "unknown-identity"):
-                for mode in (
-                    "test-network-legacy-epoch-zero",
-                    "test-network-epoch-aware",
-                ):
-                    case = test + "/" + identity + "/" + mode
-                    if "--- FAIL: " + case not in output:
-                        raise RuntimeError(
-                            "identity/mode control stayed green: "
-                            + case
-                            + "\n"
-                            + output
-                        )
-                    print("RED identity/mode: " + case, flush=True)
         print("RED " + name + ": " + test, flush=True)
     print(f"AGENTTRANSPORT_MUTANTS_OK: {len(MUTANTS)} checks removed and caught")
 

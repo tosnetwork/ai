@@ -191,9 +191,9 @@ func TestInitCrossChecksTheDomainAgainstTheCodeFileAndTheEndpoints(t *testing.T)
 		prepare  func(*setupFixture)
 		fragment string
 	}{
-		"registry code file is other code": {func(f *setupFixture) {
+		"helper uses another release": {func(f *setupFixture) {
 			f.change(func(w *fakeWorld) { w.CodeHash = strings.Repeat("77", 32) })
-		}, "does not hold the Native Registry code"},
+		}, "tosctl must select the Registry v2 code"},
 		"label hash differs": {func(f *setupFixture) {
 			f.change(func(w *fakeWorld) { w.LabelMismatch = true })
 		}, "does not answer for the network label"},
