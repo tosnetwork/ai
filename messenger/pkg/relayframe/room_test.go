@@ -217,21 +217,22 @@ func TestRosterCodec(t *testing.T) {
 	}
 }
 
-// The cut of section 11.1: part 0 holds 162,744 object bytes and every later
-// part 190,392, so the largest object takes six parts, the last 132,546.
+// The cut of section 11.1 under frame v2: part 0 holds 160,662 object bytes
+// (room for a maximal card, evidence and credential with its seed) and every
+// later part 190,390, so the largest object takes six parts, the last 134,636.
 func TestRoomCutIsFixed(t *testing.T) {
-	if relayframe.FirstPartBytes != 162_744 || relayframe.LaterPartBytes != 190_392 || relayframe.MaxRoomObjectBytes != 1_056_858 || relayframe.RoomObjectFixedBytes != 90 {
+	if relayframe.FirstPartBytes != 160_662 || relayframe.LaterPartBytes != 190_390 || relayframe.MaxRoomObjectBytes != 1_056_858 || relayframe.RoomObjectFixedBytes != 90 {
 		t.Fatalf("cut constants %d %d %d %d", relayframe.FirstPartBytes, relayframe.LaterPartBytes, relayframe.MaxRoomObjectBytes, relayframe.RoomObjectFixedBytes)
 	}
 	sizes, err := relayframe.RoomCut(relayframe.RoomWelcome, relayframe.MaxRoomObjectBytes, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []int{162_744, 190_392, 190_392, 190_392, 190_392, 132_546}
+	want := []int{160_662, 190_390, 190_390, 190_390, 190_390, 134_636}
 	if fmt.Sprint(sizes) != fmt.Sprint(want) {
 		t.Fatalf("maximal cut %v", sizes)
 	}
-	for parts, upTo := range []int{0, 162_744, 353_136, 543_528, 733_920, 924_312, 1_114_704} {
+	for parts, upTo := range []int{0, 160_662, 351_052, 541_442, 731_832, 922_222, 1_112_612} {
 		if parts == 0 {
 			continue
 		}
@@ -321,6 +322,23 @@ func TestSplitRoomObjectProductionCut(t *testing.T) {
 	}
 	if !bytes.Equal(joined, object) {
 		t.Fatal("parts do not reassemble the object")
+	}
+	// Part 0 of the production cut still fits with a maximal card, evidence and
+	// v2 credential: the frame is exactly the largest bucket.
+	first, err := relayframe.Decode(withCard[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Card = make([]byte, relayframe.MaxCardBytes)
+	first.Evidence = make([]byte, relayframe.MaxEvidenceBytes)
+	first.Credential, first.HolderSeed = make([]byte, relayframe.MaxCredentialBytes), [32]byte{1}
+	full, err := relayframe.Encode(first)
+	if err != nil || len(full) != relayframe.MaxFrameBytes {
+		t.Fatalf("maximal part 0: %d bytes, %v", len(full), err)
+	}
+	unpadded, err := relayframe.UnpaddedSize(len(first.Card), len(first.Evidence), len(first.Credential), len(first.Part))
+	if err != nil || unpadded != relayframe.MaxFrameBytes {
+		t.Fatalf("maximal part 0 unpadded %d: %v", unpadded, err)
 	}
 }
 

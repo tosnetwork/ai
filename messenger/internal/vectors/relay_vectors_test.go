@@ -2,6 +2,7 @@ package vectors
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -194,5 +195,72 @@ func buildRelay(t *testing.T) []RelayVector {
 		}
 		add(frame.name, raw, nil)
 	}
+
+	// Frame v2's credential field: a copy carrying a contact credential and its
+	// holder seed, the largest credential, and the refusals a decoder owes.
+	credential := []byte("contact credential, opaque to the frame codec")
+	seed := [relayframe.HolderSeedBytes]byte{}
+	for index := range seed {
+		seed[index] = byte(0xa0 + index)
+	}
+	withCredential := relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1, Card: card, Evidence: evidence,
+		Credential: credential, HolderSeed: seed, Part: copyObject}
+	raw, err := relayframe.Encode(withCredential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add("relay-frame-copy-credential", raw, nil)
+	largest := withCredential
+	largest.Credential = bytes.Repeat([]byte{0xc5}, relayframe.MaxCredentialBytes)
+	largestRaw, err := relayframe.Encode(largest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add("relay-frame-copy-credential-maximal", largestRaw, nil)
+	// The credential length sits after the separator, kind, index, count,
+	// digest, card and evidence.
+	credentialLength := len(canon.DomainRelayFrame) + 3 + 32 + 2 + len(card) + 2 + len(evidence)
+	overBound := append([]byte(nil), raw...)
+	binary.BigEndian.PutUint16(overBound[credentialLength:], relayframe.MaxCredentialBytes+1)
+	add("relay-frame-credential-over-bound", overBound, relayframe.ErrCredentialTooLarge)
+	zeroSeed := append([]byte(nil), raw...)
+	copy(zeroSeed[credentialLength+2+len(credential):], make([]byte, relayframe.HolderSeedBytes))
+	add("relay-frame-credential-zero-holder-seed", zeroSeed, relayframe.ErrCredentialMalformed)
+	retired := append([]byte(nil), raw...)
+	copy(retired, strings.Replace(canon.DomainRelayFrame, ".v2", ".v1", 1))
+	add("relay-frame-retired-v1-separator", retired, relayframe.ErrFrameMalformed)
+	// A later room part carries no credential. The encoder refuses one, so
+	// the vector is a valid part-1 frame with a credential and seed inserted
+	// after its empty evidence, re-padded to its bucket.
+	add("relay-frame-credential-in-later-room-part",
+		laterPartWithCredential(t, credential, seed), relayframe.ErrCredentialMalformed)
 	return vectors
+}
+
+// laterPartWithCredential returns part 1 of a two-part room object whose
+// credential length, credential and holder seed have been written in by hand.
+func laterPartWithCredential(t *testing.T, credential []byte, seed [relayframe.HolderSeedBytes]byte) []byte {
+	t.Helper()
+	valid, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2,
+		ObjectDigest: [32]byte{0x3d}, Part: []byte("second part of a room object")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Separator, kind, index, count, digest, card length 0, evidence length 0.
+	at := len(canon.DomainRelayFrame) + 3 + 32 + 2 + 2
+	if valid[at] != 0 || valid[at+1] != 0 {
+		t.Fatal("part 1 frame already carries a credential")
+	}
+	partLength := int(binary.BigEndian.Uint32(valid[at+2:]))
+	rest := valid[at+2 : at+2+4+partLength]
+	mutated := append([]byte(nil), valid[:at]...)
+	mutated = binary.BigEndian.AppendUint16(mutated, uint16(len(credential)))
+	mutated = append(mutated, credential...)
+	mutated = append(mutated, seed[:]...)
+	mutated = append(mutated, rest...)
+	bucket, err := relayframe.BucketFor(len(mutated))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(mutated, make([]byte, bucket-len(mutated))...)
 }
