@@ -1,8 +1,9 @@
 // Package nativewallet provides local, review-before-signing support for
 // tos_service_v1 actions. Controller keys are ML-DSA-44 keys held in tosctl
 // custody: this package names controllers and receives signatures, and it
-// never reads, holds or passes private key material. It never submits a
-// transaction or grants a gateway access to controller keys.
+// never reads, holds or passes private key material. The transport issuer
+// submits only journalled controller-signed actions through the existing relay
+// interface; it never grants a gateway access to controller keys.
 package nativewallet
 
 import (

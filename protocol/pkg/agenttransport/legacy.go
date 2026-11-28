@@ -8,8 +8,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// FinalizedStateReader is the typed, proof-authenticated read exposed by the
-// protocol's chain resolver. No direct RPC read implements this promise.
+// FinalizedStateReader is the typed, authenticated finalized read exposed by
+// the protocol's chain resolver. The transport spec selects its strict-majority
+// reader; a single unchecked RPC response does not implement this promise.
 type FinalizedStateReader interface {
 	ResolveState(context.Context, string, string) (*nativev1.NativeStateV1, bool, error)
 }
