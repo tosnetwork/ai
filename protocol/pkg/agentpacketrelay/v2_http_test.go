@@ -786,3 +786,46 @@ func TestV2ProductionAndUnknownNetworksNeverEnable(t *testing.T) {
 		}
 	}
 }
+
+func TestV2ClientRejectsCompressedResponses(t *testing.T) {
+	f := newV2HTTP(t)
+	raw, err := json.Marshal(v2WireMailbox{SchemaV2Mailbox, f.r.agentID, []v2WireEntry{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := v2RoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Accept-Encoding") != "identity" {
+			t.Error("request permits transparent decompression")
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{ContentTypeJSON}, "Content-Encoding": []string{"gzip"}}, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+	})
+	client, err := NewV2Client(v2TestURL, transport, f.clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.List(t.Context(), f.r.agentID, f.wire, f.holder); err == nil {
+		t.Fatal("coded response bypassed raw bounds")
+	}
+}
+func TestV2HTTPRefusesUninterpretedBodyHeaders(t *testing.T) {
+	f := newV2HTTP(t)
+	for _, kind := range []string{"type", "duplicate", "encoding"} {
+		t.Run(kind, func(t *testing.T) {
+			e := f.r.seal(t, testPacket(1), unixNow(f.clock.Now())+3600)
+			req := f.request(t, "PUT", f.mail()+"/"+hex.EncodeToString(e.id[:]), e.envelope, false)
+			switch kind {
+			case "type":
+				req.Header.Set("Content-Type", ContentTypeJSON)
+			case "duplicate":
+				req.Header.Add("Content-Type", ContentTypeEnvelope)
+			case "encoding":
+				req.Header.Set("Content-Encoding", "gzip")
+			}
+			w := httptest.NewRecorder()
+			f.s.ServeHTTP(w, req)
+			if w.Code != 400 || f.s.store.Usage().StrangerEntries != 0 {
+				t.Fatal(kind, w.Code, w.Body.String())
+			}
+		})
+	}
+}

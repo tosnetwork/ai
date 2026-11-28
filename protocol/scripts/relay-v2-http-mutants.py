@@ -11,6 +11,46 @@ ROOT = Path(__file__).resolve().parents[2]
 RELAY = "./protocol/pkg/agentpacketrelay"
 CONTROLS = [
     (
+        "client-coded-response",
+        "agentpacketrelay/v2_client.go",
+        'if res.Uncompressed || (res.Header.Get("Content-Encoding") != "" && res.Header.Get("Content-Encoding") != "identity") {',
+        "if false {",
+        RELAY,
+        "TestV2ClientRejectsCompressedResponses",
+    ),
+    (
+        "client-identity-request",
+        "agentpacketrelay/v2_client.go",
+        'req.Header.Set("Accept-Encoding", "identity")',
+        "// permit transparent encoding",
+        RELAY,
+        "TestV2ClientRejectsCompressedResponses",
+    ),
+    (
+        "body-media-type",
+        "agentpacketrelay/v2_http.go",
+        'r.Header.Get("Content-Type") != ContentTypeEnvelope',
+        "false",
+        RELAY,
+        "TestV2HTTPRefusesUninterpretedBodyHeaders/type",
+    ),
+    (
+        "body-duplicate-type",
+        "agentpacketrelay/v2_http.go",
+        'len(r.Header.Values("Content-Type")) != 1',
+        "false",
+        RELAY,
+        "TestV2HTTPRefusesUninterpretedBodyHeaders/duplicate",
+    ),
+    (
+        "body-encoding",
+        "agentpacketrelay/v2_http.go",
+        'r.Header.Get("Content-Encoding") != ""',
+        "false",
+        RELAY,
+        "TestV2HTTPRefusesUninterpretedBodyHeaders/encoding",
+    ),
+    (
         "retention-before-conversion",
         "../cmd/tos-service-packet-relay-v2/main.go",
         "*c.TTLSeconds > uint64(agentpacketrelay.MaxTTL/time.Second)",
