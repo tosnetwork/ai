@@ -2,6 +2,7 @@ package vectors
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -194,5 +195,39 @@ func buildRelay(t *testing.T) []RelayVector {
 		}
 		add(frame.name, raw, nil)
 	}
+
+	// Frame v2's credential field: a copy carrying a contact credential and its
+	// holder seed, the largest credential, and the refusals a decoder owes.
+	credential := []byte("contact credential, opaque to the frame codec")
+	seed := [relayframe.HolderSeedBytes]byte{}
+	for index := range seed {
+		seed[index] = byte(0xa0 + index)
+	}
+	withCredential := relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1, Card: card, Evidence: evidence,
+		Credential: credential, HolderSeed: seed, Part: copyObject}
+	raw, err := relayframe.Encode(withCredential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add("relay-frame-copy-credential", raw, nil)
+	largest := withCredential
+	largest.Credential = bytes.Repeat([]byte{0xc5}, relayframe.MaxCredentialBytes)
+	largestRaw, err := relayframe.Encode(largest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add("relay-frame-copy-credential-maximal", largestRaw, nil)
+	// The credential length sits after the separator, kind, index, count,
+	// digest, card and evidence.
+	credentialLength := len(canon.DomainRelayFrame) + 3 + 32 + 2 + len(card) + 2 + len(evidence)
+	overBound := append([]byte(nil), raw...)
+	binary.BigEndian.PutUint16(overBound[credentialLength:], relayframe.MaxCredentialBytes+1)
+	add("relay-frame-credential-over-bound", overBound, relayframe.ErrCredentialTooLarge)
+	zeroSeed := append([]byte(nil), raw...)
+	copy(zeroSeed[credentialLength+2+len(credential):], make([]byte, relayframe.HolderSeedBytes))
+	add("relay-frame-credential-zero-holder-seed", zeroSeed, relayframe.ErrCredentialMalformed)
+	retired := append([]byte(nil), raw...)
+	copy(retired, strings.Replace(canon.DomainRelayFrame, ".v2", ".v1", 1))
+	add("relay-frame-retired-v1-separator", retired, relayframe.ErrFrameMalformed)
 	return vectors
 }
