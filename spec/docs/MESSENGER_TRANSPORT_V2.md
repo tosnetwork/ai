@@ -1561,7 +1561,8 @@ The questions this design raised, each with its decision (recorded
   this design; frames, double encryption, evidence and rooms stay. V2 keeps
   no V1 compatibility: routes come only from hints, never from a card's relay
   list; section 4's re-deposit TTL is the smallest of the hint's relays; and
-  a contact file (D4) gives no route without a valid hint record.
+  a contact file (D4) supplies a route only through a valid hint record it
+  carries, otherwise the route comes from a directory lookup (9.2).
 - The contact file, invite, offer file and Gateway Quote package formats
   gain an optional hint record field (9.2); until a format has it, first
   contact through it needs a directory lookup.
