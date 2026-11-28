@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	nativev1 "github.com/tosnetwork/ai/protocol/gen/tos/service/v1"
@@ -39,6 +40,9 @@ type FinalizedResolver interface {
 // ErrUnavailable alone permits stale-pass fallback. Proof and integrity errors
 // must not wrap it.
 var ErrUnavailable = nativecore.ErrFinalizedReadUnavailable
+
+// ErrDelegationRevoked is positive finalized evidence, unlike a failed read.
+var ErrDelegationRevoked = errors.New("delegation no longer authorized")
 
 type Clock interface{ Now() time.Time }
 type systemClock struct{}
@@ -144,12 +148,20 @@ func checkUse(d Delegation, purpose Purpose, now time.Time) error {
 // VerifyDelegation checks time and purpose on every use, including cached uses.
 // Only an availability error permits the bounded stale-pass fallback.
 func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpose) (Delegation, error) {
+	d, _, err := v.VerifyDelegationUntil(ctx, b, purpose)
+	return d, err
+}
+
+// VerifyDelegationUntil also returns the exclusive freshness deadline of this
+// particular pass. Consumers doing more blocking work must enforce it at commit,
+// together with delegation expiry; they must not extend it from the return time.
+func (v *Verifier) VerifyDelegationUntil(ctx context.Context, b []byte, purpose Purpose) (Delegation, time.Time, error) {
 	if err := ctx.Err(); err != nil {
-		return Delegation{}, err
+		return Delegation{}, time.Time{}, err
 	}
 	d, err := DecodeDelegation(b)
 	if err != nil {
-		return d, err
+		return d, time.Time{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, v.config.ReadTimeout)
 	defer cancel()
@@ -157,28 +169,28 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 	case v.gate <- struct{}{}:
 		defer func() { <-v.gate }()
 	case <-ctx.Done():
-		return d, ctx.Err()
+		return d, time.Time{}, ctx.Err()
 	}
 	if err := ctx.Err(); err != nil {
-		return d, err
+		return d, time.Time{}, err
 	}
 	now, err := v.now()
 	if err != nil {
-		return d, err
+		return d, time.Time{}, err
 	}
 	if err = checkUse(d, purpose, now); err != nil {
-		return d, err
+		return d, time.Time{}, err
 	}
 	digest := sha256.Sum256(b)
 	pass, cached := v.passes[digest]
 	checked := pass.checked
 	if cached && now.Sub(checked) < RefreshAfter {
-		return d, nil
+		return d, checked.Add(RefuseAfter), nil
 	}
 	snapshot, readErr := v.resolver.ResolveFinalizedAgent(ctx, d.AgentID())
 	if err := ctx.Err(); err != nil {
 		delete(v.passes, sha256.Sum256(b))
-		return d, err
+		return d, time.Time{}, err
 	}
 	if readErr == nil {
 		v.invalidateChangedAgentPasses(d.AgentDigest, snapshot)
@@ -187,28 +199,28 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 	}
 	after, err := v.now()
 	if err != nil {
-		return d, err
+		return d, time.Time{}, err
 	}
 	if err = checkUse(d, purpose, after); err != nil {
-		return d, err
+		return d, time.Time{}, err
 	}
 	if readErr != nil {
 		if !errors.Is(readErr, ErrUnavailable) {
-			return d, errors.New("finalized resolver integrity failure")
+			return d, time.Time{}, errors.New("finalized resolver integrity failure")
 		}
 		if cached && after.Sub(checked) < RefuseAfter {
-			return d, nil
+			return d, checked.Add(RefuseAfter), nil
 		}
 		delete(v.passes, digest)
-		return d, errors.New("finalized Agent state unavailable and no usable cached pass")
+		return d, time.Time{}, fmt.Errorf("%w: no usable cached pass", ErrUnavailable)
 	}
 	// Recheck the requested digest even when the finalized state is unchanged.
 	delete(v.passes, digest)
 	if err = v.checkSnapshot(d, digest, snapshot, true); err != nil {
-		return d, err
+		return d, time.Time{}, err
 	}
 	if after.Sub(now) >= RefreshAfter {
-		return d, errors.New("finalized read too old")
+		return d, time.Time{}, errors.New("finalized read too old")
 	}
 	for key, pass := range v.passes {
 		if after.Sub(pass.checked) >= RefuseAfter {
@@ -218,10 +230,13 @@ func (v *Verifier) VerifyDelegation(ctx context.Context, b []byte, purpose Purpo
 	if len(v.passes) < v.config.CacheEntries {
 		v.passes[digest] = cachedPass{agent: d.AgentDigest, stateHash: snapshot.State.TvmStateHash, epoch: d.AuthorizationEpoch, checked: now}
 	}
-	return d, nil
+	return d, now.Add(RefuseAfter), nil
 }
 
 func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admitted bool) error {
+	if s.State == nil {
+		return fmt.Errorf("%w: Agent absent", ErrDelegationRevoked)
+	}
 	agent, err := CheckState(v.config.ChainPolicy, v.config.Network, d.AgentID(), s.State)
 	if err != nil {
 		return err
@@ -231,14 +246,16 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 	}
 	if s.CurrentEpoch == nil || *s.CurrentEpoch == 0 ||
 		agent.AuthorizationEpoch != *s.CurrentEpoch ||
-		s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint || d.AuthorizationEpoch != *s.CurrentEpoch {
+		s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint {
+		return errors.New("delegation epoch differs from the current finalized authorization epoch")
+	}
+	if *s.CurrentEpoch > d.AuthorizationEpoch {
+		return fmt.Errorf("%w: finalized authorization epoch advanced", ErrDelegationRevoked)
+	}
+	if d.AuthorizationEpoch != *s.CurrentEpoch {
 		return errors.New("delegation epoch differs from the current finalized authorization epoch")
 	}
 	if admitted {
-		epoch, present := s.AdmissionEpochs[digest]
-		if !present || epoch != d.AuthorizationEpoch {
-			return errors.New("delegation epoch differs from its recorded admission epoch")
-		}
 		found := false
 		for _, entry := range agent.DelegationAdmissions {
 			if entry.GetDigest() == "sha256:"+hex.EncodeToString(digest[:]) && !entry.Withdrawn && entry.AdmissionEpoch == d.AuthorizationEpoch {
@@ -246,8 +263,15 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 				break
 			}
 		}
+		epoch, present := s.AdmissionEpochs[digest]
 		if !found {
-			return errors.New("delegation is not in the finalized live set")
+			if present {
+				return errors.New("finalized live set disagrees with its admission metadata")
+			}
+			return fmt.Errorf("%w: not in finalized live set", ErrDelegationRevoked)
+		}
+		if !present || epoch != d.AuthorizationEpoch {
+			return errors.New("delegation epoch differs from its recorded admission epoch")
 		}
 	}
 	policy, err := nativecore.PolicyCell(agent.Policy)
@@ -255,7 +279,7 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 		return err
 	}
 	if !bytes.Equal(policy.Hash(), d.PolicyHash[:]) {
-		return errors.New("delegation policy differs from finalized policy")
+		return fmt.Errorf("%w: finalized policy changed", ErrDelegationRevoked)
 	}
 	return nil
 }

@@ -618,7 +618,7 @@ The daemon configuration adds:
   process on the owner surface.
 - **Refusals.** `agent.packet` Events are refused on this route in both
   directions. The relay route's largest Event payload is computed from the
-  worst-case frame before sealing (139,547 bytes); a larger one is refused
+  worst-case frame before sealing (137,465 bytes under relay frame v2); a larger one is refused
   with `content-too-large` and no key is spent.
 
 ### Private rooms over the relay (M-R2)
@@ -729,7 +729,7 @@ names any of them, whatever the value:
 
 | Setting | Bounds | Production value |
 |---|---|---|
-| `room_part_bytes` | 1,024..162,744; cuts handshake objects only | production cut |
+| `room_part_bytes` | 1,024..160,662; cuts handshake objects only | production cut |
 | `room_handshake_retention_seconds` | 1 s..7 days | 7 days |
 | `room_authorization_seconds` | 1 min..24 h | 24 h |
 

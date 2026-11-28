@@ -14,6 +14,10 @@ import (
 	"github.com/tosnetwork/ai/protocol/pkg/nativecore"
 )
 
+// ErrEndpointsUnavailable means every endpoint failed at the network transport,
+// not malformed data, a failed proof, or a split quorum.
+var ErrEndpointsUnavailable = nativecore.ErrFinalizedReadUnavailable
+
 type consensusObservation struct {
 	seqno      uint64
 	observedAt time.Time
@@ -151,9 +155,10 @@ func quorumRead[T any](
 // failure, malformed data, or disputed finalized observation fails closed.
 func endpointUnavailable(err error) bool {
 	var networkError net.Error
+	var dnsError *net.DNSError
 	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
 		errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
-		(errors.As(err, &networkError) && networkError.Timeout())
+		errors.As(err, &dnsError) || (errors.As(err, &networkError) && networkError.Timeout())
 }
 
 func quorumKey(value any) (string, error) {

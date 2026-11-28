@@ -23,8 +23,8 @@ MUTANTS = [
     (
         "epoch",
         "agenttransport/verify.go",
-        " || d.AuthorizationEpoch != *s.CurrentEpoch",
-        "",
+        "if d.AuthorizationEpoch != *s.CurrentEpoch {",
+        "if false {",
         WALLET,
         "TestTransportEpochAndNetworkRefusals/future-epoch",
     ),

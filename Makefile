@@ -57,6 +57,7 @@ boundary-lint:
 spec-check:
 	GOWORK=off go run ./protocol/cmd/agenttransport-vectors | cmp - spec/test-vectors/agent-transport-v1.json
 	python3 -I spec/scripts/reproduce-agent-transport-v1.py
+	python3 -I spec/scripts/reproduce-messenger-relay-frame-v2.py
 	GOWORK=off go run ./protocol/cmd/agenttransport-vectors -corpus credential | cmp - spec/test-vectors/agent-transport-credential-v1.json
 	python3 -I spec/scripts/reproduce-agent-transport-credential-v1.py
 	python3 spec/scripts/verify-prediction-market-compatibility.py
@@ -196,3 +197,23 @@ agenttransport-reachability-mutants:
 .PHONY: relay-v2-store-mutants
 relay-v2-store-mutants:
 	GOWORK=off python3 -I protocol/scripts/relay-v2-store-mutants.py
+
+.PHONY: relay-v2-policy-vectors-check
+spec-check: relay-v2-policy-vectors-check
+relay-v2-policy-vectors-check:
+	GOWORK=off go run ./protocol/cmd/relay-policy-vectors | cmp - spec/test-vectors/relay-mailbox-policy-v1.json
+	python3 -I spec/scripts/reproduce-relay-mailbox-policy-v1.py
+
+.PHONY: relay-v2-http-mutants
+relay-v2-http-mutants:
+	GOWORK=off python3 -I protocol/scripts/relay-v2-http-mutants.py
+
+.PHONY: relay-v2-directory-vectors-check
+spec-check: relay-v2-directory-vectors-check
+relay-v2-directory-vectors-check:
+	GOWORK=off go run ./protocol/cmd/relay-directory-vectors | cmp - spec/test-vectors/relay-directory-v2.json
+	python3 -I spec/scripts/reproduce-relay-directory-v2.py
+
+.PHONY: relay-v2-directory-mutants
+relay-v2-directory-mutants:
+	python3 -I protocol/scripts/relay-v2-directory-mutants.py

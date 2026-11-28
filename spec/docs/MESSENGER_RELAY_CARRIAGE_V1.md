@@ -29,6 +29,17 @@ running system.
 
 **Errata (implementation).** Section 4 is corrected to the code and measurements of the M-R1 Messenger implementation: the ciphertext bound is 164 KiB, the first-contact bootstrap bound is 18 KiB (measured worst case 16,951 bytes), and the largest relay Event payload is 139,547 bytes; sections 2.5, 7 and 9 now state the relay-only descriptor route and the split of the 24-envelope count.
 
+**Errata (relay frame v2).** The frame is `tos.messaging.relay-frame.v2`
+(MESSENGER_TRANSPORT_V2.md 9.3): a `credential` field with its holder seed
+follows `evidence`, and the frame's fixed part grows to 74 bytes. The bounds
+of 1.1, 4 and 11.1 are recomputed from a real maximal frame: the largest relay
+Event payload is **137,465** bytes (139,547 under v1), part 0 of a room object
+holds **160,662** object bytes and every later part **190,390**, and
+`room_part_bytes` is at most 160,662. The ciphertext bound (164 KiB) and the
+bootstrap bound (18 KiB) are Messenger's own and unchanged; the relay route
+carries at most a 141,561-byte ciphertext. Only v2 frames decode: there is no
+v1 frame decoder and no fallback.
+
 **Errata (M-R2 relay frame implementation).** Section 11.1 gains the
 normative room-object header layout. The largest valid header is 2,653 bytes
 (2,661 since the room end time of D18 was added to it), so the largest valid
@@ -136,7 +147,7 @@ reach the rail inbox inside a chat copy, bypassing the key-purpose rule of 2.2.
 
 ```text
 relay_frame =
-  D("tos.messaging.relay-frame.v1")   29 bytes
+  D("tos.messaging.relay-frame.v2")   29 bytes
   frame_kind      u8    1 = copy, 2 = delivery-ack, 3 = room (M-R2), 4 = evidence
   part_index      u8    0 .. part_count-1
   part_count      u8    1 .. 8; kinds 1, 2 and 4 require 1
@@ -148,7 +159,13 @@ relay_frame =
   evidence_length u16   1 .. 18,432 in kinds 1, 2, 4 and kind-3 part 0;
                         0 in every other kind-3 part
   evidence        the sender's current relay identity evidence (2.5)
-  part_length     u32   1 .. 190,392
+  credential_length u16 0, or 1 .. 2,048; 0 in kind-3 parts other than part 0
+  credential      the sender's contact credential for the recipient
+                  (MESSENGER_TRANSPORT_V2.md 5.3, 9.3), opaque to the codec
+  holder_seed     32    the Ed25519 seed of the credential's holder key,
+                        present exactly when credential_length is non-zero,
+                        and not all zero
+  part_length     u32   1 .. 190,390
   part            this part of the object (kind 3: cut as in 11.1)
                   (kind 4: a one-byte object, 1 = request, 2 = response)
   padding         zero bytes up to the frame's size bucket (6)
@@ -543,11 +560,12 @@ plus an initial message of at most 4 KiB (`bootstrap.go:19`), in JSON; with
 the longest network identifier in its most-escaped JSON form the measured
 worst case is 16,951 bytes, so a copy's bootstrap is bounded at **18 KiB**
 (18,432 bytes). Every frame also carries up to 18,432 bytes of evidence (2.5)
-and possibly a card, so the relay route's largest payload is below
-Messenger's own. The frame codec derives the exact worst case from the
-maximal card (9,216), evidence (18,432), bootstrap (18,432) and admission
-token (256), the copy object's 413 fixed bytes, the frame's 72 fixed bytes
-and the 4,096-byte seal overhead: 190,464 − 50,917 = **139,547 bytes** is
+and possibly a card and a contact credential, so the relay route's largest
+payload is below Messenger's own. The frame codec derives the exact worst case
+from the maximal card (9,216), evidence (18,432), credential with its holder
+seed (2,080), bootstrap (18,432) and admission token (256), the copy object's
+413 fixed bytes, the frame's 74 fixed bytes and the 4,096-byte seal overhead:
+190,464 − 52,999 = **137,465 bytes** is
 the largest Event payload the relay route carries. The daemon MUST compute the worst-case frame
 size from it **before sealing** and refuse an oversize delivery with
 `content-too-large` (`messenger/pkg/fault/fault.go:123`), so no message key is
@@ -1640,18 +1658,19 @@ later header naming another end, is refused `not-authentic`. The
 codec limits stay 8,192 header bytes and 1,056,858 object bytes: a safe upper
 bound that no valid object reaches.
 
-**The cut is fixed, not size-driven.** The frame's fixed part is 72 bytes
-(29 + 3 + 32 + 2 + 2 + 4, `messenger/pkg/relayframe/frame.go:53-58`). Part 0
-carries the evidence and, while unacknowledged, the card; the other parts
-carry neither (1.1). So part 0 always holds the first
-c0 = 190,464 − 72 − 9,216 − 18,432 = **162,744** object bytes and every later
-part c = 190,464 − 72 = **190,392**, the last part the rest:
+**The cut is fixed, not size-driven.** The frame's fixed part is 74 bytes
+(29 + 3 + 32 + 2 + 2 + 2 + 4, `messenger/pkg/relayframe/frame.go`). Part 0
+carries the evidence and, while unacknowledged, the card and the contact
+credential; the other parts carry none of them (1.1). So part 0 always holds
+the first c0 = 190,464 − 74 − 9,216 − 18,432 − 2,080 = **160,662** object
+bytes and every later part c = 190,464 − 74 = **190,390**, the last part the
+rest:
 
 | Parts n | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|---|
-| Object bytes up to c0 + (n−1)·c | 162,744 | 353,136 | 543,528 | 733,920 | 924,312 | 1,114,704 | 1,305,096 | 1,495,488 |
+| Object bytes up to c0 + (n−1)·c | 160,662 | 351,052 | 541,442 | 731,832 | 922,222 | 1,112,612 | 1,303,002 | 1,493,392 |
 
-A maximal object takes **6 parts**; the 8-part limit leaves 438,630 bytes
+A maximal object takes **6 parts**; the 8-part limit leaves 436,534 bytes
 spare and decoders still refuse any object above 1,056,858 bytes. Cut points
 do not depend on the actual card or evidence size, so every re-deposit
 generation has byte-identical parts and the same digest although part 0's
@@ -1659,13 +1678,13 @@ card is dropped once acknowledged. Every non-final part is exactly the
 190,464-byte bucket; a full part stores 1,373 + 5,432 + 4·63,488 = 260,757
 bytes at a relay (≤ 262,144). The last part is padded to its bucket (6). The
 largest valid object (1,051,327 bytes) is five 190,464-byte frames and a last
-part of 127,015 object bytes, a 127,087-byte frame in the 128 KiB bucket:
+part of 129,105 object bytes, a 129,179-byte frame in the 128 KiB bucket:
 5 · 260,757 + (1,373 + 5,432 + 4 · 43,691) = **1,485,354 stored bytes per
 member**. (An object at the 1,056,858-byte codec limit, which no valid header
-reaches, would be six 190,464-byte frames with a last part of 132,546 bytes
+reaches, would be six 190,464-byte frames with a last part of 134,636 bytes
 and 1,564,542 stored bytes; that figure is an upper bound, never reached.)
 **Test part size:** a test build MAY set
-`room_part_bytes` P in 1,024 .. 162,744, cutting every part of a *handshake*
+`room_part_bytes` P in 1,024 .. 160,662, cutting every part of a *handshake*
 object at P (application objects keep the production rule); an object that
 would need more than 8 parts at P is refused at the sender (staged, never
 deposited, abandoned at the handshake retention), so P must let the largest
@@ -1676,7 +1695,7 @@ record states P, and a production build refuses the setting.
 **Application objects are never split.** Their Event plaintext is at most
 131,072 bytes, checked before the MLS seal (as 4 does for copies, refused
 `content-too-large`); with a PrivateMessage overhead bound of 4,096 bytes
-(vector-tested) the body is at most 135,168 ≤ 162,744 − 90. The plaintext is
+(vector-tested) the body is at most 135,168 ≤ 160,662 − 90. The plaintext is
 the canonical Event (kind `room.message` or `artifact.encrypted`) whose
 `RoomMessage` gains a per (room, sender) `sequence`, and the MLS AAD binds
 D("tos.messaging.room-aad.v1"), room ID, room and MLS epoch, the sealing
@@ -1700,7 +1719,7 @@ an MLS identity and KeyPackage (`openmls_sidecar.go:111`) whose identity is
 the compact binding naming that credential. It has the Endpoint sign a
 `DeviceCredential` (`mls_profile.go:150-160`; KeyPackage ≤ 64 KiB, `:33`)
 with the same window, and returns both as a new kind-1 event
-`room.key-package`, within the 139,547-byte copy bound. Both events leave `Event.RoomID` empty and
+`room.key-package`, within the 137,465-byte copy bound. Both events leave `Event.RoomID` empty and
 name the room only inside their payload, so the room-addressed kind-1 refusal
 below does not apply; `room.key-package` is registered in the payload
 registry with class `room`, like `room.invite`

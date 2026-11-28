@@ -57,7 +57,7 @@ func TestEachKindRoundTripsAndPadsToItsBucket(t *testing.T) {
 		if err != nil {
 			t.Fatalf("encode kind %d: %v", frame.Kind, err)
 		}
-		unpadded, err := relayframe.UnpaddedSize(len(frame.Card), len(frame.Evidence), len(frame.Part))
+		unpadded, err := relayframe.UnpaddedSize(len(frame.Card), len(frame.Evidence), len(frame.Credential), len(frame.Part))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -91,7 +91,7 @@ func TestEveryBucketIsReachableAndTheLargestIsTheBound(t *testing.T) {
 		if bucket != want[index] {
 			t.Fatalf("buckets=%v", buckets)
 		}
-		base, _ := relayframe.UnpaddedSize(0, len(ev), 0)
+		base, _ := relayframe.UnpaddedSize(0, len(ev), 0, 0)
 		part := bucket - base
 		encoded, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindDeliveryAck, PartCount: 1,
 			Evidence: ev, Part: bytes.Repeat([]byte{1}, part)})
@@ -106,7 +106,7 @@ func TestEveryBucketIsReachableAndTheLargestIsTheBound(t *testing.T) {
 			}
 		}
 	}
-	base, _ := relayframe.UnpaddedSize(0, len(ev), 0)
+	base, _ := relayframe.UnpaddedSize(0, len(ev), 0, 0)
 	if _, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindDeliveryAck, PartCount: 1, Evidence: ev,
 		Part: make([]byte, relayframe.MaxFrameBytes-base+1)}); !errors.Is(err, relayframe.ErrContentTooLarge) {
 		t.Fatalf("over the largest bucket: %v", err)
@@ -358,7 +358,9 @@ func TestMaximalBootstrapFitsItsBound(t *testing.T) {
 
 func TestWorstCaseCopyIsCheckedBeforeSealing(t *testing.T) {
 	largest := relayframe.MaxRelayPayloadBytes()
-	if largest != 139_547 || largest >= eventlog.MaxPayloadBytes {
+	// v1 carried 139,547 bytes; the v2 credential field (2,048-byte credential,
+	// 32-byte holder seed and a 2-byte length) takes 2,082 of them.
+	if largest != 137_465 || largest >= eventlog.MaxPayloadBytes {
 		t.Fatalf("largest relay payload %d", largest)
 	}
 	if err := relayframe.CheckCopyFits(largest); err != nil {
@@ -385,10 +387,152 @@ func TestWorstCaseCopyIsCheckedBeforeSealing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1,
-		Card: make([]byte, relayframe.MaxCardBytes), Evidence: make([]byte, relayframe.MaxEvidenceBytes), Part: object})
+	worst := relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1,
+		Card: make([]byte, relayframe.MaxCardBytes), Evidence: make([]byte, relayframe.MaxEvidenceBytes),
+		Credential: make([]byte, relayframe.MaxCredentialBytes), HolderSeed: [32]byte{1}, Part: object}
+	frame, err := relayframe.Encode(worst)
 	if err != nil || len(frame) != relayframe.MaxFrameBytes {
 		t.Fatalf("worst-case frame %d bytes: %v", len(frame), err)
+	}
+	// It is exactly full: unpadded, it is the largest bucket.
+	if unpadded, err := relayframe.UnpaddedSize(len(worst.Card), len(worst.Evidence), len(worst.Credential),
+		len(worst.Part)); err != nil || unpadded != relayframe.MaxFrameBytes {
+		t.Fatalf("worst-case frame unpadded %d: %v", unpadded, err)
+	}
+	decoded, err := relayframe.Decode(frame)
+	if err != nil || !bytes.Equal(decoded.Credential, worst.Credential) || decoded.HolderSeed != worst.HolderSeed {
+		t.Fatalf("worst-case frame decode: %v", err)
+	}
+	// One more payload byte does not fit.
+	over, err := relayframe.EncodeCopy(relayframe.Copy{EventID: "evt_" + strings.Repeat("1", 64),
+		SessionID: "ses_" + strings.Repeat("2", 64), RecipientEndpointID: "mep_" + strings.Repeat("3", 64),
+		RecipientDeviceID: "dev_" + strings.Repeat("4", 64), ConversationID: "conv_" + strings.Repeat("5", 64),
+		Bootstrap: make([]byte, relayframe.MaxBootstrapBytes), AdmissionToken: strings.Repeat("t", relayframe.MaxAdmissionTokenBytes),
+		Ciphertext: make([]byte, largest+1+relayframe.MaxSealOverheadBytes), ExpiresAtUnix: math.MaxUint64})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worst.Part = over
+	if _, err := relayframe.Encode(worst); !errors.Is(err, relayframe.ErrContentTooLarge) {
+		t.Fatalf("one payload byte over the worst case: %v", err)
+	}
+}
+
+// laterPart returns part 1 of a two-part room object with a credential and
+// holder seed written in by hand, which the encoder would refuse.
+func laterPart(t *testing.T, credential []byte, seed [32]byte) []byte {
+	t.Helper()
+	valid, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2,
+		ObjectDigest: [32]byte{0x3d}, Part: []byte("second part of a room object")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := len(canon.DomainRelayFrame) + 3 + 32 + 2 + 2
+	partLength := int(binary.BigEndian.Uint32(valid[at+2:]))
+	mutated := append([]byte(nil), valid[:at]...)
+	mutated = binary.BigEndian.AppendUint16(mutated, uint16(len(credential)))
+	mutated = append(append(mutated, credential...), seed[:]...)
+	mutated = append(mutated, valid[at+2:at+2+4+partLength]...)
+	bucket, err := relayframe.BucketFor(len(mutated))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(mutated, make([]byte, bucket-len(mutated))...)
+}
+
+// The v2 credential field: a credential of 1..2,048 bytes with a non-zero
+// holder seed, or neither; never in a later room part; and nothing but a v2
+// frame decodes.
+func TestCredentialFieldRoundTripsAndIsBounded(t *testing.T) {
+	ev := evidence(t)
+	credential := []byte("contact credential bytes, opaque to the frame codec")
+	seed := [32]byte{7, 7, 7}
+	for _, frame := range []relayframe.Frame{
+		{Kind: relayframe.KindCopy, PartCount: 1, Evidence: ev, Credential: credential, HolderSeed: seed, Part: copyObject(t, 64)},
+		{Kind: relayframe.KindDeliveryAck, PartCount: 1, Evidence: ev, Credential: credential, HolderSeed: seed, Part: []byte("ack")},
+		{Kind: relayframe.KindEvidence, PartCount: 1, Card: []byte("card"), Evidence: ev, Credential: credential,
+			HolderSeed: seed, Part: []byte{relayframe.EvidenceRequest}},
+		{Kind: relayframe.KindRoom, PartCount: 2, ObjectDigest: [32]byte{9}, Evidence: ev, Credential: credential,
+			HolderSeed: seed, Part: []byte("part zero")},
+		{Kind: relayframe.KindCopy, PartCount: 1, Evidence: ev, Credential: make([]byte, relayframe.MaxCredentialBytes),
+			HolderSeed: seed, Part: copyObject(t, 64)},
+	} {
+		raw, err := relayframe.Encode(frame)
+		if err != nil {
+			t.Fatalf("kind %d: %v", frame.Kind, err)
+		}
+		decoded, err := relayframe.Decode(raw)
+		if err != nil || !bytes.Equal(decoded.Credential, frame.Credential) || decoded.HolderSeed != seed {
+			t.Fatalf("kind %d did not round-trip: %v", frame.Kind, err)
+		}
+		withoutCredential := frame
+		withoutCredential.Credential, withoutCredential.HolderSeed = nil, [32]byte{}
+		plain, err := relayframe.Encode(withoutCredential)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, _ := relayframe.UnpaddedSize(len(frame.Card), len(frame.Evidence), len(frame.Credential), len(frame.Part))
+		b, _ := relayframe.UnpaddedSize(len(frame.Card), len(frame.Evidence), 0, len(frame.Part))
+		if a-b != len(frame.Credential)+relayframe.HolderSeedBytes || len(plain) > len(raw) {
+			t.Fatalf("kind %d: credential adds %d bytes", frame.Kind, a-b)
+		}
+	}
+	for _, test := range []struct {
+		name  string
+		frame relayframe.Frame
+		want  error
+	}{
+		{"credential over bound", relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1, Evidence: ev,
+			Credential: make([]byte, relayframe.MaxCredentialBytes+1), HolderSeed: seed, Part: copyObject(t, 64)},
+			relayframe.ErrCredentialTooLarge},
+		{"credential without a seed", relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1, Evidence: ev,
+			Credential: credential, Part: copyObject(t, 64)}, relayframe.ErrCredentialMalformed},
+		{"seed without a credential", relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1, Evidence: ev,
+			HolderSeed: seed, Part: copyObject(t, 64)}, relayframe.ErrCredentialMalformed},
+		{"credential in a later room part", relayframe.Frame{Kind: relayframe.KindRoom, PartIndex: 1, PartCount: 2,
+			ObjectDigest: [32]byte{9}, Credential: credential, HolderSeed: seed, Part: []byte("part one")},
+			relayframe.ErrCredentialMalformed},
+	} {
+		if _, err := relayframe.Encode(test.frame); !errors.Is(err, test.want) {
+			t.Fatalf("encode %s: %v", test.name, err)
+		}
+	}
+
+	good, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindCopy, PartCount: 1, Evidence: ev,
+		Credential: credential, HolderSeed: seed, Part: copyObject(t, 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain := len(canon.DomainRelayFrame)
+	credentialLength := domain + 3 + 32 + 2 + 2 + len(ev)
+	mutate := func(apply func([]byte) []byte) []byte { return apply(append([]byte(nil), good...)) }
+	for _, test := range []struct {
+		name string
+		raw  []byte
+		want error
+	}{
+		{"credential length over bound", mutate(func(b []byte) []byte {
+			binary.BigEndian.PutUint16(b[credentialLength:], relayframe.MaxCredentialBytes+1)
+			return b
+		}), relayframe.ErrCredentialTooLarge},
+		{"zero holder seed", mutate(func(b []byte) []byte {
+			copy(b[credentialLength+2+len(credential):], make([]byte, 32))
+			return b
+		}), relayframe.ErrCredentialMalformed},
+		{"credential in a later room part", laterPart(t, credential, seed), relayframe.ErrCredentialMalformed},
+		{"v1 frame domain", mutate(func(b []byte) []byte {
+			// The retired version's separator, derived so no unregistered
+			// separator appears in source.
+			copy(b, strings.Replace(canon.DomainRelayFrame, ".v2", ".v1", 1))
+			return b
+		}), relayframe.ErrFrameMalformed},
+	} {
+		if _, err := relayframe.Decode(test.raw); !errors.Is(err, test.want) {
+			t.Fatalf("decode %s: %v", test.name, err)
+		}
+	}
+	if !strings.HasSuffix(canon.DomainRelayFrame, ".relay-frame.v2\x00") {
+		t.Fatalf("frame domain %q", canon.DomainRelayFrame)
 	}
 }
 

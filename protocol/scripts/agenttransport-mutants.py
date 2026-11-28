@@ -186,8 +186,8 @@ MUTANTS = [
     (
         "tombstone",
         "chain.go",
-        "agent.Tombstoned || agent.Policy == nil",
-        "agent.Policy == nil",
+        "if agent.Tombstoned {",
+        "if false && agent.Tombstoned {",
         "TestVerificationChecks/tombstone",
     ),
     (
@@ -214,8 +214,8 @@ MUTANTS = [
     (
         "membership",
         "verify.go",
-        'if !found {\n\t\t\treturn errors.New("delegation is not in the finalized live set")',
-        'if false && !found {\n\t\t\treturn errors.New("delegation is not in the finalized live set")',
+        'if !found {\n\t\t\tif present {',
+        'if false && !found {\n\t\t\tif present {',
         "TestVerificationChecks/membership",
     ),
     (
@@ -230,7 +230,7 @@ MUTANTS = [
         "verify.go",
         "d.AuthorizationEpoch != *s.CurrentEpoch",
         "false",
-        "TestVerificationChecks/current-epoch",
+        "TestBuilderRefusesFutureRegistryEpoch",
     ),
     (
         "admission-epoch",
@@ -305,8 +305,8 @@ MUTANTS = [
     (
         "integrity-fallback",
         "verify.go",
-        'if !errors.Is(readErr, ErrUnavailable) {\n\t\t\treturn d, errors.New("finalized resolver integrity failure")',
-        'if false {\n\t\t\treturn d, errors.New("finalized resolver integrity failure")',
+        'if !errors.Is(readErr, ErrUnavailable) {\n\t\t\treturn d, time.Time{}, errors.New("finalized resolver integrity failure")',
+        'if false {\n\t\t\treturn d, time.Time{}, errors.New("finalized resolver integrity failure")',
         "TestFallbackNeverHidesRevocationOrIntegrity",
     ),
     (
