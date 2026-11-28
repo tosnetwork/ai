@@ -11,6 +11,22 @@ ROOT = Path(__file__).resolve().parents[2]
 RELAY = "./protocol/pkg/agentpacketrelay"
 CONTROLS = [
     (
+        "finalized-authorization",
+        "agentpacketrelay/v2_http.go",
+        "_, err = s.verifier.VerifyDelegation(r.Context(), raw, agenttransport.Relay)",
+        "_ = raw; err=nil",
+        RELAY,
+        "TestV2HTTPFinalizedCacheBoundAndStrangersContinue",
+    ),
+    (
+        "path-agent",
+        "agenttransport/proof.go",
+        "if c.delegation.AgentID() != r.AgentID {",
+        "if false {",
+        RELAY,
+        "TestV2HTTPClosedReadsAndNoV1Route",
+    ),
+    (
         "listing-bound",
         "agentpacketrelay/v2_http.go",
         "MaxV2ListingBytes = 80 << 10",
@@ -80,7 +96,7 @@ CONTROLS = [
         "RelayURL: s.relay,",
         'RelayURL: "https://127.0.0.1",',
         RELAY,
-        "TestV2HTTPRestartSecondRelayAndClockRollback",
+        "TestV2HTTPProofBindsConfiguredRelayWithoutRelayCaveat",
     ),
     (
         "post-read-scope",

@@ -672,3 +672,41 @@ func TestV2HTTPRechecksCredentialAfterFinalizedRead(t *testing.T) {
 	f.source.after = func() { f.clock.at = f.clock.at.Add(10 * time.Second) }
 	f.serve(t, "GET", f.mail(), nil, true, 403)
 }
+
+func TestV2HTTPProofBindsConfiguredRelayWithoutRelayCaveat(t *testing.T) {
+	f := newV2HTTP(t)
+	c, err := agenttransport.DecodeCredential(f.wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.DelegationBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := c.Blocks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var caveats []agenttransport.Caveat
+	for _, caveat := range blocks[0].Caveats {
+		if caveat.Type != agenttransport.CaveatRelay {
+			caveats = append(caveats, caveat)
+		}
+	}
+	f.wire, err = agenttransport.IssueCredential(raw, v2TestKey("http-transport"), f.holder.Public().(ed25519.PublicKey), caveats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := f.request(t, "GET", f.mail(), nil, true)
+	store := v2Open(t, filepath.Join(v2Temp(t), "second"), DefaultV2Limits(1024, 64<<20), testStart)
+	defer v2Close(t, store)
+	second, err := NewV2Server(V2ServerConfig{Store: store, URL: "https://127.0.0.2", Verifier: f.s.verifier, Now: f.clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	second.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Fatal("proof moved between relays", w.Code, w.Body.String())
+	}
+}

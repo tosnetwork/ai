@@ -48,7 +48,24 @@ def main():
     ]:
         if accepts(DOMAIN + struct.pack(">QHI", *fields), 1800000000, 64, 4 << 20):
             raise ValueError("semantic refusal missing")
-    print("policy vectors independently reproduced: 3 positive, 13 negative")
+    for vector in corpus["negative"]:
+        expected = DOMAIN + struct.pack(
+            ">QHI", vector["issued"], vector["count"], vector["bytes"]
+        )
+        if vector["name"] == "trailing":
+            expected += b"\x00"
+        elif vector["name"] == "truncated":
+            expected = expected[:-1]
+        elif vector["name"] == "domain":
+            expected = bytes([expected[0] ^ 1]) + expected[1:]
+        raw = bytes.fromhex(vector["hex"])
+        if expected != raw or accepts(
+            raw, corpus["now"], corpus["maximum_count"], corpus["maximum_bytes"]
+        ):
+            raise ValueError("frozen negative mismatch")
+    print(
+        "policy vectors independently reproduced: 3 positive, 7 frozen negative, 13 derived controls"
+    )
 
 
 if __name__ == "__main__":
