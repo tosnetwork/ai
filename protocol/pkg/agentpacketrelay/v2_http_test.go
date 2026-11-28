@@ -400,8 +400,14 @@ func TestV2HTTPPolicyReadFailureDoesNotOpenClosedMailbox(t *testing.T) {
 		f.source.err = failure
 		f.clock.at = f.clock.at.Add(601 * time.Second)
 		budget, err := f.s.policyBudget(t.Context(), f.r.agentID)
-		if err != nil || budget.Count != 0 {
-			t.Fatal("read failure lifted a closed policy", budget, err)
+		if err == nil || budget != (v2Usage{}) {
+			t.Fatal("read failure did not refuse the budget", budget, err)
+		}
+		f.s.store.mu.Lock()
+		_, retained := f.s.store.policies[f.r.agentID]
+		f.s.store.mu.Unlock()
+		if !retained {
+			t.Fatal("read failure removed the closed policy")
 		}
 	}
 }

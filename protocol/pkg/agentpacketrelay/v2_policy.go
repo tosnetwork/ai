@@ -2,6 +2,7 @@ package agentpacketrelay
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"net/http"
@@ -87,22 +88,58 @@ func (s *V2Store) loadPolicy(name string, now uint64) error {
 	return nil
 }
 
-// Caller holds the store gate. An unavailable read never lifts a closed policy.
-// Only positive revocation/expiry evidence voids it; the next publication may
-// then use an earlier timestamp than the revoked key's policy.
-func (s *V2Server) currentPolicy(ctx context.Context, agent string) (*v2PolicyRecord, error) {
-	p, ok := s.store.policies[agent]
-	if !ok {
-		return nil, nil
+// A refresh verifies an immutable snapshot outside the store gate. The identity
+// is checked again before applying the answer, so a slow read cannot remove a
+// newer policy. Missing or malformed evidence never reopens a closed mailbox.
+func (s *V2Server) policySnapshot(ctx context.Context, agent string) (*v2PolicyRecord, error) {
+	if err := s.store.mu.lock(ctx); err != nil {
+		return nil, err
 	}
-	d, decodeErr := agenttransport.DecodeDelegation(p.Delegation)
-	if decodeErr != nil {
+	defer s.store.mu.Unlock()
+	if err := s.store.available(); err != nil {
+		return nil, err
+	}
+	if p, ok := s.store.policies[agent]; ok {
+		return &p, nil
+	}
+	return nil, nil
+}
+
+// Caller holds the store gate. In addition to the issuance time, pin the
+// delegation digest and policy fields so a result cannot cross a replacement.
+func (s *V2Store) samePolicyLocked(agent string, expected *v2PolicyRecord) bool {
+	current, exists := s.policies[agent]
+	if expected == nil {
+		return !exists
+	}
+	return exists && sha256.Sum256(current.Delegation) == sha256.Sum256(expected.Delegation) && current.Policy == expected.Policy
+}
+func (s *V2Server) currentPolicy(ctx context.Context, agent string) (*v2PolicyRecord, error) {
+	p, err := s.policySnapshot(ctx, agent)
+	if err != nil || p == nil {
+		return p, err
+	}
+	d, err := agenttransport.DecodeDelegation(p.Delegation)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
-	_, err := s.verifier.VerifyDelegation(ctx, p.Delegation, agenttransport.Relay)
+	_, readErr := s.verifier.VerifyDelegation(ctx, p.Delegation, agenttransport.Relay)
+	if err = s.store.mu.lock(ctx); err != nil {
+		return nil, err
+	}
+	defer s.store.mu.Unlock()
+	if err = s.store.available(); err != nil {
+		return nil, err
+	}
+	if !s.store.samePolicyLocked(agent, p) {
+		return nil, ErrStoreUnavailable
+	}
 	expired := d.NotAfter <= unixNow(s.now())
-	if !expired && (err == nil || !errors.Is(err, agenttransport.ErrDelegationRevoked)) {
-		return &p, nil
+	if !expired && !errors.Is(readErr, agenttransport.ErrDelegationRevoked) {
+		if readErr != nil {
+			return nil, readErr
+		}
+		return p, nil
 	}
 	if err = s.store.disk.remove(policyName(agent)); err != nil {
 		s.store.poisoned = true
@@ -112,13 +149,6 @@ func (s *V2Server) currentPolicy(ctx context.Context, agent string) (*v2PolicyRe
 	return nil, nil
 }
 func (s *V2Server) policyBudget(ctx context.Context, agent string) (v2Usage, error) {
-	if err := s.store.mu.lock(ctx); err != nil {
-		return v2Usage{}, err
-	}
-	defer s.store.mu.Unlock()
-	if err := s.store.available(); err != nil {
-		return v2Usage{}, err
-	}
 	p, err := s.currentPolicy(ctx, agent)
 	if err != nil {
 		return v2Usage{}, err
@@ -132,6 +162,11 @@ func (s *V2Server) setPolicy(w http.ResponseWriter, r *http.Request, agent strin
 	p, err := DecodeMailboxPolicy(body)
 	if err != nil || !p.valid(s.store.limits, unixNow(s.now())) {
 		v2Fail(w, 400, CodeInvalidRequest)
+		return
+	}
+	old, err := s.currentPolicy(r.Context(), agent)
+	if err != nil {
+		v2Fail(w, 503, CodeUnavailable)
 		return
 	}
 	if err = s.store.mu.lock(r.Context()); err != nil {
@@ -152,8 +187,7 @@ func (s *V2Server) setPolicy(w http.ResponseWriter, r *http.Request, agent strin
 		v2Fail(w, 403, "credential_revoked")
 		return
 	}
-	old, err := s.currentPolicy(r.Context(), agent)
-	if err != nil {
+	if !s.store.samePolicyLocked(agent, old) {
 		v2Fail(w, 503, CodeUnavailable)
 		return
 	}

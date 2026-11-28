@@ -235,7 +235,13 @@ func (v *Verifier) checkSnapshot(d Delegation, digest [32]byte, s Snapshot, admi
 			return errors.New("legacy test network requires epoch zero and no recorded epochs")
 		}
 	} else {
-		if s.CurrentEpoch == nil || *s.CurrentEpoch == 0 || s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint || d.AuthorizationEpoch != *s.CurrentEpoch {
+		if s.CurrentEpoch == nil || *s.CurrentEpoch == 0 || s.State.Reference.FinalizedCheckpoint != s.EpochCheckpoint {
+			return errors.New("missing or inconsistent finalized authorization epoch")
+		}
+		if *s.CurrentEpoch > d.AuthorizationEpoch {
+			return fmt.Errorf("%w: finalized authorization epoch advanced", ErrDelegationRevoked)
+		}
+		if d.AuthorizationEpoch != *s.CurrentEpoch {
 			return errors.New("delegation epoch differs from the current finalized authorization epoch")
 		}
 		if admitted {
