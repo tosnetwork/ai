@@ -153,19 +153,22 @@ func (r *SimplifiedNativeResolver) ConfirmDelegationWithdrawal(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	before, found, err := r.readNativeAtCheckpoint(ctx, identity.Address, checkpoint)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, errors.New("withdrawal prior finalized state is unavailable")
-	}
 	after, found, err := r.ResolveState(ctx, action.TargetObjectId, "")
 	if err != nil {
 		return nil, err
 	}
 	if !found {
 		return nil, errors.New("withdrawal post-state is unavailable")
+	}
+	if checkpoint.Sequence >= after.Reference.FinalizedCheckpoint {
+		return nil, errors.New("withdrawal prior checkpoint must precede the fresh finalized checkpoint")
+	}
+	before, found, err := r.readNativeAtCheckpoint(ctx, identity.Address, checkpoint)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errors.New("withdrawal prior finalized state is unavailable")
 	}
 	return nativecore.ConfirmDelegationWithdrawal(action, before, after)
 }

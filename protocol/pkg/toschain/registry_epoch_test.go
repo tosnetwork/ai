@@ -190,10 +190,15 @@ func TestRegistryEpochAdapterReadsOneFinalizedObject(t *testing.T) {
 		Payload: &nativev1.NativeActionV1_WithdrawAgentDelegation{WithdrawAgentDelegation: &nativev1.WithdrawAgentDelegationV1{
 			DelegationDigest: "sha256:" + hex.EncodeToString(live[:]), AuthorizationEpoch: 7,
 		}}}
-	proof, err := reader.ConfirmDelegationWithdrawal(t.Context(), action, &nativev1.DNSCheckpointV1{
-		Workchain: -1, Sequence: 41, RootHash: priorRoot, FileHash: priorFile,
-	})
+	prior := &nativev1.DNSCheckpointV1{Workchain: -1, Sequence: 41, RootHash: priorRoot, FileHash: priorFile}
+	proof, err := reader.ConfirmDelegationWithdrawal(t.Context(), action, prior)
 	if err != nil || proof.Result != "cleared_by_epoch_bump" || proof.FinalizedEpoch != 8 || proof.FinalizedCheckpoint != 42 {
 		t.Fatalf("finalized goal was not proven: %+v, %v", proof, err)
+	}
+	reads := accountReads.Load()
+	prior.Sequence = 43
+	_, err = reader.ConfirmDelegationWithdrawal(t.Context(), action, prior)
+	if err == nil || !strings.Contains(err.Error(), "must precede the fresh finalized checkpoint") || accountReads.Load() != reads+3 {
+		t.Fatalf("a future predecessor drove a historical read: %v, reads=%d", err, accountReads.Load()-reads)
 	}
 }
