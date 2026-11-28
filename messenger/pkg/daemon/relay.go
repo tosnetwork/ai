@@ -72,6 +72,49 @@ type relayCarrier interface {
 	Withdraw(ctx context.Context, recipientAgentID, idempotencyKey string) (carrierapi.Response, error)
 }
 
+// frameCarrier is a carrier that journals the frame of a key: on a retry it
+// carries the frame first journaled and returns it (the builtin lane).
+type frameCarrier interface {
+	CarryFrame(ctx context.Context, recipientAgentID, idempotencyKey, withdrawKey string,
+		expiresAtUnix uint64, frame []byte) (carrierapi.Response, []byte, error)
+}
+
+// carry deposits one frame and returns the frame actually carried: the
+// journaled one of a frame carrier, else the one given.
+func (r *relayRuntime) carry(ctx context.Context, peer, key, withdraw string, expires uint64,
+	frame []byte) (carrierapi.Response, []byte, error) {
+	if journaling, ok := r.carrier.(frameCarrier); ok {
+		response, sent, err := journaling.CarryFrame(ctx, peer, key, withdraw, expires, frame)
+		if sent == nil {
+			sent = frame
+		}
+		return response, sent, err
+	}
+	response, err := r.carrier.Carry(ctx, peer, key, withdraw, expires, frame)
+	return response, frame, err
+}
+
+// sentGeneration is what a carried frame proves was sent: its evidence's
+// descriptor, and the digests of the card and credential it carries.
+func sentGeneration(raw []byte) (eventlog.RelayGeneration, error) {
+	frame, err := relayframe.Decode(raw)
+	if err != nil {
+		return eventlog.RelayGeneration{}, err
+	}
+	digest, issued, err := directory.EvidenceDescriptor(frame.Evidence)
+	if err != nil {
+		return eventlog.RelayGeneration{}, err
+	}
+	generation := eventlog.RelayGeneration{DescriptorDigest: digest, DescriptorIssuedAtUnix: issued}
+	if len(frame.Card) > 0 {
+		generation.CardDigest = canon.Digest(frame.Card)
+	}
+	if len(frame.Credential) > 0 {
+		generation.CredentialDigest = canon.Digest(frame.Credential)
+	}
+	return generation, nil
+}
+
 // relayRuntime is the daemon half of relay carriage.
 type relayRuntime struct {
 	daemon   *Daemon
@@ -369,7 +412,7 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 	if err != nil {
 		return fault.Wrap(fault.CodeInternal, err)
 	}
-	frame, generation, err := r.ownFrame(relayframe.KindCopy, peer, object, requireCard)
+	frame, _, err := r.ownFrame(relayframe.KindCopy, peer, object, requireCard)
 	if err != nil {
 		if errors.Is(err, relayframe.ErrContentTooLarge) {
 			return fault.Wrap(fault.CodeContentTooLarge, err)
@@ -387,9 +430,15 @@ func (s relaySender) Send(ctx context.Context, message dispatch.Message) error {
 			return fault.Wrap(fault.CodeInternal, err)
 		}
 	}
-	response, err := r.carrier.Carry(ctx, peer, key, withdraw, message.ExpiresAtUnix, frame)
+	response, sent, err := r.carry(ctx, peer, key, withdraw, message.ExpiresAtUnix, frame)
 	if err != nil {
 		return fault.Wrap(fault.CodeUnreachable, err)
+	}
+	// The generation records what was carried: a retry of a journaled key
+	// carries its first frame, not the one built now.
+	generation, err := sentGeneration(sent)
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, err)
 	}
 	now := r.now()
 	switch response.Result {
@@ -778,7 +827,7 @@ func (r *relayRuntime) sendRequest(ctx context.Context, peer string) error {
 		return err
 	}
 	expires := uint64(now.Add(relayRetentionWindow).Unix())
-	response, err := r.carrier.Carry(ctx, peer, key, withdraw, expires, frame)
+	response, _, err := r.carry(ctx, peer, key, withdraw, expires, frame)
 	var delay time.Duration
 	if err == nil && response.Result == carrierapi.ResultCarried {
 		delay, err = r.redepositDelay(response.RelayTTLSeconds)
@@ -834,7 +883,7 @@ func (r *relayRuntime) sendResponse(ctx context.Context, peer string) error {
 	if err != nil {
 		return err
 	}
-	response, err := r.carrier.Carry(ctx, peer, key, "", uint64(now.Add(relayRetentionWindow).Unix()), frame)
+	response, _, err := r.carry(ctx, peer, key, "", uint64(now.Add(relayRetentionWindow).Unix()), frame)
 	if err != nil {
 		return err
 	}
@@ -1173,8 +1222,17 @@ func (r *relayRuntime) applyAck(peer, deliveryID string, delivery eventlog.Deliv
 		return r.recordAckedCard(settled, now)
 	}
 	if ack.Code != fault.CodeDescriptorExpired {
-		_, err := r.daemon.journal.RelayRejected(deliveryID, match, ack.Code, "", now, now)
-		return err
+		rejected, err := r.daemon.journal.RelayRejected(deliveryID, match, ack.Code, "", now, now)
+		if err != nil {
+			return err
+		}
+		// A rejection that ends the copy, or holds it for the owner, settles
+		// its generations at the carrier, so no relay receives it again; a
+		// retry later is a new generation.
+		if rejected.State != eventlog.StatePending {
+			r.settleCopies(peer, deliveryID, rejected)
+		}
+		return nil
 	}
 	// descriptor-expired: retry at once only with evidence newer than the
 	// evidence that was refused, in the single sense of "newer"; otherwise

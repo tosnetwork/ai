@@ -125,13 +125,19 @@ func TestBuiltinCarrierConfigurationIsCheckedAsAWhole(t *testing.T) {
 		"builtin with sockets":    func(c *Config) { c.RelayCarriage.CarrySocketPath = "/run/carrier.sock" },
 		"one relay":               func(c *Config) { c.RelayCarriage.Builtin.Relays = c.RelayCarriage.Builtin.Relays[:1] },
 		"one directory":           func(c *Config) { c.RelayCarriage.Builtin.Directories = c.RelayCarriage.Builtin.Directories[:1] },
-		"plain HTTP relay":        func(c *Config) { c.RelayCarriage.Builtin.Relays[0] = "http://relay-one.example" },
-		"production mode":         func(c *Config) { c.RelayCarriage.Builtin.NetworkMode = "production" },
-		"lane inside state dir":   func(c *Config) { c.RelayCarriage.Builtin.StateDir = filepath.Join(c.StateDir, "lane") },
-		"relative delegation":     func(c *Config) { c.RelayCarriage.Builtin.TransportDelegationPath = "delegation.bin" },
-		"no controller":           func(c *Config) { c.RelayCarriage.Builtin.Signer.Controller = "" },
-		"bad key id":              func(c *Config) { c.RelayCarriage.Builtin.Signer.KeyID = "ed25519:00" },
-		"hint TTL above a day":    func(c *Config) { c.RelayCarriage.Builtin.HintTTLSeconds = 86_401 },
+		"five directories": func(c *Config) {
+			c.RelayCarriage.Builtin.Directories = []string{"https://d1.example", "https://d2.example", "https://d3.example",
+				"https://d4.example", "https://d5.example"}
+		},
+		"repeated directory":    func(c *Config) { c.RelayCarriage.Builtin.Directories[1] = c.RelayCarriage.Builtin.Directories[0] },
+		"repeated relay":        func(c *Config) { c.RelayCarriage.Builtin.Relays[1] = c.RelayCarriage.Builtin.Relays[0] },
+		"plain HTTP relay":      func(c *Config) { c.RelayCarriage.Builtin.Relays[0] = "http://relay-one.example" },
+		"production mode":       func(c *Config) { c.RelayCarriage.Builtin.NetworkMode = "production" },
+		"lane inside state dir": func(c *Config) { c.RelayCarriage.Builtin.StateDir = filepath.Join(c.StateDir, "lane") },
+		"relative delegation":   func(c *Config) { c.RelayCarriage.Builtin.TransportDelegationPath = "delegation.bin" },
+		"no controller":         func(c *Config) { c.RelayCarriage.Builtin.Signer.Controller = "" },
+		"bad key id":            func(c *Config) { c.RelayCarriage.Builtin.Signer.KeyID = "ed25519:00" },
+		"hint TTL above a day":  func(c *Config) { c.RelayCarriage.Builtin.HintTTLSeconds = 86_401 },
 	}
 	for name, mutate := range cases {
 		config := builtinRelayConfig(t)

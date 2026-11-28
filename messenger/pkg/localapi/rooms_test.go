@@ -405,7 +405,7 @@ func TestRuntimeListsConversationsNewestFirstInPages(t *testing.T) {
 		}
 		for index := 1; index < len(page.Conversations); index++ {
 			entry, previous := page.Conversations[index], page.Conversations[index-1]
-			if entry.UpdatedAtUnix > previous.UpdatedAtUnix {
+			if entry.CreatedAtUnix > previous.CreatedAtUnix {
 				t.Fatalf("not newest first on page %d: %+v after %+v", pages, entry, previous)
 			}
 		}
@@ -414,7 +414,7 @@ func TestRuntimeListsConversationsNewestFirstInPages(t *testing.T) {
 			break
 		}
 		last := page.Conversations[len(page.Conversations)-1]
-		request = Request{Op: OpListConversations, BeforeUpdatedAtUnix: last.UpdatedAtUnix, BeforeConversationID: last.ConversationID}
+		request = Request{Op: OpListConversations, BeforeCreatedAtUnix: last.CreatedAtUnix, BeforeConversationID: last.ConversationID}
 	}
 	if len(seen) != 70 {
 		t.Fatalf("listed %d conversations", len(seen))
@@ -439,9 +439,9 @@ func TestRuntimeListsConversationsNewestFirstInPages(t *testing.T) {
 	}
 	for name, bad := range map[string]Request{
 		"over the page bound": {Op: OpListConversations, Limit: MaxConversationsPerPage + 1},
-		"half a cursor":       {Op: OpListConversations, BeforeUpdatedAtUnix: 5},
+		"half a cursor":       {Op: OpListConversations, BeforeCreatedAtUnix: 5},
 		"other half":          {Op: OpListConversations, BeforeConversationID: seen[0].ConversationID},
-		"non-canonical id":    {Op: OpListConversations, BeforeUpdatedAtUnix: 5, BeforeConversationID: "conv_x"},
+		"non-canonical id":    {Op: OpListConversations, BeforeCreatedAtUnix: 5, BeforeConversationID: "conv_x"},
 		"with a room":         {Op: OpListConversations, RoomID: otherRoomID},
 	} {
 		if ValidateRequest(bad) == nil {

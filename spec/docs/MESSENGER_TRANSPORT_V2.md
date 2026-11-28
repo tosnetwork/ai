@@ -1168,7 +1168,10 @@ the lane already sends to that peer:
   (the seed present only with a credential, and never all zero) directly
   after `evidence`,
   present until the peer acknowledged a frame that carried it, like the card
-  (carriage 2.3). The frame bounds of carriage 1.1, 4 and 11.1 are recomputed
+  (carriage 2.3). A credential on an ack frame rides on every ack until it is
+  renewed, because acks are never acknowledged: a peer that only receives
+  returns its credential on its acks, and the sender takes it from an ack it
+  verified and applied. The frame bounds of carriage 1.1, 4 and 11.1 are recomputed
   from a real maximal frame: the frame's fixed part is 74 bytes, the largest
   relay Event payload is 137,465 bytes (2,082 below v1), part 0 of a room
   object holds 160,662 object bytes and every later part 190,390. Only v2

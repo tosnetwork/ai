@@ -342,10 +342,10 @@ type Request struct {
 	LeaseSeconds uint64     `json:"lease_seconds,omitempty"`
 	Code         fault.Code `json:"code,omitempty"`
 	Limit        int        `json:"limit,omitempty"`
-	// BeforeUpdatedAtUnix and BeforeConversationID continue a
+	// BeforeCreatedAtUnix and BeforeConversationID continue a
 	// conversations.list page strictly after the last entry of the previous
 	// one; both are unset for the first page.
-	BeforeUpdatedAtUnix  uint64 `json:"before_updated_at_unix,omitempty"`
+	BeforeCreatedAtUnix  uint64 `json:"before_created_at_unix,omitempty"`
 	BeforeConversationID string `json:"before_conversation_id,omitempty"`
 	// Recipient is a human input accepted only by contacts.resolve and
 	// conversations.ensure-direct. It is either a canonical AgentID or a
@@ -1088,7 +1088,7 @@ func ValidateRequest(request Request) error {
 			request.RecipientEndpointID, request.Recipient, request.ActionID, request.Reason)
 	case OpListConversations:
 		if request.Limit < 0 || request.Limit > MaxConversationsPerPage ||
-			(request.BeforeUpdatedAtUnix == 0) != (request.BeforeConversationID == "") ||
+			(request.BeforeCreatedAtUnix == 0) != (request.BeforeConversationID == "") ||
 			request.BeforeConversationID != "" && !conversationPattern.MatchString(request.BeforeConversationID) {
 			return errors.New("a conversation listing needs a bounded limit and a whole cursor")
 		}

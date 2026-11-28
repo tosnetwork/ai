@@ -78,15 +78,12 @@ func (b BuiltinCarrierConfig) Validate(stateDir string) error {
 	if len(b.Relays) < 1 || len(b.Relays) > 4 || (!b.TestSingleRelay && len(b.Relays) < 2) {
 		return errors.New("relay_carriage.builtin needs two to four relays, or one with test_single_relay")
 	}
-	seen := map[string]bool{}
-	for _, relay := range append(append([]string(nil), b.Relays...), b.Directories...) {
-		if agentpacketseal.CheckRelayURL(relay) != nil {
-			return errors.New("relay_carriage.builtin relay URLs must be canonical HTTPS relay URLs")
-		}
-		seen[relay] = true
+	if !distinctRelays(b.Relays) || !distinctRelays(b.Directories) {
+		return errors.New("relay_carriage.builtin relay URLs must be distinct canonical HTTPS relay URLs")
 	}
-	if len(b.Directories) < 2 || len(b.Directories) > 8 {
-		return errors.New("relay_carriage.builtin needs two to eight directory relays")
+	// The lane accepts at most four directories, as it does relays.
+	if len(b.Directories) < 2 || len(b.Directories) > 4 {
+		return errors.New("relay_carriage.builtin needs two to four directory relays")
 	}
 	if b.NetworkMode != agenttransport.TestNetworkLegacyEpochZero && b.NetworkMode != agenttransport.TestNetworkEpochAware {
 		return errors.New("relay_carriage.builtin network_mode must name a test-network transport mode")
@@ -101,6 +98,22 @@ func (b BuiltinCarrierConfig) Validate(stateDir string) error {
 		return errors.New("relay_carriage.builtin signer key_id is not an ML-DSA-44 key ID")
 	}
 	return nil
+}
+
+// distinctRelays reports whether every URL is a canonical relay URL and none
+// repeats, the lane's own rule for its relays and directories.
+func distinctRelays(urls []string) bool {
+	seen := make(map[string]struct{}, len(urls))
+	for _, url := range urls {
+		if agentpacketseal.CheckRelayURL(url) != nil {
+			return false
+		}
+		if _, repeated := seen[url]; repeated {
+			return false
+		}
+		seen[url] = struct{}{}
+	}
+	return true
 }
 
 // openBuiltinCarrier opens the in-process chat lane with the daemon's
@@ -159,7 +172,8 @@ func (d *Daemon) openBuiltinCarrier(ctx context.Context) (*transport.Builtin, er
 	if err != nil {
 		return nil, err
 	}
-	signing := packetSigning{agentID: d.config.AgentID, signer: signer, controller: b.Signer.Controller, keyID: keyID}
+	signing := packetSigning{agentID: d.config.AgentID, signer: signer, controller: b.Signer.Controller, keyID: keyID,
+		now: d.clock}
 	checks := packetChecks{verifier: helper, resolver: packets}
 	roundTripper := http.DefaultTransport.(*http.Transport).Clone()
 	relays := func(url string) (*agentpacketrelay.V2Client, error) {
@@ -178,6 +192,7 @@ func (d *Daemon) openBuiltinCarrier(ctx context.Context) (*transport.Builtin, er
 		Publication: agentcarrier.PublicationConfig{Directories: b.Directories, TestSingleRelay: b.TestSingleRelay,
 			TTL: ttl, Directory: func(url string) (agentcarrier.Directory, error) { return relays(url) }},
 		CardPath: relay.CardPath,
+		Report:   d.report,
 	})
 }
 
@@ -214,6 +229,7 @@ type packetSigning struct {
 	signer     mldsa44.Signer
 	controller string
 	keyID      [mldsa44.KeyIDSize]byte
+	now        func() time.Time
 }
 
 func (s packetSigning) packet(ctx context.Context, packet agentpacket.Packet) (agentpacket.Packet, error) {
@@ -226,7 +242,11 @@ func (s packetSigning) card(ctx context.Context, card agentpacketseal.KeyCard) (
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, err
 	}
-	sequence := uint64(time.Now().UnixNano())
+	nano := s.now().UnixNano()
+	if nano <= 0 {
+		return nil, errors.New("the clock is before the epoch")
+	}
+	sequence := uint64(nano)
 	packet, err := agentpacketseal.KeyCardPacket(s.agentID, s.keyID, sequence, nonce, card.NotBeforeUnix, card)
 	if err != nil {
 		return nil, err

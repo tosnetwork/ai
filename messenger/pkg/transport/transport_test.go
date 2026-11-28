@@ -99,6 +99,10 @@ type world struct {
 	people    map[string]*person
 	admission map[string]map[string]bool
 	mu        sync.Mutex
+	// signs counts packet signatures; signDelay widens the window between
+	// a key's read and its record, as a slow signing helper does.
+	signs     atomic.Int64
+	signDelay time.Duration
 }
 
 func privateDir(t *testing.T) string {
@@ -275,6 +279,8 @@ func (w *world) open(name string, handler Inbound) *Builtin {
 			return nil
 		},
 		SignPacket: func(_ context.Context, packet agentpacket.Packet) (agentpacket.Packet, error) {
+			w.signs.Add(1)
+			time.Sleep(w.signDelay)
 			packet.SenderKeyID = p.keyID
 			packet.Signature = bytes.Repeat([]byte{17}, mldsa44.SignatureSize)
 			return packet, nil
@@ -404,7 +410,7 @@ func TestCopyCrossesTwoRelaysAndTheAdmittedCredentialIsTaken(t *testing.T) {
 	// Each copy that reaches the daemon offers the credential again; it is
 	// stored once per peer and relay set.
 	if taken, refused := bob.Credentials(); taken < 1 || refused != 0 {
-		t.Fatalf("credential taken %d refused %d: %v", taken, refused, bob.lastRefusal)
+		t.Fatalf("credential taken %d refused %d", taken, refused)
 	}
 	if _, held, err := bob.credentials.Contact(t.Context(), w.people["alice"].agent, w.relays[0]); err != nil || !held {
 		t.Fatalf("bob holds alice's contact credential: %v %v", held, err)
@@ -501,5 +507,293 @@ func TestNoCredentialForStrangersAndOnlyFramesAreCarried(t *testing.T) {
 	if err := alice.verifyPacket(t.Context(), agentpacket.Packet{CapabilityID: agentpacketseal.KeyCardCapability,
 		Payload: []byte("rail packet"), Signature: signed}); !errors.Is(err, agentcarrier.ErrRefused) {
 		t.Fatalf("a packet without a relay frame passed the lane check: %v", err)
+	}
+}
+
+// Callers of one key at once sign it once: a reply and a second poll of the
+// same envelope, or a retry racing its first attempt, all carry the one
+// journaled packet. A caller that records what it sent gets the journaled
+// frame back; one that expects its own bytes exactly is refused.
+func TestOneKeyIsSignedOnceUnderConcurrentCallers(t *testing.T) {
+	w := newWorld(t, "alice", "bob")
+	w.admit("alice", "bob")
+	bob := w.open("bob", &inbound{response: answer("accepted", ackFrame(t))})
+	alice := w.open("alice", &inbound{response: answer("accepted", ackFrame(t))})
+	if err := alice.LearnCard(t.Context(), w.people["bob"].agent, card(t, bob)); err != nil {
+		t.Fatal(err)
+	}
+	w.signDelay = 20 * time.Millisecond
+	before := w.signs.Load()
+	first := copyFrame(t, card(t, alice), nil, [32]byte{})
+	credential, seed, _, err := alice.ContactCredential(t.Context(), w.people["bob"].agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := copyFrame(t, card(t, alice), credential, seed)
+	var group sync.WaitGroup
+	frames := make([][]byte, 16)
+	for index := range frames {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			raw := first
+			if index%2 == 1 {
+				raw = second
+			}
+			response, sent, err := alice.CarryFrame(t.Context(), w.people["bob"].agent, "copy-1", "", start+3600, raw)
+			if err != nil || response.Result != carrierapi.ResultCarried {
+				t.Errorf("carry %d: %+v %v", index, response, err)
+			}
+			frames[index] = sent
+		}()
+	}
+	group.Wait()
+	if signs := w.signs.Load() - before; signs != 1 {
+		t.Fatalf("one key was signed %d times", signs)
+	}
+	for index, sent := range frames {
+		if !bytes.Equal(sent, frames[0]) {
+			t.Fatalf("caller %d was told another frame was carried", index)
+		}
+	}
+	other := first
+	if bytes.Equal(frames[0], first) {
+		other = second
+	}
+	if response, err := alice.Carry(t.Context(), w.people["bob"].agent, "copy-1", "", start+3600, other); err != nil ||
+		response.Result != carrierapi.ResultRefused || response.Code != carrierapi.CodeInvalidRequest {
+		t.Fatalf("other bytes under a journaled key were carried: %+v %v", response, err)
+	}
+	if response, err := alice.Carry(t.Context(), w.people["bob"].agent, "copy-1", "", start+3600, frames[0]); err != nil ||
+		response.Result != carrierapi.ResultCarried {
+		t.Fatalf("the journaled bytes were refused: %+v %v", response, err)
+	}
+}
+
+// ackCredentialFrame is a delivery ack frame carrying a contact credential.
+func ackCredentialFrame(t *testing.T, credential []byte, seed [32]byte) []byte {
+	t.Helper()
+	raw, err := relayframe.Encode(relayframe.Frame{Kind: relayframe.KindDeliveryAck, PartCount: 1,
+		Evidence: []byte("evidence opaque to the lane"), Credential: credential, HolderSeed: seed,
+		Part: []byte("ack object opaque to the lane")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func heldSeed(t *testing.T, b *Builtin, peer, relay string) ([]byte, bool) {
+	t.Helper()
+	held, ok, err := b.credentials.Contact(t.Context(), peer, relay)
+	if err != nil || !ok {
+		return nil, false
+	}
+	_, seed, err := held.ExportForSealedPacket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return seed, true
+}
+
+// A peer that only receives returns its credential on its acks: the sender
+// takes it from an ack its daemon applied and deposits to the peer on the
+// contact lane from then on; a renewed credential on later acks replaces it.
+func TestAReceiveOnlyPeerReturnsItsCredentialOnItsAcks(t *testing.T) {
+	w := newWorld(t, "alice", "bob")
+	w.admit("alice", "bob")
+	w.admit("bob", "alice")
+	bobInbound := &inbound{}
+	aliceInbound := &inbound{response: answer("accepted", ackFrame(t))}
+	bob := w.open("bob", bobInbound)
+	alice := w.open("alice", aliceInbound)
+	bobAgent, aliceAgent := w.people["bob"].agent, w.people["alice"].agent
+	if err := alice.LearnCard(t.Context(), bobAgent, card(t, bob)); err != nil {
+		t.Fatal(err)
+	}
+	if err := bob.LearnCard(t.Context(), aliceAgent, card(t, alice)); err != nil {
+		t.Fatal(err)
+	}
+	if _, held := heldSeed(t, alice, bobAgent, w.relays[0]); held {
+		t.Fatal("alice holds a credential before any ack")
+	}
+	credential, seed, ok, err := bob.ContactCredential(t.Context(), aliceAgent)
+	if err != nil || !ok {
+		t.Fatalf("bob issues alice a credential: %v %v", ok, err)
+	}
+	bobInbound.mu.Lock()
+	bobInbound.response = answer("accepted", ackCredentialFrame(t, credential, seed))
+	bobInbound.mu.Unlock()
+	if response, err := alice.Carry(t.Context(), bobAgent, "copy-1", "", start+3600,
+		copyFrame(t, card(t, alice), nil, [32]byte{})); err != nil || response.Result != carrierapi.ResultCarried {
+		t.Fatalf("carry: %+v %v", response, err)
+	}
+	eventually(t, bob, func() bool {
+		bobInbound.mu.Lock()
+		defer bobInbound.mu.Unlock()
+		return len(bobInbound.frames) > 0
+	})
+	eventually(t, alice, func() bool {
+		_, held := heldSeed(t, alice, bobAgent, w.relays[0])
+		return held
+	})
+	got, _ := heldSeed(t, alice, bobAgent, w.relays[0])
+	if !bytes.Equal(got, seed[:]) {
+		t.Fatal("alice holds another credential than bob's ack carried")
+	}
+
+	// A re-issued credential on bob's later acks replaces the one alice
+	// holds. A second lane state of bob's issues it, as a renewal would:
+	// another credential of the same Agent.
+	reissuer := w.open("bob", &inbound{response: answer("accepted", ackFrame(t))})
+	if err := reissuer.LearnCard(t.Context(), aliceAgent, card(t, alice)); err != nil {
+		t.Fatal(err)
+	}
+	fresh, freshSeed, ok, err := reissuer.ContactCredential(t.Context(), aliceAgent)
+	if err != nil || !ok || freshSeed == seed || bytes.Equal(fresh, credential) {
+		t.Fatalf("a second credential of bob: %v %v", ok, err)
+	}
+	bobInbound.mu.Lock()
+	bobInbound.response = answer("accepted", ackCredentialFrame(t, fresh, freshSeed))
+	bobInbound.mu.Unlock()
+	if response, err := alice.Carry(t.Context(), bobAgent, "copy-2", "", start+3600,
+		copyFrame(t, card(t, alice), nil, [32]byte{})); err != nil || response.Result != carrierapi.ResultCarried {
+		t.Fatalf("second carry: %+v %v", response, err)
+	}
+	eventually(t, bob, func() bool {
+		bobInbound.mu.Lock()
+		defer bobInbound.mu.Unlock()
+		return len(bobInbound.frames) > 1
+	})
+	eventually(t, alice, func() bool {
+		got, held := heldSeed(t, alice, bobAgent, w.relays[0])
+		return held && bytes.Equal(got, freshSeed[:])
+	})
+}
+
+// Acknowledgements to peers that are not admitted take their own bounded
+// share of the journal and a share per peer: a flood of them never leaves
+// this installation's own sends without capacity.
+func TestStrangerAcksNeverTakeTheCapacityOfOwnSends(t *testing.T) {
+	j, err := openJournal(privateDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := func(key, recipient, class string) carried {
+		return carried{Key: key, Recipient: recipient, Packet: []byte("signed"), Deadline: start + 60, Class: class}
+	}
+	taken := 0
+	for peer := 0; peer < 2*maxStrangerAcks/maxStrangerAcksPerPeer; peer++ {
+		for index := 0; index < maxStrangerAcksPerPeer+2; index++ {
+			_, err := j.create(record(fmt.Sprintf("ack-%d-%d", peer, index), fmt.Sprintf("stranger-%d", peer), classStrangerAck))
+			switch {
+			case err == nil:
+				taken++
+			case !errors.Is(err, errJournalFull):
+				t.Fatal(err)
+			}
+		}
+		if j.perPeer[fmt.Sprintf("stranger-%d", peer)] > maxStrangerAcksPerPeer {
+			t.Fatalf("a stranger holds %d records", j.perPeer[fmt.Sprintf("stranger-%d", peer)])
+		}
+	}
+	if taken != maxStrangerAcks {
+		t.Fatalf("strangers took %d records, their share is %d", taken, maxStrangerAcks)
+	}
+	for index := 0; index < maxTrackedDelivery-maxStrangerAcks; index++ {
+		if _, err := j.create(record(fmt.Sprintf("copy-%d", index), "contact", classOwn)); err != nil {
+			t.Fatalf("own send %d refused after the flood: %v", index, err)
+		}
+	}
+	reopened, err := openJournal(filepath.Dir(filepath.Dir(j.root)))
+	if err != nil || reopened.strangers != maxStrangerAcks || len(reopened.index) != maxTrackedDelivery {
+		t.Fatalf("the bounds do not survive a restart: %v", err)
+	}
+}
+
+// An acknowledgement to a peer this installation has not admitted is
+// journaled as a stranger's record.
+func TestAnAckToAStrangerIsJournaledAsOne(t *testing.T) {
+	w := newWorld(t, "alice", "bob")
+	w.admit("alice", "bob")
+	bobInbound := &inbound{response: answer("held", ackFrame(t))}
+	bob := w.open("bob", bobInbound)
+	alice := w.open("alice", &inbound{response: answer("accepted", ackFrame(t))})
+	if err := alice.LearnCard(t.Context(), w.people["bob"].agent, card(t, bob)); err != nil {
+		t.Fatal(err)
+	}
+	if err := bob.LearnCard(t.Context(), w.people["alice"].agent, card(t, alice)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bob.resolver.Resolve(t.Context(), w.people["alice"].agent, bob.contact(w.people["alice"].agent)); err != nil {
+		t.Fatal(err)
+	}
+	if response, err := alice.Carry(t.Context(), w.people["bob"].agent, "copy-1", "", start+3600,
+		copyFrame(t, card(t, alice), nil, [32]byte{})); err != nil || response.Result != carrierapi.ResultCarried {
+		t.Fatalf("carry: %+v %v", response, err)
+	}
+	eventually(t, bob, func() bool {
+		records, err := bob.journal.list()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range records {
+			if record.Recipient == w.people["alice"].agent {
+				if record.Class != classStrangerAck {
+					t.Fatalf("an ack to a stranger is journaled as an own send: %+v", record.Class)
+				}
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// A key's record is created once: a second create of the key, as another
+// process writing the same key would do, keeps and returns the first bytes.
+func TestAJournalRecordIsCreatedExclusively(t *testing.T) {
+	j, err := openJournal(privateDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := carried{Key: "copy-1", Recipient: "peer", Packet: []byte("first signature"), Deadline: start + 60}
+	if kept, err := j.create(first); err != nil || !bytes.Equal(kept.Packet, first.Packet) {
+		t.Fatalf("first create: %v", err)
+	}
+	second := first
+	second.Packet = []byte("second signature")
+	kept, err := j.create(second)
+	if err != nil || !bytes.Equal(kept.Packet, first.Packet) {
+		t.Fatalf("a second create replaced the first bytes: %q %v", kept.Packet, err)
+	}
+	// Another process's file appears between this one's read and its link.
+	if created, err := writeExclusive(filepath.Join(j.root, recordName("copy-1")), []byte("other")); err != nil || created {
+		t.Fatalf("an existing record was overwritten: %v %v", created, err)
+	}
+	stored, found, err := j.get("copy-1")
+	if err != nil || !found || !bytes.Equal(stored.Packet, first.Packet) {
+		t.Fatalf("stored record: %q %v %v", stored.Packet, found, err)
+	}
+}
+
+// Packet sequences only increase: a clock that steps back, and a restart,
+// still yield a sequence above the last one signed.
+func TestPacketSequencesNeverGoBack(t *testing.T) {
+	dir := privateDir(t)
+	j, err := openJournal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := j.nextSequence(1000); err != nil || got != 1000 {
+		t.Fatalf("first sequence %d %v", got, err)
+	}
+	if got, err := j.nextSequence(500); err != nil || got != 1001 {
+		t.Fatalf("sequence after the clock stepped back: %d %v", got, err)
+	}
+	reopened, err := openJournal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reopened.nextSequence(10); err != nil || got != 1002 {
+		t.Fatalf("sequence after a restart: %d %v", got, err)
 	}
 }

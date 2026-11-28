@@ -604,10 +604,20 @@ carrier sockets and names its own lane:
   settles it. Cards are taken only from admitted peers (accepted frames,
   imported contact files, joined rooms' rosters); a hint is the only route.
 - **Contact credentials.** A frame to an admitted peer carries this lane's
-  contact credential until the peer acknowledged a frame that carried it. A
-  received credential is taken only from a frame the daemon admitted, from a
-  peer business admission covers, whose delegation names the packet sender;
-  anything else is refused and not stored.
+  contact credential until the peer acknowledged a frame that carried it; on
+  an ack frame it rides on every ack until renewed, since acks are never
+  acknowledged. A received credential is taken only from a frame the daemon
+  admitted (an accepted, held or duplicate copy, an admitted evidence frame,
+  or an ack it verified and applied), from a peer business admission covers,
+  whose delegation names the packet sender; anything else is refused and not
+  stored.
+- **Journal bounds.** A key is signed once: a retry carries the journaled
+  frame, and the daemon records the card, credential and evidence of the
+  frame actually carried. Acknowledgements to peers that are not admitted
+  share at most 512 journal records, 8 per peer, so they never take the
+  capacity of this installation's own sends. A copy the recipient rejected
+  for good, or held for its owner, is settled and not deposited again.
+- **Directories.** Two to four, as the lane accepts.
 - **Test networks only.** Transport verification needs a registry with
   authorization epochs for production; until then only the named
   test-network modes start.
@@ -693,9 +703,10 @@ sealed packets. The `relay_carriage` block enables rooms with:
   them. The runtime may send (`outbox.compose` with the `room_id` of a room
   held here takes the kind-3 path) and read (`rooms.list`, `rooms.gaps`).
 - `conversations.list` on the runtime socket returns the direct conversations
-  held here, newest first, at most 64 per page; a page continues after the
-  `before_updated_at_unix` and `before_conversation_id` of the previous page's
-  last entry.
+  held here, newest first by creation, at most 64 per page; a page continues
+  after the `before_created_at_unix` and `before_conversation_id` of the
+  previous page's last entry. Creation order does not change when a
+  conversation is updated, so a walk lists each conversation once.
   OpenFox's `openfox chat room` and `openfox chat invite present` commands
   are the intended clients.
 - **Joining.** `rooms.add` sends the Agent a `room.invite` over the 1:1

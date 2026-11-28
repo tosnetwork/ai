@@ -1169,7 +1169,7 @@ func (s *Server) listConversations(request Request) Response {
 		limit = MaxConversationsPerPage
 	}
 	local := s.config.Dispatcher.LocalIdentity().AgentID
-	records, err := s.config.Journal.ListDirectConversations(local, request.BeforeUpdatedAtUnix,
+	records, err := s.config.Journal.ListDirectConversations(local, request.BeforeCreatedAtUnix,
 		request.BeforeConversationID, limit)
 	if err != nil {
 		return refuse(fault.CodeInternal, err)
